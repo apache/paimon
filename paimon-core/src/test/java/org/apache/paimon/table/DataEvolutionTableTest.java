@@ -1541,6 +1541,382 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(rows.get(2).getString(2).toString()).isEqualTo("b");
     }
 
+    /**
+     * Central repro for the ADD COLUMN bug fixed in this change. Pre-ALTER files do not carry the
+     * new column physically; {@code WHERE new_col IS NULL} must match every pre-ALTER row. Before
+     * the fix, the single-entry filterByStats dropped pre-ALTER files at the manifest layer and the
+     * predicate returned zero rows.
+     */
+    @Test
+    public void testAddColumnIsNullKeepsPreAlterRows() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+
+        // Pre-ALTER write: only (f0, f1).
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeF0F1 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeF0F1)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // ADD COLUMN f3 (post-ALTER) and write a full-schema row at a fresh row id.
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+        FileStoreTable table = getTableDefault();
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 5; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("c" + i),
+                                BinaryString.fromString("e" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // WHERE f3 IS NULL -> pre-ALTER rows (5 of them).
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        int f3Idx = table.rowType().getFieldIndex("f3");
+        ReadBuilder rb = table.newReadBuilder().withFilter(pb.isNull(f3Idx));
+        assertThat(countMatchingRows(rb)).isEqualTo(5);
+    }
+
+    /**
+     * Predicate-aware stats pruning for ADD COLUMN: WHERE new_col = 'something' cannot match
+     * pre-ALTER rows (their new_col is implicit NULL), so the pre-ALTER manifest must be pruned at
+     * planning time. The all-NULL encoding in EvolutionStats / DataEvolutionArray makes
+     * LeafPredicate.test drop the file via the leaf's normal decision instead of falling back to
+     * "unknown stats -> keep".
+     */
+    @Test
+    public void testAddColumnEqualityPredicatePrunesPreAlterFiles() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+
+        // Pre-ALTER write: only (f0, f1).
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeF0F1 = schema.rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeF0F1)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+        FileStoreTable table = getTableDefault();
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 5; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("c" + i),
+                                BinaryString.fromString("e" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // Total files on the table.
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(2);
+
+        // WHERE f3 = 'e7' -> only the post-ALTER file can match. The pre-ALTER file is
+        // pruned at planning because EvolutionStats encodes its missing f3 as all-NULL,
+        // letting LeafPredicate.test evaluate Equal against (min=null, max=null,
+        // nullCount=rowCount) and return false instead of falling through to
+        // "unknown stats -> keep".
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        int f3Idx = table.rowType().getFieldIndex("f3");
+        Predicate filter = pb.equal(f3Idx, BinaryString.fromString("e7"));
+        assertThat(plannedFileCount(table, null, filter)).isEqualTo(1);
+    }
+
+    /**
+     * Central repro for the RENAME COLUMN bug fixed in this change. The renamed field's id is
+     * preserved across schemas, so a predicate on the latest name must still match rows in the
+     * pre-rename file (whose physical writeCols carry the old name). Before the fix, the
+     * single-entry filterByStats compared by name and dropped pre-rename files at the manifest
+     * layer.
+     */
+    @Test
+    public void testRenameColumnPredicateKeepsPreRenameRows() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+
+        // Pre-rename write: f2 carries the values that will later be queried as f3.
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            for (int i = 0; i < 5; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("preR_" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        catalog.alterTable(identifier(), SchemaChange.renameColumn("f2", "f3"), false);
+        FileStoreTable table = getTableDefault();
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 5; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("postR_" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        // WHERE f3 LIKE 'preR_%' -> rows from the pre-rename file (5 rows).
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        int f3Idx = table.rowType().getFieldIndex("f3");
+        ReadBuilder rb =
+                table.newReadBuilder()
+                        .withFilter(pb.startsWith(f3Idx, BinaryString.fromString("preR_")));
+        assertThat(countMatchingRows(rb)).isEqualTo(5);
+    }
+
+    /**
+     * Columnar-split: two files cover the same row id range, each carrying a different subset of
+     * columns. A query that projects only columns owned by one file should not read the other.
+     */
+    @Test
+    public void testNoFilterProjectionPrunesColumnarSplitFiles() throws Exception {
+        write(5);
+        FileStoreTable table = getTableDefault();
+        Schema schema = schemaDefault();
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(2);
+
+        RowType readF0 = schema.rowType().project(Collections.singletonList("f0"));
+        assertThat(plannedFileCount(table, readF0, null)).isEqualTo(1);
+
+        RowType readF1 = schema.rowType().project(Collections.singletonList("f1"));
+        assertThat(plannedFileCount(table, readF1, null)).isEqualTo(1);
+
+        RowType readF2 = schema.rowType().project(Collections.singletonList("f2"));
+        assertThat(plannedFileCount(table, readF2, null)).isEqualTo(1);
+
+        RowType readF0F2 = schema.rowType().project(Arrays.asList("f0", "f2"));
+        assertThat(plannedFileCount(table, readF0F2, null)).isEqualTo(2);
+
+        assertThat(plannedFileCount(table, schema.rowType(), null)).isEqualTo(2);
+    }
+
+    /**
+     * Row-disjoint pre-ALTER files must not be dropped by the column-pruning logic — the reader
+     * needs them to emit rowCount NULL-filled rows for the projection.
+     */
+    @Test
+    public void testNoFilterProjectionKeepsRowDisjointFiles() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+        builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            for (int i = 5; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+        FileStoreTable table = getTableDefault();
+
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(2);
+
+        // Projecting f2 must still keep the pre-ALTER file as a row-count witness so
+        // the reader emits 5 NULL-filled rows for the pre-ALTER range.
+        RowType readF2 = schema.rowType().project(Collections.singletonList("f2"));
+        assertThat(plannedFileCount(table, readF2, null)).isEqualTo(2);
+    }
+
+    /**
+     * Columnar split + predicate on the file-A column: stats prune through file A's column, column
+     * pruning then drops file B from the kept group.
+     */
+    @Test
+    public void testColumnarSplitWithPredicateOnFileAColumn() throws Exception {
+        write(10);
+        FileStoreTable table = getTableDefault();
+        Schema schema = schemaDefault();
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        int f0Idx = table.rowType().getFieldIndex("f0");
+        RowType readF0 = schema.rowType().project(Collections.singletonList("f0"));
+        assertThat(plannedFileCount(table, readF0, pb.greaterThan(f0Idx, 5))).isEqualTo(1);
+        assertThat(plannedFileCount(table, readF0, pb.greaterThan(f0Idx, 1000))).isEqualTo(0);
+    }
+
+    /**
+     * Columnar split + predicate on the file-B column: stats prune through file B's column, column
+     * pruning then drops file A from the kept group.
+     */
+    @Test
+    public void testColumnarSplitWithPredicateOnFileBColumn() throws Exception {
+        write(10);
+        FileStoreTable table = getTableDefault();
+        Schema schema = schemaDefault();
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+        int f2Idx = table.rowType().getFieldIndex("f2");
+        RowType readF2 = schema.rowType().project(Collections.singletonList("f2"));
+        assertThat(plannedFileCount(table, readF2, pb.equal(f2Idx, BinaryString.fromString("b5"))))
+                .isEqualTo(1);
+    }
+
+    /**
+     * Three-way columnar split: fileA{f0}, fileB{f1}, fileC{f2} share a row id range. A query that
+     * touches one column should retain exactly that one file.
+     */
+    @Test
+    public void testThreeWayColumnarSplitPruning() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+
+        RowType writeF0 = schema.rowType().project(Collections.singletonList("f0"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeF0)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(i));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+
+        builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeF1 = schema.rowType().project(Collections.singletonList("f1"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeF1)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("f1_" + i)));
+            }
+            List<CommitMessage> msgs = write.prepareCommit();
+            setFirstRowId(msgs, 0L);
+            builder.newCommit().commit(msgs);
+        }
+
+        builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeF2 = schema.rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write = builder.newWrite().withWriteType(writeF2)) {
+            for (int i = 0; i < 5; i++) {
+                write.write(GenericRow.of(BinaryString.fromString("f2_" + i)));
+            }
+            List<CommitMessage> msgs = write.prepareCommit();
+            setFirstRowId(msgs, 0L);
+            builder.newCommit().commit(msgs);
+        }
+
+        FileStoreTable table = getTableDefault();
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(3);
+        assertThat(
+                        plannedFileCount(
+                                table,
+                                schema.rowType().project(Collections.singletonList("f0")),
+                                null))
+                .isEqualTo(1);
+        assertThat(
+                        plannedFileCount(
+                                table,
+                                schema.rowType().project(Collections.singletonList("f1")),
+                                null))
+                .isEqualTo(1);
+        assertThat(
+                        plannedFileCount(
+                                table,
+                                schema.rowType().project(Collections.singletonList("f2")),
+                                null))
+                .isEqualTo(1);
+        assertThat(
+                        plannedFileCount(
+                                table, schema.rowType().project(Arrays.asList("f0", "f2")), null))
+                .isEqualTo(2);
+        assertThat(
+                        plannedFileCount(
+                                table, schema.rowType().project(Arrays.asList("f1", "f2")), null))
+                .isEqualTo(2);
+    }
+
+    /**
+     * A columnar-split group covering rows 0..4 (file A {f0,f1} + file B {f2}), plus a row-disjoint
+     * group at rows 5..9 (file C with the full schema). Per-group column pruning composes correctly
+     * across the two topologies.
+     */
+    @Test
+    public void testMixedColumnarSplitAndRowDisjoint() throws Exception {
+        write(5);
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(schema.rowType())) {
+            for (int i = 5; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("c" + i)));
+            }
+            builder.newCommit().commit(write.prepareCommit());
+        }
+        FileStoreTable table = getTableDefault();
+
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(3);
+        RowType readF0 = schema.rowType().project(Collections.singletonList("f0"));
+        assertThat(plannedFileCount(table, readF0, null)).isEqualTo(2);
+        RowType readF2 = schema.rowType().project(Collections.singletonList("f2"));
+        assertThat(plannedFileCount(table, readF2, null)).isEqualTo(2);
+    }
+
+    /**
+     * System-field-only projection is filtered out of readType in
+     * DataEvolutionFileStoreScan.withReadType — readType stays null and
+     * postFilterManifestEntriesEnabled returns false. The column-pruning path is not entered, so
+     * every file in every group flows through unchanged.
+     */
+    @Test
+    public void testSystemFieldOnlyProjectionIsNotPruned() throws Exception {
+        write(5);
+        FileStoreTable table = getTableDefault();
+        assertThat(plannedFileCount(table, null, null)).isEqualTo(2);
+        assertThat(plannedFileCount(table, RowType.of(SpecialFields.ROW_ID), null)).isEqualTo(2);
+    }
+
+    private static int plannedFileCount(FileStoreTable table, RowType readType, Predicate filter) {
+        ReadBuilder rb = table.newReadBuilder();
+        if (readType != null) {
+            rb = rb.withReadType(readType);
+        }
+        if (filter != null) {
+            rb = rb.withFilter(filter);
+        }
+        return rb.newScan().plan().splits().stream()
+                .mapToInt(
+                        s ->
+                                s instanceof DataSplit
+                                        ? ((DataSplit) s).dataFiles().size()
+                                        : ((IndexedSplit) s).dataSplit().dataFiles().size())
+                .sum();
+    }
+
+    private static long countMatchingRows(ReadBuilder rb) throws Exception {
+        RecordReader<InternalRow> reader = rb.newRead().createReader(rb.newScan().plan());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(r -> cnt.incrementAndGet());
+        reader.close();
+        return cnt.get();
+    }
+
     private Range assertContinuousRowIdRange(List<DataFileMeta> files) {
         files.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
         long start = files.get(0).nonNullFirstRowId();
