@@ -74,8 +74,10 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Builder to build btree global index. */
@@ -143,7 +145,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         if (snapshot == null) {
             return Optional.empty();
         }
-        snapshotReader = snapshotReader.withSnapshot(snapshot);
+        snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
         Range dataRange = new Range(0, snapshot.nextRowId() - 1);
 
         return Optional.of(
@@ -164,7 +166,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         if (snapshot == null) {
             return Optional.empty();
         }
-        snapshotReader = snapshotReader.withSnapshot(snapshot);
+        snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
 
         Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
         Range dataRange = new Range(0, snapshot.nextRowId() - 1);
@@ -178,6 +180,13 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 Pair.of(
                         RowRangeIndex.create(nonIndexedRanges),
                         snapshotReader.read().dataSplits()));
+    }
+
+    private SnapshotReader withManifestEntryFilter(SnapshotReader snapshotReader) {
+        return snapshotReader.withManifestEntryFilter(
+                entry ->
+                        !isBlobFile(entry.file().fileName())
+                                && !isVectorStoreFile(entry.file().fileName()));
     }
 
     private List<Range> indexedRowRanges(Snapshot snapshot) {
