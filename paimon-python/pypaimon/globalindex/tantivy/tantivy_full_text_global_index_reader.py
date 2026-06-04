@@ -310,29 +310,18 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 file_names, file_offsets, file_lengths = self._parse_archive_header(stream)
                 directory = StreamDirectory(stream, file_names, file_offsets, file_lengths)
 
-                schema_candidates = [
-                    self._build_schema(tantivy,
-                                       row_id_stored=False,
-                                       text_stored=False),
-                    self._build_schema(tantivy,
-                                       row_id_stored=True,
-                                       text_stored=False),
-                    self._build_schema(tantivy,
-                                       row_id_stored=True,
-                                       text_stored=True),
-                ]
-                last_err = None
-                for schema in schema_candidates:
-                    try:
-                        self._index = tantivy.Index(
-                            schema, directory=directory,
-                        )
-                        last_err = None
-                        break
-                    except ValueError as e:
-                        last_err = e
-                if last_err is not None:
-                    raise last_err
+                schema = self._build_schema(tantivy)
+                try:
+                    self._index = tantivy.Index(
+                        schema, directory=directory,
+                    )
+                except ValueError:
+                    schema = self._build_schema(
+                        tantivy, row_id_stored=True,
+                    )
+                    self._index = tantivy.Index(
+                        schema, directory=directory,
+                    )
                 self._schema = schema
                 self._register_tokenizer(tantivy, self._index)
                 self._index.reload()
