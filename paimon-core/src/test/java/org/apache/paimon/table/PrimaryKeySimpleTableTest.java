@@ -3365,4 +3365,36 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         write.close();
         commit.close();
     }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPath() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write multiple times to create overlapping level-0 files in the same bucket.
+        int numRecords = 100;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        // Verify that withLimit takes effect through the table read path
+        // (KeyValueTableRead -> MergeFileSplitReadProvider -> SplitRead.convert).
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
 }
