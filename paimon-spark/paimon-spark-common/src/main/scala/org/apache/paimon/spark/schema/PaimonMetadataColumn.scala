@@ -24,11 +24,16 @@ import org.apache.paimon.types.DataField
 
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
-import org.apache.spark.sql.connector.catalog.MetadataColumn
 import org.apache.spark.sql.types.{DataType, FloatType, IntegerType, LongType, StringType, StructField, StructType}
 
-case class PaimonMetadataColumn(id: Int, override val name: String, override val dataType: DataType)
-  extends MetadataColumn {
+case class PaimonMetadataColumn(
+    id: Int,
+    override val name: String,
+    override val dataType: DataType,
+    preserveOnDelete: Boolean = true,
+    preserveOnUpdate: Boolean = true,
+    preserveOnReinsert: Boolean = false)
+  extends PaimonMetadataColumnBase {
 
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
@@ -79,7 +84,11 @@ object PaimonMetadataColumn {
   val ROW_ID: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 104, ROW_ID_COLUMN, LongType)
   val SEQUENCE_NUMBER: PaimonMetadataColumn =
-    PaimonMetadataColumn(Int.MaxValue - 105, SEQUENCE_NUMBER_COLUMN, LongType)
+    PaimonMetadataColumn(
+      Int.MaxValue - 105,
+      SEQUENCE_NUMBER_COLUMN,
+      LongType,
+      preserveOnUpdate = false)
   val VECTOR_SEARCH_SCORE: PaimonMetadataColumn =
     PaimonMetadataColumn(Integer.MAX_VALUE - 106, VECTOR_SEARCH_SCORE_COLUMN, FloatType)
 

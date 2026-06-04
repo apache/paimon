@@ -16,23 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.schema;
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.spark.sql.connector.catalog.MetadataColumn;
 
-import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+abstract class PaimonMetadataColumnBase implements MetadataColumn {
 
-class RowTrackingTest extends RowTrackingTestBase {
+    abstract boolean preserveOnDelete();
 
-  test("Row Tracking: Spark 3.5 keeps row-tracking tables on V1 DML path") {
-    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
-      withTable("t", "rt") {
-        sql("CREATE TABLE t (id INT, data INT)")
-        assert(SparkTable.of(loadTable("t")).isInstanceOf[SupportsRowLevelOperations])
+    abstract boolean preserveOnUpdate();
 
-        sql("CREATE TABLE rt (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
-        assert(!SparkTable.of(loadTable("rt")).isInstanceOf[SupportsRowLevelOperations])
-      }
+    abstract boolean preserveOnReinsert();
+
+    public String metadataInJSON() {
+        return "{\"__preserve_on_delete\":"
+                + preserveOnDelete()
+                + ",\"__preserve_on_update\":"
+                + preserveOnUpdate()
+                + ",\"__preserve_on_reinsert\":"
+                + preserveOnReinsert()
+                + "}";
     }
-  }
 }
