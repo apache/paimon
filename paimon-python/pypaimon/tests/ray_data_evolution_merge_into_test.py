@@ -1442,7 +1442,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         source = pa.Table.from_pydict(
             {
                 'id': pa.array([1], type=pa.int32()),
-                'name': ['new'],
+                'name': ['first'],
                 'age': pa.array([99], type=pa.int32()),
             },
             schema=self.pa_schema,
@@ -1454,15 +1454,17 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             catalog_options=self.catalog_options,
             on=['id'],
             when_matched=[
-                WhenMatched(update='*', condition='s.age > 50'),
-                WhenMatched(update='*', condition='s.age > 10'),
+                WhenMatched(update={'name': 's.name'},
+                            condition='s.age > 50'),
+                WhenMatched(update={'age': 's.age'},
+                            condition='s.age > 10'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
 
         out = self._read_sorted(target)
-        self.assertEqual(out['name'], ['new'])
-        self.assertEqual(out['age'], [99])
+        self.assertEqual(out['name'], ['first'])
+        self.assertEqual(out['age'], [10])
 
 
 class TargetProjectionTest(unittest.TestCase):

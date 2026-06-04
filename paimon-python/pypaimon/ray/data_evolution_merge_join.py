@@ -105,15 +105,19 @@ def build_matched_update_ds(
             )
         prepared_clauses.append((clause.spec, rewritten))
 
+    _filter_batch = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
+
     def _transform(batch: pa.Table) -> pa.Table:
+        import pyarrow.compute as pc
         remaining = batch
         parts = []
         for spec, rewritten in prepared_clauses:
             if remaining.num_rows == 0:
                 break
             if rewritten is not None:
-                from pypaimon.ray.merge_condition import filter_batch
-                matched = filter_batch(
+                matched = _filter_batch(
                     remaining, rewritten, _pre_rewritten=True,
                 )
                 if matched.num_rows > 0:
@@ -123,7 +127,6 @@ def build_matched_update_ds(
                         captured_schema,
                     ))
                 if matched.num_rows < remaining.num_rows:
-                    import pyarrow.compute as pc
                     row_id_col = f"t.{captured_row_id_name}"
                     mask = pc.invert(pc.is_in(
                         remaining.column(row_id_col),
@@ -350,6 +353,10 @@ def build_not_matched_insert_ds(
             rewritten = rewrite_condition(clause.condition)
         prepared_clauses.append((clause.spec, rewritten))
 
+    _filter_batch_nm = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch_nm
+
     def _transform(batch: pa.Table) -> pa.Table:
         remaining = batch
         parts = []
@@ -357,8 +364,7 @@ def build_not_matched_insert_ds(
             if remaining.num_rows == 0:
                 break
             if rewritten is not None:
-                from pypaimon.ray.merge_condition import filter_batch
-                matched = filter_batch(
+                matched = _filter_batch_nm(
                     remaining, rewritten, _pre_rewritten=True,
                 )
                 if matched.num_rows > 0:
@@ -366,8 +372,8 @@ def build_not_matched_insert_ds(
                         matched, spec, captured_field_names, out_schema
                     ))
                 if matched.num_rows < remaining.num_rows:
-                    not_cond = f"NOT ({rewritten})"
-                    remaining = filter_batch(
+                    not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                    remaining = _filter_batch_nm(
                         remaining, not_cond, _pre_rewritten=True,
                     )
                 else:
