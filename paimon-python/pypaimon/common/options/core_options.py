@@ -16,6 +16,7 @@
 # under the License.
 
 import sys
+import warnings
 from datetime import timedelta
 from enum import Enum
 from typing import Dict, List, Optional
@@ -65,6 +66,23 @@ class SortOrder(str, Enum):
     """
     ASCENDING = "ascending"
     DESCENDING = "descending"
+
+
+class StartupMode(str, Enum):
+    """
+    Startup mode for scan operations.
+    """
+    DEFAULT = "default"
+    LATEST_FULL = "latest-full"
+    FULL = "full"
+    LATEST = "latest"
+    COMPACTED_FULL = "compacted-full"
+    FROM_TIMESTAMP = "from-timestamp"
+    FROM_SNAPSHOT = "from-snapshot"
+    FROM_SNAPSHOT_FULL = "from-snapshot-full"
+    FROM_CREATION_TIMESTAMP = "from-creation-timestamp"
+    FROM_FILE_CREATION_TIME = "from-file-creation-time"
+    INCREMENTAL = "incremental"
 
 
 class GlobalIndexColumnUpdateAction(str, Enum):
@@ -327,6 +345,21 @@ class CoreOptions:
         .with_description("Specify the file name prefix of data files.")
     )
     # Scan options
+    SCAN_MODE: ConfigOption[StartupMode] = (
+        ConfigOptions.key("scan.mode")
+        .enum_type(StartupMode)
+        .default_value(StartupMode.DEFAULT)
+        .with_description(
+            "Scan startup mode for the table. "
+            "'default' resolves the actual mode from other scan options. "
+            "'latest-full' reads the latest snapshot then streams changes. "
+            "'latest' only streams changes without an initial snapshot. "
+            "'from-timestamp' reads from a specific timestamp. "
+            "'from-snapshot' reads from a specific snapshot. "
+            "'incremental' reads incremental changes between two snapshots/tags."
+        )
+    )
+
     SCAN_FALLBACK_BRANCH: ConfigOption[str] = (
         ConfigOptions.key("scan.fallback-branch")
         .string_type()
@@ -385,6 +418,24 @@ class CoreOptions:
         .with_description(
             "Optional watermark used for time travel to the first snapshot "
             "with watermark greater than or equal to the given value."
+        )
+    )
+
+    SCAN_FILE_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.file-creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "After configuring this time, only the data files created after this time will be read."
+        )
+    )
+
+    SCAN_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp used in case of 'from-creation-timestamp' scan mode."
         )
     )
 
@@ -826,6 +877,42 @@ class CoreOptions:
 
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)
+
+    def scan_mode(self, default=None):
+        return self.options.get(CoreOptions.SCAN_MODE, default)
+
+    def startup_mode(self) -> 'StartupMode':
+        """Resolve the effective startup mode, matching Java CoreOptions.startupMode().
+
+        If scan.mode is DEFAULT, auto-detects from other scan options.
+        Maps deprecated FULL to LATEST_FULL.
+        """
+        mode = self.scan_mode()
+        if mode == StartupMode.DEFAULT:
+            if (self.options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
+                    or self.options.contains(CoreOptions.SCAN_TIMESTAMP)):
+                return StartupMode.FROM_TIMESTAMP
+            elif (self.options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
+                  or self.options.contains(CoreOptions.SCAN_TAG_NAME)
+                  or self.options.contains(CoreOptions.SCAN_WATERMARK)):
+                return StartupMode.FROM_SNAPSHOT
+            elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+                return StartupMode.INCREMENTAL
+            elif self.options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS):
+                return StartupMode.FROM_FILE_CREATION_TIME
+            elif self.options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS):
+                return StartupMode.FROM_CREATION_TIMESTAMP
+            else:
+                return StartupMode.LATEST_FULL
+        elif mode == StartupMode.FULL:
+            warnings.warn(
+                "scan.mode 'full' is deprecated, use 'latest-full' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return StartupMode.LATEST_FULL
+        else:
+            return mode
 
     def scan_fallback_branch(self, default=None):
         return self.options.get(CoreOptions.SCAN_FALLBACK_BRANCH, default)
