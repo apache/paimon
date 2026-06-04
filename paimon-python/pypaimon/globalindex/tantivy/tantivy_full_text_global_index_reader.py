@@ -315,7 +315,9 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                     self._index = tantivy.Index(
                         schema, directory=directory,
                     )
-                except ValueError:
+                except ValueError as e:
+                    if "schema" not in str(e).lower():
+                        raise
                     schema = self._build_schema(
                         tantivy, row_id_stored=True,
                     )
@@ -331,9 +333,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 stream.close()
                 raise
 
-    def _build_schema(
-        self, tantivy, row_id_stored=False, text_stored=False,
-    ):
+    def _build_schema(self, tantivy, row_id_stored=False):
         schema_builder = tantivy.SchemaBuilder()
         schema_builder.add_unsigned_field(
             "row_id", stored=row_id_stored, indexed=True, fast=True,
@@ -344,11 +344,11 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             field_kwargs["index_option"] = "freq"
         if tokenizer_name == "default":
             schema_builder.add_text_field(
-                "text", stored=text_stored, **field_kwargs,
+                "text", stored=False, **field_kwargs,
             )
         else:
             schema_builder.add_text_field(
-                "text", stored=text_stored,
+                "text", stored=False,
                 tokenizer_name=tokenizer_name, **field_kwargs,
             )
         return schema_builder.build()
