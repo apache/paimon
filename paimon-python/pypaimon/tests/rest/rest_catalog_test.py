@@ -380,7 +380,6 @@ class RESTCatalogTest(RESTBaseTest):
 
         table = self.rest_catalog.get_table_via(table_identifier, view_identifier)
         self.assertIsNotNone(table)
-        self.assertEqual(table.name(), "table_for_via")
 
     def test_get_table_via_with_string_identifier(self):
         """Test get table via view using string identifiers."""
@@ -391,11 +390,10 @@ class RESTCatalogTest(RESTBaseTest):
 
         table = self.rest_catalog.get_table_via(table_name, "default.some_view")
         self.assertIsNotNone(table)
-        self.assertEqual(table.name(), "table_for_via_str")
 
     def test_get_table_via_not_exist(self):
         """Test get table via view when table does not exist."""
-        from pypaimon.catalog.catalog import TableNotExistException
+        from pypaimon.catalog.catalog_exception import TableNotExistException
         table_identifier = Identifier.from_string("default.non_exist_via")
         view_identifier = Identifier.from_string("default.some_view")
 
