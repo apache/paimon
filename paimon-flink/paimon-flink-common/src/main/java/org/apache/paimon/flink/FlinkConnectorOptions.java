@@ -274,6 +274,16 @@ public class FlinkConnectorOptions {
                                     + "normal source, the max partition(s) will be determined before job running "
                                     + "without refreshing even for streaming jobs.");
 
+    public static final ConfigOption<Integer> SCAN_BUCKET =
+            ConfigOptions.key("scan.bucket")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify a single bucket to scan. This option filters manifest entries "
+                                    + "and only plans splits for the given bucket. It is only supported "
+                                    + "for fixed-bucket primary key tables (bucket > 0). It cannot be used "
+                                    + "with postpone bucket tables.");
+
     public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
             ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
                     .durationType()

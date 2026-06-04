@@ -153,6 +153,12 @@ under the License.
             <td>Bounded mode for Paimon consumer. By default, Paimon automatically selects bounded mode based on the mode of the Flink job.</td>
         </tr>
         <tr>
+            <td><h5>scan.bucket</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Specify a single bucket to scan. This option filters manifest entries and only plans splits for the given bucket. It is only supported for fixed-bucket primary key tables (bucket &gt; 0). It cannot be used with postpone bucket tables.</td>
+        </tr>
+        <tr>
             <td><h5>scan.dedicated-split-generation</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

@@ -26,6 +26,7 @@ import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.lookup.DynamicPartitionLoader;
 import org.apache.paimon.flink.lookup.PartitionLoader;
 import org.apache.paimon.flink.lookup.StaticPartitionLoader;
+import org.apache.paimon.flink.utils.ScanBucketUtils;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -35,6 +36,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
@@ -245,13 +247,14 @@ public abstract class FlinkTableSource
     protected void scanSplitsForInference() {
         if (splitStatistics == null) {
             if (table instanceof DataTable) {
-                List<PartitionEntry> partitionEntries =
+                ReadBuilder readBuilder =
                         table.newReadBuilder()
                                 .dropStats()
                                 .withFilter(predicate)
-                                .withPartitionFilter(partitionPredicate)
-                                .newScan()
-                                .listPartitionEntries();
+                                .withPartitionFilter(partitionPredicate);
+                ScanBucketUtils.applyScanBucket(table, readBuilder, options);
+                List<PartitionEntry> partitionEntries =
+                        readBuilder.newScan().listPartitionEntries();
                 long totalSize = 0;
                 long rowCount = 0;
                 for (PartitionEntry entry : partitionEntries) {
@@ -262,15 +265,14 @@ public abstract class FlinkTableSource
                 splitStatistics =
                         new SplitStatistics((int) (totalSize / splitTargetSize + 1), rowCount);
             } else {
-                List<Split> splits =
+                ReadBuilder readBuilder =
                         table.newReadBuilder()
                                 .dropStats()
                                 .withFilter(predicate)
                                 .withPartitionFilter(partitionPredicate)
-                                .withProjection(new int[0])
-                                .newScan()
-                                .plan()
-                                .splits();
+                                .withProjection(new int[0]);
+                ScanBucketUtils.applyScanBucket(table, readBuilder, options);
+                List<Split> splits = readBuilder.newScan().plan().splits();
                 splitStatistics =
                         new SplitStatistics(
                                 splits.size(), splits.stream().mapToLong(Split::rowCount).sum());
