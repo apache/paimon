@@ -1385,6 +1385,47 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2, 3])
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_multi_matched_null_falls_through(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        source = pa.Table.from_pydict(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': ['a2', 'b2', 'c2'],
+                'age': pa.array([None, 50, 60], type=pa.int32()),
+            },
+            schema=self.pa_schema,
+        )
+
+        merge_into(
+            target=target,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched(update='*', condition='s.age > 40'),
+                WhenMatched(update='*'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        out = self._read_sorted(target)
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['a2', 'b2', 'c2'])
+        self.assertEqual(out['age'], [None, 50, 60])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_multi_not_matched_null_falls_through(self):
         target = self._create_table()
 
