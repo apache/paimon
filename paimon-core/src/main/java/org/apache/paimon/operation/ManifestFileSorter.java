@@ -66,7 +66,16 @@ public class ManifestFileSorter {
         final boolean fullCompaction;
         final RecordComparator fieldComparator;
         final Set<FileEntry.Identifier> deleteEntries;
-        final Map<ManifestFileMeta, Boolean> needsUnsortedCompaction;
+        /**
+         * Manifest files that need unsorted compaction.
+         *
+         * <p>Key: manifest file metadata
+         *
+         * <p>Value: true if fullCompaction is true and the file overlaps with delete partitions. It
+         * means the file needs to eliminate delete entries file
+         */
+        final Map<ManifestFileMeta, Boolean> compactWithoutSort;
+
         final List<ManifestAdjacentSortedRun> levelRuns;
         final List<ManifestAdjacentSortedRun> pickedRuns;
 
@@ -74,20 +83,20 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 RecordComparator fieldComparator,
                 Set<FileEntry.Identifier> deleteEntries,
-                Map<ManifestFileMeta, Boolean> needsUnsortedCompaction,
+                Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
             this.fieldComparator = fieldComparator;
             this.deleteEntries = deleteEntries;
-            this.needsUnsortedCompaction = needsUnsortedCompaction;
+            this.compactWithoutSort = compactWithoutSort;
             this.levelRuns = levelRuns;
             this.pickedRuns = pickedRuns;
         }
 
         /** Check whether the given manifest file is marked for unsorted compaction. */
         boolean isMarkedForUnsortedCompaction(ManifestFileMeta file) {
-            return needsUnsortedCompaction.containsKey(file);
+            return compactWithoutSort.containsKey(file);
         }
     }
 
@@ -100,18 +109,18 @@ public class ManifestFileSorter {
          *
          * <p>Key: manifest file metadata
          *
-         * <p>Value: true if the file overlaps with delete partitions and fullCompaction is true
-         * file
+         * <p>Value: true if fullCompaction is true and the file overlaps with delete partitions. It
+         * means the file needs to eliminate delete entries file
          */
-        final Map<ManifestFileMeta, Boolean> needsUnsortedCompaction;
+        final Map<ManifestFileMeta, Boolean> compactWithoutSort;
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
                 Set<FileEntry.Identifier> deleteEntries,
-                Map<ManifestFileMeta, Boolean> needsUnsortedCompaction) {
+                Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
-            this.needsUnsortedCompaction = needsUnsortedCompaction;
+            this.compactWithoutSort = compactWithoutSort;
         }
     }
 
@@ -214,19 +223,19 @@ public class ManifestFileSorter {
         List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
         List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.needsUnsortedCompaction.isEmpty()) {
+        if (pickedRuns.isEmpty() && ctx.compactWithoutSort.isEmpty()) {
             LOG.debug(
-                    "Manifest sort full compact skipped: no runs picked and no unsortedCompaction files.");
+                    "Manifest sort full compact skipped: no runs picked and no compactWithoutSort files.");
             return Optional.empty();
         }
 
         LOG.info(
                 "Manifest sort full compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "unsortedCompaction={} files.",
+                        + "compactWithoutSort={} files.",
                 input.size(),
                 levelRuns.size(),
                 pickedRuns.size(),
-                ctx.needsUnsortedCompaction.size());
+                ctx.compactWithoutSort.size());
 
         // Step 3: Collect reused files (not picked) and picked files
         Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
@@ -240,7 +249,7 @@ public class ManifestFileSorter {
         for (ManifestAdjacentSortedRun run : pickedRuns) {
             pickedFiles.addAll(run.files());
         }
-        pickedFiles.addAll(ctx.needsUnsortedCompaction.keySet());
+        pickedFiles.addAll(ctx.compactWithoutSort.keySet());
 
         // Step 4: Split into sections and merge small adjacent sections
         List<Section> sections = splitIntoSections(pickedFiles, ctx);
@@ -305,19 +314,19 @@ public class ManifestFileSorter {
         List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
         List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.needsUnsortedCompaction.isEmpty()) {
+        if (pickedRuns.isEmpty() && ctx.compactWithoutSort.isEmpty()) {
             LOG.debug(
-                    "Manifest sort minor compact skipped: no runs picked and no unsortedCompaction files.");
+                    "Manifest sort minor compact skipped: no runs picked and no compactWithoutSort files.");
             return input;
         }
 
         LOG.info(
                 "Manifest sort minor compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "unsortedCompaction={} files.",
+                        + "compactWithoutSort={} files.",
                 input.size(),
                 levelRuns.size(),
                 pickedRuns.size(),
-                ctx.needsUnsortedCompaction.size());
+                ctx.compactWithoutSort.size());
 
         // Step 2: Build fileName -> index mapping and initialize 2D result
         Map<String, Integer> fileNameToIndex = new HashMap<>();
@@ -344,7 +353,7 @@ public class ManifestFileSorter {
         for (ManifestAdjacentSortedRun run : pickedRuns) {
             pickedFiles.addAll(run.files());
         }
-        pickedFiles.addAll(ctx.needsUnsortedCompaction.keySet());
+        pickedFiles.addAll(ctx.compactWithoutSort.keySet());
 
         // Step 4: Compute index range
         int minIdx = Integer.MAX_VALUE;
@@ -447,7 +456,7 @@ public class ManifestFileSorter {
                 fullCompaction,
                 fieldComparator,
                 classifyResult.deleteEntries,
-                classifyResult.needsUnsortedCompaction,
+                classifyResult.compactWithoutSort,
                 levelRuns,
                 pickedRuns);
     }
@@ -456,12 +465,12 @@ public class ManifestFileSorter {
      * Classify manifest files into default-compaction group and LSM group.
      *
      * <p>Full compaction: small files and files overlapping delete partitions go into
-     * needsUnsortedCompaction; the rest are returned as lsmFiles.
+     * compactWithoutSort; the rest are returned as lsmFiles.
      *
-     * <p>Non-full compaction: small files go to needsUnsortedCompaction for minor-style merge; the
-     * rest are returned as lsmFiles.
+     * <p>Non-full compaction: small files go to compactWithoutSort for minor-style merge; the rest
+     * are returned as lsmFiles.
      *
-     * @return ClassifyResult containing lsmFiles, deleteEntries, and needsUnsortedCompaction
+     * @return ClassifyResult containing lsmFiles, deleteEntries, and compactWithoutSort
      */
     private static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
@@ -471,7 +480,7 @@ public class ManifestFileSorter {
             long suggestedMetaSize,
             @Nullable Integer manifestReadParallelism) {
         // Initialize classification containers and read delete entries
-        Map<ManifestFileMeta, Boolean> needsUnsortedCompaction = new LinkedHashMap<>();
+        Map<ManifestFileMeta, Boolean> compactWithoutSort = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
         Set<FileEntry.Identifier> classifiedDeleteEntries = Collections.emptySet();
         PartitionPredicate predicate = null;
@@ -507,11 +516,11 @@ public class ManifestFileSorter {
                                     file.partitionStats().nullCounts());
             if (small || inDeleteRange) {
                 iterator.remove();
-                needsUnsortedCompaction.put(file, inDeleteRange);
+                compactWithoutSort.put(file, inDeleteRange);
             }
         }
 
-        return new ClassifyResult(lsmFiles, classifiedDeleteEntries, needsUnsortedCompaction);
+        return new ClassifyResult(lsmFiles, classifiedDeleteEntries, compactWithoutSort);
     }
 
     /**
@@ -715,8 +724,8 @@ public class ManifestFileSorter {
      *   <li>First overflow: The current section is split. The rewritable part is sorted and
      *       rewritten. The remaining part is appended back to the sections queue for later
      *       processing.
-     *   <li>Subsequent overflows: If the section has files in needsUnsortedCompaction (needs
-     *       unsorted compaction), unsortedCompactSection is called to process it in smaller chunks.
+     *   <li>Subsequent overflows: If the section has files in compactWithoutSort (needs unsorted
+     *       compaction), unsortedCompactSection is called to process it in smaller chunks.
      *       Otherwise, the section is skipped.
      * </ul>
      *
@@ -822,9 +831,8 @@ public class ManifestFileSorter {
         List<ManifestFileMeta> tailFiles = new ArrayList<>();
         long headSize = 0;
         long tailSize = 0;
-        // Whether tail section has files in needsUnsortedCompaction, if true, the section need to
-        // be
-        // rewritten.
+        // Whether tail section has files in compactWithoutSort, if true, the section need to
+        // be rewritten.
         boolean tailHasUnsortedCompactMeta = false;
 
         for (ManifestFileMeta file : section.files) {
@@ -883,9 +891,8 @@ public class ManifestFileSorter {
      *
      * <p><b>Semantics difference from old minor merge:</b> In the old ManifestFileMerger path, the
      * trailing candidates are kept unchanged when their count is below manifest.merge-min-count. In
-     * this sort path, unsortedCompactSection is triggered when needsUnsortedCompaction is
-     * non-empty, regardless of the manifest count. This is because files in needsUnsortedCompaction
-     * either:
+     * this sort path, unsortedCompactSection is triggered when compactWithoutSort is non-empty,
+     * regardless of the manifest count. This is because files in compactWithoutSort either:
      *
      * <ul>
      *   <li>Are small files needing consolidation
@@ -955,8 +962,7 @@ public class ManifestFileSorter {
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Skip rewrite for single file not in delete-range.
-        if (section.size() == 1
-                && !ctx.needsUnsortedCompaction.getOrDefault(section.get(0), false)) {
+        if (section.size() == 1 && !ctx.compactWithoutSort.getOrDefault(section.get(0), false)) {
             output.addUnchanged(section.get(0));
             return;
         }
