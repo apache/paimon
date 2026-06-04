@@ -66,7 +66,7 @@ public class ManifestFileSorter {
         final boolean fullCompaction;
         final RecordComparator fieldComparator;
         final Set<FileEntry.Identifier> deleteEntries;
-        final Map<ManifestFileMeta, Boolean> needsDefaultCompaction;
+        final Map<ManifestFileMeta, Boolean> needsUnsortedCompaction;
         final List<ManifestAdjacentSortedRun> levelRuns;
         final List<ManifestAdjacentSortedRun> pickedRuns;
 
@@ -74,20 +74,20 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 RecordComparator fieldComparator,
                 Set<FileEntry.Identifier> deleteEntries,
-                Map<ManifestFileMeta, Boolean> needsDefaultCompaction,
+                Map<ManifestFileMeta, Boolean> needsUnsortedCompaction,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
             this.fieldComparator = fieldComparator;
             this.deleteEntries = deleteEntries;
-            this.needsDefaultCompaction = needsDefaultCompaction;
+            this.needsUnsortedCompaction = needsUnsortedCompaction;
             this.levelRuns = levelRuns;
             this.pickedRuns = pickedRuns;
         }
 
-        /** Check whether the given manifest file is marked for default compaction. */
-        boolean isMarkedForDefaultCompaction(ManifestFileMeta file) {
-            return needsDefaultCompaction.containsKey(file);
+        /** Check whether the given manifest file is marked for unsorted compaction. */
+        boolean isMarkedForUnsortedCompaction(ManifestFileMeta file) {
+            return needsUnsortedCompaction.containsKey(file);
         }
     }
 
@@ -96,22 +96,22 @@ public class ManifestFileSorter {
         final List<ManifestFileMeta> lsmFiles;
         final Set<FileEntry.Identifier> deleteEntries;
         /**
-         * Manifest files that need default compaction.
+         * Manifest files that need unsorted compaction.
          *
          * <p>Key: manifest file metadata
          *
          * <p>Value: true if the file overlaps with delete partitions and fullCompaction is true
          * file
          */
-        final Map<ManifestFileMeta, Boolean> needsDefaultCompaction;
+        final Map<ManifestFileMeta, Boolean> needsUnsortedCompaction;
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
                 Set<FileEntry.Identifier> deleteEntries,
-                Map<ManifestFileMeta, Boolean> needsDefaultCompaction) {
+                Map<ManifestFileMeta, Boolean> needsUnsortedCompaction) {
             this.lsmFiles = lsmFiles;
             this.deleteEntries = deleteEntries;
-            this.needsDefaultCompaction = needsDefaultCompaction;
+            this.needsUnsortedCompaction = needsUnsortedCompaction;
         }
     }
 
@@ -214,19 +214,19 @@ public class ManifestFileSorter {
         List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
         List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.needsDefaultCompaction.isEmpty()) {
+        if (pickedRuns.isEmpty() && ctx.needsUnsortedCompaction.isEmpty()) {
             LOG.debug(
-                    "Manifest sort full compact skipped: no runs picked and no defaultCompaction files.");
+                    "Manifest sort full compact skipped: no runs picked and no unsortedCompaction files.");
             return Optional.empty();
         }
 
         LOG.info(
                 "Manifest sort full compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "defaultCompaction={} files.",
+                        + "unsortedCompaction={} files.",
                 input.size(),
                 levelRuns.size(),
                 pickedRuns.size(),
-                ctx.needsDefaultCompaction.size());
+                ctx.needsUnsortedCompaction.size());
 
         // Step 3: Collect reused files (not picked) and picked files
         Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
@@ -240,7 +240,7 @@ public class ManifestFileSorter {
         for (ManifestAdjacentSortedRun run : pickedRuns) {
             pickedFiles.addAll(run.files());
         }
-        pickedFiles.addAll(ctx.needsDefaultCompaction.keySet());
+        pickedFiles.addAll(ctx.needsUnsortedCompaction.keySet());
 
         // Step 4: Split into sections and merge small adjacent sections
         List<Section> sections = splitIntoSections(pickedFiles, ctx);
@@ -305,19 +305,19 @@ public class ManifestFileSorter {
         List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
         List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.needsDefaultCompaction.isEmpty()) {
+        if (pickedRuns.isEmpty() && ctx.needsUnsortedCompaction.isEmpty()) {
             LOG.debug(
-                    "Manifest sort minor compact skipped: no runs picked and no defaultCompaction files.");
+                    "Manifest sort minor compact skipped: no runs picked and no unsortedCompaction files.");
             return input;
         }
 
         LOG.info(
                 "Manifest sort minor compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "defaultCompaction={} files.",
+                        + "unsortedCompaction={} files.",
                 input.size(),
                 levelRuns.size(),
                 pickedRuns.size(),
-                ctx.needsDefaultCompaction.size());
+                ctx.needsUnsortedCompaction.size());
 
         // Step 2: Build fileName -> index mapping and initialize 2D result
         Map<String, Integer> fileNameToIndex = new HashMap<>();
@@ -344,7 +344,7 @@ public class ManifestFileSorter {
         for (ManifestAdjacentSortedRun run : pickedRuns) {
             pickedFiles.addAll(run.files());
         }
-        pickedFiles.addAll(ctx.needsDefaultCompaction.keySet());
+        pickedFiles.addAll(ctx.needsUnsortedCompaction.keySet());
 
         // Step 4: Compute index range
         int minIdx = Integer.MAX_VALUE;
@@ -447,7 +447,7 @@ public class ManifestFileSorter {
                 fullCompaction,
                 fieldComparator,
                 classifyResult.deleteEntries,
-                classifyResult.needsDefaultCompaction,
+                classifyResult.needsUnsortedCompaction,
                 levelRuns,
                 pickedRuns);
     }
@@ -456,12 +456,12 @@ public class ManifestFileSorter {
      * Classify manifest files into default-compaction group and LSM group.
      *
      * <p>Full compaction: small files and files overlapping delete partitions go into
-     * needsDefaultCompaction; the rest are returned as lsmFiles.
+     * needsUnsortedCompaction; the rest are returned as lsmFiles.
      *
-     * <p>Non-full compaction: small files go to needsDefaultCompaction for minor-style merge; the
+     * <p>Non-full compaction: small files go to needsUnsortedCompaction for minor-style merge; the
      * rest are returned as lsmFiles.
      *
-     * @return ClassifyResult containing lsmFiles, deleteEntries, and needsDefaultCompaction
+     * @return ClassifyResult containing lsmFiles, deleteEntries, and needsUnsortedCompaction
      */
     private static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
@@ -471,7 +471,7 @@ public class ManifestFileSorter {
             long suggestedMetaSize,
             @Nullable Integer manifestReadParallelism) {
         // Initialize classification containers and read delete entries
-        Map<ManifestFileMeta, Boolean> needsDefaultCompaction = new LinkedHashMap<>();
+        Map<ManifestFileMeta, Boolean> needsUnsortedCompaction = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
         Set<FileEntry.Identifier> classifiedDeleteEntries = Collections.emptySet();
         PartitionPredicate predicate = null;
@@ -507,11 +507,11 @@ public class ManifestFileSorter {
                                     file.partitionStats().nullCounts());
             if (small || inDeleteRange) {
                 iterator.remove();
-                needsDefaultCompaction.put(file, inDeleteRange);
+                needsUnsortedCompaction.put(file, inDeleteRange);
             }
         }
 
-        return new ClassifyResult(lsmFiles, classifiedDeleteEntries, needsDefaultCompaction);
+        return new ClassifyResult(lsmFiles, classifiedDeleteEntries, needsUnsortedCompaction);
     }
 
     /**
@@ -599,7 +599,7 @@ public class ManifestFileSorter {
 
     /**
      * Split picked files into sections. Files with overlapping sort-key intervals go into the same
-     * section. Each section is built with pre-computed totalSize and hasDefaultCompactMeta.
+     * section. Each section is built with pre-computed totalSize and hasUnsortedCompactMeta.
      */
     static List<Section> splitIntoSections(
             List<ManifestFileMeta> pickedFiles, CompactionContext ctx) {
@@ -623,7 +623,7 @@ public class ManifestFileSorter {
 
         currentSectionFiles.add(first);
         currentSectionTotalSize += first.fileSize();
-        boolean currentSectionHasCompactMeta = ctx.isMarkedForDefaultCompaction(first);
+        boolean currentSectionHasUnsortedCompactMeta = ctx.isMarkedForUnsortedCompaction(first);
         BinaryRow sectionMaxBound = first.partitionStats().maxValues();
 
         for (int i = 1; i < pickedFiles.size(); i++) {
@@ -647,19 +647,20 @@ public class ManifestFileSorter {
                         new Section(
                                 currentSectionFiles,
                                 currentSectionTotalSize,
-                                currentSectionHasCompactMeta));
+                                currentSectionHasUnsortedCompactMeta));
                 // start a new section
                 currentSectionFiles = new ArrayList<>();
                 currentSectionTotalSize = 0;
                 currentSectionFiles.add(file);
                 currentSectionTotalSize += file.fileSize();
-                currentSectionHasCompactMeta = ctx.isMarkedForDefaultCompaction(file);
+                currentSectionHasUnsortedCompactMeta = ctx.isMarkedForUnsortedCompaction(file);
                 sectionMaxBound = file.partitionStats().maxValues();
             } else {
                 currentSectionFiles.add(file);
                 currentSectionTotalSize += file.fileSize();
-                if (!currentSectionHasCompactMeta && ctx.isMarkedForDefaultCompaction(file)) {
-                    currentSectionHasCompactMeta = true;
+                if (!currentSectionHasUnsortedCompactMeta
+                        && ctx.isMarkedForUnsortedCompaction(file)) {
+                    currentSectionHasUnsortedCompactMeta = true;
                 }
                 if (fieldComparator.compare(file.partitionStats().maxValues(), sectionMaxBound)
                         > 0) {
@@ -671,7 +672,7 @@ public class ManifestFileSorter {
                 new Section(
                         currentSectionFiles,
                         currentSectionTotalSize,
-                        currentSectionHasCompactMeta));
+                        currentSectionHasUnsortedCompactMeta));
         return sections;
     }
 
@@ -714,14 +715,14 @@ public class ManifestFileSorter {
      *   <li>First overflow: The current section is split. The rewritable part is sorted and
      *       rewritten. The remaining part is appended back to the sections queue for later
      *       processing.
-     *   <li>Subsequent overflows: If the section has files in needsDefaultCompaction (needs default
-     *       compaction), defaultCompactSection is called to process it in smaller chunks.
+     *   <li>Subsequent overflows: If the section has files in needsUnsortedCompaction (needs
+     *       unsorted compaction), unsortedCompactSection is called to process it in smaller chunks.
      *       Otherwise, the section is skipped.
      * </ul>
      *
      * <p>This design ensures that the budget only limits the aggressive sort rewrite, while still
      * allowing necessary cleanup operations (delete entry elimination, small file merge) through
-     * the defaultCompactSection fallback path.
+     * the unsortedCompactSection fallback path.
      */
     private static void rewriteSections(
             List<Section> sections,
@@ -788,7 +789,7 @@ public class ManifestFileSorter {
                     budgetExhausted = true;
                 }
             } else {
-                // Phase 2: budget already exhausted -- only do default compact, skip aggressive
+                // Phase 2: budget already exhausted -- only do unsorted compact, skip aggressive
                 // sort rewrite.
                 rewriteSectionBeyondBudget(
                         section,
@@ -821,9 +822,10 @@ public class ManifestFileSorter {
         List<ManifestFileMeta> tailFiles = new ArrayList<>();
         long headSize = 0;
         long tailSize = 0;
-        // Whether tail section has files in needsDefaultCompaction, if true, the section need to be
+        // Whether tail section has files in needsUnsortedCompaction, if true, the section need to
+        // be
         // rewritten.
-        boolean tailHasDefaultCompactMeta = false;
+        boolean tailHasUnsortedCompactMeta = false;
 
         for (ManifestFileMeta file : section.files) {
             if (headSize + file.fileSize() <= remainingBudget) {
@@ -832,8 +834,8 @@ public class ManifestFileSorter {
             } else {
                 tailFiles.add(file);
                 tailSize += file.fileSize();
-                if (ctx.isMarkedForDefaultCompaction(file)) {
-                    tailHasDefaultCompactMeta = true;
+                if (ctx.isMarkedForUnsortedCompaction(file)) {
+                    tailHasUnsortedCompactMeta = true;
                 }
             }
         }
@@ -844,13 +846,13 @@ public class ManifestFileSorter {
         if (tailFiles.isEmpty()) {
             return null;
         }
-        return new Section(tailFiles, tailSize, tailHasDefaultCompactMeta);
+        return new Section(tailFiles, tailSize, tailHasUnsortedCompactMeta);
     }
 
     /**
      * Handle a section after the sort rewrite budget is exhausted. Sections that contain
      * default-compaction files (small files / delete entries) still go through
-     * defaultCompactSection for necessary cleanup; otherwise they are kept unchanged.
+     * unsortedCompactSection for necessary cleanup; otherwise they are kept unchanged.
      */
     private static void rewriteSectionBeyondBudget(
             Section section,
@@ -862,8 +864,8 @@ public class ManifestFileSorter {
             int suggestedMinMetaCount,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        if (section.hasDefaultCompactMeta) {
-            defaultCompactSection(
+        if (section.hasUnsortedCompactMeta) {
+            unsortedCompactSection(
                     section.files,
                     output,
                     sortNewFiles,
@@ -882,8 +884,9 @@ public class ManifestFileSorter {
      *
      * <p><b>Semantics difference from old minor merge:</b> In the old ManifestFileMerger path, the
      * trailing candidates are kept unchanged when their count is below manifest.merge-min-count. In
-     * this sort path, defaultCompactSection is triggered when needsDefaultCompaction is non-empty,
-     * regardless of the manifest count. This is because files in needsDefaultCompaction either:
+     * this sort path, unsortedCompactSection is triggered when needsUnsortedCompaction is
+     * non-empty, regardless of the manifest count. This is because files in needsUnsortedCompaction
+     * either:
      *
      * <ul>
      *   <li>Are small files needing consolidation
@@ -894,7 +897,7 @@ public class ManifestFileSorter {
      * acting as a conservative gate to avoid unnecessary rewrite when there are no delete entries
      * and the tail is too small.
      */
-    private static void defaultCompactSection(
+    private static void unsortedCompactSection(
             List<ManifestFileMeta> section,
             RewriteOutput output,
             List<ManifestFileMeta> sortNewFiles,
@@ -954,7 +957,7 @@ public class ManifestFileSorter {
             throws Exception {
         // Skip rewrite for single file not in delete-range.
         if (section.size() == 1
-                && !ctx.needsDefaultCompaction.getOrDefault(section.get(0), false)) {
+                && !ctx.needsUnsortedCompaction.getOrDefault(section.get(0), false)) {
             output.addUnchanged(section.get(0));
             return;
         }
@@ -1213,12 +1216,12 @@ public class ManifestFileSorter {
     static class Section {
         final List<ManifestFileMeta> files;
         final long totalSize;
-        final boolean hasDefaultCompactMeta;
+        final boolean hasUnsortedCompactMeta;
 
-        Section(List<ManifestFileMeta> files, long totalSize, boolean hasDefaultCompactMeta) {
+        Section(List<ManifestFileMeta> files, long totalSize, boolean hasUnsortedCompactMeta) {
             this.files = files;
             this.totalSize = totalSize;
-            this.hasDefaultCompactMeta = hasDefaultCompactMeta;
+            this.hasUnsortedCompactMeta = hasUnsortedCompactMeta;
         }
 
         /** Create a merged section from two sections. */
@@ -1228,7 +1231,7 @@ public class ManifestFileSorter {
             return new Section(
                     merged,
                     a.totalSize + b.totalSize,
-                    a.hasDefaultCompactMeta || b.hasDefaultCompactMeta);
+                    a.hasUnsortedCompactMeta || b.hasUnsortedCompactMeta);
         }
     }
 }
