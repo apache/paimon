@@ -407,6 +407,36 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testGetTableVia() throws Exception {
+        Identifier tableIdentifier = Identifier.create("test_table_db", "via_table");
+        Identifier viewIdentifier = Identifier.create("test_table_db", "via_view");
+        createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList());
+        Table table = restCatalog.getTableVia(tableIdentifier, viewIdentifier);
+        assertThat(table).isNotNull();
+        assertThat(table.name()).isEqualTo("via_table");
+    }
+
+    @Test
+    void testGetTableViaWhenTableNotExist() {
+        Identifier tableIdentifier = Identifier.create("test_table_db", "non_exist_table");
+        Identifier viewIdentifier = Identifier.create("test_table_db", "via_view");
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.getTableVia(tableIdentifier, viewIdentifier));
+    }
+
+    @Test
+    void testGetTableViaWhenTableNoPermission() throws Exception {
+        Identifier tableIdentifier = Identifier.create("test_table_db", "no_perm_via_table");
+        Identifier viewIdentifier = Identifier.create("test_table_db", "via_view");
+        createTable(tableIdentifier, Maps.newHashMap(), Lists.newArrayList());
+        revokeTablePermission(tableIdentifier);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () -> restCatalog.getTableVia(tableIdentifier, viewIdentifier));
+    }
+
+    @Test
     void renameWhenTargetTableExist() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "rename_table");
         Identifier targetIdentifier = Identifier.create("test_table_db", "target_table");
