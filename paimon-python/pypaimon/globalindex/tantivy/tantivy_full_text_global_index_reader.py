@@ -22,6 +22,7 @@ backed by a stream-based Directory. No temp files are created on disk.
 """
 
 import json
+import logging
 import os
 import struct
 import threading
@@ -33,6 +34,8 @@ from pypaimon.globalindex.vector_search_result import (
     DictBasedScoredIndexResult,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+
+logger = logging.getLogger(__name__)
 
 TANTIVY_FULLTEXT_IDENTIFIER = "tantivy-fulltext"
 TANTIVY_NGRAM_TOKENIZER = "paimon_ngram"
@@ -310,13 +313,25 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 file_names, file_offsets, file_lengths = self._parse_archive_header(stream)
                 directory = StreamDirectory(stream, file_names, file_offsets, file_lengths)
 
-                schema_builder = tantivy.SchemaBuilder()
-                schema_builder.add_unsigned_field("row_id", stored=False, indexed=True, fast=True)
-                self._add_text_field(schema_builder)
-                schema = schema_builder.build()
-
+                schema = self._build_schema(tantivy)
+                try:
+                    self._index = tantivy.Index(
+                        schema, directory=directory,
+                    )
+                except ValueError as e:
+                    if "schema does not match" not in str(e):
+                        raise
+                    logger.warning(
+                        "Schema mismatch, retrying with "
+                        "row_id stored=true"
+                    )
+                    schema = self._build_schema(
+                        tantivy, row_id_stored=True,
+                    )
+                    self._index = tantivy.Index(
+                        schema, directory=directory,
+                    )
                 self._schema = schema
-                self._index = tantivy.Index(schema, directory=directory)
                 self._register_tokenizer(tantivy, self._index)
                 self._index.reload()
                 self._searcher = self._index.searcher()
@@ -325,17 +340,25 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 stream.close()
                 raise
 
-    def _add_text_field(self, schema_builder):
+    def _build_schema(self, tantivy, row_id_stored=False):
+        schema_builder = tantivy.SchemaBuilder()
+        schema_builder.add_unsigned_field(
+            "row_id", stored=row_id_stored, indexed=True, fast=True,
+        )
         tokenizer_name = self._index_options.tokenizer_name()
         field_kwargs = {}
         if not self._index_options.with_position:
             field_kwargs["index_option"] = "freq"
         if tokenizer_name == "default":
-            schema_builder.add_text_field("text", stored=False, **field_kwargs)
+            schema_builder.add_text_field(
+                "text", stored=False, **field_kwargs,
+            )
         else:
             schema_builder.add_text_field(
-                "text", stored=False, tokenizer_name=tokenizer_name,
-                **field_kwargs)
+                "text", stored=False,
+                tokenizer_name=tokenizer_name, **field_kwargs,
+            )
+        return schema_builder.build()
 
     def _register_tokenizer(self, tantivy, index):
         if (self._index_options.tokenizer == "default"

@@ -177,7 +177,7 @@ class _FakeSchemaBuilder:
         self.fields = {}
 
     def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
-        self.fields[name] = {"fast": fast}
+        self.fields[name] = {"fast": fast, "stored": stored}
 
     def add_text_field(self, name, stored=False, tokenizer_name=None, **kwargs):
         if "index_option" in kwargs and kwargs["index_option"] is None:
@@ -531,7 +531,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["tantivy"] = old_tantivy
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_NGRAM_TOKENIZER}},
                          tantivy.last_schema.fields)
@@ -543,6 +543,61 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
 
         query = tantivy.last_index.searcher_instance.query
         self.assertEqual(("中文", ("text",), {}), query)
+
+    def test_schema_fallback_for_pre_7670_indexes(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        call_count = [0]
+
+        class _FakeTantivyWithSchemaFallback(_FakeTantivy):
+            def __init__(self_outer):
+                super().__init__()
+                parent = self_outer
+
+                class SchemaBuilder(_FakeSchemaBuilder):
+                    def build(self_inner):
+                        parent.last_schema = super().build()
+                        return parent.last_schema
+
+                class Index(_FakeIndex):
+                    def __init__(self_inner, schema, directory=None):
+                        call_count[0] += 1
+                        row_id_opts = schema.fields.get("row_id", {})
+                        if not row_id_opts.get("stored", False):
+                            raise ValueError(
+                                "Schema error: 'An index exists but "
+                                "the schema does not match.'"
+                            )
+                        super().__init__(schema, directory=directory)
+                        parent.last_index = self_inner
+
+                self_outer.SchemaBuilder = SchemaBuilder
+                self_outer.Index = Index
+
+        tantivy = _FakeTantivyWithSchemaFallback()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(), "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch("hello", 5, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual(2, call_count[0])
+        self.assertTrue(
+            tantivy.last_schema.fields["row_id"].get("stored", False))
 
     def test_custom_analyzer_reader_registers_matching_tantivy_analyzer(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
@@ -577,7 +632,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["tantivy"] = old_tantivy
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_CUSTOM_TOKENIZER,
                                    "index_option": "freq"}},
@@ -656,7 +711,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["jieba"] = old_jieba
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_JIEBA_TOKENIZER}},
                          tantivy.last_schema.fields)
