@@ -22,6 +22,7 @@ backed by a stream-based Directory. No temp files are created on disk.
 """
 
 import json
+import logging
 import os
 import struct
 import threading
@@ -33,6 +34,8 @@ from pypaimon.globalindex.vector_search_result import (
     DictBasedScoredIndexResult,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+
+logger = logging.getLogger(__name__)
 
 TANTIVY_FULLTEXT_IDENTIFIER = "tantivy-fulltext"
 TANTIVY_NGRAM_TOKENIZER = "paimon_ngram"
@@ -318,6 +321,10 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 except ValueError as e:
                     if "schema does not match" not in str(e):
                         raise
+                    logger.warning(
+                        "Schema mismatch, retrying with "
+                        "row_id stored=true"
+                    )
                     schema = self._build_schema(
                         tantivy, row_id_stored=True,
                     )
