@@ -109,9 +109,19 @@ def build_matched_update_ds(
     if any(r is not None for _, r in prepared_clauses):
         from pypaimon.ray.merge_condition import filter_batch as _filter_batch
 
+    _is_multi_clause = len(prepared_clauses) > 1
+
     def _transform(batch: pa.Table) -> pa.Table:
         import pyarrow.compute as pc
         row_id_col = f"t.{captured_row_id_name}"
+        if _is_multi_clause and batch.num_rows > 0:
+            ids = batch.column(row_id_col)
+            if pc.count_distinct(ids, mode="all").as_py() < batch.num_rows:
+                raise ValueError(
+                    "merge_into matched multiple source rows to "
+                    "the same target _ROW_ID. Deduplicate the "
+                    "source before merging."
+                )
         remaining = batch
         parts = []
         for spec, rewritten in prepared_clauses:
