@@ -92,6 +92,7 @@ def build_matched_update_ds(
     captured_on_pairs = list(zip(source_on, target_on))
     captured_schema = update_schema
 
+    on_map = dict(zip(source_on, target_on))
     prepared_clauses = []
     for clause in clauses:
         rewritten = None
@@ -99,7 +100,6 @@ def build_matched_update_ds(
             from pypaimon.ray.merge_condition import (
                 remap_source_on_keys, rewrite_condition,
             )
-            on_map = dict(zip(source_on, target_on))
             rewritten = remap_source_on_keys(
                 rewrite_condition(clause.condition), on_map,
             )
