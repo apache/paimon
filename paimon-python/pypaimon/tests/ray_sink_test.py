@@ -272,7 +272,27 @@ class RaySinkTest(unittest.TestCase):
             })
             with self.assertRaises(Exception):
                 datasink.write([data_table], ctx)
-            mock_write.close.assert_called_once()
+            mock_write.abort.assert_called_once()
+            mock_write.close.assert_not_called()
+
+        with patch.object(self.table, 'new_batch_write_builder') as mock_builder:
+            mock_write_builder = Mock()
+            mock_write_builder.overwrite.return_value = mock_write_builder
+            mock_write = Mock()
+            mock_write.prepare_commit.return_value = [Mock(spec=CommitMessage)]
+            mock_write.close.side_effect = Exception("Close error")
+            mock_write_builder.new_write.return_value = mock_write
+            mock_builder.return_value = mock_write_builder
+
+            data_table = pa.table({
+                'id': [1],
+                'name': ['Alice'],
+                'value': [1.1]
+            })
+            with self.assertRaises(Exception):
+                datasink.write([data_table], ctx)
+            mock_write.prepare_commit.assert_called_once()
+            mock_write.abort.assert_called_once()
 
     def test_on_write_complete(self):
         from ray.data.datasource.datasink import WriteResult

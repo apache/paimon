@@ -245,6 +245,15 @@ class FileStoreWrite:
             writer.close()
         self.data_writers.clear()
 
+    def abort(self):
+        """Abort all data writers and clean up files produced by this write."""
+        for writer in self.data_writers.values():
+            try:
+                writer.abort()
+            except Exception as e:
+                logger.warning("Failed to abort data writer.", exc_info=e)
+        self.data_writers.clear()
+
     def _seq_number_stats(self, partition: Tuple) -> Dict[int, int]:
         buckets = self.max_seq_numbers.get(partition)
         if buckets is None:
