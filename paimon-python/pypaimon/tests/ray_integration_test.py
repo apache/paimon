@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import ray
@@ -183,10 +184,13 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertLess(limited_count, 10)
 
     def test_read_paimon_empty_table(self):
-        """read_paimon() on a table with no data returns an empty dataset."""
+        """read_paimon() on an empty table preserves the table schema."""
         from pypaimon.ray import read_paimon
 
-        pa_schema = pa.schema([('id', pa.int32())])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
         identifier = 'default.test_read_empty'
         catalog = CatalogFactory.create(self.catalog_options)
         schema = Schema.from_pyarrow_schema(pa_schema)
@@ -194,6 +198,40 @@ class RayIntegrationTest(unittest.TestCase):
 
         ds = read_paimon(identifier, self.catalog_options)
         self.assertEqual(ds.count(), 0)
+        self.assertEqual(ds.schema().names, ['id', 'name'])
+
+    def test_read_paimon_empty_table_with_projection(self):
+        """read_paimon() applies projection to empty table schemas."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+        identifier = 'default.test_read_empty_projection'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+
+        ds = read_paimon(
+            identifier, self.catalog_options, projection=['id', 'value']
+        )
+        self.assertEqual(ds.count(), 0)
+        self.assertEqual(ds.schema().names, ['id', 'value'])
+
+    def test_missing_ray_dependency_has_install_hint(self):
+        """Ray facade surfaces an actionable install hint when Ray is absent."""
+        from pypaimon.ray.ray_paimon import _require_ray_data
+
+        error = ModuleNotFoundError("No module named 'ray'")
+        error.name = 'ray'
+
+        with patch('importlib.import_module', side_effect=error):
+            with self.assertRaises(ImportError) as ctx:
+                _require_ray_data()
+
+        self.assertIn('pip install pypaimon[ray]', str(ctx.exception))
 
     def test_read_paimon_with_snapshot_id(self):
         """read_paimon(snapshot_id=N) time-travels to that snapshot."""
