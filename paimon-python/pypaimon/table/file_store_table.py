@@ -118,13 +118,15 @@ class FileStoreTable(Table):
         # If catalog environment has a catalog loader, use CatalogBranchManager
         catalog_loader = self.catalog_environment.catalog_loader
         if catalog_loader is not None:
-            from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
+            from pypaimon.branch.catalog_branch_manager import \
+                CatalogBranchManager
             return CatalogBranchManager(
                 catalog_loader,
                 self.identifier
             )
         # Otherwise, use FileSystemBranchManager
-        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        from pypaimon.branch.filesystem_branch_manager import \
+            FileSystemBranchManager
         current_branch = self.current_branch() or "main"
         return FileSystemBranchManager(
             self.file_io,
@@ -380,6 +382,8 @@ class FileStoreTable(Table):
             file_compression=file_compression,
             data_file_path_directory=None,
             external_paths=external_paths,
+            external_path_strategy=self.options.data_file_external_paths_strategy(),
+            external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=False,
         )
 
@@ -417,11 +421,13 @@ class FileStoreTable(Table):
         return StreamWriteBuilder(self)
 
     def new_full_text_search_builder(self) -> 'FullTextSearchBuilder':
-        from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
+        from pypaimon.table.source.full_text_search_builder import \
+            FullTextSearchBuilderImpl
         return FullTextSearchBuilderImpl(self)
 
     def new_vector_search_builder(self) -> 'VectorSearchBuilder':
-        from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
+        from pypaimon.table.source.vector_search_builder import \
+            VectorSearchBuilderImpl
         return VectorSearchBuilderImpl(self)
 
     def create_row_key_extractor(self) -> RowKeyExtractor:
@@ -496,6 +502,7 @@ class FileStoreTable(Table):
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
+
         from pypaimon.common.options.core_options import ExternalPathStrategy
 
         external_paths_str = self.options.data_file_external_paths()
