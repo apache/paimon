@@ -112,15 +112,6 @@ def build_matched_update_ds(
     def _transform(batch: pa.Table) -> pa.Table:
         import pyarrow.compute as pc
         row_id_col = f"t.{captured_row_id_name}"
-        if batch.num_rows > 0:
-            ids = batch.column(row_id_col)
-            n_unique = pc.count_distinct(ids, mode="all").as_py()
-            if n_unique < batch.num_rows:
-                raise ValueError(
-                    "merge_into matched multiple source rows to the "
-                    "same target _ROW_ID. Deduplicate the source "
-                    "before merging."
-                )
         remaining = batch
         parts = []
         for spec, rewritten in prepared_clauses:
@@ -130,26 +121,29 @@ def build_matched_update_ds(
                 matched = _filter_batch(
                     remaining, rewritten, _pre_rewritten=True,
                 )
-                if matched.num_rows > 0:
-                    parts.append(vectorized_matched_transform(
-                        matched, spec, captured_on_pairs,
-                        captured_update_cols, captured_row_id_name,
-                        captured_schema,
-                    ))
-                if matched.num_rows < remaining.num_rows:
-                    mask = pc.invert(pc.is_in(
-                        remaining.column(row_id_col),
-                        matched.column(row_id_col),
-                    ))
-                    remaining = remaining.filter(mask)
-                else:
-                    remaining = remaining.slice(0, 0)
             else:
-                parts.append(vectorized_matched_transform(
-                    remaining, spec, captured_on_pairs,
-                    captured_update_cols, captured_row_id_name,
-                    captured_schema,
+                matched = remaining
+            if matched.num_rows == 0:
+                continue
+            ids = matched.column(row_id_col)
+            if pc.count_distinct(ids, mode="all").as_py() < matched.num_rows:
+                raise ValueError(
+                    "merge_into matched multiple source rows to "
+                    "the same target _ROW_ID. Deduplicate the "
+                    "source before merging."
+                )
+            parts.append(vectorized_matched_transform(
+                matched, spec, captured_on_pairs,
+                captured_update_cols, captured_row_id_name,
+                captured_schema,
+            ))
+            if matched.num_rows < remaining.num_rows:
+                mask = pc.invert(pc.is_in(
+                    remaining.column(row_id_col),
+                    matched.column(row_id_col),
                 ))
+                remaining = remaining.filter(mask)
+            else:
                 remaining = remaining.slice(0, 0)
         if not parts:
             return captured_schema.empty_table()
