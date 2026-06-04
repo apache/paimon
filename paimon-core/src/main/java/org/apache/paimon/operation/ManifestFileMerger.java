@@ -18,10 +18,10 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -43,10 +43,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Util for merging manifest files. */
+/** Manifest file merger with standard merge logic and optional sort rewrite. */
 public class ManifestFileMerger {
 
     private static final Logger LOG = LoggerFactory.getLogger(ManifestFileMerger.class);
@@ -60,33 +63,44 @@ public class ManifestFileMerger {
     public static List<ManifestFileMeta> merge(
             List<ManifestFileMeta> input,
             ManifestFile manifestFile,
-            long suggestedMetaSize,
-            int suggestedMinMetaCount,
-            long manifestFullCompactionSize,
             RowType partitionType,
-            @Nullable Integer manifestReadParallelism) {
+            CoreOptions options) {
+        // Extract configuration from options
+        long suggestedMetaSize = options.manifestTargetSize().getBytes();
+        int suggestedMinMetaCount = options.manifestMergeMinCount();
+        long manifestFullCompactionSize = options.manifestFullCompactionThresholdSize().getBytes();
+        Integer manifestReadParallelism = options.scanManifestParallelism();
+
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            Optional<List<ManifestFileMeta>> fullCompacted =
-                    tryFullCompaction(
-                            input,
-                            newFilesForAbort,
-                            manifestFile,
-                            suggestedMetaSize,
-                            manifestFullCompactionSize,
-                            partitionType,
-                            manifestReadParallelism);
-            return fullCompacted.orElseGet(
-                    () ->
-                            tryMinorCompaction(
-                                    input,
-                                    newFilesForAbort,
-                                    manifestFile,
-                                    suggestedMetaSize,
-                                    suggestedMinMetaCount,
-                                    manifestReadParallelism));
+            // If manifest-sort.enabled is enabled and there are partition fields, use
+            // trySortRewrite
+            if (options.manifestSortEnabled() && partitionType.getFieldCount() > 0) {
+                return ManifestFileSorter.trySortCompaction(
+                        input, newFilesForAbort, manifestFile, partitionType, options);
+            } else {
+                // Otherwise try full compaction first, then minor compaction if needed
+                Optional<List<ManifestFileMeta>> fullCompacted =
+                        tryFullCompaction(
+                                input,
+                                newFilesForAbort,
+                                manifestFile,
+                                suggestedMetaSize,
+                                manifestFullCompactionSize,
+                                partitionType,
+                                manifestReadParallelism);
+                return fullCompacted.orElseGet(
+                        () ->
+                                tryMinorCompaction(
+                                        input,
+                                        newFilesForAbort,
+                                        manifestFile,
+                                        suggestedMetaSize,
+                                        suggestedMinMetaCount,
+                                        manifestReadParallelism));
+            }
         } catch (Throwable e) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newFilesForAbort) {
@@ -232,34 +246,25 @@ public class ManifestFileMerger {
         }
 
         // 2.2. merge
-
         if (toBeMerged.size() <= 1) {
             return Optional.empty();
         }
 
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 manifestFile.createRollingWriter();
+        Function<ManifestFileMeta, List<FullCompactionReadResult>> reader =
+                file ->
+                        singletonList(
+                                readForFullCompaction(
+                                        file, manifestFile, mustChange, deleteEntries));
         Exception exception = null;
         try {
-            for (ManifestFileMeta file : toBeMerged) {
-                List<ManifestEntry> entries = new ArrayList<>();
-                boolean requireChange = mustChange.test(file);
-                for (ManifestEntry entry : manifestFile.read(file.fileName(), file.fileSize())) {
-                    if (entry.kind() == FileKind.DELETE) {
-                        continue;
-                    }
-
-                    if (deleteEntries.contains(entry.identifier())) {
-                        requireChange = true;
-                    } else {
-                        entries.add(entry);
-                    }
-                }
-
-                if (requireChange) {
-                    writer.write(entries);
+            for (FullCompactionReadResult readResult :
+                    sequentialBatchedExecute(reader, toBeMerged, manifestReadParallelism)) {
+                if (readResult.requireChange) {
+                    writer.write(readResult.entries);
                 } else {
-                    result.add(file);
+                    result.add(readResult.file);
                 }
             }
         } catch (Exception e) {
@@ -278,11 +283,48 @@ public class ManifestFileMerger {
         return Optional.of(result);
     }
 
-    private static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
+    private static FullCompactionReadResult readForFullCompaction(
+            ManifestFileMeta file,
+            ManifestFile manifestFile,
+            Filter<ManifestFileMeta> mustChange,
+            Set<FileEntry.Identifier> deleteEntries) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        boolean requireChange = mustChange.test(file);
+        for (ManifestEntry entry :
+                manifestFile.read(
+                        file.fileName(),
+                        file.fileSize(),
+                        FileEntry.addFilter(),
+                        Filter.alwaysTrue())) {
+            if (deleteEntries.contains(entry.identifier())) {
+                requireChange = true;
+            } else {
+                entries.add(entry);
+            }
+        }
+
+        return new FullCompactionReadResult(file, requireChange, entries);
+    }
+
+    static Set<BinaryRow> computeDeletePartitions(Set<FileEntry.Identifier> deleteEntries) {
         Set<BinaryRow> partitions = new HashSet<>();
         for (FileEntry.Identifier identifier : deleteEntries) {
             partitions.add(identifier.partition);
         }
         return partitions;
+    }
+
+    static class FullCompactionReadResult {
+
+        final ManifestFileMeta file;
+        final boolean requireChange;
+        final List<ManifestEntry> entries;
+
+        FullCompactionReadResult(
+                ManifestFileMeta file, boolean requireChange, List<ManifestEntry> entries) {
+            this.file = file;
+            this.requireChange = requireChange;
+            this.entries = entries;
+        }
     }
 }

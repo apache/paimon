@@ -100,9 +100,9 @@ public class DedicatedFormatRollingFileWriter
     /** Constant for checking rolling condition periodically. */
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
 
-    // Core components
     private final RowType writeSchema;
-    private final Supplier<ProjectedFileWriter<BundleAwareRowDataFileWriter, DataFileMeta>>
+    private final @Nullable Supplier<
+                    ProjectedFileWriter<BundleAwareRowDataFileWriter, DataFileMeta>>
             writerFactory;
     private final @Nullable Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final @Nullable Supplier<
@@ -155,7 +155,7 @@ public class DedicatedFormatRollingFileWriter
                 fieldNamesInVectorFile(writeSchema, vectorFileFormat != null);
         if (context != null) {
             fieldsInDedicatedFile.addAll(
-                    fieldNamesInBlobFile(writeSchema, context.blobDescriptorFields()));
+                    fieldNamesInBlobFile(writeSchema, context.blobInlineFields()));
         }
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
@@ -164,21 +164,25 @@ public class DedicatedFormatRollingFileWriter
             }
         }
 
-        this.writerFactory =
-                createNormalWriterFactory(
-                        fileIO,
-                        schemaId,
-                        fileFormat,
-                        fieldsInNormalFile,
-                        writeSchema,
-                        pathFactory,
-                        seqNumCounterSupplier,
-                        fileCompression,
-                        statsCollectorFactories,
-                        fileIndexOptions,
-                        fileSource,
-                        asyncFileWrite,
-                        statsDenseStore);
+        if (fieldsInNormalFile.isEmpty()) {
+            this.writerFactory = null;
+        } else {
+            this.writerFactory =
+                    createNormalWriterFactory(
+                            fileIO,
+                            schemaId,
+                            fileFormat,
+                            fieldsInNormalFile,
+                            writeSchema,
+                            pathFactory,
+                            seqNumCounterSupplier,
+                            fileCompression,
+                            statsCollectorFactories,
+                            fileIndexOptions,
+                            fileSource,
+                            asyncFileWrite,
+                            statsDenseStore);
+        }
 
         if (context != null) {
             this.blobWriterFactory =
@@ -194,7 +198,7 @@ public class DedicatedFormatRollingFileWriter
                                     statsDenseStore,
                                     blobTargetFileSize,
                                     context.blobConsumer(),
-                                    context.blobDescriptorFields());
+                                    context.blobInlineFields());
         } else {
             this.blobWriterFactory = null;
         }
@@ -358,10 +362,12 @@ public class DedicatedFormatRollingFileWriter
             if (vectorStoreWriter != null) {
                 vectorStoreWriter.write(transformedRow);
             }
-            currentWriter.write(transformedRow);
+            if (currentWriter != null) {
+                currentWriter.write(transformedRow);
+            }
             recordCount++;
 
-            if (rollingFile(false)) {
+            if (currentWriter != null && rollingFile(false)) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -372,7 +378,7 @@ public class DedicatedFormatRollingFileWriter
 
     /** Handles write exceptions by logging and cleaning up resources. */
     private void handleWriteException(Throwable e) {
-        String filePath = (currentWriter == null) ? null : currentWriter.writer().path().toString();
+        String filePath = currentWriter == null ? null : currentWriter.writer().path().toString();
         LOG.warn("Exception occurs when writing file {}. Cleaning up.", filePath, e);
         abort();
     }
@@ -411,10 +417,12 @@ public class DedicatedFormatRollingFileWriter
             if (vectorStoreWriter != null) {
                 vectorStoreWriter.writeBundle(replayableBundle);
             }
-            currentWriter.writeBundle(replayableBundle);
+            if (currentWriter != null) {
+                currentWriter.writeBundle(replayableBundle);
+            }
             recordCount += replayableBundle.rowCount();
 
-            if (rollingFile(true)) {
+            if (currentWriter != null && rollingFile(true)) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -461,7 +469,7 @@ public class DedicatedFormatRollingFileWriter
 
     /** Checks if the current file should be rolled based on size and record count. */
     private void openWritersIfNeeded() {
-        if (currentWriter == null) {
+        if (writerFactory != null && currentWriter == null) {
             currentWriter = writerFactory.get();
         }
         if ((blobWriter == null) && (blobWriterFactory != null)) {
@@ -487,12 +495,12 @@ public class DedicatedFormatRollingFileWriter
      * @throws IOException if closing fails
      */
     private void closeCurrentWriter() throws IOException {
-        if (currentWriter == null) {
+        if (currentWriter == null && blobWriter == null && vectorStoreWriter == null) {
             return;
         }
 
         // Close main writer and get metadata
-        DataFileMeta mainDataFileMeta = closeMainWriter();
+        DataFileMeta mainDataFileMeta = currentWriter == null ? null : closeMainWriter();
 
         // Close blob writer and process blob metadata
         List<DataFileMeta> blobMetas = closeBlobWriter();
@@ -500,11 +508,13 @@ public class DedicatedFormatRollingFileWriter
         // Close vector-store writer and process vector-store metadata
         List<DataFileMeta> vectorStoreMetas = closeVectorStoreWriter();
 
-        // Validate consistency between main and blob files
-        validateFileConsistency(mainDataFileMeta, blobMetas, vectorStoreMetas);
+        if (mainDataFileMeta != null) {
+            // Validate consistency between main and blob files
+            validateFileConsistency(mainDataFileMeta, blobMetas, vectorStoreMetas);
+            results.add(mainDataFileMeta);
+        }
 
         // Add results to the results list
-        results.add(mainDataFileMeta);
         results.addAll(blobMetas);
         results.addAll(vectorStoreMetas);
 

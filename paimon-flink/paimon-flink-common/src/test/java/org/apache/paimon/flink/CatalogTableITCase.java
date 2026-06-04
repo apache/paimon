@@ -20,8 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.utils.BlockingIterator;
-
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;

@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import pyarrow as pa
 import pyarrow.compute as pc
 import uuid
@@ -70,6 +70,22 @@ class DataWriter(ABC):
         )
         # Store the current generated external path to preserve scheme in metadata
         self._current_external_path: Optional[str] = None
+        # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
+        self._variant_shredding: Dict[str, Tuple] = {}
+        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
+                and self.options.variant_shredding_enabled():
+            shredding_json = self.options.variant_shredding_schema()
+            if shredding_json:
+                from pypaimon.data.variant_shredding import (
+                    parse_shredding_schema_option, shredding_schema_to_arrow_type)
+                col_schemas = parse_shredding_schema_option(shredding_json)
+                for col_name, obj_fields in col_schemas.items():
+                    target_type = shredding_schema_to_arrow_type(obj_fields)
+                    self._variant_shredding[col_name] = (obj_fields, target_type)
+
+        # Paimon field id map, used by _apply_variant_shredding; built once since
+        # the table schema is fixed for the lifetime of this writer.
+        self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
 
     def write(self, data: pa.RecordBatch):
         try:
@@ -167,6 +183,9 @@ class DataWriter(ABC):
         else:
             external_path_str = None
 
+        if self._variant_shredding:
+            data = self._apply_variant_shredding(data)
+
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
             self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
@@ -179,6 +198,10 @@ class DataWriter(ABC):
             self.file_io.write_lance(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            self.file_io.write_mosaic(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -236,6 +259,31 @@ class DataWriter(ABC):
             # None means all columns in the table have been written
             file_path=file_path,
         ))
+
+    def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
+        """Transform VARIANT columns into shredded Parquet format.
+
+        Each shredded parent column is tagged with a ``PARQUET:field_id`` so that
+        the Java ``ParquetSchemaConverter.convertToPaimonField`` (called from
+        ``VariantUtils.variantFileType``) can read ``parquetType.getId().intValue()``
+        without a NullPointerException.
+        """
+        from pypaimon.data.variant_shredding import shred_variant_column
+        columns = list(data.columns)
+        fields = list(data.schema)
+        changed = False
+
+        for i, f in enumerate(fields):
+            if f.name in self._variant_shredding:
+                obj_fields, target_type = self._variant_shredding[f.name]
+                columns[i] = shred_variant_column(columns[i], obj_fields, target_type)
+                pid = self._paimon_field_id.get(f.name)
+                parent_meta = {b'PARQUET:field_id': str(pid).encode()} if pid is not None else None
+                fields[i] = pa.field(f.name, target_type, nullable=f.nullable, metadata=parent_meta)
+                changed = True
+        if not changed:
+            return data
+        return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
@@ -300,7 +348,9 @@ class DataWriter(ABC):
             }
         
         column_type = column_array.type
-        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type))
+        supports_minmax = not (
+            pa.types.is_nested(column_type) or pa.types.is_map(column_type) or pa.types.is_large_binary(column_type)
+        )
         
         if not supports_minmax:
             return {

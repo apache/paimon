@@ -23,15 +23,20 @@ import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.write.{PaimonBatchWrite, WriteTaskResult}
+import org.apache.paimon.table.sink.CommitMessageImpl
 import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Assertions
 
 import java.sql.Timestamp
 import java.time.LocalDateTime
+
+import scala.collection.JavaConverters._
 
 class SparkWriteWithNoExtensionITCase extends SparkWriteITCase {
 
@@ -269,6 +274,79 @@ class SparkWriteITCase extends PaimonSparkTestBase {
         ) :: Nil
       )
 
+    }
+  }
+
+  test("Paimon Write: abort cleans uncommitted files") {
+    withTable("T") {
+      spark.sql(
+        "CREATE TABLE T (id INT, data INT) TBLPROPERTIES ('bucket' = '1', 'bucket-key' = 'id')")
+
+      val table = loadTable("T")
+      val sparkSchema = spark.table("T").schema
+      val batchWrite = PaimonBatchWrite(table, sparkSchema, sparkSchema, None, None)
+      val dataWriter = batchWrite.createBatchWriterFactory(null).createWriter(0, 0L)
+
+      dataWriter.write(new GenericInternalRow(Array[Any](1, 10)))
+      val writerCommitMessage = dataWriter.commit()
+      val dataFilePaths = dataFilePathsFromWriteTaskResult(table, writerCommitMessage)
+
+      assertThat(dataFilePaths.size).isGreaterThan(0)
+      dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isTrue)
+
+      batchWrite.abort(Array(writerCommitMessage, null))
+
+      dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isFalse)
+      assertThat(table.latestSnapshot()).isEmpty
+    }
+  }
+
+  test("Paimon Write: abort skips cleanup after commit starts") {
+    withTable("T") {
+      spark.sql(
+        "CREATE TABLE T (id INT, data INT) TBLPROPERTIES ('bucket' = '1', 'bucket-key' = 'id')")
+
+      val table = loadTable("T")
+      val sparkSchema = spark.table("T").schema
+      val batchWrite = PaimonBatchWrite(table, sparkSchema, sparkSchema, None, None)
+      val dataWriter = batchWrite.createBatchWriterFactory(null).createWriter(0, 0L)
+
+      dataWriter.write(new GenericInternalRow(Array[Any](1, 10)))
+      val writerCommitMessage = dataWriter.commit()
+      val dataFilePaths = dataFilePathsFromWriteTaskResult(table, writerCommitMessage)
+
+      assertThat(dataFilePaths.size).isGreaterThan(0)
+      dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isTrue)
+
+      try {
+        batchWrite.commit(Array(writerCommitMessage))
+      } catch {
+        case _: Throwable =>
+      }
+      assertThat(table.latestSnapshot()).isPresent
+
+      batchWrite.abort(Array(writerCommitMessage, null))
+
+      dataFilePaths.foreach(path => assertThat(table.fileIO().exists(path)).isTrue)
+      checkAnswer(spark.sql("SELECT * FROM T"), Row(1, 10) :: Nil)
+    }
+  }
+
+  private def dataFilePathsFromWriteTaskResult(
+      table: org.apache.paimon.table.FileStoreTable,
+      writerCommitMessage: org.apache.spark.sql.connector.write.WriterCommitMessage) = {
+    WriteTaskResult.merge(Seq(writerCommitMessage)).flatMap {
+      case commitMessage: CommitMessageImpl =>
+        val pathFactory = table
+          .store()
+          .pathFactory()
+          .createDataFilePathFactory(commitMessage.partition(), commitMessage.bucket())
+        commitMessage
+          .newFilesIncrement()
+          .newFiles()
+          .asScala
+          .map(pathFactory.toPath)
+      case _ => Seq.empty
     }
   }
 

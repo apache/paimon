@@ -24,6 +24,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -109,6 +110,8 @@ public class IcebergConversions {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return timestampToByteBuffer(
                         (Timestamp) value, ((LocalZonedTimestampType) type).getPrecision());
+            case TIME_WITHOUT_TIME_ZONE:
+                return timeToByteBuffer((Integer) value, ((TimeType) type).getPrecision());
             default:
                 throw new UnsupportedOperationException("Cannot serialize type: " + type);
         }
@@ -123,6 +126,23 @@ public class IcebergConversions {
                 .putLong(0, timestamp.toMicros());
     }
 
+    private static Timestamp timestampFromBytes(byte[] bytes, int precision) {
+        Preconditions.checkArgument(
+                precision >= 3 && precision <= 6,
+                "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
+        long encoded = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+        return precision == 3 ? Timestamp.fromEpochMillis(encoded) : Timestamp.fromMicros(encoded);
+    }
+
+    private static ByteBuffer timeToByteBuffer(int millisOfDay, int precision) {
+        Preconditions.checkArgument(
+                precision >= 0 && precision <= 3,
+                "Paimon Iceberg compatibility only support time type with precision from 0 to 3.");
+        return ByteBuffer.allocate(8)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .putLong(0, millisOfDay * 1000L);
+    }
+
     public static Object toPaimonObject(DataType type, byte[] bytes) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
@@ -130,6 +150,10 @@ public class IcebergConversions {
             case INTEGER:
             case DATE:
                 return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            case TINYINT:
+                return (byte) ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
+            case SMALLINT:
+                return (short) ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt();
             case BIGINT:
                 return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
             case FLOAT:
@@ -152,17 +176,18 @@ public class IcebergConversions {
                 return Decimal.fromUnscaledBytes(
                         bytes, decimalType.getPrecision(), decimalType.getScale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return timestampFromBytes(bytes, ((TimestampType) type).getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                int timestampPrecision = ((TimestampType) type).getPrecision();
-                long timestampLong =
-                        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+                // LocalZonedTimestampType does not extend TimestampType, so it cannot
+                // share a switch arm with TIMESTAMP_WITHOUT_TIME_ZONE.
+                return timestampFromBytes(bytes, ((LocalZonedTimestampType) type).getPrecision());
+            case TIME_WITHOUT_TIME_ZONE:
+                int timePrecision = ((TimeType) type).getPrecision();
                 Preconditions.checkArgument(
-                        timestampPrecision >= 3 && timestampPrecision <= 6,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
-                if (timestampPrecision == 3) {
-                    return Timestamp.fromEpochMillis(timestampLong);
-                }
-                return Timestamp.fromMicros(timestampLong);
+                        timePrecision >= 0 && timePrecision <= 3,
+                        "Paimon Iceberg compatibility only support time type with precision from 0 to 3.");
+                long timeMicros = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
+                return (int) (timeMicros / 1000L);
             default:
                 throw new UnsupportedOperationException("Cannot deserialize type: " + type);
         }

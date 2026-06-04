@@ -358,6 +358,25 @@ public interface Catalog extends AutoCloseable {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
+    /**
+     * Replace an existing table with a new {@link Schema}.
+     *
+     * <p>For compatible FileStore tables, it truncates visible data and appends a new schema to the
+     * schema chain, preserving old schemas and snapshots for time travel. Other table kinds may
+     * fall back to drop-and-create behavior.
+     *
+     * @param identifier path of the table to be replaced
+     * @param newSchema the new {@link Schema}
+     * @param ignoreIfNotExists if true, do nothing when the table does not exist
+     * @throws TableNotExistException if the table does not exist and {@code ignoreIfNotExists} is
+     *     false
+     */
+    default void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "Catalog " + getClass().getName() + " does not support replaceTable.");
+    }
+
     // ======================= partition methods ===============================
 
     /**
@@ -1430,6 +1449,33 @@ public interface Catalog extends AutoCloseable {
 
         public String getTableId() {
             return tableId;
+        }
+    }
+
+    /** Exception for trying to operate on the view that doesn't have permission. */
+    class ViewNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "View %s has no permission. Caused by %s.";
+
+        private final Identifier identifier;
+
+        public ViewNoPermissionException(Identifier identifier, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            identifier.getFullName(),
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.identifier = identifier;
+        }
+
+        @VisibleForTesting
+        public ViewNoPermissionException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 

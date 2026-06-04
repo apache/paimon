@@ -30,20 +30,97 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{EnumSet => JEnumSet, Set => JSet}
 
-/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(override val table: Table)
-  extends PaimonSparkTableBase(table)
+/**
+ * A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon.
+ *
+ * This base variant does NOT implement [[SupportsRowLevelOperations]]. Spark 4.1 moved
+ * `RewriteDeleteFromTable` / `RewriteUpdateTable` / `RewriteMergeIntoTable` from the separate "DML
+ * rewrite" batch into the main Resolution batch, which fires BEFORE Paimon's own
+ * postHocResolutionRule interceptors (`PaimonDeleteTable`, `PaimonUpdateTable`, `PaimonMergeInto`).
+ * If this base class implemented `SupportsRowLevelOperations`, Spark 4.1 would immediately call
+ * `newRowLevelOperationBuilder` on tables whose V2 write is disabled (e.g. dynamic bucket or
+ * primary-key tables that fall back to V1 write) and fail before Paimon has a chance to rewrite the
+ * plan to a V1 command. Likewise, deletion-vector, data-evolution, and fixed-length CHAR tables
+ * need to stay on Paimon's V1 postHoc path even when `useV2Write=true`, so they must also not
+ * expose `SupportsRowLevelOperations`.
+ *
+ * Tables that DO support V2 row-level operations use the [[SparkTableWithRowLevelOps]] subclass
+ * instead; the [[SparkTable.of]] factory picks the right variant via
+ * [[SparkTable.supportsV2RowLevelOps]]. Append-only tables, including row-tracking-only tables,
+ * expose `SupportsRowLevelOperations` so DELETE, UPDATE, and MERGE INTO can go through the V2
+ * copy-on-write path when the table has no PK, deletion vectors, data evolution, or CHAR columns.
+ */
+case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table)
+
+/**
+ * A Paimon [[SparkTable]] that additionally exposes V2 row-level operations to Spark. Constructed
+ * when [[PaimonSparkTableBase.useV2Write]] is true.
+ */
+class SparkTableWithRowLevelOps(tableArg: Table)
+  extends SparkTable(tableArg)
   with SupportsRowLevelOperations {
 
   override def newRowLevelOperationBuilder(
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
-      case t: FileStoreTable if useV2Write =>
+      case t: FileStoreTable =>
         () => new PaimonSparkCopyOnWriteOperation(t, info)
       case _ =>
         throw new UnsupportedOperationException(
-          s"Write operation is only supported for FileStoreTable with V2 write enabled. " +
-            s"Actual table type: ${table.getClass.getSimpleName}, useV2Write: $useV2Write")
+          "Row-level write operation is only supported for FileStoreTable. " +
+            s"Actual table type: ${table.getClass.getSimpleName}")
+    }
+  }
+}
+
+/** Factory helpers for constructing the right [[SparkTable]] subclass. */
+object SparkTable {
+
+  /**
+   * Returns a [[SparkTable]] variant suitable for the given table: [[SparkTableWithRowLevelOps]]
+   * when the table can participate in Spark's V2 row-level ops path, the plain [[SparkTable]]
+   * otherwise.
+   */
+  def of(table: Table): SparkTable = {
+    // We need `useV2Write` (and other coreOptions) which are instance state, so construct once to
+    // probe and promote to the row-level-ops variant only if the table truly supports the V2
+    // row-level write path. The base instance is cheap and is discarded if we decide to return
+    // the subclass.
+    val base = SparkTable(table)
+    if (supportsV2RowLevelOps(base)) new SparkTableWithRowLevelOps(table) else base
+  }
+
+  /**
+   * Whether the given table supports Paimon's V2 row-level operations, i.e. whether it is safe to
+   * expose [[SupportsRowLevelOperations]] to Spark.
+   *
+   * Append-only tables return `true` here so that `SparkTable.of` wraps them as
+   * `SparkTableWithRowLevelOps`, enabling Spark's V2 copy-on-write DELETE, UPDATE, and MERGE INTO
+   * paths. Row-tracking append-only tables require Spark 4.0+ because Spark 3.5 does not have the
+   * metadata-aware `DataWriter.write(metadata, data)` path needed to preserve row-tracking metadata
+   * for rewritten rows.
+   *
+   * Per-version shims for Spark 3.2/3.3/3.4 each ship their own
+   * `org.apache.paimon.spark.SparkTable` (class + companion) that shadows this one at packaging
+   * time — the common jar is also shaded into every per-version artifact, and the per-version copy
+   * wins classloader precedence. Those shim companions MUST therefore expose a method with this
+   * exact signature (they hard-code `false` because Spark < 3.5 cannot participate in V2 row-level
+   * ops), otherwise `RowLevelHelper.shouldFallbackToV1` on the shim classpath throws
+   * `NoSuchMethodError` at the first DML statement.
+   */
+  private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.5") return false
+    if (!sparkTable.useV2Write) return false
+    sparkTable.getTable match {
+      case fs: FileStoreTable =>
+        val supportsRowTrackingCopyOnWrite =
+          !sparkTable.coreOptions.rowTrackingEnabled() || org.apache.spark.SPARK_VERSION >= "4.0"
+        fs.primaryKeys().isEmpty &&
+        supportsRowTrackingCopyOnWrite &&
+        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
+      case _ => false
     }
   }
 }

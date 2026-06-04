@@ -26,13 +26,16 @@ import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParserUtils.withOrigin
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser._
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -98,6 +101,13 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
   }
 
+  /** Create a CREATE TABLE LIKE logical command. */
+  override def visitCreateTableLike(ctx: CreateTableLikeContext): LogicalPlan = withOrigin(ctx) {
+    sparkCreateTableLikeCommand(ctx).copy(
+      targetTable = toTableIdentifier(typedVisit[Seq[String]](ctx.target)),
+      sourceTable = toTableIdentifier(typedVisit[Seq[String]](ctx.source)))
+  }
+
   /** Create a CREATE OR REPLACE TAG logical command. */
   override def visitCreateOrReplaceTag(ctx: CreateOrReplaceTagContext): CreateOrReplaceTagCommand =
     withOrigin(ctx) {
@@ -153,9 +163,156 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       ctx.identifier(1).getText)
   }
 
+  /** Create a COPY INTO TABLE (import) logical command. */
+  override def visitCopyIntoTable(ctx: CopyIntoTableContext): logical.CopyIntoTableCommand =
+    withOrigin(ctx) {
+      val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
+      val columns = Option(ctx.columnList()).map(_.identifier().asScala.map(_.getText).toSeq)
+      val sourcePath = unquoteString(ctx.sourcePath.getText)
+      val fileFormat = buildFileFormat(ctx.fileFormatClause())
+      val pattern = Option(ctx.patternClause()).map(p => unquoteString(p.STRING().getText))
+      val force = Option(ctx.forceClause()).exists(_.booleanValue().TRUE() != null)
+      val onError = Option(ctx.onErrorClause())
+        .map {
+          clause =>
+            if (clause.CONTINUE() != null) OnErrorMode.Continue
+            else if (clause.SKIP_FILE() != null) OnErrorMode.SkipFile
+            else OnErrorMode.AbortStatement
+        }
+        .getOrElse(OnErrorMode.AbortStatement)
+      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force, onError)
+    }
+
+  /** Create a COPY INTO LOCATION (export) logical command. */
+  override def visitCopyIntoLocation(
+      ctx: CopyIntoLocationContext): logical.CopyIntoLocationCommand = withOrigin(ctx) {
+    val targetPath = unquoteString(ctx.targetPath.getText)
+    val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
+    val fileFormat = buildFileFormat(ctx.fileFormatClause())
+    val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
+    logical.CopyIntoLocationCommand(targetPath, table, fileFormat, overwrite)
+  }
+
+  private def buildFileFormat(ctx: FileFormatClauseContext): CopyFileFormat = {
+    val opts = ctx.fileFormatOption().asScala.toSeq
+    val seen = mutable.Set[String]()
+    val optionsBuilder = mutable.LinkedHashMap[String, String]()
+
+    opts.foreach {
+      opt =>
+        val key = opt.key.getText.toUpperCase
+        if (!seen.add(key)) {
+          throw new IllegalArgumentException(s"Duplicate FILE_FORMAT option: $key")
+        }
+        val value = extractFormatValue(opt.fileFormatValue())
+        optionsBuilder(key) = value
+    }
+
+    val typeValue = optionsBuilder.remove("TYPE")
+    if (typeValue.isEmpty) {
+      throw new IllegalArgumentException("FILE_FORMAT must include TYPE")
+    }
+
+    val formatType = CopyFileFormat.parseFormatType(typeValue.get)
+
+    CopyFileFormat(formatType, optionsBuilder.toMap)
+  }
+
+  private def extractFormatValue(ctx: FileFormatValueContext): String = {
+    ctx match {
+      case c: StringFormatValueContext =>
+        unquoteString(c.STRING().getText)
+      case c: IdentFormatValueContext =>
+        c.identifier().getText
+      case c: BoolFormatValueContext =>
+        if (c.booleanValue().TRUE() != null) "TRUE" else "FALSE"
+      case c: IntFormatValueContext =>
+        c.INTEGER_VALUE().getText
+      case c: ListFormatValueContext =>
+        c.STRING()
+          .asScala
+          .map(s => unquoteString(s.getText))
+          .mkString(CopyFileFormat.LIST_SEPARATOR)
+    }
+  }
+
+  private def unquoteString(s: String): String = {
+    if (s == null || s.length < 2) return s
+    val first = s.charAt(0)
+    if ((first == '\'' || first == '"') && s.charAt(s.length - 1) == first) {
+      val inner = s.substring(1, s.length - 1)
+      val sb = new StringBuilder
+      var i = 0
+      while (i < inner.length) {
+        val c = inner.charAt(i)
+        if (c == '\\' && i + 1 < inner.length) {
+          inner.charAt(i + 1) match {
+            case 'n' => sb.append('\n'); i += 2
+            case 't' => sb.append('\t'); i += 2
+            case 'r' => sb.append('\r'); i += 2
+            case '\\' => sb.append('\\'); i += 2
+            case q if q == first => sb.append(q); i += 2
+            case other => sb.append('\\'); sb.append(other); i += 2
+          }
+        } else if (c == first && i + 1 < inner.length && inner.charAt(i + 1) == first) {
+          sb.append(first); i += 2
+        } else {
+          sb.append(c); i += 1
+        }
+      }
+      sb.toString()
+    } else {
+      s
+    }
+  }
+
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)
+
+  private def toTableIdentifier(identifier: Seq[String]): TableIdentifier = {
+    identifier match {
+      case Seq(table) =>
+        TableIdentifier(table)
+      case Seq(database, table) =>
+        TableIdentifier(table, Some(database))
+      case parts =>
+        TableIdentifier(
+          parts.last,
+          Some(parts.slice(1, parts.length - 1).mkString(".")),
+          Some(parts.head))
+    }
+  }
+
+  private def sparkCreateTableLikeCommand(
+      ctx: CreateTableLikeContext): SparkCreateTableLikeCommand = {
+    delegate.parsePlan(createSparkCreateTableLikeSql(ctx)) match {
+      case command: SparkCreateTableLikeCommand => command
+      case plan =>
+        throw new UnsupportedOperationException(
+          s"Expected Spark CREATE TABLE LIKE command, but got ${plan.nodeName}.")
+    }
+  }
+
+  private def createSparkCreateTableLikeSql(ctx: CreateTableLikeContext): String = {
+    val stream = ctx.getStart.getInputStream
+    val baseStart = ctx.getStart.getStartIndex
+    val baseStop = ctx.getStop.getStopIndex
+    val targetStart = ctx.target.getStart.getStartIndex
+    val targetStop = ctx.target.getStop.getStopIndex
+    val sourceStart = ctx.source.getStart.getStartIndex
+    val sourceStop = ctx.source.getStop.getStopIndex
+
+    val prefix = stream.getText(Interval.of(baseStart, targetStart - 1))
+    val middle = stream.getText(Interval.of(targetStop + 1, sourceStart - 1))
+    val suffix = if (sourceStop < baseStop) {
+      stream.getText(Interval.of(sourceStop + 1, baseStop))
+    } else {
+      ""
+    }
+
+    prefix + "__paimon_create_like_target" + middle + "__paimon_create_like_source" + suffix
+  }
 
   private def reconstructSqlString(ctx: ParserRuleContext): String = {
     toBuffer(ctx.children)

@@ -33,15 +33,23 @@ public class UserDefinedSeqComparator implements FieldsComparator {
 
     private final int[] fields;
     private final RecordComparator comparator;
+    private final boolean ascendingOrder;
 
-    public UserDefinedSeqComparator(int[] fields, RecordComparator comparator) {
+    public UserDefinedSeqComparator(
+            int[] fields, RecordComparator comparator, boolean ascendingOrder) {
         this.fields = fields;
         this.comparator = comparator;
+        this.ascendingOrder = ascendingOrder;
     }
 
     @Override
     public int[] compareFields() {
         return fields;
+    }
+
+    @Override
+    public boolean isAscendingOrder() {
+        return ascendingOrder;
     }
 
     @Override
@@ -75,9 +83,13 @@ public class UserDefinedSeqComparator implements FieldsComparator {
             return null;
         }
 
+        boolean[] ascendingOrders = new boolean[sequenceFields.length];
+        for (int i = 0; i < sequenceFields.length; i++) {
+            ascendingOrders[i] = isAscendingOrder;
+        }
         RecordComparator comparator =
                 CodeGenUtils.newRecordComparator(
-                        rowType.getFieldTypes(), sequenceFields, isAscendingOrder);
-        return new UserDefinedSeqComparator(sequenceFields, comparator);
+                        rowType.getFieldTypes(), sequenceFields, ascendingOrders);
+        return new UserDefinedSeqComparator(sequenceFields, comparator, isAscendingOrder);
     }
 }

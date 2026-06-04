@@ -19,9 +19,8 @@
 package org.apache.paimon.format.lance;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PluginFileIO;
-import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
@@ -33,11 +32,6 @@ import java.util.Map;
 
 /** Utils for lance all. */
 public class LanceUtils {
-
-    private static final Class<?> ossFileIOKlass;
-    private static final Class<?> pluginFileIOKlass;
-    private static final Class<?> jindoFileIOKlass;
-    private static final Class<?> hadoopFileIOKlass;
 
     // OSS configuration keys
     public static final String FS_OSS_ENDPOINT = "fs.oss.endpoint";
@@ -56,37 +50,6 @@ public class LanceUtils {
     public static final String STORAGE_OPTION_OSS_SECRET_ACCESS_KEY = "oss_secret_access_key";
     public static final String STORAGE_OPTION_OSS_SESSION_TOKEN = "oss_session_token";
     public static final String STORAGE_OPTION_OSS_ENDPOINT = "oss_endpoint";
-
-    static {
-        Class<?> klass;
-        try {
-            klass = Class.forName("org.apache.paimon.oss.OSSFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        ossFileIOKlass = klass;
-
-        try {
-            klass = Class.forName("org.apache.paimon.jindo.JindoFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        jindoFileIOKlass = klass;
-
-        try {
-            klass = Class.forName("org.apache.paimon.fs.PluginFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        pluginFileIOKlass = klass;
-
-        try {
-            klass = Class.forName("org.apache.paimon.fs.hadoop.HadoopFileIO");
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            klass = null;
-        }
-        hadoopFileIOKlass = klass;
-    }
 
     public static Pair<Path, Map<String, String>> toLanceSpecifiedForReader(
             FileIO fileIO, Path path) {
@@ -113,26 +76,9 @@ public class LanceUtils {
         }
 
         Options originOptions;
-        if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
-            try {
-                originOptions = (Options) ossFileIOKlass.getMethod("hadoopOptions").invoke(fileIO);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to invoke hadoopOptions on OSSFileIO", e);
-            }
-        } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            try {
-                originOptions =
-                        (Options)
-                                jindoFileIOKlass
-                                        .getMethod("hadoopOptions", Path.class, String.class)
-                                        .invoke(fileIO, path, isRead ? "read" : "write");
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to invoke hadoopOptions on JindoFileIO", e);
-            }
-        } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((PluginFileIO) fileIO).options();
-        } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((HadoopFileIO) fileIO).hadoopOptions();
+        if (fileIO instanceof HadoopOptionsProvider) {
+            originOptions =
+                    ((HadoopOptionsProvider) fileIO).hadoopOptions(path, isRead ? "read" : "write");
         } else {
             originOptions = new Options();
         }

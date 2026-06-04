@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Docs</name>
 
     <properties>
-        <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
+        <generated.docs.dir>./docs/generated</generated.docs.dir>
         <static.docs.dir>./docs/static</static.docs.dir>
     </properties>
 

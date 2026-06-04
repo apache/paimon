@@ -255,10 +255,19 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
             for (int i = 0; i < stats.length; i++) {
                 SimpleColStats fieldStats = stats[i];
                 DataType type = partitionType.getTypeAt(i);
+                boolean containsNan = false;
+                switch (type.getTypeRoot()) {
+                    case FLOAT:
+                    case DOUBLE:
+                        containsNan = isNaN(fieldStats.min()) || isNaN(fieldStats.max());
+                        break;
+                    default:
+                        // contains_nan is only meaningful for FLOAT/DOUBLE per the Iceberg spec
+                }
                 partitionSummaries.add(
                         new IcebergPartitionSummary(
                                 Objects.requireNonNull(fieldStats.nullCount()) > 0,
-                                false, // TODO correct it?
+                                containsNan,
                                 toByteBuffer(type, fieldStats.min()).array(),
                                 toByteBuffer(type, fieldStats.max()).array()));
             }
@@ -277,6 +286,16 @@ public class IcebergManifestFile extends ObjectsFile<IcebergManifestEntry> {
                     existingRowsCount,
                     deletedRowsCount,
                     partitionSummaries);
+        }
+
+        private boolean isNaN(@Nullable Object value) {
+            if (value instanceof Float) {
+                return Float.isNaN((Float) value);
+            }
+            if (value instanceof Double) {
+                return Double.isNaN((Double) value);
+            }
+            return false;
         }
     }
 }

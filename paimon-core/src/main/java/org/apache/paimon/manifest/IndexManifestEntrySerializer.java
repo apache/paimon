@@ -18,12 +18,15 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
+
+import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.index.IndexFileMetaSerializer.dvMetasToRowArrayData;
@@ -103,5 +106,17 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
                         row.isNullAt(8) ? null : row.getString(8).toString(),
                         globalIndexMeta));
+    }
+
+    public static Function<InternalRow, BinaryRow> partitionGetter() {
+        return row -> deserializeBinaryRow(row.getBinary(2));
+    }
+
+    public static Function<InternalRow, Integer> bucketGetter() {
+        return row -> row.getInt(3);
+    }
+
+    public static Function<InternalRow, String> indexTypeGetter() {
+        return row -> row.getString(4).toString();
     }
 }

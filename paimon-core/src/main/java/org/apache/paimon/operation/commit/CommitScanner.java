@@ -21,35 +21,47 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
-
-import static java.util.Collections.emptyList;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 
 /** Manifest entries scanner for commit. */
 public class CommitScanner {
 
     private final FileStoreScan scan;
+    private final Supplier<FileStoreScan> scanSupplier;
+    private final SnapshotManager snapshotManager;
     private final IndexManifestFile indexManifestFile;
+    private final boolean dropStats;
 
     public CommitScanner(
-            FileStoreScan scan, IndexManifestFile indexManifestFile, CoreOptions options) {
-        this.scan = scan;
+            Supplier<FileStoreScan> scanSupplier,
+            SnapshotManager snapshotManager,
+            IndexManifestFile indexManifestFile,
+            CoreOptions options) {
+        this.scanSupplier = scanSupplier;
+        this.scan = scanSupplier.get();
+        this.snapshotManager = snapshotManager;
         this.indexManifestFile = indexManifestFile;
         // Stats in DELETE Manifest Entries is useless
-        if (options.manifestDeleteFileDropStats()) {
+        this.dropStats = options.manifestDeleteFileDropStats();
+        if (dropStats) {
             this.scan.dropStats();
         }
     }
@@ -89,46 +101,53 @@ public class CommitScanner {
         }
     }
 
-    public CommitChanges readOverwriteChanges(
+    public Map<BinaryRow, Integer> readTotalBuckets(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        try {
+            Set<BinaryRow> remainingPartitions = new HashSet<>(changedPartitions);
+            Map<BinaryRow, Integer> totalBuckets = new HashMap<>();
+            FileStoreScan freshScan = scanSupplier.get();
+            if (dropStats) {
+                freshScan.dropStats();
+            }
+            Iterator<ManifestEntry> iterator =
+                    freshScan
+                            .withSnapshot(snapshot)
+                            .withKind(ScanMode.ALL)
+                            .withPartitionFilter(changedPartitions)
+                            .readFileIterator();
+            while (iterator.hasNext() && !remainingPartitions.isEmpty()) {
+                ManifestEntry entry = iterator.next();
+                int totalBucket = entry.totalBuckets();
+                if (totalBucket > 0 && remainingPartitions.remove(entry.partition())) {
+                    totalBuckets.put(entry.partition(), totalBucket);
+                }
+            }
+            return totalBuckets;
+        } catch (Throwable e) {
+            throw new RuntimeException("Cannot read total buckets from changed partitions.", e);
+        }
+    }
+
+    /**
+     * Returns a stateful {@link CommitChangesProvider} for overwrite operations. The returned
+     * provider caches the current files of the target partitions across retries and only walks
+     * delta manifests when the latest snapshot advances, avoiding repeated full scans on every
+     * commit retry.
+     */
+    public CommitChangesProvider overwriteChangesProvider(
             int numBucket,
             List<ManifestEntry> changes,
             List<IndexManifestEntry> indexFiles,
-            @Nullable Snapshot latestSnapshot,
             @Nullable PartitionPredicate partitionFilter) {
-        List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
-        List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
-        if (latestSnapshot != null) {
-            scan.withSnapshot(latestSnapshot)
-                    .withPartitionFilter(partitionFilter)
-                    .withKind(ScanMode.ALL);
-            if (numBucket != BucketMode.POSTPONE_BUCKET) {
-                // bucket = -2 can only be overwritten in postpone bucket tables
-                scan.withBucketFilter(bucket -> bucket >= 0);
-            }
-            List<ManifestEntry> currentEntries = scan.plan().files();
-            for (ManifestEntry entry : currentEntries) {
-                changesWithOverwrite.add(
-                        ManifestEntry.create(
-                                FileKind.DELETE,
-                                entry.partition(),
-                                entry.bucket(),
-                                entry.totalBuckets(),
-                                entry.file()));
-            }
-
-            // collect index files
-            if (latestSnapshot.indexManifest() != null) {
-                List<IndexManifestEntry> entries =
-                        indexManifestFile.read(latestSnapshot.indexManifest());
-                for (IndexManifestEntry entry : entries) {
-                    if (partitionFilter == null || partitionFilter.test(entry.partition())) {
-                        indexChangesWithOverwrite.add(entry.toDeleteEntry());
-                    }
-                }
-            }
-        }
-        changesWithOverwrite.addAll(changes);
-        indexChangesWithOverwrite.addAll(indexFiles);
-        return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
+        return new OverwriteChangesProvider(
+                scanSupplier,
+                snapshotManager,
+                indexManifestFile,
+                dropStats,
+                numBucket,
+                changes,
+                indexFiles,
+                partitionFilter);
     }
 }

@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntryWithDV;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +38,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -339,5 +342,166 @@ class ConflictDetectionTest {
             }
         }
         assert (deleteCount > 0);
+    }
+
+    @Test
+    void testShouldBeOverwriteCommit() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> addOnlyEntries = new ArrayList<>();
+        addOnlyEntries.add(createFileEntry("f1", ADD));
+        addOnlyEntries.add(createFileEntry("f2", ADD));
+        assertThat(detection.shouldBeOverwriteCommit(addOnlyEntries, Collections.emptyList()))
+                .isFalse();
+
+        assertThat(
+                        detection.shouldBeOverwriteCommit(
+                                Collections.emptyList(), Collections.emptyList()))
+                .isFalse();
+
+        List<SimpleFileEntry> deleteEntries = new ArrayList<>();
+        deleteEntries.add(createFileEntry("f1", DELETE));
+        deleteEntries.add(createFileEntry("f2", ADD));
+        assertThat(detection.shouldBeOverwriteCommit(deleteEntries, Collections.emptyList()))
+                .isTrue();
+
+        List<IndexManifestEntry> dvIndexFiles = new ArrayList<>();
+        dvIndexFiles.add(createDvIndexEntry("dv1", ADD, Arrays.asList("f1")));
+        assertThat(detection.shouldBeOverwriteCommit(Collections.emptyList(), dvIndexFiles))
+                .isTrue();
+
+        detection.setRowIdCheckFromSnapshot(1L);
+        assertThat(detection.shouldBeOverwriteCommit(addOnlyEntries, Collections.emptyList()))
+                .isFalse();
+    }
+
+    @Test
+    void testCheckRowIdExistenceNoConflict() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceBaseFileRemoved() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 100L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceBaseFileRewritten() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f2", ADD, 0L, 200L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 200L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        // nextRowId=100: files with firstRowId >= 100 are newly appended, not references
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        // partial-column update referencing existing rows (firstRowId=0 < nextRowId=100)
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+        // newly appended file (firstRowId=100 >= nextRowId=100), should be skipped
+        deltaEntries.add(createFileEntryWithRowId("new1", ADD, 100L, 50L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsNonPreAssigned() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntry("f1", ADD));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsDeleteEntries() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsWhenNextRowIdNull() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, null)).isEmpty();
+    }
+
+    private SimpleFileEntry createFileEntryWithRowId(
+            String fileName, FileKind kind, long firstRowId, long rowCount) {
+        return new SimpleFileEntry(
+                kind,
+                EMPTY_ROW,
+                0,
+                1,
+                0,
+                fileName,
+                Collections.emptyList(),
+                null,
+                EMPTY_ROW,
+                EMPTY_ROW,
+                null,
+                rowCount,
+                firstRowId);
+    }
+
+    private ConflictDetection createConflictDetection() {
+        return new ConflictDetection(
+                "test-table",
+                "test-user",
+                RowType.of(),
+                null,
+                null,
+                BucketMode.HASH_FIXED,
+                false,
+                true,
+                false,
+                null,
+                null,
+                null);
     }
 }

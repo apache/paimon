@@ -56,6 +56,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -103,7 +104,47 @@ public class JavaPyTantivyE2ETest {
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testTantivyFullTextIndexWrite() throws Exception {
-        String tableName = "test_tantivy_fulltext";
+        writeTableWithTantivyIndex(
+                "test_tantivy_fulltext",
+                Arrays.asList(
+                        "Apache Paimon is a streaming data lake platform",
+                        "Tantivy is a full-text search engine written in Rust",
+                        "Paimon supports real-time data ingestion and analytics",
+                        "Full-text search enables efficient text retrieval",
+                        "Data lake platforms like Paimon handle large-scale data"),
+                "default");
+
+        writeTableWithTantivyIndex(
+                "test_tantivy_fulltext_ngram",
+                Arrays.asList(
+                        "Apache Paimon 支持中文全文检索",
+                        "Tantivy ngram tokenizer helps Chinese search",
+                        "湖仓表支持实时数据分析",
+                        "默认分词适合英文内容",
+                        "中文索引支持片段查询"),
+                "ngram");
+
+        writeTableWithTantivyIndex(
+                "test_tantivy_fulltext_simple",
+                Arrays.asList(
+                        "Running runners search Apache Paimon",
+                        "Run search with Paimon lake",
+                        "The connector runs analytics"),
+                "simple");
+
+        writeTableWithTantivyIndex(
+                "test_tantivy_fulltext_jieba",
+                Arrays.asList(
+                        "张华在百货公司当售货员",
+                        "Apache Paimon supports full text search",
+                        "李萍进入中等技术学校学习",
+                        "中文分词支持更自然的全文检索",
+                        "默认英文分词不适合中文语义"),
+                "jieba");
+    }
+
+    private void writeTableWithTantivyIndex(
+            String tableName, List<String> contents, String tokenizer) throws Exception {
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
 
         RowType rowType =
@@ -138,37 +179,25 @@ public class JavaPyTantivyE2ETest {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(
-                    GenericRow.of(
-                            0,
-                            BinaryString.fromString(
-                                    "Apache Paimon is a streaming data lake platform")));
-            write.write(
-                    GenericRow.of(
-                            1,
-                            BinaryString.fromString(
-                                    "Tantivy is a full-text search engine written in Rust")));
-            write.write(
-                    GenericRow.of(
-                            2,
-                            BinaryString.fromString(
-                                    "Paimon supports real-time data ingestion and analytics")));
-            write.write(
-                    GenericRow.of(
-                            3,
-                            BinaryString.fromString(
-                                    "Full-text search enables efficient text retrieval")));
-            write.write(
-                    GenericRow.of(
-                            4,
-                            BinaryString.fromString(
-                                    "Data lake platforms like Paimon handle large-scale data")));
+            for (int i = 0; i < contents.size(); i++) {
+                write.write(GenericRow.of(i, BinaryString.fromString(contents.get(i))));
+            }
             commit.commit(write.prepareCommit());
         }
 
         // Build tantivy full-text index on the "content" column
         DataField contentField = table.rowType().getField("content");
         Options indexOptions = table.coreOptions().toConfiguration();
+        if (!"default".equals(tokenizer)) {
+            indexOptions.set(TantivyFullTextIndexOptions.TOKENIZER, tokenizer);
+        }
+        if ("ngram".equals(tokenizer)) {
+            indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MIN_GRAM, 2);
+            indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MAX_GRAM, 2);
+        } else if ("simple".equals(tokenizer)) {
+            indexOptions.set(TantivyFullTextIndexOptions.STEM, true);
+            indexOptions.set(TantivyFullTextIndexOptions.REMOVE_STOP_WORDS, true);
+        }
 
         GlobalIndexSingletonWriter writer =
                 (GlobalIndexSingletonWriter)
@@ -178,21 +207,25 @@ public class JavaPyTantivyE2ETest {
                                 contentField,
                                 indexOptions);
 
-        // Write the same text data to the index
-        writer.write(BinaryString.fromString("Apache Paimon is a streaming data lake platform"));
-        writer.write(
-                BinaryString.fromString("Tantivy is a full-text search engine written in Rust"));
-        writer.write(
-                BinaryString.fromString("Paimon supports real-time data ingestion and analytics"));
-        writer.write(BinaryString.fromString("Full-text search enables efficient text retrieval"));
-        writer.write(
-                BinaryString.fromString("Data lake platforms like Paimon handle large-scale data"));
+        // Write the same text data to the index.
+        for (String content : contents) {
+            writer.write(BinaryString.fromString(content));
+        }
 
         List<ResultEntry> entries = writer.finish();
         assertThat(entries).hasSize(1);
-        assertThat(entries.get(0).rowCount()).isEqualTo(5);
+        assertThat(entries.get(0).rowCount()).isEqualTo(contents.size());
+        TantivyFullTextIndexOptions persistedOptions =
+                TantivyFullTextIndexOptions.deserialize(entries.get(0).meta());
+        assertThat(persistedOptions.tokenizer()).isEqualTo(tokenizer);
+        assertThat(persistedOptions.ngramMinGram()).isEqualTo(2);
+        assertThat(persistedOptions.ngramMaxGram()).isEqualTo(2);
+        if ("simple".equals(tokenizer)) {
+            assertThat(persistedOptions.stem()).isTrue();
+            assertThat(persistedOptions.removeStopWords()).isTrue();
+        }
 
-        Range rowRange = new Range(0, 4);
+        Range rowRange = new Range(0, contents.size() - 1);
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),

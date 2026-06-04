@@ -20,3 +20,4 @@ org.apache.paimon.format.csv.CsvFileFormatFactory
 org.apache.paimon.format.text.TextFileFormatFactory
 org.apache.paimon.format.json.JsonFileFormatFactory
 org.apache.paimon.format.blob.BlobFileFormatFactory
+org.apache.paimon.format.row.RowFileFormatFactory

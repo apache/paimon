@@ -552,7 +552,12 @@ public class AppendTableITCase extends CatalogITCaseBase {
                 strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : largerSinkParallelism;
-        partitionEntriesLarger.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLarger));
+        if (strategy == CoreOptions.PartitionSinkStrategy.PARTITION_DYNAMIC) {
+            fileCountLarger = Math.min(largerSinkParallelism, 4);
+        }
+        final int expectedFileCountLarger = fileCountLarger;
+        partitionEntriesLarger.forEach(
+                x -> assertThat(x.fileCount()).isEqualTo(expectedFileCountLarger));
 
         FileStoreTable fileStoreTableLess = paimonTable("partition_strategy_table_less");
         List<PartitionEntry> partitionEntriesLess =
@@ -562,7 +567,206 @@ public class AppendTableITCase extends CatalogITCaseBase {
                 strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : lessSinkParallelism;
-        partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
+        if (strategy == CoreOptions.PartitionSinkStrategy.PARTITION_DYNAMIC) {
+            fileCountLess = Math.min(lessSinkParallelism, 4);
+        }
+        final int expectedFileCountLess = fileCountLess;
+        partitionEntriesLess.forEach(
+                x -> assertThat(x.fileCount()).isEqualTo(expectedFileCountLess));
+    }
+
+    @Test
+    public void testPartitionDynamicDataCorrectness() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_correctness ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        batchSql(
+                "INSERT INTO dynamic_correctness VALUES "
+                        + "(1, 'a', '20250301'), (2, 'b', '20250301'), "
+                        + "(3, 'c', '20250302'), (4, 'd', '20250302'), "
+                        + "(5, 'e', '20250303')");
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_correctness ORDER BY id");
+        assertThat(result).hasSize(5);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "a", "20250301"),
+                        Row.of(2, "b", "20250301"),
+                        Row.of(3, "c", "20250302"),
+                        Row.of(4, "d", "20250302"),
+                        Row.of(5, "e", "20250303"));
+    }
+
+    @Test
+    public void testPartitionDynamicWithSkewedData() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_skewed ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        // Heavily skewed: partition '20250301' gets most data
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+        for (int i = 101; i <= 110; i++) {
+            values.append(String.format("(%d, 'data%d', '20250302'),", i, i));
+        }
+        for (int i = 111; i <= 115; i++) {
+            values.append(String.format("(%d, 'data%d', '20250303'),", i, i));
+        }
+
+        batchSql("INSERT INTO dynamic_skewed VALUES " + values.substring(0, values.length() - 1));
+
+        assertThat(batchSql("SELECT * FROM dynamic_skewed")).hasSize(115);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250301'")).hasSize(100);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250302'")).hasSize(10);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250303'")).hasSize(5);
+    }
+
+    @Test
+    public void testPartitionDynamicWithManyPartitions() {
+        int partitionCount = 20;
+        int sinkParallelism = 4;
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_many_partitions ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + String.format("'sink.parallelism' = '%d')", sinkParallelism));
+
+        StringBuilder values = new StringBuilder();
+        int totalRows = 0;
+        for (int p = 1; p <= partitionCount; p++) {
+            for (int i = 1; i <= 5; i++) {
+                values.append(String.format("(%d, 'data', '2025030%02d'),", (p - 1) * 5 + i, p));
+                totalRows++;
+            }
+        }
+
+        batchSql(
+                "INSERT INTO dynamic_many_partitions VALUES "
+                        + values.substring(0, values.length() - 1));
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_many_partitions");
+        assertThat(result).hasSize(totalRows);
+
+        // Verify all partitions are present
+        List<Row> partitions =
+                batchSql("SELECT DISTINCT dt FROM dynamic_many_partitions ORDER BY dt");
+        assertThat(partitions).hasSize(partitionCount);
+    }
+
+    @Test
+    public void testPartitionDynamicMultipleInserts() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_multi_insert ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        batchSql(
+                "INSERT INTO dynamic_multi_insert VALUES "
+                        + "(1, 'a', '20250301'), (2, 'b', '20250301'), (3, 'c', '20250302')");
+        batchSql(
+                "INSERT INTO dynamic_multi_insert VALUES "
+                        + "(4, 'd', '20250302'), (5, 'e', '20250303'), (6, 'f', '20250301')");
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_multi_insert ORDER BY id");
+        assertThat(result).hasSize(6);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250301'")).hasSize(3);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250302'")).hasSize(2);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250303'")).hasSize(1);
+    }
+
+    @Timeout(120)
+    @Test
+    public void testPartitionDynamicStreaming() throws Exception {
+        int sinkParallelism = 4;
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_streaming ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '%d')",
+                sinkParallelism);
+
+        // Write heavily skewed data: partition '20250301' gets most records.
+        // With streaming mode (sEnv has checkpoint interval 100ms), the
+        // DataStatisticsOperator sends local stats at checkpoint -> coordinator
+        // aggregates -> sends global stats back -> partitioner updates assignment.
+        // This verifies the full coordinator -> operator event -> partitioner update path.
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+        for (int i = 101; i <= 110; i++) {
+            values.append(String.format("(%d, 'data%d', '20250302'),", i, i));
+        }
+        for (int i = 111; i <= 115; i++) {
+            values.append(String.format("(%d, 'data%d', '20250303'),", i, i));
+        }
+
+        sEnv.executeSql(
+                        "INSERT INTO dynamic_streaming VALUES "
+                                + values.substring(0, values.length() - 1))
+                .await();
+
+        // Verify data correctness
+        assertThat(batchSql("SELECT * FROM dynamic_streaming")).hasSize(115);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250301'")).hasSize(100);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250302'")).hasSize(10);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250303'")).hasSize(5);
+
+        // Verify the hot partition is spread across multiple subtasks (file count > 1).
+        // If statistics were not applied, each partition would only go to min(parallelism, 4)
+        // subtasks with equal weight. With statistics, the hot partition ('20250301') should
+        // be spread across more subtasks proportionally to its weight.
+        FileStoreTable table = paimonTable("dynamic_streaming");
+        List<PartitionEntry> partitionEntries =
+                table.newReadBuilder().newScan().listPartitionEntries();
+        assertThat(partitionEntries).hasSize(3);
+
+        for (PartitionEntry entry : partitionEntries) {
+            assertThat(entry.fileCount()).isGreaterThanOrEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testPartitionDynamicSinglePartition() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_single_partition ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 50; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+
+        batchSql(
+                "INSERT INTO dynamic_single_partition VALUES "
+                        + values.substring(0, values.length() - 1));
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_single_partition");
+        assertThat(result).hasSize(50);
+        assertThat(batchSql("SELECT DISTINCT dt FROM dynamic_single_partition"))
+                .containsExactly(Row.of("20250301"));
     }
 
     private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {

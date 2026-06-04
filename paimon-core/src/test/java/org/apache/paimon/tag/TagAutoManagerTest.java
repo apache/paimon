@@ -36,6 +36,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Collections;
 
+import static org.apache.paimon.CoreOptions.SINK_PROCESS_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
@@ -517,6 +518,50 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
 
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-19T12:12:00")));
         assertThat(tagManager.allTagNames()).containsOnly("20230718");
+    }
+
+    @Test
+    public void testForceCreatingSnapshotProcessTime() throws Exception {
+        // sink.process-time-zone=UTC, machine timezone=Asia/Shanghai.
+        // Daily tag should trigger at UTC 00:00 (Shanghai 08:00), not Shanghai 00:00.
+
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.PROCESS_TIME);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        options.set(SINK_PROCESS_TIME_ZONE, "UTC");
+
+        FileStoreTable table = this.table.copy(options.toMap());
+
+        // Commit a snapshot to set nextTag
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit.commit(new ManifestCommittable(0));
+        commit.close();
+
+        TagAutoCreation tagAutoCreation =
+                TagAutoCreation.create(
+                        table.coreOptions(),
+                        table.snapshotManager(),
+                        table.store().newTagManager(),
+                        table.store().newTagDeletion(),
+                        Collections.emptyList());
+
+        // threshold = tagTime + 2 days (nextTag + 1 period)
+        TagManager tagManager = table.store().newTagManager();
+        String createdTag = tagManager.allTagNames().get(0);
+        LocalDateTime tagTime = LocalDateTime.parse(createdTag + "T00:00:00");
+        LocalDateTime thresholdUtc = tagTime.plusDays(2);
+
+        // Shanghai 00:00 = UTC 16:00 previous day, before threshold -> false
+        LocalDateTime shanghaiMidnightAsUtc = thresholdUtc.minusHours(8);
+        assertThat(tagAutoCreation.forceCreatingSnapshotProcessTime(shanghaiMidnightAsUtc))
+                .isFalse();
+
+        // UTC 00:00 = threshold -> true
+        assertThat(tagAutoCreation.forceCreatingSnapshotProcessTime(thresholdUtc)).isTrue();
+
+        // After threshold -> true
+        assertThat(tagAutoCreation.forceCreatingSnapshotProcessTime(thresholdUtc.plusHours(1)))
+                .isTrue();
     }
 
     private long localZoneMills(String timestamp) {

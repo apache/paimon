@@ -69,7 +69,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
     private final RowType keyType;
     private final RowType valueType;
     private final ExecutorService executor;
-    private final BucketedDvMaintainer dvMaintainer;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
@@ -87,7 +87,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
             KeyValueFileReaderFactory valueReaderFactory,
             KeyValueFileWriterFactory writerFactory,
             ExecutorService executor,
-            BucketedDvMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             List<DataFileMeta> restoreFiles,
             long targetFileSize,
@@ -112,11 +112,10 @@ public class ClusteringCompactManager extends CompactFutureManager {
         RecordComparator clusteringComparatorAlone =
                 CodeGenUtils.newRecordComparator(
                         valueType.project(clusteringColumns).getFieldTypes(),
-                        IntStream.range(0, clusteringColumns.size()).toArray(),
-                        true);
+                        IntStream.range(0, clusteringColumns.size()).toArray());
         RecordComparator clusteringComparatorInValue =
                 CodeGenUtils.newRecordComparator(
-                        valueType.getFieldTypes(), clusteringColumnIndexes, true);
+                        valueType.getFieldTypes(), clusteringColumnIndexes);
 
         SimpleLsmKvDb kvDb =
                 SimpleLsmKvDb.builder(new File(ioManager.pickTempDir()))
@@ -205,9 +204,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
         List<DataFileMeta> existingSortedFiles = fileLevels.sortedFiles();
         for (DataFileMeta file : unsortedFiles) {
             List<DataFileMeta> sortedFiles =
-                    fileRewriter.sortAndRewriteFiles(
-                            singletonList(file), kvSerializer, kvSchemaType);
-            keyIndex.updateIndex(file, sortedFiles);
+                    fileRewriter.sortAndRewriteFile(file, kvSerializer, kvSchemaType, keyIndex);
             result.before().add(file);
             result.after().addAll(sortedFiles);
         }
@@ -232,19 +229,23 @@ public class ClusteringCompactManager extends CompactFutureManager {
                     keyIndex.rebuildIndex(newFile);
                 }
                 // Remove stale deletion vectors for merged-away files
-                for (DataFileMeta file : mergeGroup) {
-                    dvMaintainer.removeDeletionVectorOf(file.fileName());
+                if (dvMaintainer != null) {
+                    for (DataFileMeta file : mergeGroup) {
+                        dvMaintainer.removeDeletionVectorOf(file.fileName());
+                    }
                 }
                 result.before().addAll(mergeGroup);
                 result.after().addAll(mergedFiles);
             }
         }
 
-        CompactDeletionFile deletionFile =
-                lazyGenDeletionFile
-                        ? CompactDeletionFile.lazyGeneration(dvMaintainer)
-                        : CompactDeletionFile.generateFiles(dvMaintainer);
-        result.setDeletionFile(deletionFile);
+        if (dvMaintainer != null) {
+            CompactDeletionFile deletionFile =
+                    lazyGenDeletionFile
+                            ? CompactDeletionFile.lazyGeneration(dvMaintainer)
+                            : CompactDeletionFile.generateFiles(dvMaintainer);
+            result.setDeletionFile(deletionFile);
+        }
         return result;
     }
 

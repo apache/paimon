@@ -48,13 +48,28 @@ public class EarlyFullCompaction {
             @Nullable Long fullCompactionInterval,
             @Nullable Long totalSizeThreshold,
             @Nullable Long incrementalSizeThreshold) {
+        this(fullCompactionInterval, totalSizeThreshold, incrementalSizeThreshold, null);
+    }
+
+    public EarlyFullCompaction(
+            @Nullable Long fullCompactionInterval,
+            @Nullable Long totalSizeThreshold,
+            @Nullable Long incrementalSizeThreshold,
+            @Nullable Long initialLastFullCompaction) {
         this.fullCompactionInterval = fullCompactionInterval;
         this.totalSizeThreshold = totalSizeThreshold;
         this.incrementalSizeThreshold = incrementalSizeThreshold;
+        this.lastFullCompaction = initialLastFullCompaction;
     }
 
     @Nullable
     public static EarlyFullCompaction create(CoreOptions options) {
+        return create(options, null);
+    }
+
+    @Nullable
+    public static EarlyFullCompaction create(
+            CoreOptions options, @Nullable Long initialLastFullCompaction) {
         Duration interval = options.optimizedCompactionInterval();
         MemorySize totalThreshold = options.compactionTotalSizeThreshold();
         MemorySize incrementalThreshold = options.compactionIncrementalSizeThreshold();
@@ -64,7 +79,8 @@ public class EarlyFullCompaction {
         return new EarlyFullCompaction(
                 interval == null ? null : interval.toMillis(),
                 totalThreshold == null ? null : totalThreshold.getBytes(),
-                incrementalThreshold == null ? null : incrementalThreshold.getBytes());
+                incrementalThreshold == null ? null : incrementalThreshold.getBytes(),
+                initialLastFullCompaction);
     }
 
     public Optional<CompactUnit> tryFullCompact(int numLevels, List<LevelSortedRun> runs) {

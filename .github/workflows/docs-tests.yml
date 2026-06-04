@@ -20,9 +20,6 @@ on:
     paths:
       - 'docs/**'
 
-env:
-  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
@@ -30,20 +27,25 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Setup Hugo
-        uses: peaceiris/actions-hugo@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          hugo-version: '0.124.1'
-          extended: true
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: docs
+        run: |
+          npm install -g yarn
+          yarn install --frozen-lockfile || yarn install
 
       - name: Build
-        run: |
-          cd docs
-          # Fetch the theme submodule
-          git submodule update --init --recursive
-          hugo
+        working-directory: docs
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: yarn build

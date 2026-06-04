@@ -26,7 +26,7 @@ import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeIntoTable, UpdateTable}
 
-trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
+trait RowLevelHelper extends SQLConfHelper {
 
   val operation: RowLevelOp
 
@@ -76,18 +76,14 @@ trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
       }
   }
 
-  /** Determines if DataSourceV2 is not supported for the given table. */
   protected def shouldFallbackToV1(table: SparkTable): Boolean = {
-    val baseTable = table.getTable
-    org.apache.spark.SPARK_VERSION < "3.5" ||
-    !baseTable.isInstanceOf[FileStoreTable] ||
-    !baseTable.primaryKeys().isEmpty ||
-    !table.useV2Write ||
-    table.coreOptions.deletionVectorsEnabled() ||
-    table.coreOptions.rowTrackingEnabled() ||
-    table.coreOptions.dataEvolutionEnabled()
+    !SparkTable.supportsV2RowLevelOps(table)
   }
 
+  // `SparkTable.supportsV2RowLevelOps` controls whether the table exposes Spark row-level
+  // capability at all. These per-operation checks are the remaining V1 fallbacks for cases Spark's
+  // V2 rewrite cannot safely handle: metadata-only DELETE, non-rewritable UPDATE/MERGE, or
+  // assignments that have not been aligned yet.
   /** Determines if DataSourceV2 delete is not supported for the given table. */
   protected def shouldFallbackToV1Delete(table: SparkTable, condition: Expression): Boolean = {
     shouldFallbackToV1(table) ||

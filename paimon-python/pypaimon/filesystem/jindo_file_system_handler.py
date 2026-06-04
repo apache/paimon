@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import logging
 
 import pyarrow as pa
@@ -22,6 +22,11 @@ from pyarrow import PythonFile
 from pyarrow._fs import FileSystemHandler
 from pyarrow.fs import FileInfo, FileSelector, FileType
 
+# `JindoFileSystemHandler` (the PyArrow FileIO path) only needs `pyjindo.fs`
+# and `pyjindo.util`. The PVFS jindo backend (`create_jindo_oss_filesystem`)
+# additionally needs `pyjindo.ossfs`. Track the two surfaces independently so
+# that a pyjindosdk build without `pyjindo.ossfs` does not silently disable
+# the previously-working PyArrow path.
 try:
     import pyjindo.fs as jfs
     import pyjindo.util as jutil
@@ -31,8 +36,81 @@ except ImportError:
     jfs = None
     jutil = None
 
+try:
+    import pyjindo.ossfs as jossfs
+    JINDO_OSSFS_AVAILABLE = True
+except ImportError:
+    jossfs = None
+    JINDO_OSSFS_AVAILABLE = False
+
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+
+
+def build_jindo_config(catalog_options: Options):
+    """Build a pyjindo ``Config`` from OSS catalog options.
+
+    Shared by ``JindoFileSystemHandler`` (the PyArrow FileIO path) and
+    ``create_jindo_oss_filesystem`` (the PVFS fsspec path) so both jindo entry
+    points consume exactly the same credential / endpoint options.
+    """
+    if not JINDO_AVAILABLE:
+        raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
+
+    config = jutil.Config()
+
+    access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
+    access_key_secret = catalog_options.get(OssOptions.OSS_ACCESS_KEY_SECRET)
+    security_token = catalog_options.get(OssOptions.OSS_SECURITY_TOKEN)
+    endpoint = catalog_options.get(OssOptions.OSS_ENDPOINT)
+    region = catalog_options.get(OssOptions.OSS_REGION)
+
+    if access_key_id:
+        config.set("fs.oss.accessKeyId", access_key_id)
+    if access_key_secret:
+        config.set("fs.oss.accessKeySecret", access_key_secret)
+    if security_token:
+        config.set("fs.oss.securityToken", security_token)
+    if endpoint:
+        endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
+        config.set("fs.oss.endpoint", endpoint_clean)
+    if region:
+        config.set("fs.oss.region", region)
+    config.set("fs.oss.user.agent.features", "pypaimon")
+    return config
+
+
+def create_jindo_oss_filesystem(root_uri: str, catalog_options: Options):
+    """Create an fsspec-compatible ``JindoOssFileSystem`` for an OSS bucket.
+
+    ``PaimonVirtualFileSystem`` uses this to back OSS reads/writes with the
+    native JindoSDK instead of ``ossfs``. JindoSDK writes objects via
+    PutObject / multipart upload, so it never issues OSS ``AppendObject`` --
+    the call that fails with ``PositionNotEqualToLength`` (409) on the OSS
+    data-acceleration endpoint when ``ossfs`` flushes a multi-chunk write.
+
+    ``root_uri`` is the bucket root, e.g. ``oss://my-bucket/``; it must carry
+    the bucket so ``JindoOssFileSystem`` can re-attach the ``oss://`` scheme to
+    the bucket-relative paths that ``PaimonVirtualFileSystem`` passes in.
+    """
+    if not (JINDO_AVAILABLE and JINDO_OSSFS_AVAILABLE):
+        raise ImportError(
+            "pyjindo.ossfs is not available. Please install pyjindosdk>=6.10.4."
+        )
+
+    return jossfs.JindoOssFileSystem(
+        uri=root_uri,
+        config=build_jindo_config(catalog_options),
+        # PaimonVirtualFileSystem owns directory semantics for the virtual FS;
+        # the backing object-store fs must not auto-create dir-marker objects.
+        auto_mkdir=False,
+        # Bypass fsspec's _Cached metaclass instance cache, so the only
+        # reference to this filesystem -- and to its underlying native jindo
+        # connection -- is the PaimonRealStorage cache in PVFS. On token
+        # refresh PVFS replaces that entry and the native resources can be
+        # released, instead of being pinned forever by fsspec's global cache.
+        skip_instance_cache=True,
+    )
 
 
 class JindoInputFile:
@@ -129,28 +207,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.root_path = root_path
         self.properties = catalog_options
 
-        # Build jindo config from catalog_options
-        config = jutil.Config()
-
-        access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
-        access_key_secret = catalog_options.get(OssOptions.OSS_ACCESS_KEY_SECRET)
-        security_token = catalog_options.get(OssOptions.OSS_SECURITY_TOKEN)
-        endpoint = catalog_options.get(OssOptions.OSS_ENDPOINT)
-        region = catalog_options.get(OssOptions.OSS_REGION)
-
-        if access_key_id:
-            config.set("fs.oss.accessKeyId", access_key_id)
-        if access_key_secret:
-            config.set("fs.oss.accessKeySecret", access_key_secret)
-        if security_token:
-            config.set("fs.oss.securityToken", security_token)
-        if endpoint:
-            endpoint_clean = endpoint.replace('http://', '').replace('https://', '')
-            config.set("fs.oss.endpoint", endpoint_clean)
-        if region:
-            config.set("fs.oss.region", region)
-        config.set("fs.oss.user.agent.features", "pypaimon")
-
+        config = build_jindo_config(catalog_options)
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
 
     def __eq__(self, other):

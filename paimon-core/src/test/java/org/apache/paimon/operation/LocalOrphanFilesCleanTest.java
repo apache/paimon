@@ -628,6 +628,58 @@ public class LocalOrphanFilesCleanTest {
                 .isTrue();
     }
 
+    @Test
+    void testDirectoriesNotTreatedAsOrphanCandidates() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+
+        Path partitionPath = new Path(tablePath, "part1=0/part2=a");
+        Path bucketPath =
+                listSubDirs(partitionPath, p -> p.getName().startsWith(BUCKET_PATH_PREFIX)).get(0);
+        assertThat(fileIO.listStatus(bucketPath)).isNotEmpty();
+
+        Path subdirInBucket = new Path(bucketPath, "orphan-subdir");
+        fileIO.mkdirs(subdirInBucket);
+        fileIO.tryToWriteAtomic(new Path(subdirInBucket, "stale-file.tmp"), "data");
+
+        String bucketName = bucketPath.getName();
+        long oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2);
+        Files.setLastModifiedTime(
+                tempDir.resolve("part1=0/part2=a/" + bucketName + "/orphan-subdir"),
+                FileTime.fromMillis(oldTime));
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(table, System.currentTimeMillis());
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFilesPath())
+                .noneMatch(p -> p.toString().contains("orphan-subdir"));
+        assertThat(fileIO.exists(bucketPath)).isTrue();
+        assertThat(fileIO.listStatus(bucketPath).length).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void testDirectoryInSnapshotDirNotTreatedAsCandidate() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+
+        Path snapshotDir = new Path(tablePath, "snapshot");
+        assertThat(fileIO.exists(snapshotDir)).isTrue();
+
+        Path unknownDir = new Path(snapshotDir, "UNKNOWN-stale-dir");
+        fileIO.mkdirs(unknownDir);
+
+        long oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2);
+        Files.setLastModifiedTime(
+                tempDir.resolve("snapshot/UNKNOWN-stale-dir"), FileTime.fromMillis(oldTime));
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(table, System.currentTimeMillis());
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFilesPath())
+                .noneMatch(p -> p.toString().contains("UNKNOWN-stale-dir"));
+        assertThat(fileIO.exists(unknownDir)).isTrue();
+    }
+
     private void writeData(
             SnapshotManager snapshotManager,
             List<List<TestPojo>> committedData,
@@ -824,11 +876,7 @@ public class LocalOrphanFilesCleanTest {
             String fileName =
                     fileNamePrefix.get(RANDOM.nextInt(fileNamePrefix.size())) + UUID.randomUUID();
             Path file = new Path(dir, fileName);
-            if (RANDOM.nextBoolean()) {
-                fileIO.tryToWriteAtomic(file, "");
-            } else {
-                fileIO.mkdirs(file);
-            }
+            fileIO.tryToWriteAtomic(file, "");
             manuallyAddedFiles.add(file);
         }
     }

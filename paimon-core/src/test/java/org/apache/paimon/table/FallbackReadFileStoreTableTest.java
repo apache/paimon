@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -26,7 +28,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -34,7 +39,9 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -42,17 +49,23 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SchemaEvolutionTableTestBase.rowData;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FallbackReadFileStoreTable}. */
 public class FallbackReadFileStoreTableTest {
@@ -240,6 +253,191 @@ public class FallbackReadFileStoreTableTest {
                         .map(row -> row.getInt(0))
                         .collect(Collectors.toList());
         assertThat(mergedPartitions).containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    @Test
+    public void testFallbackReadFailFastDefaultSwallowsException() throws Exception {
+        FallbackReadFileStoreTable table = setUpTableWithThrowingFallback(false);
+        Split split = onlyFallbackSplit(table);
+
+        // Default behavior: the failing fallback read is swallowed and the reader
+        // falls through to the main branch, which has no data for partition 3 and
+        // either returns an empty reader or throws something other than the
+        // injected fallback exception.
+        try {
+            table.newRead().createReader(split);
+        } catch (Exception e) {
+            assertThat(e.getMessage())
+                    .as("fallback exception must not propagate when fail-fast is disabled")
+                    .doesNotContain("injected fallback failure");
+        }
+    }
+
+    @Test
+    public void testFallbackReadFailFastPropagatesException() throws Exception {
+        FallbackReadFileStoreTable table = setUpTableWithThrowingFallback(true);
+        Split split = onlyFallbackSplit(table);
+
+        assertThatThrownBy(() -> table.newRead().createReader(split))
+                .hasMessageContaining("injected fallback failure");
+    }
+
+    private FallbackReadFileStoreTable setUpTableWithThrowingFallback(boolean failFast)
+            throws Exception {
+        String branchName = "bc";
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+        writeDataIntoTable(branchTable, 0, rowData(3, 60));
+
+        Options overrides = new Options();
+        overrides.set(CoreOptions.SCAN_FALLBACK_BRANCH_READ_FAIL_FAST, failFast);
+        FileStoreTable mainWithOption = mainTable.copy(overrides.toMap());
+
+        FileStoreTable spyBranch = Mockito.spy(branchTable);
+        InnerTableRead throwing = throwingInnerTableRead();
+        Mockito.doReturn(throwing).when(spyBranch).newRead();
+
+        return new FallbackReadFileStoreTable(mainWithOption, spyBranch, true);
+    }
+
+    private static Split onlyFallbackSplit(FallbackReadFileStoreTable table) {
+        DataTableScan scan = table.newScan();
+        scan.withFilter(new PredicateBuilder(ROW_TYPE).equal(0, 3));
+        List<Split> splits = scan.plan().splits();
+        assertThat(splits).hasSize(1);
+        FallbackReadFileStoreTable.FallbackSplit fs =
+                (FallbackReadFileStoreTable.FallbackSplit) splits.get(0);
+        assertThat(fs.isFallback()).isTrue();
+        return splits.get(0);
+    }
+
+    private static InnerTableRead throwingInnerTableRead() {
+        return new InnerTableRead() {
+            @Override
+            public InnerTableRead withFilter(Predicate predicate) {
+                return this;
+            }
+
+            @Override
+            public InnerTableRead withReadType(RowType readType) {
+                return this;
+            }
+
+            @Override
+            public TableRead withIOManager(org.apache.paimon.disk.IOManager ioManager) {
+                return this;
+            }
+
+            @Override
+            public org.apache.paimon.reader.RecordReader<InternalRow> createReader(Split split)
+                    throws IOException {
+                throw new IOException("injected fallback failure");
+            }
+        };
+    }
+
+    /**
+     * Test that FallbackReadScan uses separate partition predicates for main and fallback scans.
+     * When withPartitionFilter(mainPredicate, fallbackPredicate) is called, plan() should only list
+     * partitions matching the corresponding predicate from each branch.
+     */
+    @Test
+    public void testMainAndFallbackPartitionPredicates() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+
+        mainTable.createBranch("bc");
+        FileStoreTable branchTable = createTableFromBranch(mainTable, "bc");
+        writeDataIntoTable(
+                branchTable, 0, rowData(1, 100), rowData(2, 200), rowData(3, 300), rowData(4, 400));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        RowType partitionType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"pt"});
+        PartitionPredicate mainPredicate =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(BinaryRow.singleColumn(1)));
+        PartitionPredicate fallbackPredicate =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(BinaryRow.singleColumn(3)));
+
+        // Case 1: both predicates set, pt=1 from main, pt=3 from fallback
+        assertThat(
+                        readAndCollect(
+                                table,
+                                scan -> scan.withPartitionFilter(mainPredicate, fallbackPredicate)))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(3, 300));
+
+        // Case 2: main predicate is null, fallback predicate set
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(null, fallbackPredicate)))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 300));
+
+        // Case 3: main predicate set, fallback predicate is null
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(mainPredicate, null)))
+                .containsExactlyInAnyOrder(
+                        Pair.of(1, 10), Pair.of(2, 200), Pair.of(3, 300), Pair.of(4, 400));
+
+        // Case 4: both null
+        assertThat(readAndCollect(table, scan -> scan.withPartitionFilter(null, null)))
+                .containsExactlyInAnyOrder(
+                        Pair.of(1, 10), Pair.of(2, 20), Pair.of(3, 300), Pair.of(4, 400));
+    }
+
+    private List<Pair<Integer, Integer>> readAndCollect(
+            FallbackReadFileStoreTable table,
+            Consumer<FallbackReadFileStoreTable.FallbackReadScan> consumer)
+            throws Exception {
+        FallbackReadFileStoreTable.FallbackReadScan scan =
+                (FallbackReadFileStoreTable.FallbackReadScan) table.newScan();
+        consumer.accept(scan);
+        List<Pair<Integer, Integer>> result = new ArrayList<>();
+        for (Split split : scan.plan().splits()) {
+            RecordReader<InternalRow> reader = table.newRead().createReader(split);
+            reader.forEachRemaining(r -> result.add(Pair.of(r.getInt(0), r.getInt(1))));
+            reader.close();
+        }
+        return result;
+    }
+
+    @Test
+    void testSwitchToBranch() throws Exception {
+        String branchName = "bc";
+
+        Identifier mainId = Identifier.create("mydb", "mytable");
+        CatalogEnvironment env =
+                new CatalogEnvironment(mainId, "uuid-1", null, null, null, null, false, false);
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                Collections.emptyMap(),
+                                ""));
+        AppendOnlyFileStoreTable mainTable =
+                new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema, env);
+
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createBranch(branchName);
+
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable fallbackTable =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+
+        FileStoreTable switched = fallbackTable.switchToBranch(branchName);
+        Identifier switchedId = switched.catalogEnvironment().identifier();
+
+        assertThat(switchedId).isNotNull();
+        assertThat(switchedId.getDatabaseName()).isEqualTo("mydb");
+        assertThat(switchedId.getBranchName()).isEqualTo(branchName);
+        assertThat(switchedId.getObjectName()).isEqualTo("mytable$branch_bc");
     }
 
     private void writeDataIntoTable(

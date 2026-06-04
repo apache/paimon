@@ -23,11 +23,14 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -139,5 +142,126 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
         sql(
                 "CALL sys.create_global_index(`table` => 'default.%s', index_column => '%s', index_type => 'btree')",
                 tableName, indexColumn);
+    }
+
+    @Test
+    void testBTreeIndexWithSingleRangeAndParallelWriters() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_SINGLE_RANGE_PARALLEL (id INT, name STRING) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        String values =
+                IntStream.range(0, 2_000)
+                        .mapToObj(i -> String.format("(%s, %s)", i, "'name_" + i + "'"))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_SINGLE_RANGE_PARALLEL VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_SINGLE_RANGE_PARALLEL', "
+                        + "index_column => 'id', index_type => 'btree', "
+                        + "options => 'btree-index.records-per-range=100;"
+                        + "btree-index.build.max-parallelism=4')");
+
+        FileStoreTable table = paimonTable("T_SINGLE_RANGE_PARALLEL");
+        List<IndexFileMeta> btreeEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> "btree".equals(f.indexType()))
+                        .collect(Collectors.toList());
+
+        long totalRowCount = btreeEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(btreeEntries).hasSizeGreaterThan(1);
+        assertThat(totalRowCount).isEqualTo(2_000L);
+
+        assertThat(sql("SELECT * FROM T_SINGLE_RANGE_PARALLEL WHERE id = 1500"))
+                .containsOnly(Row.of(1500, "name_1500"));
+    }
+
+    @Test
+    void testBTreeIndexWithManyPartitions() throws Catalog.TableNotExistException {
+        int numPartitions = 50;
+        sql(
+                "CREATE TABLE T_MANY_PT (pt INT, id INT, name STRING) PARTITIONED BY (pt) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        for (int p = 0; p < numPartitions; p++) {
+            insertPartitionRows("T_MANY_PT", p, p * 2, 2, "r_");
+        }
+
+        buildBTreeIndexForTable("T_MANY_PT", "id");
+
+        FileStoreTable table = paimonTable("T_MANY_PT");
+        long totalRowCount =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> "btree".equals(e.indexFile().indexType()))
+                        .map(IndexManifestEntry::indexFile)
+                        .mapToLong(IndexFileMeta::rowCount)
+                        .sum();
+        assertThat(totalRowCount).isEqualTo((long) numPartitions * 2);
+    }
+
+    @Test
+    void testUnionDoesNotStackOverflow() throws InterruptedException {
+        int totalUnions = 1000;
+        long stackSize = 512 * 1024; // Flink JM default
+
+        // Chained union: result = result.union(new) — causes StackOverflowError
+        AtomicReference<Throwable> chainedError = new AtomicReference<>();
+        Thread chainedThread =
+                new Thread(
+                        null,
+                        () -> {
+                            try {
+                                StreamExecutionEnvironment env =
+                                        StreamExecutionEnvironment.getExecutionEnvironment();
+                                DataStream<String> all = null;
+                                for (int i = 0; i < totalUnions; i++) {
+                                    DataStream<String> s = env.fromElements("item-" + i);
+                                    all = all == null ? s : all.union(s);
+                                }
+                                all.print();
+                                env.getExecutionPlan();
+                            } catch (Throwable t) {
+                                chainedError.set(t);
+                            }
+                        },
+                        "chained-union-test",
+                        stackSize);
+        chainedThread.start();
+        chainedThread.join();
+        assertThat(chainedError.get()).isInstanceOf(StackOverflowError.class);
+
+        // Flat union: first.union(rest...) — no overflow at same stack size
+        AtomicReference<Throwable> flatError = new AtomicReference<>();
+        Thread flatThread =
+                new Thread(
+                        null,
+                        () -> {
+                            try {
+                                StreamExecutionEnvironment env =
+                                        StreamExecutionEnvironment.getExecutionEnvironment();
+                                @SuppressWarnings("unchecked")
+                                DataStream<String>[] streams = new DataStream[totalUnions];
+                                for (int i = 0; i < totalUnions; i++) {
+                                    streams[i] = env.fromElements("item-" + i);
+                                }
+                                @SuppressWarnings("unchecked")
+                                DataStream<String>[] rest = new DataStream[totalUnions - 1];
+                                System.arraycopy(streams, 1, rest, 0, totalUnions - 1);
+                                streams[0].union(rest).print();
+                                env.getExecutionPlan();
+                            } catch (Throwable t) {
+                                flatError.set(t);
+                            }
+                        },
+                        "flat-union-test",
+                        stackSize);
+        flatThread.start();
+        flatThread.join();
+        assertThat(flatError.get()).isNull();
     }
 }

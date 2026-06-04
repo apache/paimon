@@ -1,33 +1,53 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import bisect
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
 
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import DataField
-from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.range import Range
+from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.writer.blob_writer import BlobWriter
+
+
+@dataclass(frozen=True)
+class _FilesInfo:
+    """Snapshot view of target data files keyed by first_row_id.
+
+    Built once per merge by the driver and broadcast to workers so each task
+    avoids re-scanning the manifest.
+    """
+    snapshot_id: int
+    first_row_ids: List[int]
+    first_row_id_index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = (
+        field(default_factory=dict)
+    )
+    valid_row_id_ranges: List[Range] = field(default_factory=list)
 
 
 class TableUpdateByRowId:
@@ -40,52 +60,95 @@ class TableUpdateByRowId:
 
     FIRST_ROW_ID_COLUMN = '_FIRST_ROW_ID'
 
-    def __init__(self, table, commit_user: str):
+    def __init__(
+            self, table, commit_user: str, commit_identifier: int,
+            _precomputed_files_info: Optional[_FilesInfo] = None,
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.commit_user = commit_user
+        self.commit_identifier = commit_identifier
 
-        # Load existing first_row_ids and build partition map
-        (self.snapshot_id,
-         self.first_row_ids,
-         self.first_row_id_to_partition_map,
-         self.first_row_id_to_row_count_map,
-         self.total_row_count,
-         self.splits) = self._load_existing_files_info()
+        info = _precomputed_files_info or self._load_existing_files_info()
+        self.snapshot_id = info.snapshot_id
+        self.first_row_ids = info.first_row_ids
+        self._first_row_id_index = info.first_row_id_index
+        self.valid_row_id_ranges = info.valid_row_id_ranges
 
-        # Collect commit messages
-        self.commit_messages = []
+        self.commit_messages: List[CommitMessage] = []
 
-    def _load_existing_files_info(self):
-        """Load existing first_row_ids and build partition map for efficient lookup."""
-        first_row_ids = []
-        first_row_id_to_partition_map: Dict[int, GenericRow] = {}
-        first_row_id_to_row_count_map: Dict[int, int] = {}
+    def _snapshot_files_info(self) -> _FilesInfo:
+        """Internal: return the current snapshot's file index for broadcast."""
+        return _FilesInfo(
+            snapshot_id=self.snapshot_id,
+            first_row_ids=self.first_row_ids,
+            first_row_id_index=self._first_row_id_index,
+            valid_row_id_ranges=self.valid_row_id_ranges,
+        )
 
-        read_builder = self.table.new_read_builder()
-        scan = read_builder.new_scan()
-        splits = scan.plan().splits()
+    def _load_existing_files_info(self) -> _FilesInfo:
+        """Scan the latest snapshot once and index files by ``first_row_id``.
 
+        Returns a :class:`_FilesInfo` whose ``first_row_id_index`` maps each
+        ``first_row_id`` to the owning split and the list of files with that
+        id (a single id may belong to multiple files when data evolution has
+        split a logical row range).
+        """
+        plan = self.table.new_read_builder().new_scan().plan()
+        splits = plan.splits()
+
+        index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
+        row_id_ranges: List[Range] = []
         for split in splits:
+            files_with_row_id = [
+                file for file in split.files if file.first_row_id is not None
+            ]
+            data_files = [
+                file for file in files_with_row_id
+                if not DataFileMeta.is_blob_file(file.file_name)
+            ]
             for file in split.files:
-                if file.first_row_id is not None and not file.file_name.endswith('.blob'):
-                    first_row_id = file.first_row_id
-                    first_row_ids.append(first_row_id)
-                    first_row_id_to_partition_map[first_row_id] = split.partition
-                    first_row_id_to_row_count_map[first_row_id] = file.row_count
+                if file.first_row_id is None or DataFileMeta.is_blob_file(file.file_name):
+                    continue
+                row_id_ranges.append(file.row_id_range())
+            for file in data_files:
+                target_files = [
+                    target_file
+                    for target_file in files_with_row_id
+                    if self._overlaps(file.row_id_range(), target_file.row_id_range())
+                ]
 
-        total_row_count = sum(first_row_id_to_row_count_map.values())
+                entry = index.get(file.first_row_id)
+                if entry is None:
+                    index[file.first_row_id] = (split, target_files)
+                else:
+                    existing_files = entry[1]
+                    existing_names = {existing.file_name for existing in existing_files}
+                    existing_files.extend(
+                        target_file
+                        for target_file in target_files
+                        if target_file.file_name not in existing_names
+                    )
 
-        snapshot_id = self.table.snapshot_manager().get_latest_snapshot().id
-        return (snapshot_id,
-                sorted(list(set(first_row_ids))),
-                first_row_id_to_partition_map,
-                first_row_id_to_row_count_map,
-                total_row_count,
-                splits)
+        if row_id_ranges:
+            merged = Range.sort_and_merge_overlap(row_id_ranges, True, True)
+        else:
+            merged = []
 
-    def update_columns(self, data: pa.Table, column_names: List[str]) -> List:
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        return _FilesInfo(
+            snapshot_id=snapshot_id,
+            first_row_ids=sorted(index.keys()),
+            first_row_id_index=index,
+            valid_row_id_ranges=merged,
+        )
+
+    @staticmethod
+    def _overlaps(left: Range, right: Range) -> bool:
+        return left.from_ <= right.to and right.from_ <= left.to
+
+    def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """
         Add or update columns in the table.
 
@@ -97,90 +160,73 @@ class TableUpdateByRowId:
             List of commit messages
         """
 
-        # Validate column_names is not empty
         if not column_names:
             raise ValueError("column_names cannot be empty")
 
-        # Validate input data has row_id column
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
 
-        # Validate all update columns exist in the schema
         for col_name in column_names:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        # Sort data by _ROW_ID column
         sorted_data = data.sort_by([(SpecialFields.ROW_ID.name, "ascending")])
-
-        # Calculate first_row_id for each row
         data_with_first_row_id = self._calculate_first_row_id(sorted_data)
-
-        # Group by first_row_id and write each group
         self._write_by_first_row_id(data_with_first_row_id, column_names)
 
         return self.commit_messages
 
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
-        """Calculate _first_row_id for each row based on _ROW_ID.
+        """Append ``_FIRST_ROW_ID`` to *data* by looking up each ``_ROW_ID``.
 
-        Supports partial row updates - row_ids don't need to be consecutive.
+        Validates that every input ``_ROW_ID`` is unique and belongs to
+        a valid row_id range. Supports partial / non-consecutive updates.
         """
-        row_ids = data[SpecialFields.ROW_ID.name].to_pylist()
+        row_id_arr = data[SpecialFields.ROW_ID.name]
+        row_ids = row_id_arr.to_pylist()
 
-        # Validate row_ids have no duplicates
         if len(row_ids) != len(set(row_ids)):
             raise ValueError("Input data contains duplicate _ROW_ID values")
 
-        # Validate row_ids are within valid range
+        if not row_ids:
+            return data.append_column(
+                self.FIRST_ROW_ID_COLUMN, pa.array([], type=pa.int64()),
+            )
+
         for row_id in row_ids:
-            if row_id < 0 or row_id >= self.total_row_count:
-                raise ValueError(f"Row ID {row_id} is out of valid range [0, {self.total_row_count})")
+            if not any(r.contains(row_id) for r in self.valid_row_id_ranges):
+                raise ValueError(
+                    f"Row ID {row_id} does not belong to any valid range "
+                    f"{[f'[{r.from_}, {r.to}]' for r in self.valid_row_id_ranges]}"
+                )
 
-        # Calculate first_row_id for each row_id
-        first_row_id_values = []
-        for row_id in row_ids:
-            first_row_id = self._floor_binary_search(self.first_row_ids, row_id)
-            first_row_id_values.append(first_row_id)
-
-        # Add first_row_id column to the table
-        first_row_id_array = pa.array(first_row_id_values, type=pa.int64())
-        return data.append_column(self.FIRST_ROW_ID_COLUMN, first_row_id_array)
-
-    def _floor_binary_search(self, sorted_seq: List[int], value: int) -> int:
-        """Binary search to find the floor value in sorted sequence."""
-        if not sorted_seq:
+        if not self.first_row_ids:
             raise ValueError("The input sorted sequence is empty.")
 
-        idx = bisect.bisect_right(sorted_seq, value) - 1
-        if idx < 0:
-            raise ValueError(f"Value {value} is less than the first element in the sorted sequence.")
-
-        return sorted_seq[idx]
+        sorted_seq = self.first_row_ids
+        bisect_right = bisect.bisect_right
+        first_row_id_values = [
+            sorted_seq[bisect_right(sorted_seq, row_id) - 1]
+            for row_id in row_ids
+        ]
+        return data.append_column(
+            self.FIRST_ROW_ID_COLUMN,
+            pa.array(first_row_id_values, type=pa.int64()),
+        )
 
     def _write_by_first_row_id(self, data: pa.Table, column_names: List[str]):
         """Write data grouped by first_row_id."""
-        # Extract unique first_row_id values
         first_row_id_array = data[self.FIRST_ROW_ID_COLUMN]
         unique_first_row_ids = pc.unique(first_row_id_array).to_pylist()
 
         for first_row_id in unique_first_row_ids:
-            # Filter rows for this first_row_id
-            mask = pc.equal(first_row_id_array, first_row_id)
-            group_data = data.filter(mask)
-
-            # Get partition for this first_row_id
-            partition = self._find_partition_by_first_row_id(first_row_id)
-
-            if partition is None:
+            entry = self._first_row_id_index.get(first_row_id)
+            if entry is None:
                 raise ValueError(f"No existing file found for first_row_id {first_row_id}")
+            split, _files = entry
 
-            # Write this group
-            self._write_group(partition, first_row_id, group_data, column_names)
-
-    def _find_partition_by_first_row_id(self, first_row_id: int) -> Optional[GenericRow]:
-        """Find the partition for a given first_row_id using pre-built partition map."""
-        return self.first_row_id_to_partition_map.get(first_row_id)
+            group_data = data.filter(pc.equal(first_row_id_array, first_row_id))
+            self._write_group(split.partition, first_row_id, group_data, column_names)
 
     def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> Optional[pa.Table]:
         """Read original file data for the given first_row_id.
@@ -197,47 +243,33 @@ class TableUpdateByRowId:
             PyArrow Table containing the original data for columns that exist in the file,
             or None if no columns need to be read from the original file.
         """
-
-        # Build read type for the columns we need to read
-        read_fields: List[DataField] = []
-        for field in self.table.fields:
-            if field.name in column_names:
-                read_fields.append(field)
-
+        wanted = set(column_names)
+        read_fields: List[DataField] = [
+            table_field for table_field in self.table.fields if table_field.name in wanted
+        ]
         if not read_fields:
             return None
 
-        # Find the split that contains files with this first_row_id
-        target_split = None
-        target_files = []
-        for split in self.splits:
-            for file_idx, file in enumerate(split.files):
-                if file.first_row_id == first_row_id:
-                    target_files.append(file)
-                    if target_split is None:
-                        target_split = split
-            if target_split is not None:
-                break
-
-        if not target_files:
+        entry = self._first_row_id_index.get(first_row_id)
+        if entry is None:
             raise ValueError(f"No file found for first_row_id {first_row_id}")
+        owning_split, target_files = entry
 
-        # Create a DataSplit containing all files with this first_row_id
         origin_split = DataSplit(
             files=target_files,
-            partition=target_split.partition,
-            bucket=target_split.bucket,
-            raw_convertible=True
+            partition=owning_split.partition,
+            bucket=owning_split.bucket,
+            raw_convertible=True,
         )
-
-        # Create TableRead and read the data
         table_read = TableRead(self.table, predicate=None, read_type=read_fields)
-        origin_data = table_read.to_arrow([origin_split])
+        return table_read.to_arrow([origin_split])
 
-        return origin_data
-
-    def _merge_update_with_original(self, original_data: Optional[pa.Table], update_data: pa.Table,
-                                    column_names: List[str], first_row_id: int) -> pa.Table:
+    def _merge_update_with_original(
+            self,
+            original_data: Optional[pa.Table],
+            update_data: pa.Table,
+            column_names: List[str],
+            first_row_id: int) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
@@ -250,7 +282,7 @@ class TableUpdateByRowId:
             first_row_id: The first_row_id of this file group
 
         Returns:
-            Merged PyArrow Table with all rows
+            Normal merged PyArrow Table and blob values to write row-by-row.
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -265,60 +297,97 @@ class TableUpdateByRowId:
 
         # Build the merged table column by column
         merged_columns = {}
+        blob_columns = {}
+        update_by_col = {
+            col_name: update_data[col_name].combine_chunks()
+            for col_name in column_names
+        }
+        update_positions = {
+            int(relative_index.as_py()): idx
+            for idx, relative_index in enumerate(relative_indices)
+        }
         for col_name in column_names:
-            update_col = update_data[col_name].combine_chunks()
+            update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
-            # replace_with_mask fills mask=True positions with update values in order
-            merged_columns[col_name] = pc.replace_with_mask(
-                original_col, mask, update_col.cast(original_col.type)
-            )
+            if self._is_blob_column(col_name):
+                blob_columns[col_name] = [
+                    update_col[update_positions[i]].as_py()
+                    if i in update_positions
+                    else Blob.PLACE_HOLDER
+                    for i in range(original_data.num_rows)
+                ]
+            else:
+                # replace_with_mask fills mask=True positions with update values in order
+                merged_columns[col_name] = pc.replace_with_mask(
+                    original_col, mask, update_col.cast(original_col.type)
+                )
 
-        # Create the merged table
-        merged_table = pa.table(merged_columns)
+        merged_table = pa.table(merged_columns) if merged_columns else None
 
-        return merged_table
+        return merged_table, blob_columns
+
+    def _is_blob_column(self, column_name: str) -> bool:
+        for table_field in self.table.fields:
+            if table_field.name == column_name:
+                return getattr(table_field.type, 'type', None) == 'BLOB'
+        return False
 
     def _write_group(self, partition: GenericRow, first_row_id: int,
                      data: pa.Table, column_names: List[str]):
         """Write a group of data with the same first_row_id.
 
-        This method reads the original file data, merges it with the update data,
-        and writes out the complete merged data. Supports partial row updates.
+        Reads the original file data, merges in the update values, and
+        writes a single output file (rolling disabled) for the group.
         """
-
-        # Read original file data for the columns being updated
         original_data = self._read_original_file_data(first_row_id, column_names)
+        merged_data, blob_columns = self._merge_update_with_original(
+            original_data, data, column_names, first_row_id,
+        )
 
-        # Merge update data with original data
-        merged_data = self._merge_update_with_original(original_data, data, column_names, first_row_id)
-
-        # Create a file store write for this partition
-        # Disable rolling to ensure one output file per first_row_id group,
-        file_store_write = FileStoreWrite(self.table, self.commit_user)
-        file_store_write.disable_rolling()
-
-        # Set write columns to only update specific columns
-        write_cols = column_names
-        file_store_write.write_cols = write_cols
-
-        # Convert partition to tuple for hashing
         partition_tuple = tuple(partition.values)
+        new_files = []
+        file_store_write = None
+        blob_writers = []
+        try:
+            if merged_data is not None:
+                file_store_write = FileStoreWrite(self.table, self.commit_user)
+                file_store_write.disable_rolling()
+                file_store_write.write_cols = list(merged_data.column_names)
+                for batch in merged_data.to_batches():
+                    file_store_write.write(partition_tuple, 0, batch)
+                new_messages = file_store_write.prepare_commit(self.commit_identifier)
+                for msg in new_messages:
+                    new_files.extend(msg.new_files)
 
-        # Write merged data - convert Table to RecordBatch
-        for batch in merged_data.to_batches():
-            file_store_write.write(partition_tuple, 0, batch)
+            for column_name, values in blob_columns.items():
+                blob_writer = BlobWriter(
+                    self.table,
+                    partition_tuple,
+                    0,
+                    0,
+                    column_name,
+                    self.table.options,
+                )
+                blob_writers.append(blob_writer)
+                arrow_type = original_data.schema.field(column_name).type
+                for value in values:
+                    blob_writer.write_blob(value, arrow_type)
+                new_files.extend(blob_writer.prepare_commit())
 
-        # Prepare commit and assign first_row_id
-        commit_messages = file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
-
-        # Assign first_row_id to the new files
-        for msg in commit_messages:
-            msg.check_from_snapshot = self.snapshot_id
-            for file in msg.new_files:
-                file.first_row_id = first_row_id
-                file.write_cols = write_cols
-
-        self.commit_messages.extend(commit_messages)
-
-        # Close the writer
-        file_store_write.close()
+            if new_files:
+                for file in new_files:
+                    file.first_row_id = first_row_id
+                    file.write_cols = file.write_cols or column_names
+                self.commit_messages.append(
+                    CommitMessage(
+                        partition=partition_tuple,
+                        bucket=0,
+                        new_files=new_files,
+                        check_from_snapshot=self.snapshot_id,
+                    )
+                )
+        finally:
+            if file_store_write is not None:
+                file_store_write.close()
+            for blob_writer in blob_writers:
+                blob_writer.close()

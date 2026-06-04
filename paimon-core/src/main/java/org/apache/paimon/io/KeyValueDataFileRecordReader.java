@@ -36,12 +36,26 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
     private final FileRecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
+    private final boolean overrideSequenceWithSnapshotId;
+    private final long snapshotId;
 
     public KeyValueDataFileRecordReader(
             FileRecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
+        this(reader, keyType, valueType, level, false, KeyValue.UNKNOWN_SEQUENCE);
+    }
+
+    public KeyValueDataFileRecordReader(
+            FileRecordReader<InternalRow> reader,
+            RowType keyType,
+            RowType valueType,
+            int level,
+            boolean overrideSequenceWithSnapshotId,
+            long snapshotId) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
+        this.overrideSequenceWithSnapshotId = overrideSequenceWithSnapshotId;
+        this.snapshotId = snapshotId;
     }
 
     @Nullable
@@ -53,10 +67,20 @@ public class KeyValueDataFileRecordReader implements FileRecordReader<KeyValue> 
         }
 
         return iterator.transform(
-                internalRow ->
-                        internalRow == null
-                                ? null
-                                : serializer.fromRow(internalRow).setLevel(level));
+                internalRow -> {
+                    if (internalRow == null) {
+                        return null;
+                    }
+                    KeyValue kv = serializer.fromRow(internalRow).setLevel(level);
+                    // In snapshot-ordering mode, an APPEND file's on-disk per-record sequence
+                    // numbers are stale; we override them with the commit snapshot id so later
+                    // snapshots win during merge. Any read path bypassing this override would
+                    // order APPEND records incorrectly.
+                    if (overrideSequenceWithSnapshotId) {
+                        kv.setSequenceNumber(snapshotId);
+                    }
+                    return kv;
+                });
     }
 
     @Override

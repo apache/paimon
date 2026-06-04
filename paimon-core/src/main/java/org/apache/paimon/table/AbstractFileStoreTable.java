@@ -55,6 +55,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.BranchMergeHandler;
 import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
@@ -373,7 +374,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
 
         return copy(newTableSchema);
     }
@@ -382,9 +383,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public FileStoreTable copyWithLatestSchema() {
         Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
-            Map<String, String> options = tableSchema.options();
-            TableSchema newTableSchema = optionalLatestSchema.get();
-            newTableSchema = newTableSchema.copy(options);
+            TableSchema latestSchema = optionalLatestSchema.get();
+            Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
+            mergedOptions.putAll(tableSchema.options());
+            TableSchema newTableSchema = latestSchema.copy(mergedOptions);
             SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);
         } else {
@@ -738,6 +740,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        branchManager().mergeBranch(sourceBranch, targetBranch);
+    }
+
+    @Override
     public TagManager tagManager() {
         return new TagManager(fileIO, path, currentBranch(), coreOptions());
     }
@@ -749,7 +756,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             return new CatalogBranchManager(catalogEnvironment.catalogLoader(), identifier());
         }
         return new FileSystemBranchManager(
-                fileIO, path, snapshotManager(), tagManager(), schemaManager());
+                fileIO,
+                path,
+                snapshotManager(),
+                tagManager(),
+                schemaManager(),
+                new BranchMergeHandler(this::switchToBranch));
     }
 
     @Override
@@ -795,5 +807,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         AbstractFileStoreTable that = (AbstractFileStoreTable) o;
         return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(path, tableSchema);
     }
 }

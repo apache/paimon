@@ -23,6 +23,7 @@ import org.apache.paimon.table.CatalogTableType;
 import java.time.Duration;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.MemorySize.ofMebiBytes;
 
 /** Options for catalog. */
 public class CatalogOptions {
@@ -185,4 +186,41 @@ public class CatalogOptions {
                             "Whether to allow static cache in file io implementation. If not allowed, this means that "
                                     + "there may be a large number of FileIO instances generated, enabling caching can "
                                     + "lead to resource leakage.");
+
+    public static final ConfigOption<Boolean> LOCAL_CACHE_ENABLED =
+            key("local-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable local block cache for file reads. "
+                                    + "If local-cache.dir is configured, disk cache is used; otherwise memory cache is used.");
+
+    public static final ConfigOption<String> LOCAL_CACHE_DIR =
+            key("local-cache.dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Directory for local block cache on disk. "
+                                    + "If not configured, memory cache is used instead.");
+
+    public static final ConfigOption<MemorySize> LOCAL_CACHE_MAX_SIZE =
+            key("local-cache.max-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum total size of the local block cache. Unlimited by default.");
+
+    public static final ConfigOption<MemorySize> LOCAL_CACHE_BLOCK_SIZE =
+            key("local-cache.block-size")
+                    .memoryType()
+                    .defaultValue(ofMebiBytes(1))
+                    .withDescription("Block size for local cache.");
+
+    public static final ConfigOption<String> LOCAL_CACHE_WHITELIST =
+            key("local-cache.whitelist")
+                    .stringType()
+                    .defaultValue("meta,global-index")
+                    .withDescription(
+                            "Comma-separated list of file types to cache. "
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index.");
 }

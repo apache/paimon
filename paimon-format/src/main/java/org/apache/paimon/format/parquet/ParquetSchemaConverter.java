@@ -353,12 +353,16 @@ public class ParquetSchemaConverter {
                             instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
                         LogicalTypeAnnotation.TimestampLogicalTypeAnnotation timestampType =
                                 (LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) logicalType;
-                        int precision =
-                                timestampType
-                                                .getUnit()
-                                                .equals(LogicalTypeAnnotation.TimeUnit.MILLIS)
-                                        ? 3
-                                        : 6;
+                        int precision;
+                        if (timestampType.getUnit().equals(LogicalTypeAnnotation.TimeUnit.MILLIS)) {
+                            precision = 3;
+                        } else if (timestampType
+                                .getUnit()
+                                .equals(LogicalTypeAnnotation.TimeUnit.MICROS)) {
+                            precision = 6;
+                        } else {
+                            precision = 9;
+                        }
                         paimonDataType =
                                 timestampType.isAdjustedToUTC()
                                         ? new LocalZonedTimestampType(precision)

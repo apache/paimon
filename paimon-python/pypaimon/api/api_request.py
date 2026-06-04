@@ -1,20 +1,19 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from abc import ABC
 from dataclasses import dataclass
@@ -156,3 +155,43 @@ class AlterFunctionRequest(RESTRequest):
         return {
             self.FIELD_CHANGES: [c.to_dict() for c in self.changes]
         }
+
+
+# Wire DTO for ``POST /databases/{db}/tables/{tbl}/tags``. Mirrors Java
+# ``CreateTagRequest`` (paimon-api/.../rest/requests/CreateTagRequest.java) — only
+# three fields are serialized. ``ignoreIfExists`` is intentionally NOT included
+# here; it is a client-side flag handled by ``RESTCatalog.create_tag``, not part
+# of the wire format.
+@dataclass
+class CreateTagRequest(RESTRequest):
+    FIELD_TAG_NAME = "tagName"
+    FIELD_SNAPSHOT_ID = "snapshotId"
+    FIELD_TIME_RETAINED = "timeRetained"
+
+    tag_name: str = json_field(FIELD_TAG_NAME)
+    snapshot_id: Optional[int] = json_field(FIELD_SNAPSHOT_ID, default=None)
+    time_retained: Optional[str] = json_field(FIELD_TIME_RETAINED, default=None)
+
+
+# Branch CRUD wire DTOs. Mirrors Java requests in
+# paimon-api/.../rest/requests/.
+@dataclass
+class CreateBranchRequest(RESTRequest):
+    FIELD_BRANCH = "branch"
+    FIELD_FROM_TAG = "fromTag"
+
+    branch: str = json_field(FIELD_BRANCH)
+    from_tag: Optional[str] = json_field(FIELD_FROM_TAG, default=None)
+
+
+@dataclass
+class RenameBranchRequest(RESTRequest):
+    FIELD_TO_BRANCH = "toBranch"
+
+    to_branch: str = json_field(FIELD_TO_BRANCH)
+
+
+@dataclass
+class ForwardBranchRequest(RESTRequest):
+    """Empty body request; serializes to ``{}`` per Java ForwardBranchRequest."""
+    pass

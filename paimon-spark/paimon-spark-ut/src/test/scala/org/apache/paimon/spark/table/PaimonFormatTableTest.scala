@@ -50,13 +50,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
           "'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      val readTable =
-        paimonCatalog
-          .getTable(Identifier.create("test_db", s"$readTableName"))
-          .asInstanceOf[FormatTable]
-
-      table.fileIO().mkdirs(new Path(table.location()))
-      readTable.fileIO().mkdirs(new Path(readTable.location()))
 
       val partition = 20250920
       val partitionPath = new Path(table.location(), s"ds=$partition")
@@ -109,9 +102,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
            |CREATE TABLE $tableName (age INT, name STRING)
            |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon', 'file.compression'='gzip', 'lineSep'='abc')
            |""".stripMargin)
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName  VALUES (5, 'ab'), (7, 'Larry')")
       checkAnswer(
         spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
@@ -126,9 +116,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
       sql(
         s"CREATE TABLE $tableName (`ds` bigint, age INT, `ds1` bigint, name STRING, `ds2` bigint) USING ORC TBLPROPERTIES (" +
           s"'format-table.implementation'='paimon') PARTITIONED BY (`ds`, `ds1`, `ds2`)")
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName  VALUES (5, 11, 12, 'ab', 13), (7, 11, 12, 'Larry', 13)")
       checkAnswer(
         spark.sql(s"SELECT ds, age, ds1, name, ds2 FROM $tableName ORDER BY ds"),
@@ -148,6 +135,38 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable: create table like copies properties for same provider") {
+    assume(gteqSpark3_4)
+    withTable("source_tbl", "target_tbl") {
+      sql("""
+            |CREATE TABLE source_tbl (
+            |  id INT,
+            |  pt STRING
+            |) USING CSV
+            |PARTITIONED BY (pt)
+            |COMMENT 'source comment'
+            |TBLPROPERTIES (
+            |  'k' = 'v',
+            |  'csv.field-delimiter' = ';'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE target_tbl
+            |LIKE source_tbl
+            |""".stripMargin)
+
+      val target =
+        paimonCatalog.getTable(Identifier.create("test_db", "target_tbl")).asInstanceOf[FormatTable]
+      assert(target.partitionKeys().size() == 1)
+      assert(target.partitionKeys().get(0) == "pt")
+      assert(target.comment.isPresent)
+      assert(target.comment.get == "source comment")
+      assert(target.options().get("k") == "v")
+      assert(target.options().get("csv.field-delimiter") == ";")
+    }
+  }
+
   test("PaimonFormatTable non partition table overwrite: csv") {
     val tableName = "paimon_non_partiiton_overwrite_test"
     withTable(tableName) {
@@ -155,9 +174,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
                    |CREATE TABLE $tableName (age INT, name STRING)
                    |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon')
                    |""".stripMargin)
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName  VALUES (5, 'Ben'), (7, 'Larry')")
       checkAnswer(
         spark.sql(s"SELECT age, name FROM $tableName ORDER BY age"),
@@ -179,9 +195,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
                    |USING CSV TBLPROPERTIES ('format-table.implementation'='paimon')
                    |PARTITIONED BY (id INT)
                    |""".stripMargin)
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName PARTITION (id = 1) VALUES (5, 'Ben'), (7, 'Larry')")
       spark.sql(s"INSERT OVERWRITE $tableName PARTITION (id = 1) VALUES (5, 'Jerry'), (7, 'Tom')")
       checkAnswer(
@@ -202,9 +215,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     withTable(tableName) {
       sql(s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
         s"'seq'='|', 'lineSep'='\n', 'format-table.implementation'='paimon') PARTITIONED BY (`ds` bigint)")
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       val partition = 20250920
       sql(
         s"INSERT INTO $tableName VALUES (1, 'asfasdfsdf', $partition), (2, 'asfasdfsdf', $partition)")
@@ -220,9 +230,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     withTable(tableName) {
       sql(s"CREATE TABLE $tableName (f0 INT, f1 string) USING CSV TBLPROPERTIES (" +
         s"'format-table.implementation'='paimon','format-table.partition-path-only-value'='true') PARTITIONED BY (`ds` bigint)")
-      val table =
-        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      table.fileIO().mkdirs(new Path(table.location()))
       val partition = 20250920
       sql(
         s"INSERT INTO $tableName VALUES (1, 'asfasdfsdf', $partition), (2, 'asfasdfsdf', $partition)")
@@ -252,9 +259,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING $format " +
             s"TBLPROPERTIES ('file.compression'='$compression', 'seq'=',', 'lineSep'='\n'," +
             " 'format-table.implementation'='paimon')")
-        val path =
-          paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
-        fileIO.mkdirs(new Path(path))
         // Insert data using our new write implementation
         sql(s"INSERT INTO $tableName VALUES (1, 'Alice', 10.5)")
         sql(s"INSERT INTO $tableName VALUES (2, 'Bob', 20.7)")
@@ -307,10 +311,6 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
           s"CREATE TABLE $tableName (id INT, name STRING, value DOUBLE) USING $format " +
             s"PARTITIONED BY (dept STRING) TBLPROPERTIES ('file.compression'='$compression'," +
             " 'format-table.implementation'='paimon')")
-        val paimonTable = paimonCatalog.getTable(Identifier.create("test_db", tableName))
-        val path =
-          paimonCatalog.getTable(Identifier.create("test_db", tableName)).options().get("path")
-        fileIO.mkdirs(new Path(path))
         // Insert data into different partitions
         sql(
           s"INSERT INTO $tableName VALUES (1, 'Alice', 10.5, 'Engineering')," +
@@ -402,6 +402,27 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
             .mode("overwrite")
             .saveAsTable(tableName)
         }
+    }
+  }
+
+  test(
+    "PartitionedFormatTable: engine impl should return empty result when selecting a partition column on an empty table") {
+    val tableName = "engine_empty_partition_select"
+    withTable(tableName) {
+      val location = s"${tempDBDir.getCanonicalPath}/engine_empty_partition_select"
+      sql(s"""CREATE TABLE $tableName (clickid STRING, geo STRING, dt STRING, hour STRING)
+             |USING parquet PARTITIONED BY (dt, hour) LOCATION '$location'
+             |TBLPROPERTIES ('format-table.implementation'='engine')
+             |""".stripMargin)
+      fileIO.mkdirs(new Path(location))
+      checkAnswer(sql(s"SELECT clickid, hour FROM $tableName WHERE dt='20260418'"), Nil)
+      checkAnswer(sql(s"SELECT clickid, dt FROM $tableName WHERE hour='00'"), Nil)
+      checkAnswer(
+        sql(s"""SELECT clickid, max(hour) AS max_hour FROM $tableName
+               |WHERE dt='20260418' AND hour <= '11' AND geo IS NOT NULL
+               |GROUP BY clickid""".stripMargin),
+        Nil
+      )
     }
   }
 

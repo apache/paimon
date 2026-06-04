@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import List
 
@@ -81,3 +81,22 @@ class SpecialFields:
             fields_with_row_tracking.append(SpecialFields.SEQUENCE_NUMBER)
 
         return fields_with_row_tracking
+
+    @staticmethod
+    def row_type_with_row_id(table_fields: List[DataField]) -> List[DataField]:
+        """Add ROW_ID field to the given fields list.
+
+        Args:
+            table_fields: The original table fields
+        """
+        fields_with_row_id = list(table_fields)
+
+        for field in fields_with_row_id:
+            if SpecialFields.ROW_ID.name == field.name:
+                raise ValueError(
+                    "Row tracking field name '{}' conflicts with existing field names."
+                    .format(field.name)
+                )
+
+        fields_with_row_id.append(SpecialFields.ROW_ID)
+        return fields_with_row_id

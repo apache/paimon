@@ -87,12 +87,50 @@ public class NextSnapshotFetcher {
                     nextSnapshotId);
         } else {
             if (!changelogDecoupled) {
+                long earliestTime = -1;
+                long latestTime = -1;
+
+                if (earliestSnapshotId != null) {
+                    try {
+                        if (snapshotManager.snapshotExists(earliestSnapshotId)) {
+                            earliestTime =
+                                    snapshotManager.snapshot(earliestSnapshotId).timeMillis();
+                        }
+                    } catch (Exception e) {
+                        LOG.warn(
+                                "Failed to get snapshot time for ID earliest: {}",
+                                earliestSnapshotId,
+                                e);
+                    }
+                }
+
+                if (latestSnapshotId != null) {
+                    try {
+                        if (snapshotManager.snapshotExists(latestSnapshotId)) {
+                            latestTime = snapshotManager.snapshot(latestSnapshotId).timeMillis();
+                        }
+                    } catch (Exception e) {
+                        LOG.warn(
+                                "Failed to get snapshot time for ID latest: {}",
+                                latestSnapshotId,
+                                e);
+                    }
+                }
+
                 throw new OutOfRangeException(
                         String.format(
-                                "The snapshot with id %d has expired. You can: "
-                                        + "1. increase the snapshot or changelog expiration time. "
+                                "The wanted read snapshot with id %d has expired.\n"
+                                        + "Current status:\n"
+                                        + "  Earliest Snapshot ID: %s, Time: %d\n"
+                                        + "  Latest Snapshot ID: %s, Time: %d\n"
+                                        + "You can: \n"
+                                        + "1. increase the snapshot or changelog expiration time. \n"
                                         + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
-                                nextSnapshotId));
+                                nextSnapshotId,
+                                earliestSnapshotId,
+                                earliestTime,
+                                latestSnapshotId == null ? "N/A" : latestSnapshotId,
+                                latestTime));
             }
         }
     }

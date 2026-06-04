@@ -170,8 +170,7 @@ public class SortUtils {
                                     options.localSortMaxNumFileHandles(),
                                     options.spillCompressOptions(),
                                     sinkParallelism,
-                                    options.writeBufferSpillDiskSize(),
-                                    options.sequenceFieldSortOrderIsAscending()))
+                                    options.writeBufferSpillDiskSize()))
                     .setParallelism(sinkParallelism)
                     // remove the key column from every row
                     .map(

@@ -22,3 +22,17 @@ import org.apache.paimon.table.Table
 
 /** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
 case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table) {}
+
+/**
+ * Per-version companion: Spark 3.2 uses its own simpler `SparkTable` (without V2 row-level ops),
+ * which shadows the shaded `paimon-spark-common.SparkTable` at packaging time. `SparkCatalog` in
+ * `paimon-spark-common` calls `SparkTable$.MODULE$.of`, and `RowLevelHelper.shouldFallbackToV1`
+ * calls `SparkTable$.MODULE$.supportsV2RowLevelOps`, so this companion must expose both methods to
+ * avoid `NoSuchMethodError` at runtime. V2 row-level ops require Spark 3.5+, so on 3.2 we always
+ * report `false` and every DML goes through Paimon's V1 postHoc fallback path.
+ */
+object SparkTable {
+  def of(table: Table): SparkTable = SparkTable(table)
+
+  private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = false
+}

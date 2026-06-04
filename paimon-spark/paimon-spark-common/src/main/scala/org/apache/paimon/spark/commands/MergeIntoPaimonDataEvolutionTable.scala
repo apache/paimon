@@ -27,22 +27,27 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.RowType
+import org.apache.paimon.types.VectorType.isVectorStoreFile
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualTo, Expression, ExprId, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.{immutable, mutable}
@@ -60,7 +65,9 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with WithFileStoreTable {
+  with WithFileStoreTable
+  with ExpressionHelper
+  with Logging {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -85,9 +92,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case updateAction: UpdateAction =>
           for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              columns ++= Seq(key)
+            if (isModifiedAssignment(assignment)) {
+              columns += assignmentKeyAttribute(assignment)
             }
           }
       }
@@ -136,12 +142,16 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = v2Table.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
+    SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, targetRelation, sparkSession)
     invokeMergeInto(sparkSession)
     Seq.empty[Row]
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
-    val plan = table.newSnapshotReader().read()
+    val snapshotReader = table.newSnapshotReader()
+    pushDownMergePartitionFilter(snapshotReader)
+    val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
@@ -150,7 +160,12 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val firstRowIds: immutable.IndexedSeq[Long] = tableSplits
       .flatMap(_.dataFiles().asScala)
-      .filter(file => file.firstRowId() != null && !isBlobFile(file.fileName()))
+      .filter {
+        file =>
+          file.firstRowId() != null &&
+          !isBlobFile(file.fileName()) &&
+          !isVectorStoreFile(file.fileName())
+      }
       .map(file => file.firstRowId().asInstanceOf[Long])
       .distinct
       .sorted
@@ -200,6 +215,41 @@ case class MergeIntoPaimonDataEvolutionTable(
     writer.commit(updateCommit ++ insertCommit)
   }
 
+  private def pushDownMergePartitionFilter(snapshotReader: SnapshotReader): Unit = {
+    val partitionRowType = table.schema().logicalPartitionType()
+    if (partitionRowType.getFieldCount == 0) {
+      return
+    }
+
+    // matchedCondition comes from MergeIntoTable.mergeCondition, which is the MERGE ON condition.
+    val partitionPredicates = getExpressionOnlyRelated(matchedCondition, targetTable)
+      .map(splitConjunctivePredicates)
+      .map(extractMergePartitionFilters(_, partitionRowType))
+      .getOrElse(Seq.empty)
+
+    if (partitionPredicates.nonEmpty) {
+      val filter = convertConditionToPaimonPredicate(
+        partitionPredicates.reduce(And),
+        targetRelation.output,
+        rowType,
+        ignorePartialFailure = true)
+      filter.foreach(snapshotReader.withFilter)
+    }
+  }
+
+  private def extractMergePartitionFilters(
+      filters: Seq[Expression],
+      partitionRowType: RowType): Seq[Expression] = {
+    val partitionColumns = partitionRowType.getFieldNames.asScala.toSet
+    filters.filter {
+      f =>
+        f.deterministic &&
+        f.references.forall(attr => partitionColumns.exists(_.equalsIgnoreCase(attr.name))) &&
+        !SubqueryExpression.hasSubquery(f) &&
+        f.collect { case _: PythonUDF => true }.isEmpty
+    }
+  }
+
   private def targetRelatedSplits(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
@@ -208,6 +258,13 @@ case class MergeIntoPaimonDataEvolutionTable(
     // Self-Merge shortcut:
     // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
     if (isSelfMergeOnRowId) {
+      return tableSplits
+    }
+
+    if (!table.coreOptions().dataEvolutionMergeIntoFilePruning()) {
+      logInfo(
+        "Skip file-level pruning for MergeInto partial column update on data-evolution table " +
+          s"${table.name()}.")
       return tableSplits
     }
 
@@ -275,9 +332,7 @@ case class MergeIntoPaimonDataEvolutionTable(
           UpdateAction.apply(
             update.condition,
             update.assignments.filter(
-              a =>
-                updateColumnsSorted.contains(
-                  a.key.asInstanceOf[AttributeReference])) ++ assignments))
+              a => updateColumnsSorted.contains(assignmentKeyAttribute(a))) ++ assignments))
 
     for (action <- realUpdateActions) {
       allFields ++= action.references.flatMap(r => extractFields(r)).seq
@@ -334,10 +389,20 @@ case class MergeIntoPaimonDataEvolutionTable(
         matchedInstructions = rewrittenUpdateActions
           .map(
             action => {
-              Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-            }) ++ Seq(Keep(TrueLiteral, output)),
+              SparkShimLoader.shim
+                .mergeRowsKeepUpdate(
+                  action.condition.getOrElse(TrueLiteral),
+                  action.assignments.map(a => a.value))
+                .asInstanceOf[MergeRows.Instruction]
+            }) ++ Seq(
+          SparkShimLoader.shim
+            .mergeRowsKeepCopy(TrueLiteral, output)
+            .asInstanceOf[MergeRows.Instruction]),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)),
+        notMatchedBySourceInstructions = Seq(
+          SparkShimLoader.shim
+            .mergeRowsKeepCopy(TrueLiteral, output)
+            .asInstanceOf[MergeRows.Instruction]),
         checkCardinality = false,
         output = output,
         child = readPlan
@@ -373,10 +438,20 @@ case class MergeIntoPaimonDataEvolutionTable(
         matchedInstructions = realUpdateActions
           .map(
             action => {
-              Keep(action.condition.getOrElse(TrueLiteral), action.assignments.map(a => a.value))
-            }) ++ Seq(Keep(TrueLiteral, output)),
+              SparkShimLoader.shim
+                .mergeRowsKeepUpdate(
+                  action.condition.getOrElse(TrueLiteral),
+                  action.assignments.map(a => a.value))
+                .asInstanceOf[MergeRows.Instruction]
+            }) ++ Seq(
+          SparkShimLoader.shim
+            .mergeRowsKeepCopy(TrueLiteral, output)
+            .asInstanceOf[MergeRows.Instruction]),
         notMatchedInstructions = Nil,
-        notMatchedBySourceInstructions = Seq(Keep(TrueLiteral, output)).toSeq,
+        notMatchedBySourceInstructions = Seq(
+          SparkShimLoader.shim
+            .mergeRowsKeepCopy(TrueLiteral, output)
+            .asInstanceOf[MergeRows.Instruction]).toSeq,
         checkCardinality = false,
         output = output,
         child = joinPlan
@@ -412,16 +487,18 @@ case class MergeIntoPaimonDataEvolutionTable(
       matchedInstructions = Nil,
       notMatchedInstructions = notMatchedActions.map {
         case insertAction: InsertAction =>
-          Keep(
-            insertAction.condition.getOrElse(TrueLiteral),
-            insertAction.assignments.map(
-              a =>
-                if (
-                  !a.value.isInstanceOf[AttributeReference] || joinPlan.output.exists(
-                    attr => attr.toString().equals(a.value.toString()))
-                ) a.value
-                else Literal(null))
-          )
+          SparkShimLoader.shim
+            .mergeRowsKeepInsert(
+              insertAction.condition.getOrElse(TrueLiteral),
+              insertAction.assignments.map(
+                a =>
+                  if (
+                    !a.value.isInstanceOf[AttributeReference] || joinPlan.output.exists(
+                      attr => attr.toString().equals(a.value.toString()))
+                  ) a.value
+                  else Literal(null))
+            )
+            .asInstanceOf[MergeRows.Instruction]
       }.toSeq,
       notMatchedBySourceInstructions = Nil,
       checkCardinality = false,
@@ -589,6 +666,27 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_FROM_TARGET = "__row_from_target"
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
+
+  private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
+    !sameAttributeReference(assignment.key, assignment.value)
+  }
+
+  private[commands] def assignmentKeyAttribute(assignment: Assignment): AttributeReference = {
+    assignment.key match {
+      case key: AttributeReference => key
+      case other =>
+        throw new UnsupportedOperationException(
+          s"Unsupported update assignment key: $other. Only top-level attributes are supported.")
+    }
+  }
+
+  private def sameAttributeReference(left: Expression, right: Expression): Boolean = {
+    (left, right) match {
+      case (leftAttr: AttributeReference, rightAttr: AttributeReference) =>
+        leftAttr.sameRef(rightAttr)
+      case _ => false
+    }
+  }
 
   private def floorBinarySearch(indexed: immutable.IndexedSeq[Long], value: Long): Long = {
     if (indexed.isEmpty) {

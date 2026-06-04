@@ -116,6 +116,7 @@ import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.format.csv.CsvOptions.FIELD_DELIMITER;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
@@ -850,7 +851,6 @@ public class HiveCatalog extends AbstractCatalog {
         Table hiveTable =
                 org.apache.hadoop.hive.ql.metadata.Table.getEmptyTable(
                         identifier.getDatabaseName(), identifier.getObjectName());
-        hiveTable.setCreateTime((int) (System.currentTimeMillis() / 1000));
 
         Map<String, String> properties = new HashMap<>(view.options());
         // Table comment
@@ -1293,7 +1293,47 @@ public class HiveCatalog extends AbstractCatalog {
         Path location = getTableLocation(identifier, table);
         // file format is null, because only data table support alter table.
         updateHmsTable(table, identifier, newSchema, null, location);
-        clients().execute(client -> HiveAlterTableUtils.alterTable(client, identifier, table));
+        boolean skipUpdateStats = options.get(HIVE_SKIP_UPDATE_STATS);
+        clients()
+                .execute(
+                        client ->
+                                HiveAlterTableUtils.alterTable(
+                                        client, identifier, table, skipUpdateStats));
+    }
+
+    @Override
+    protected void replaceTableImpl(
+            Identifier identifier, FileStoreTable existingTable, Schema newSchema)
+            throws TableNotExistException {
+        Table hmsTable = getHmsTable(identifier);
+        if (!isPaimonTable(hmsTable)) {
+            throw new UnsupportedOperationException("Only data table support replaceTable.");
+        }
+
+        truncateTable(existingTable);
+
+        SchemaManager schemaManager = existingTable.schemaManager();
+        long newSchemaId;
+        try {
+            newSchemaId = runWithLock(identifier, () -> appendNewSchema(existingTable, newSchema));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to replaceTable " + identifier.getFullName(), e);
+        }
+
+        // currently only changes to main branch affect metastore
+        if (!DEFAULT_MAIN_BRANCH.equals(identifier.getBranchNameOrDefault())) {
+            return;
+        }
+
+        try {
+            TableSchema newTableSchema = schemaManager.schema(newSchemaId);
+            alterTableToHms(hmsTable, identifier, newTableSchema, Collections.emptySet());
+        } catch (Exception te) {
+            schemaManager.deleteSchema(newSchemaId);
+            throw new RuntimeException(te);
+        }
     }
 
     @Override

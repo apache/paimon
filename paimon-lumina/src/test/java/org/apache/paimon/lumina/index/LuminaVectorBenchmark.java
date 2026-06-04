@@ -47,6 +47,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Benchmark for Lumina vector index using {@link LuminaVectorGlobalIndexWriter} and {@link
@@ -541,10 +543,11 @@ public class LuminaVectorBenchmark {
                     ioMetaArg ->
                             benchFileIO.newInputStream(
                                     new Path(benchIndexDir, ioMetaArg.filePath().getName()));
+            ExecutorService executor = Executors.newCachedThreadPool();
             try (LuminaVectorGlobalIndexReader reader =
                     new LuminaVectorGlobalIndexReader(
-                            gFileReader, ioMetas, vectorType, indexOptions)) {
-                reader.visitVectorSearch(vs);
+                            gFileReader, ioMetas, vectorType, indexOptions, executor)) {
+                reader.visitVectorSearch(vs).join();
                 openBytesArr[i] = reader.getOpenBytesRead();
                 openSeekArr[i] = reader.getOpenSeekCount();
                 openReadArr[i] = reader.getOpenReadCount();

@@ -1,5 +1,4 @@
 # Licensed to the Apache Software Foundation (ASF) under one
-# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -7,13 +6,14 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import shutil
 import tempfile
@@ -199,3 +199,47 @@ class PVFSTest(unittest.TestCase):
         self.assertTrue(self.pvfs.created(table_data_new_virtual_path) is not None)
         self.assertTrue(self.pvfs.modified(table_data_new_virtual_path) is not None)
         self.assertEqual('Hello World', self.pvfs.cat_file(date_file_new_virtual_path).decode('utf-8'))
+
+    def test_path_traversal_rejected_in_extract(self):
+        """Paths containing '..' components must be rejected at parse time."""
+        traversal_paths = [
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../other_table/secret.parquet',
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../../other_db/t/data',
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../../../etc/passwd',
+            f'pvfs://{self.catalog}/../{self.database}/{self.table}',
+        ]
+        for path in traversal_paths:
+            with self.assertRaises(ValueError, msg=f"Should reject: {path}"):
+                self.pvfs._extract_pvfs_identifier(path)
+
+    def test_path_traversal_rejected_in_get_actual_path(self):
+        """Even if '..' reaches get_actual_path, boundary check must block it."""
+        from pypaimon.filesystem.pvfs import PVFSTableIdentifier
+        identifier = PVFSTableIdentifier(
+            endpoint="http://localhost",
+            catalog="cat",
+            database="db",
+            table="tbl",
+            sub_path="../../other_table/secret.parquet"
+        )
+        with self.assertRaises(ValueError):
+            identifier.get_actual_path("/warehouse/cat/db/tbl")
+
+    def test_null_byte_rejected(self):
+        """Null bytes in path components must be rejected."""
+        path = f'pvfs://{self.catalog}/{self.database}/{self.table}/file\x00.parquet'
+        with self.assertRaises(ValueError):
+            self.pvfs._extract_pvfs_identifier(path)
+
+    def test_legitimate_subpaths_allowed(self):
+        """Normal sub-paths without traversal must still work."""
+        from pypaimon.filesystem.pvfs import PVFSTableIdentifier
+        identifier = PVFSTableIdentifier(
+            endpoint="http://localhost",
+            catalog="cat",
+            database="db",
+            table="tbl",
+            sub_path="partition=1/bucket-0/data.parquet"
+        )
+        result = identifier.get_actual_path("/warehouse/cat/db/tbl")
+        self.assertEqual(result, "/warehouse/cat/db/tbl/partition=1/bucket-0/data.parquet")

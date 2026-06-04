@@ -1,23 +1,23 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """FullTextSearch for performing full-text search on a text column."""
 
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Optional
 
@@ -36,6 +36,7 @@ class FullTextSearch:
     query_text: str
     limit: int
     field_name: str
+    query_operator: str = "or"
 
     def __post_init__(self):
         if not self.query_text:
@@ -44,10 +45,21 @@ class FullTextSearch:
             raise ValueError(f"Limit must be positive, got: {self.limit}")
         if not self.field_name:
             raise ValueError("Field name cannot be null or empty")
+        query_operator = (
+            "or" if self.query_operator is None else self.query_operator.strip().lower()
+        )
+        if query_operator not in ("or", "and"):
+            raise ValueError(
+                "Query operator must be 'or' or 'and', got: %s" % self.query_operator
+            )
+        self.query_operator = query_operator
 
-    def visit(self, visitor: 'GlobalIndexReader') -> Optional['ScoredGlobalIndexResult']:
+    def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""
         return visitor.visit_full_text_search(self)
 
     def __repr__(self) -> str:
-        return f"FullTextSearch(field={self.field_name}, query='{self.query_text}', limit={self.limit})"
+        return (
+            f"FullTextSearch(field={self.field_name}, query='{self.query_text}', "
+            f"limit={self.limit}, operator={self.query_operator})"
+        )

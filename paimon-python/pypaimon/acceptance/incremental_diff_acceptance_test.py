@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 """
 Acceptance tests for IncrementalDiffScanner.
 
@@ -38,7 +38,6 @@ from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.incremental_diff_scanner import \
     IncrementalDiffScanner
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class IncrementalDiffAcceptanceTest(unittest.TestCase):
@@ -94,7 +93,7 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
 
     def _read_via_diff(self, table, start_snap_id, end_snap_id):
         """Read data using IncrementalDiffScanner between two snapshots."""
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         start_snapshot = snapshot_manager.get_snapshot_by_id(start_snap_id)
         end_snapshot = snapshot_manager.get_snapshot_by_id(end_snap_id)
 
@@ -106,7 +105,7 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
 
     def _read_via_delta(self, table, start_snap_id, end_snap_id):
         """Read data by iterating delta_manifest_lists between two snapshots."""
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         manifest_list_manager = ManifestListManager(table)
         manifest_file_manager = ManifestFileManager(table)
 

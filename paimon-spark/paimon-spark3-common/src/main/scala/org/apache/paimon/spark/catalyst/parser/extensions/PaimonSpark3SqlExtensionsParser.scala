@@ -22,4 +22,5 @@ import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.AbstractPaimonSparkSqlExtensionsParser
 
 class PaimonSpark3SqlExtensionsParser(override val delegate: ParserInterface)
-  extends AbstractPaimonSparkSqlExtensionsParser(delegate) {}
+  extends AbstractPaimonSparkSqlExtensionsParser(delegate)
+  with ParserInterface

@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.spark.sql.types.ArrayType;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
@@ -106,5 +107,23 @@ public class SparkTypeTest {
         assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
         assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
+    }
+
+    @Test
+    public void testVectorType() {
+        RowType rowType =
+                RowType.builder()
+                        .field("nullable_vec", DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .field("notnull_vec", DataTypes.VECTOR(3, DataTypes.FLOAT()).notNull())
+                        .build();
+        StructType sparkType = fromPaimonRowType(rowType);
+
+        assertThat(sparkType.apply("nullable_vec").nullable()).isTrue();
+        ArrayType nullableArray = (ArrayType) sparkType.apply("nullable_vec").dataType();
+        assertThat(nullableArray.containsNull()).isFalse();
+
+        assertThat(sparkType.apply("notnull_vec").nullable()).isFalse();
+        ArrayType notNullArray = (ArrayType) sparkType.apply("notnull_vec").dataType();
+        assertThat(notNullArray.containsNull()).isFalse();
     }
 }

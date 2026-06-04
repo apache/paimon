@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 """
 Table commands for Paimon CLI.
@@ -22,6 +22,8 @@ This module provides table-related commands for the CLI.
 """
 
 import sys
+from dataclasses import asdict
+
 from pypaimon.common.json_util import JSON
 
 
@@ -145,6 +147,98 @@ def cmd_table_read(args):
         print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
     else:
         print(df.to_string(index=False))
+
+
+def cmd_table_explain(args):
+    """
+    Execute the 'table explain' command.
+
+    Prints the scan plan (snapshot, pushed-down predicate / projection /
+    limit, partition / bucket / file-stats pruning funnel and split-
+    level signals) without reading any data files.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    database_name, table_name = parts
+
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    read_builder = table.new_read_builder()
+    available_fields = set(field.name for field in table.table_schema.fields)
+
+    select_columns = getattr(args, 'select', None)
+    if select_columns:
+        user_columns = [col.strip() for col in select_columns.split(',')]
+        invalid_columns = [col for col in user_columns if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        read_builder = read_builder.with_projection(user_columns)
+
+    where_clause = getattr(args, 'where', None)
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Unlike `table read`, explain always pushes the limit down — the
+    # whole point of explain is to show what the planner will see,
+    # including limit pushdown.
+    limit = getattr(args, 'limit', None)
+    if limit is not None:
+        read_builder = read_builder.with_limit(limit)
+
+    verbose = getattr(args, 'verbose', False)
+    try:
+        result = read_builder.explain(verbose=verbose)
+    except Exception as e:
+        print(f"Error: Failed to explain table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(_explain_result_to_json_dict(result), indent=2, ensure_ascii=False))
+    else:
+        print(str(result))
+
+
+def _explain_result_to_json_dict(result):
+    """Serialize an ``ExplainResult`` to a JSON-friendly dict.
+
+    ``level_histogram`` has ``int`` keys, both at the top level and
+    inside each split. ``json.dumps`` would coerce them to strings
+    silently; we do it up front so the output is explicit and stable.
+    """
+    payload = asdict(result)
+    payload['level_histogram'] = {
+        str(level): count for level, count in payload.get('level_histogram', {}).items()
+    }
+    if payload.get('splits') is not None:
+        for split in payload['splits']:
+            split['level_histogram'] = {
+                str(level): count for level, count in split.get('level_histogram', {}).items()
+            }
+    return payload
 
 
 def cmd_table_full_text_search(args):
@@ -724,6 +818,67 @@ def cmd_table_list_partitions(args):
         sys.exit(1)
 
 
+def cmd_table_drop_partition(args):
+    """
+    Execute the 'table drop-partition' command.
+
+    Drops one or more partitions from a Paimon table.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    # Load catalog configuration
+    config_path = args.config
+    config = load_catalog_config(config_path)
+
+    # Create catalog
+    catalog = create_catalog(config)
+
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    # Parse partition specs
+    partition_strings = args.partition
+    if not partition_strings:
+        print("Error: At least one --partition must be specified.", file=sys.stderr)
+        sys.exit(1)
+
+    partitions = []
+    for partition_str in partition_strings:
+        partition_dict = {}
+        for kv in partition_str.split(','):
+            kv = kv.strip()
+            if '=' not in kv:
+                print(f"Error: Invalid partition spec '{kv}'. "
+                      f"Expected format: 'key=value'", file=sys.stderr)
+                sys.exit(1)
+            key, value = kv.split('=', 1)
+            partition_dict[key.strip()] = value.strip()
+        if not partition_dict:
+            print("Error: Empty partition spec.", file=sys.stderr)
+            sys.exit(1)
+        partitions.append(partition_dict)
+
+    # Drop partitions
+    try:
+        catalog.drop_partitions(table_identifier, partitions)
+        partition_desc = "; ".join(
+            ",".join(f"{k}={v}" for k, v in p.items()) for p in partitions
+        )
+        print(f"Successfully dropped partition(s) [{partition_desc}] "
+              f"from table '{table_identifier}'.")
+    except Exception as e:
+        print(f"Error: Failed to drop partition(s): {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -766,7 +921,50 @@ def add_table_subcommands(table_parser):
         help='Output format: table (default) or json'
     )
     read_parser.set_defaults(func=cmd_table_read)
-    
+
+    # table explain command
+    explain_parser = table_subparsers.add_parser(
+        'explain',
+        help='Show the scan plan (snapshot, pushdown, pruning funnel, split shape) '
+             'without reading data'
+    )
+    explain_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    explain_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Project specific columns (comma-separated, e.g., "id,name,age")'
+    )
+    explain_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help='Filter condition in SQL-like syntax '
+             '(e.g., "age > 18", "dt = \'2026-01-01\' AND id IN (1,2,3)")'
+    )
+    explain_parser.add_argument(
+        '--limit', '-l',
+        type=int,
+        default=None,
+        help='Row limit to push down'
+    )
+    explain_parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='List every split with its files'
+    )
+    explain_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    explain_parser.set_defaults(func=cmd_table_explain)
+
     # table get command
     get_parser = table_subparsers.add_parser('get', help='Get table schema information')
     get_parser.add_argument(
@@ -814,6 +1012,22 @@ def add_table_subcommands(table_parser):
     )
     drop_parser.set_defaults(func=cmd_table_drop)
     
+    # table drop-partition command
+    drop_partition_parser = table_subparsers.add_parser(
+        'drop-partition', help='Drop one or more partitions from a table')
+    drop_partition_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    drop_partition_parser.add_argument(
+        '--partition', '-p',
+        action='append',
+        required=True,
+        help=('Partition spec in format: "key1=value1,key2=value2". '
+              'Can be specified multiple times to drop multiple partitions.')
+    )
+    drop_partition_parser.set_defaults(func=cmd_table_drop_partition)
+
     # table import command
     import_parser = table_subparsers.add_parser('import', help='Import data from CSV or JSON file')
     import_parser.add_argument(

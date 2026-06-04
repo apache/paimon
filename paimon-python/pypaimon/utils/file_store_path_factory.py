@@ -1,20 +1,20 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from typing import List, Optional, Tuple
 
 from pypaimon.common.external_path_provider import ExternalPathProvider
@@ -55,6 +55,8 @@ class FileStorePathFactory:
         file_compression: str,
         data_file_path_directory: Optional[str] = None,
         external_paths: Optional[List[str]] = None,
+        external_path_strategy: str = "round-robin",
+        external_path_weights: Optional[List[int]] = None,
         index_file_in_data_file_dir: bool = False,
     ):
         self._root = root.rstrip('/')
@@ -67,6 +69,8 @@ class FileStorePathFactory:
         self.file_compression = file_compression
         self.data_file_path_directory = data_file_path_directory
         self.external_paths = external_paths or []
+        self.external_path_strategy = external_path_strategy
+        self.external_path_weights = external_path_weights
         self.index_file_in_data_file_dir = index_file_in_data_file_dir
         self.legacy_partition_name = legacy_partition_name
 
@@ -124,7 +128,12 @@ class FileStorePathFactory:
             return None
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket)
-        return ExternalPathProvider(self.external_paths, relative_bucket_path)
+        return ExternalPathProvider.create(
+            self.external_path_strategy,
+            self.external_paths,
+            relative_bucket_path,
+            self.external_path_weights,
+        )
 
     def global_index_path_factory(self) -> 'IndexPathFactory':
         return IndexPathFactory(self.index_path())

@@ -6,18 +6,20 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import os
 import shutil
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 
@@ -88,6 +90,49 @@ class FileSystemCatalogTest(unittest.TestCase):
         self.assertEqual(table.fields[2].name, "f2")
         self.assertTrue(isinstance(table.fields[2].type, AtomicType))
         self.assertEqual(table.fields[2].type.type, "STRING")
+
+    def test_s3_filesystem_catalog_with_paimon_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "s3.endpoint": "http://localhost:9000",
+                "s3.access-key": "access-key",
+                "s3.secret-key": "secret-key",
+                "s3.session-token": "session-token",
+                "s3.region": "us-east-1",
+                "s3.path-style-access": "true",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertFalse(kwargs["force_virtual_addressing"])
+
+    def test_s3_filesystem_catalog_with_legacy_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "fs.s3.endpoint": "http://localhost:9000",
+                "fs.s3.accessKeyId": "access-key",
+                "fs.s3.accessKeySecret": "secret-key",
+                "fs.s3.securityToken": "session-token",
+                "fs.s3.region": "us-east-1",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertTrue(kwargs["force_virtual_addressing"])
 
     def test_alter_table(self):
         catalog = CatalogFactory.create({
@@ -366,3 +411,64 @@ class FileSystemCatalogTest(unittest.TestCase):
             identifier, partition_name_pattern='dt=2025*'
         )
         self.assertEqual(len(result.elements), 0)
+
+    def test_drop_partitions(self):
+        """Test drop_partitions removes specified partitions from a table."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_part_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 2},
+            {'dt': '2024-01-02', 'rows': 3},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Verify all 3 partitions exist
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+
+        # Drop one partition
+        catalog.drop_partitions(identifier, [{'dt': '2024-01-02'}])
+
+        # Verify only 2 partitions remain
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-01-01', '2024-01-03'])
+
+    def test_drop_partitions_multiple(self):
+        """Test drop_partitions with multiple partitions at once."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_multi_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Drop two partitions at once
+        catalog.drop_partitions(identifier, [
+            {'dt': '2024-01-01'},
+            {'dt': '2024-01-03'},
+        ])
+
+        # Verify only 1 partition remains
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-02')
+
+    def test_drop_partitions_empty_list_raises(self):
+        """Test drop_partitions raises ValueError for empty partitions list."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_empty_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+        ])
+
+        with self.assertRaises(ValueError):
+            catalog.drop_partitions(identifier, [])

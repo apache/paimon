@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import logging
 import uuid
@@ -23,6 +22,7 @@ from typing import Optional, Tuple, Dict
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.timestamp import Timestamp
+from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.blob_file_writer import BlobFileWriter
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class BlobWriter(AppendOnlyDataWriter):
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, blob_column: str,
-                 options: Dict[str, str] = None):
+                 options: Dict[str, str] = None, blob_consumer: Optional[BlobConsumer] = None):
         super().__init__(table, partition, bucket, max_seq_number,
                          options, write_cols=[blob_column])
 
@@ -45,6 +45,7 @@ class BlobWriter(AppendOnlyDataWriter):
         options = self.table.options
         self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
 
+        self._blob_consumer = blob_consumer
         self.current_writer: Optional[BlobFileWriter] = None
         self.current_file_path: Optional[str] = None
         self.record_count = 0
@@ -82,13 +83,24 @@ class BlobWriter(AppendOnlyDataWriter):
         # This ensures each row has a unique sequence number for data versioning and consistency
         self.sequence_generator.next()
 
+    def write_blob(self, value, arrow_type=pa.large_binary()):
+        if self.current_writer is None:
+            self.open_current_writer()
+
+        self.current_writer.write_blob(self.blob_column, arrow_type, value)
+        self.sequence_generator.next()
+        self.record_count += 1
+
+        if self.rolling_file():
+            self.close_current_writer()
+
     def open_current_writer(self):
         file_name = (f"{CoreOptions.data_file_prefix(self.options)}"
                      f"{self.file_uuid}-{self.file_count}.{self.file_format}")
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        self.current_writer = BlobFileWriter(self.file_io, file_path)
+        self.current_writer = BlobFileWriter(self.file_io, file_path, blob_consumer=self._blob_consumer)
 
     def rolling_file(self) -> bool:
         if self.current_writer is None:
@@ -226,7 +238,11 @@ class BlobWriter(AppendOnlyDataWriter):
                 logger.warning(f"Error aborting blob writer: {e}", exc_info=e)
             self.current_writer = None
             self.current_file_path = None
-        super().abort()
+        if self._blob_consumer is not None:
+            self.pending_data = None
+            self.committed_files.clear()
+        else:
+            super().abort()
 
     @staticmethod
     def _get_column_stats(data_or_batch, column_name: str):

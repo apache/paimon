@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.dataevolution;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
@@ -56,6 +57,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 
 /**
  * The Flink Batch Operator to process sorted new rows for data-evolution partial write. It assumes
@@ -68,6 +70,7 @@ public class DataEvolutionPartialWriteOperator
             LoggerFactory.getLogger(DataEvolutionPartialWriteOperator.class);
 
     private final FileStoreTable table;
+    private final Long baseSnapshotId;
 
     // dataType
     private final RowType dataType;
@@ -89,8 +92,11 @@ public class DataEvolutionPartialWriteOperator
     private transient AbstractFileStoreWrite<InternalRow> tableWrite;
     private transient Writer writer;
 
-    public DataEvolutionPartialWriteOperator(FileStoreTable table, RowType dataType) {
-        this.table = table;
+    public DataEvolutionPartialWriteOperator(
+            FileStoreTable table, RowType dataType, Long baseSnapshotId) {
+        this.table =
+                table.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"));
+        this.baseSnapshotId = baseSnapshotId;
         List<String> fieldNames =
                 dataType.getFieldNames().stream()
                         .filter(name -> !SpecialFields.ROW_ID.name().equals(name))
@@ -116,7 +122,9 @@ public class DataEvolutionPartialWriteOperator
                         .withManifestEntryFilter(
                                 entry ->
                                         entry.file().firstRowId() != null
-                                                && !isBlobFile(entry.file().fileName()))
+                                                && !isBlobFile(entry.file().fileName())
+                                                && !isVectorStoreFile(entry.file().fileName()))
+                        .withSnapshot(baseSnapshotId)
                         .plan()
                         .files();
 

@@ -36,7 +36,7 @@ import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.datasources.v2.text.{TextScanBuilder, TextTable}
-import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -63,10 +63,15 @@ object SparkFormatTable {
     val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
     // Hadoop Configurations are case-sensitive.
     val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
-    if (FileStreamSink.hasMetadata(paths, hadoopConf, sparkSession.sessionState.conf)) {
+    if (
+      SparkShimLoader.shim.hasFileStreamSinkMetadata(
+        paths,
+        hadoopConf,
+        sparkSession.sessionState.conf)
+    ) {
       // We are reading from the results of a streaming query. We will load files from
       // the metadata log instead of listing them using HDFS APIs.
-      new PartitionedMetadataLogFileIndex(
+      SparkShimLoader.shim.createPartitionedMetadataLogFileIndex(
         sparkSession,
         new Path(paths.head),
         options.asScala.toMap,
@@ -92,14 +97,16 @@ object SparkFormatTable {
     }
   }
 
-  // Extend from MetadataLogFileIndex to override partitionSchema
-  private class PartitionedMetadataLogFileIndex(
-      sparkSession: SparkSession,
-      path: Path,
-      parameters: Map[String, String],
-      userSpecifiedSchema: Option[StructType],
-      override val partitionSchema: StructType)
-    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
+  // Visible to shim-local PartitionedMetadataLogFileIndex subclasses.
+  private[sql] def alignPartitionSpec(
+      inferred: PartitionSpec,
+      partitionSchema: StructType): PartitionSpec = {
+    if (inferred.partitionColumns.isEmpty && partitionSchema.nonEmpty) {
+      PartitionSpec(partitionSchema, inferred.partitions)
+    } else {
+      inferred
+    }
+  }
 
   // Extend from InMemoryFileIndex to override partitionSchema
   private class PartitionedInMemoryFileIndex(
@@ -118,7 +125,12 @@ object SparkFormatTable {
       userSpecifiedSchema,
       fileStatusCache,
       userSpecifiedPartitionSpec,
-      metadataOpsTimeNs)
+      metadataOpsTimeNs) {
+
+    override def partitionSpec(): PartitionSpec = {
+      alignPartitionSpec(super.partitionSpec(), partitionSchema)
+    }
+  }
 }
 
 trait PartitionedFormatTable extends SupportsPartitionManagement {

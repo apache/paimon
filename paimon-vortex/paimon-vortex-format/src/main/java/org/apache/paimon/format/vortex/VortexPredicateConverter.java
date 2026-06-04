@@ -42,11 +42,6 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 
 import dev.vortex.api.Expression;
-import dev.vortex.api.expressions.Binary;
-import dev.vortex.api.expressions.GetItem;
-import dev.vortex.api.expressions.Literal;
-import dev.vortex.api.expressions.Not;
-import dev.vortex.api.expressions.Root;
 
 import javax.annotation.Nullable;
 
@@ -74,13 +69,13 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             return null;
         }
         FieldRef fieldRef = fieldRefOpt.get();
-        Expression field = GetItem.of(Root.INSTANCE, fieldRef.name());
+        Expression field = Expression.column(fieldRef.name());
 
         if (predicate.function() instanceof IsNull) {
-            return Not.of(Binary.notEq(field, Literal.nullLit()));
+            return Expression.isNull(field);
         }
         if (predicate.function() instanceof IsNotNull) {
-            return Binary.notEq(field, Literal.nullLit());
+            return Expression.isNotNull(field);
         }
 
         List<Object> literals = predicate.literals();
@@ -88,26 +83,25 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             return null;
         }
 
-        Literal<?> vortexLiteral = toLiteral(fieldRef.type(), literals.get(0));
+        Expression vortexLiteral = toLiteral(fieldRef.type(), literals.get(0));
         if (vortexLiteral == null) {
             return null;
         }
 
         if (predicate.function() instanceof Equal) {
-            return Binary.eq(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.EQ, field, vortexLiteral);
         } else if (predicate.function() instanceof NotEqual) {
-            return Binary.notEq(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.NOT_EQ, field, vortexLiteral);
         } else if (predicate.function() instanceof GreaterThan) {
-            return Binary.gt(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.GT, field, vortexLiteral);
         } else if (predicate.function() instanceof GreaterOrEqual) {
-            return Binary.gtEq(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.GTE, field, vortexLiteral);
         } else if (predicate.function() instanceof LessThan) {
-            return Binary.lt(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.LT, field, vortexLiteral);
         } else if (predicate.function() instanceof LessOrEqual) {
-            return Binary.ltEq(field, vortexLiteral);
+            return Expression.binary(Expression.BinaryOp.LTE, field, vortexLiteral);
         }
 
-        // unsupported function (e.g. In, Between)
         return null;
     }
 
@@ -124,11 +118,7 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             if (children.isEmpty()) {
                 return null;
             }
-            Expression result = children.get(0);
-            for (int i = 1; i < children.size(); i++) {
-                result = Binary.and(result, children.get(i));
-            }
-            return result;
+            return Expression.and(children.toArray(new Expression[0]));
         } else if (predicate.function() instanceof Or) {
             List<Expression> children = new ArrayList<>();
             for (Predicate child : predicate.children()) {
@@ -138,74 +128,70 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                 }
                 children.add(expr);
             }
-            Expression result = children.get(0);
-            for (int i = 1; i < children.size(); i++) {
-                result = Binary.or(result, children.get(i));
-            }
-            return result;
+            return Expression.or(children.toArray(new Expression[0]));
         }
 
         return null;
     }
 
     @Nullable
-    private static Literal<?> toLiteral(DataType type, Object value) {
+    private static Expression toLiteral(DataType type, Object value) {
         if (value == null) {
-            return Literal.nullLit();
+            return Expression.nullLiteral(Expression.DType.I32);
         }
         switch (type.getTypeRoot()) {
             case BOOLEAN:
-                return Literal.bool((Boolean) value);
+                return Expression.literal((Boolean) value);
             case TINYINT:
-                return Literal.int8((Byte) value);
+                return Expression.literal((Byte) value);
             case SMALLINT:
-                return Literal.int16((Short) value);
+                return Expression.literal((Short) value);
             case INTEGER:
             case DATE:
-                return Literal.int32((Integer) value);
+                return Expression.literal((Integer) value);
             case BIGINT:
-                return Literal.int64((Long) value);
+                return Expression.literal((Long) value);
             case FLOAT:
-                return Literal.float32((Float) value);
+                return Expression.literal((Float) value);
             case DOUBLE:
-                return Literal.float64((Double) value);
+                return Expression.literal((Double) value);
             case CHAR:
             case VARCHAR:
-                return Literal.string(
+                return Expression.literal(
                         value instanceof BinaryString ? value.toString() : (String) value);
             case DECIMAL:
                 Decimal decimal = (Decimal) value;
-                return Literal.decimal(
-                        decimal.toBigDecimal(), decimal.precision(), decimal.scale());
+                return Expression.literalDecimal(
+                        decimal.toBigDecimal().unscaledValue(),
+                        decimal.precision(),
+                        decimal.scale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 Timestamp ts = (Timestamp) value;
-                return toTimestampLiteral(
-                        ts, ((TimestampType) type).getPrecision(), Optional.empty());
+                return toTimestampLiteral(ts, ((TimestampType) type).getPrecision(), null);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 Timestamp lzTs = (Timestamp) value;
                 return toTimestampLiteral(
-                        lzTs, ((LocalZonedTimestampType) type).getPrecision(), Optional.of("UTC"));
+                        lzTs, ((LocalZonedTimestampType) type).getPrecision(), "UTC");
             default:
                 return null;
         }
     }
 
-    private static Literal<Long> toTimestampLiteral(
-            Timestamp ts, int precision, Optional<String> timeZone) {
-        if (precision <= 0) {
-            // seconds
-            return Literal.timestampMillis(ts.getMillisecond(), timeZone);
-        } else if (precision <= 3) {
-            // millis
-            return Literal.timestampMillis(ts.getMillisecond(), timeZone);
+    private static Expression toTimestampLiteral(
+            Timestamp ts, int precision, @Nullable String timeZone) {
+        if (precision <= 3) {
+            return Expression.literalTimestamp(
+                    ts.getMillisecond(), Expression.TimeUnit.MILLISECONDS, timeZone);
         } else if (precision <= 6) {
-            // micros
-            return Literal.timestampMicros(
-                    ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000, timeZone);
+            return Expression.literalTimestamp(
+                    ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000,
+                    Expression.TimeUnit.MICROSECONDS,
+                    timeZone);
         } else {
-            // nanos
-            return Literal.timestampNanos(
-                    ts.getMillisecond() * 1_000_000 + ts.getNanoOfMillisecond(), timeZone);
+            return Expression.literalTimestamp(
+                    ts.getMillisecond() * 1_000_000 + ts.getNanoOfMillisecond(),
+                    Expression.TimeUnit.NANOSECONDS,
+                    timeZone);
         }
     }
 }

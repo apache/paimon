@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import os
 import shutil
@@ -26,7 +25,6 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class PkReaderTest(unittest.TestCase):
@@ -226,12 +224,15 @@ class PkReaderTest(unittest.TestCase):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        # TODO support pk merge feature when multiple write
+        # The in-memory merge buffer in KeyValueDataWriter folds the
+        # two writes for user_id=2 down to the latest row before flush
+        # (default merge engine is deduplicate), so the PK appears once
+        # with the second batch's value.
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 2, 3, 4, 5, 7, 8],
-            'item_id': [1001, 1002, 1002, 1003, 1004, 1005, 1007, 1008],
-            'behavior': ['a', 'b', 'b-new', 'c', None, 'e', 'g', 'h'],
-            'dt': ['p1', 'p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
+            'user_id': [1, 2, 3, 4, 5, 7, 8],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1007, 1008],
+            'behavior': ['a', 'b-new', 'c', None, 'e', 'g', 'h'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -270,6 +271,45 @@ class PkReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = self.expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
+
+    def _assert_value_only_projection_works(self, file_format: str, table_suffix: str):
+        # Two commits force the split through the merge path. The merge
+        # reader still needs the PK column to assemble its key, even
+        # though the user-visible projection drops it — regress the
+        # case where narrowing to value-only fields broke the file
+        # column lookup.
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '2', 'file.format': file_format})
+        self.catalog.create_table(
+            'default.test_pk_projection_no_pk_' + table_suffix, schema, False)
+        table = self.catalog.get_table(
+            'default.test_pk_projection_no_pk_' + table_suffix)
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['behavior'])
+        actual = self._read_test_table(read_builder)
+        expected = self.expected.select(['behavior'])
+        # Projection drops PKs so we can only compare bag semantics.
+        self.assertEqual(
+            sorted([r['behavior'] for r in actual.to_pylist()],
+                   key=lambda v: '' if v is None else v),
+            sorted([r['behavior'] for r in expected.to_pylist()],
+                   key=lambda v: '' if v is None else v))
+
+    def test_pk_reader_with_projection_excluding_pk(self):
+        self._assert_value_only_projection_works('parquet', 'parquet')
+
+    def test_pk_reader_with_projection_excluding_pk_orc(self):
+        self._assert_value_only_projection_works('orc', 'orc')
+
+    def test_pk_reader_with_projection_excluding_pk_avro(self):
+        # Avro path resolves DataField names through ``full_fields_map``
+        # built from ``self.read_fields``; the alias-safe lookup must also
+        # cover the bare PK name (``user_id``) the file actually stores.
+        self._assert_value_only_projection_works('avro', 'avro')
 
     def test_pk_reader_with_limit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -313,7 +353,6 @@ class PkReaderTest(unittest.TestCase):
             len(merge_splits), 0,
             "Should have at least one merge split to test limit with merge scenario")
 
-        total_unique_rows = 125
         for limit in [5, 10, 20, 50]:
             read_builder = table.new_read_builder().with_limit(limit)
             table_read = read_builder.new_read()
@@ -325,9 +364,9 @@ class PkReaderTest(unittest.TestCase):
             result = table_read.to_arrow(splits)
             row_count = result.num_rows if result is not None else 0
             self.assertEqual(
-                row_count, total_unique_rows,
-                f"with_limit({limit}) should return all rows for PK table "
-                f"(read-level limit not yet implemented)")
+                row_count, limit,
+                f"with_limit({limit}) on PK table must return exactly "
+                f"{limit} rows now that the read-level limit is wired")
 
     def test_incremental_timestamp(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -339,7 +378,7 @@ class PkReaderTest(unittest.TestCase):
         timestamp = int(time.time() * 1000)
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
@@ -386,7 +425,7 @@ class PkReaderTest(unittest.TestCase):
             table_write.close()
             table_commit.close()
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
@@ -412,7 +451,7 @@ class PkReaderTest(unittest.TestCase):
 
         self._write_test_table(table)
 
-        snapshot_manager = SnapshotManager(table)
+        snapshot_manager = table.snapshot_manager()
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
@@ -575,7 +614,7 @@ class PkReaderTest(unittest.TestCase):
                              f"Iteration {test_iteration}: User IDs mismatch")
 
             # Verify snapshot count (should have num_threads snapshots)
-            snapshot_manager = SnapshotManager(table)
+            snapshot_manager = table.snapshot_manager()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")

@@ -138,6 +138,14 @@ public class PredicateBuilder {
         return leaf(IsNotNull.INSTANCE, transform);
     }
 
+    public Predicate isNaN(int idx) {
+        return leaf(IsNaN.INSTANCE, idx);
+    }
+
+    public Predicate isNaN(Transform transform) {
+        return leaf(IsNaN.INSTANCE, transform);
+    }
+
     public Predicate startsWith(int idx, Object patternLiteral) {
         return leaf(StartsWith.INSTANCE, idx, patternLiteral);
     }

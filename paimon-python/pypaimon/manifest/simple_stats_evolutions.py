@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import Callable, Dict, List, Optional
 
@@ -55,13 +54,15 @@ class SimpleStatsEvolutions:
         Create index and cast mapping between table fields and data fields.
         This is a simplified implementation.
         """
-        # Create a mapping from field names to indices in data_fields
-        data_field_map = {field.name: i for i, field in enumerate(data_fields)}
+        # Create a mapping from field IDs to indices in data_fields.
+        # Field IDs are stable across schema evolution (including column renames),
+        # while field names may change.
+        data_field_map = {field.id: i for i, field in enumerate(data_fields)}
 
         index_mapping = []
         for table_field in table_fields:
-            if table_field.name in data_field_map:
-                index_mapping.append(data_field_map[table_field.name])
+            if table_field.id in data_field_map:
+                index_mapping.append(data_field_map[table_field.id])
             else:
                 index_mapping.append(-1)  # Field not found in data schema
 

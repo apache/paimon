@@ -99,4 +99,17 @@ class SubstringTransformTest {
                                 3));
         assertThat(result).isEqualTo(BinaryString.fromString("ell"));
     }
+
+    @Test
+    public void testSubstringRefInputUsesSourceFieldNullability() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
+        inputs.add(2);
+        inputs.add(3);
+        SubstringTransform transform = new SubstringTransform(inputs);
+
+        Object result = transform.transform(GenericRow.of(null, BinaryString.fromString("hello")));
+
+        assertThat(result).isEqualTo(BinaryString.fromString("ell"));
+    }
 }

@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import math
 import random
@@ -125,18 +124,12 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         if self.num_buckets <= 0:
             raise ValueError(f"Fixed bucket mode requires bucket > 0, got {self.num_buckets}")
 
-        bucket_key_option = options.bucket_key()
-        if bucket_key_option and bucket_key_option.strip():
-            self.bucket_keys = [k.strip() for k in bucket_key_option.split(',')]
-        else:
-            self.bucket_keys = [pk for pk in table_schema.primary_keys
-                                if pk not in table_schema.partition_keys]
-
+        # Bucket-key resolution lives on TableSchema (mirrors Java
+        # ``TableSchema.bucketKeys()`` / ``logicalBucketKeyType()``); reuse
+        # it so any reader path that walks the same logic stays in sync.
+        self.bucket_keys = table_schema.bucket_keys
         self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
-        field_map = {f.name: f for f in table_schema.fields}
-        self._bucket_key_fields = [
-            field_map[name] for name in self.bucket_keys if name in field_map
-        ]
+        self._bucket_key_fields = table_schema.logical_bucket_key_fields
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         columns = [data.column(i) for i in self.bucket_key_indices]

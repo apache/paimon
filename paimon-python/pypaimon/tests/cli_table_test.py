@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import os
 import shutil
@@ -1350,6 +1350,231 @@ class CliTableTest(unittest.TestCase):
 
                 output = mock_stdout.getvalue()
                 self.assertIn('No partitions found', output)
+
+    def test_cli_table_drop_partition(self):
+        """Test drop-partition command drops a partition from a table."""
+        # Create a partitioned table for drop-partition test
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('id', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('test_db.drop_part_cli', schema, True)
+        table = self.catalog.get_table('test_db.drop_part_cli')
+
+        # Write data for two partitions
+        for dt_val in ['2024-01-01', '2024-01-02', '2024-01-03']:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [dt_val],
+                'id': [1],
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Drop one partition via CLI
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'drop-partition', 'test_db.drop_part_cli',
+                    '--partition', 'dt=2024-01-02']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Successfully dropped', output)
+
+        # Verify partition was dropped
+        result = self.catalog.list_partitions_paged('test_db.drop_part_cli')
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-01-01', '2024-01-03'])
+
+    def test_cli_table_drop_partition_multiple(self):
+        """Test drop-partition command with multiple --partition flags."""
+        # Create a partitioned table
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('id', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('test_db.drop_multi_cli', schema, True)
+        table = self.catalog.get_table('test_db.drop_multi_cli')
+
+        for dt_val in ['2024-01-01', '2024-01-02', '2024-01-03']:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [dt_val],
+                'id': [1],
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Drop multiple partitions via CLI
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'drop-partition', 'test_db.drop_multi_cli',
+                    '--partition', 'dt=2024-01-01',
+                    '--partition', 'dt=2024-01-03']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Successfully dropped', output)
+
+        # Verify only the middle partition remains
+        result = self.catalog.list_partitions_paged('test_db.drop_multi_cli')
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-02')
+
+    def test_cli_table_explain_basic(self):
+        """Basic `table explain` prints the render anchors and no data."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.users']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+
+                # render_explain anchors
+                self.assertIn('== PyPaimon Scan Plan ==', output)
+                self.assertIn('Table:', output)
+                self.assertIn('Snapshot:', output)
+                self.assertIn('Splits:', output)
+                self.assertIn('Files:', output)
+                # No data rows: row data ('Alice'/'Bob') should not appear
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+
+    def test_cli_table_explain_with_select_and_limit(self):
+        """`--select` and `--limit` are reflected in the Projection / Limit lines."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.users',
+                    '--select', 'id,name',
+                    '--limit', '3']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+
+                self.assertIn('Projection:', output)
+                self.assertIn('[id, name]', output)
+                self.assertIn('Limit:', output)
+                self.assertIn('3', output)
+
+    def test_cli_table_explain_verbose_lists_splits(self):
+        """`--verbose` triggers a Splits[] section listing each split."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.users',
+                    '--verbose']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Splits[]', output)
+                # The per-split bullet uses "[0] partition=" as a prefix
+                self.assertIn('[0] partition=', output)
+
+    def test_cli_table_explain_where_partition_pruning(self):
+        """A partition predicate fires the partition-pruning funnel."""
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.partitioned',
+                    '--where', "dt = '2024-01-01' AND region = 'us'"]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+
+                # Predicate is rendered
+                self.assertIn('Predicate:', output)
+                self.assertIn('dt', output)
+                # Partition pruning funnel shows before -> after  (pruned N>0)
+                self.assertIn('Partition pruning:', output)
+                self.assertRegex(output, r'Partition pruning:\s+\d+ -> \d+\s+\(pruned [1-9]\d*\)')
+
+    def test_cli_table_explain_format_json(self):
+        """`--format json` is valid JSON with stringified level_histogram keys."""
+        import json
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.users',
+                    '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                payload = json.loads(output)
+
+                # Top-level identity / snapshot / split aggregates
+                self.assertEqual(payload['table_identifier'], 'test_db.users')
+                self.assertIn('snapshot_id', payload)
+                self.assertIn('split_count', payload)
+                self.assertIn('level_histogram', payload)
+                self.assertIn('partition_pruning', payload)
+
+                # level_histogram keys must be strings (json-safe). When the
+                # table has data, at least one level entry exists.
+                for key in payload['level_histogram'].keys():
+                    self.assertIsInstance(key, str)
+
+                # Non-verbose => splits is null
+                self.assertIsNone(payload['splits'])
+
+    def test_cli_table_explain_invalid_table(self):
+        """Unknown table identifier produces a clean error on stderr."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.does_not_exist']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Failed to get table", mock_stderr.getvalue())
+
+    def test_cli_table_explain_invalid_where(self):
+        """Malformed WHERE produces a clean error on stderr."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'explain', 'test_db.users',
+                    '--where', 'this is not a valid clause']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Invalid WHERE clause", mock_stderr.getvalue())
 
 
 if __name__ == '__main__':

@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -30,6 +31,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -43,10 +46,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.LongFunction;
+import java.util.stream.Collectors;
 
+import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -54,6 +62,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DataEvolutionCompactCoordinator {
 
     private static final int FILES_BATCH = 100_000;
+    private static final int BLOB_COMPACT_MIN_FILE_NUM = 2;
 
     private final CompactScanner scanner;
     private final CompactPlanner planner;
@@ -72,6 +81,7 @@ public class DataEvolutionCompactCoordinator {
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();
+        Set<String> blobInlineFields = options.blobInlineField();
 
         this.scanner =
                 new CompactScanner(
@@ -82,8 +92,20 @@ public class DataEvolutionCompactCoordinator {
                         compactBlob,
                         compactVector,
                         targetFileSize,
+                        options.blobTargetFileSize(),
                         openFileCost,
-                        compactMinFileNum);
+                        compactMinFileNum,
+                        schemaId -> table.schemaManager().schema(schemaId).logicalRowType(),
+                        compactBlob
+                                ? table.rowType().getFields().stream()
+                                        .filter(
+                                                field ->
+                                                        field.type().is(BLOB)
+                                                                && !blobInlineFields.contains(
+                                                                        field.name()))
+                                        .map(DataField::id)
+                                        .collect(Collectors.toSet())
+                                : null);
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -141,20 +163,52 @@ public class DataEvolutionCompactCoordinator {
         private final boolean compactBlob;
         private final boolean compactVector;
         private final long targetFileSize;
+        private final long blobTargetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
+        private final LongFunction<RowType> schemaFetcher;
+        @Nullable private final Set<Integer> currentBlobFieldIds;
 
+        @VisibleForTesting
         CompactPlanner(
                 boolean compactBlob,
                 boolean compactVector,
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum) {
+            this(
+                    compactBlob,
+                    compactVector,
+                    targetFileSize,
+                    targetFileSize,
+                    openFileCost,
+                    compactMinFileNum,
+                    schemaId -> {
+                        throw new IllegalStateException(
+                                "Schema fetcher is required for blob compaction.");
+                    },
+                    null);
+        }
+
+        CompactPlanner(
+                boolean compactBlob,
+                boolean compactVector,
+                long targetFileSize,
+                long blobTargetFileSize,
+                long openFileCost,
+                long compactMinFileNum,
+                LongFunction<RowType> schemaFetcher,
+                @Nullable Set<Integer> currentBlobFieldIds) {
             this.compactBlob = compactBlob;
             this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
+            this.blobTargetFileSize = blobTargetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
+            Map<Long, RowType> schemaCache = new HashMap<>();
+            this.schemaFetcher =
+                    schemaId -> schemaCache.computeIfAbsent(schemaId, schemaFetcher::apply);
+            this.currentBlobFieldIds = currentBlobFieldIds;
         }
 
         List<DataEvolutionCompactTask> compactPlan(List<ManifestEntry> input) {
@@ -302,33 +356,163 @@ public class DataEvolutionCompactCoordinator {
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToBlobFiles,
                 Map<DataFileMeta, List<DataFileMeta>> dataFileToVectorStoreFiles) {
             List<DataEvolutionCompactTask> tasks = new ArrayList<>();
-            if (dataFiles.size() >= compactMinFileNum) {
+            boolean triggerNormalFile = dataFiles.size() >= compactMinFileNum;
+            if (triggerNormalFile) {
                 tasks.add(new DataEvolutionCompactTask(partition, dataFiles, false));
             }
 
             if (compactBlob) {
-                List<DataFileMeta> blobFiles = new ArrayList<>();
-                for (DataFileMeta dataFile : dataFiles) {
-                    blobFiles.addAll(
-                            dataFileToBlobFiles.getOrDefault(dataFile, Collections.emptyList()));
-                }
-                if (blobFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, blobFiles, true));
+                if (triggerNormalFile) {
+                    List<DataFileMeta> blobFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        blobFiles.addAll(
+                                dataFileToBlobFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    for (List<DataFileMeta> blobFilesToCompact :
+                            blobFileGroupsToCompact(blobFiles)) {
+                        tasks.add(
+                                new DataEvolutionCompactTask(partition, blobFilesToCompact, true));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        for (List<DataFileMeta> blobFilesToCompact :
+                                blobFileGroupsToCompact(
+                                        dataFileToBlobFiles.getOrDefault(
+                                                dataFile, Collections.emptyList()))) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, blobFilesToCompact, true));
+                        }
+                    }
                 }
             }
 
             if (compactVector) {
-                List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
-                for (DataFileMeta dataFile : dataFiles) {
-                    vectorStoreFiles.addAll(
-                            dataFileToVectorStoreFiles.getOrDefault(
-                                    dataFile, Collections.emptyList()));
-                }
-                if (vectorStoreFiles.size() >= compactMinFileNum) {
-                    tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                if (triggerNormalFile) {
+                    List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
+                    for (DataFileMeta dataFile : dataFiles) {
+                        vectorStoreFiles.addAll(
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList()));
+                    }
+                    if (vectorStoreFiles.size() >= compactMinFileNum) {
+                        tasks.add(new DataEvolutionCompactTask(partition, vectorStoreFiles, false));
+                    }
+                } else {
+                    for (DataFileMeta dataFile : dataFiles) {
+                        List<DataFileMeta> vectorStoreFiles =
+                                dataFileToVectorStoreFiles.getOrDefault(
+                                        dataFile, Collections.emptyList());
+                        if (vectorStoreFiles.size() >= compactMinFileNum) {
+                            tasks.add(
+                                    new DataEvolutionCompactTask(
+                                            partition, vectorStoreFiles, false));
+                        }
+                    }
                 }
             }
             return tasks;
+        }
+
+        private List<List<DataFileMeta>> blobFileGroupsToCompact(List<DataFileMeta> blobFiles) {
+            Map<Integer, List<DataFileMeta>> fieldIdToFiles = new LinkedHashMap<>();
+            for (DataFileMeta blobFile : blobFiles) {
+                int fieldId = blobFieldId(blobFile);
+                if (currentBlobFieldIds == null || currentBlobFieldIds.contains(fieldId)) {
+                    fieldIdToFiles.computeIfAbsent(fieldId, key -> new ArrayList<>()).add(blobFile);
+                }
+            }
+
+            List<List<DataFileMeta>> result = new ArrayList<>();
+            for (List<DataFileMeta> files : fieldIdToFiles.values()) {
+                result.addAll(fileGroupsToCompact(files));
+            }
+            return result;
+        }
+
+        private List<List<DataFileMeta>> fileGroupsToCompact(List<DataFileMeta> files) {
+            List<List<DataFileMeta>> result = new ArrayList<>();
+            List<DataFileMeta> sortedFiles = new ArrayList<>(files);
+            sortedFiles.sort(
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
+                            .thenComparingLong(DataFileMeta::maxSequenceNumber));
+
+            RangeHelper<DataFileMeta> rangeHelper =
+                    new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+            List<DataFileMeta> smallFileCandidates = new ArrayList<>();
+            for (List<DataFileMeta> rowRangeGroup :
+                    rangeHelper.mergeOverlappingRanges(sortedFiles)) {
+                if (rowRangeGroup.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                    rowRangeGroup.sort(
+                            comparingLong(DataFileMeta::nonNullFirstRowId)
+                                    .thenComparingLong(DataFileMeta::maxSequenceNumber));
+                    result.add(rowRangeGroup);
+                } else {
+                    smallFileCandidates.add(rowRangeGroup.get(0));
+                }
+            }
+
+            result.addAll(smallFileGroupsToCompact(smallFileCandidates));
+            result.sort(comparingLong(group -> group.get(0).nonNullFirstRowId()));
+            return result;
+        }
+
+        private List<List<DataFileMeta>> smallFileGroupsToCompact(List<DataFileMeta> files) {
+            List<List<DataFileMeta>> result = new ArrayList<>();
+
+            List<DataFileMeta> continuousFiles = new ArrayList<>();
+            long expectedFirstRowId = -1;
+            for (DataFileMeta file : files) {
+                if (file.fileSize() >= blobTargetFileSize) {
+                    addFileGroupsToCompact(result, continuousFiles);
+                    continuousFiles.clear();
+                    expectedFirstRowId = -1;
+                    continue;
+                }
+
+                long firstRowId = file.nonNullFirstRowId();
+                if (!continuousFiles.isEmpty() && firstRowId != expectedFirstRowId) {
+                    addFileGroupsToCompact(result, continuousFiles);
+                    continuousFiles.clear();
+                }
+                continuousFiles.add(file);
+                expectedFirstRowId = firstRowId + file.rowCount();
+            }
+            addFileGroupsToCompact(result, continuousFiles);
+            return result;
+        }
+
+        private void addFileGroupsToCompact(
+                List<List<DataFileMeta>> result, List<DataFileMeta> continuousFiles) {
+            if (continuousFiles.size() < BLOB_COMPACT_MIN_FILE_NUM) {
+                return;
+            }
+            List<DataFileMeta> taskFiles = new ArrayList<>();
+            long fileSize = 0L;
+            for (DataFileMeta file : continuousFiles) {
+                taskFiles.add(file);
+                fileSize += file.fileSize();
+                if (fileSize >= blobTargetFileSize
+                        && taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                    result.add(taskFiles);
+                    taskFiles = new ArrayList<>();
+                    fileSize = 0L;
+                }
+            }
+
+            if (taskFiles.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                result.add(taskFiles);
+            }
+        }
+
+        private int blobFieldId(DataFileMeta blobFile) {
+            checkArgument(
+                    blobFile.writeCols() != null && blobFile.writeCols().size() == 1,
+                    "Blob file %s should contain exactly one write column.",
+                    blobFile);
+            RowType rowType = schemaFetcher.apply(blobFile.schemaId());
+            return rowType.getField(blobFile.writeCols().get(0)).id();
         }
     }
 }

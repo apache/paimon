@@ -98,6 +98,22 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
           )
           Assertions.assertTrue(
             res2.select("information").collect().head.getString(0).contains("Partition Values"))
+
+          val info2 = res2.select("information").collect().head.getString(0)
+          Assertions.assertTrue(info2.contains("Partition Parameters"))
+          Assertions.assertTrue(info2.contains(PartitionStatistics.FIELD_RECORD_COUNT))
+          Assertions.assertTrue(info2.contains(PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES))
+          Assertions.assertTrue(info2.contains(PartitionStatistics.FIELD_FILE_COUNT))
+          Assertions.assertTrue(info2.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME))
+          Assertions.assertTrue(info2.contains("Partition Statistics"))
+          Assertions.assertTrue(info2.contains("recordCount=1"))
+          Assertions.assertTrue(info2.contains("1 rows"))
+
+          val res3 =
+            spark.sql(s"SHOW TABLE EXTENDED IN $testDB LIKE 's2' PARTITION(pt = '2024')")
+          val info3 = res3.select("information").collect().head.getString(0)
+          Assertions.assertTrue(info3.contains("recordCount=2"))
+          Assertions.assertTrue(info3.contains("2 rows"))
         }
       }
     }

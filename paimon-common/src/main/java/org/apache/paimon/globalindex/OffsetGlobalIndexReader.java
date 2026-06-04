@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * A {@link GlobalIndexReader} that wraps another reader and applies an offset to all row IDs in the
@@ -43,89 +44,105 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        return applyOffset(wrapped.visitIsNotNull(fieldRef));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        return wrapped.visitIsNotNull(fieldRef).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        return applyOffset(wrapped.visitIsNull(fieldRef));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+        return wrapped.visitIsNull(fieldRef).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitStartsWith(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitStartsWith(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitEndsWith(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitEndsWith(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitContains(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitContains(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLike(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLike(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLessThan(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLessThan(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitGreaterOrEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitGreaterOrEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitNotEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitNotEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitLessOrEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitLessOrEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitEqual(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitEqual(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return applyOffset(wrapped.visitGreaterThan(fieldRef, literal));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitGreaterThan(fieldRef, literal).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return applyOffset(wrapped.visitIn(fieldRef, literals));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitIn(fieldRef, literals).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return applyOffset(wrapped.visitNotIn(fieldRef, literals));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitNotIn(fieldRef, literals).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
-        return applyOffset(wrapped.visitBetween(fieldRef, from, to));
+    public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return wrapped.visitBetween(fieldRef, from, to).thenApply(this::applyOffset);
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
         return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))
-                .map(r -> r.offset(offset));
+                .thenApply(opt -> opt.map(r -> r.offset(offset)));
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
-        return wrapped.visitFullTextSearch(fullTextSearch).map(r -> r.offset(offset));
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
+            FullTextSearch fullTextSearch) {
+        return wrapped.visitFullTextSearch(fullTextSearch)
+                .thenApply(opt -> opt.map(r -> r.offset(offset)));
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {

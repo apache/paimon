@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import Optional
 
@@ -30,6 +30,10 @@ class ResourcePaths:
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    TAGS = "tags"
+    BRANCHES = "branches"
+    RENAME = "rename"
+    FORWARD = "forward"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -99,3 +103,33 @@ class ResourcePaths:
     def function(self, database_name: str, function_name: str) -> str:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def tags(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS)
+
+    def tag(self, database_name: str, table_name: str, tag_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.TAGS,
+            RESTUtil.encode_string(tag_name))
+
+    def branches(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES)
+
+    def branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.BRANCHES,
+            RESTUtil.encode_string(branch_name))
+
+    def rename_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.RENAME)
+
+    def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
+        return "{}/{}".format(
+            self.branch(database_name, table_name, branch_name), self.FORWARD)

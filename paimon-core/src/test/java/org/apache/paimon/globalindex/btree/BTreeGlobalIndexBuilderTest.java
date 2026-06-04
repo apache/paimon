@@ -22,11 +22,14 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -296,6 +299,53 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
                 "incrementalScan should only return the new rows in partition p0");
     }
 
+    @Test
+    public void testScanFiltersBlobFilesByManifestEntryFilter() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("dt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        schemaBuilder.partitionKeys(Collections.singletonList("dt"));
+
+        catalog.createTable(identifier("BlobTable"), schemaBuilder.build(), false);
+        FileStoreTable table = getTable(identifier("BlobTable"));
+
+        byte[] blobBytes = new byte[] {1};
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(
+                        GenericRow.of(BinaryString.fromString("p0"), i, new BlobData(blobBytes)));
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        Assertions.assertTrue(
+                containsBlobFile(table.store().newScan().plan().files()),
+                "Test table should contain blob manifest entries.");
+
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("f0");
+        assertNoBlobFiles(
+                builder.scan()
+                        .map(Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result for blob table.")));
+        assertNoBlobFiles(
+                builder.incrementalScan()
+                        .map(Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incremental scan result for blob table.")));
+    }
+
     private Map<BinaryRow, List<Pair<String, FileStats>>> gatherIndexMetas(FileStoreTable table) {
         IndexFileHandler handler = table.store().newIndexFileHandler();
 
@@ -317,6 +367,26 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         }
 
         return metasByParts;
+    }
+
+    private boolean containsBlobFile(List<ManifestEntry> entries) {
+        for (ManifestEntry entry : entries) {
+            if ("blob".equals(entry.file().fileFormat())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void assertNoBlobFiles(List<DataSplit> splits) {
+        for (DataSplit split : splits) {
+            for (DataFileMeta file : split.dataFiles()) {
+                Assertions.assertNotEquals(
+                        "blob",
+                        file.fileFormat(),
+                        "BTree global index scan should not include blob files.");
+            }
+        }
     }
 
     private void assertFilesNonOverlapping(

@@ -268,6 +268,25 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       })
   }
 
+  test("Push down aggregate - non-primary-key DV table with tight bounds") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT)
+            |TBLPROPERTIES (
+            | 'deletion-vectors.enabled' = 'true',
+            | 'bucket-key' = 'id',
+            | 'bucket' = '1'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO T SELECT id FROM range (0, 5000)")
+      // No deleted rows, so split stats can answer MIN/MAX.
+      runAndCheckAggregate("SELECT COUNT(*), MIN(id), MAX(id) FROM T", Row(5000, 0, 4999) :: Nil, 0)
+      sql("DELETE FROM T WHERE id > 100 AND id <= 400")
+      // Deleted rows make file stats wide, so Spark keeps MIN/MAX aggregation.
+      runAndCheckAggregate("SELECT MIN(id), MAX(id) FROM T", Row(0, 4999) :: Nil, 2)
+    }
+  }
+
   test("Push down aggregate: group by partial partition of a multi partition table") {
     sql(s"""
            |CREATE TABLE T (
