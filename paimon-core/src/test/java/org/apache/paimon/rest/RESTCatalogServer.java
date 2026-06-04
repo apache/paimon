@@ -413,6 +413,10 @@ public class RESTCatalogServer {
                                 resources.length == 5
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isTableVia =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.VIA.equals(resources[3]);
                         boolean isTableAuth =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -529,6 +533,8 @@ public class RESTCatalogServer {
                             return resetConsumer(identifier, restAuthParameter.data());
                         } else if (isLoadSnapshot) {
                             return loadSnapshot(identifier, resources[4]);
+                        } else if (isTableVia) {
+                            return tableViaHandle(identifier);
                         } else if (isTableAuth) {
                             return authTable(identifier, restAuthParameter.data());
                         } else if (isCommitSnapshot) {
@@ -1699,6 +1705,32 @@ public class RESTCatalogServer {
                 new ErrorResponse(
                         ErrorResponse.RESOURCE_TYPE_TABLE, tableId, "Table not exist.", 404),
                 404);
+    }
+
+    // This API can only be called by trusted engines. The server must authenticate
+    // whether the caller is a trusted engine.
+    private MockResponse tableViaHandle(Identifier identifier) throws Exception {
+        if (noPermissionTables.contains(identifier.getFullName())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        Schema schema = tableMetadata.schema().toSchema();
+        String path = schema.options().remove(PATH.key());
+        RESTResponse response =
+                new GetTableResponse(
+                        tableMetadata.uuid(),
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName(),
+                        path,
+                        tableMetadata.isExternal(),
+                        tableMetadata.schema().id(),
+                        schema,
+                        "owner",
+                        1L,
+                        "created",
+                        1L,
+                        "updated");
+        return mockResponse(response, 200);
     }
 
     private MockResponse tableHandle(String method, String data, Identifier identifier)

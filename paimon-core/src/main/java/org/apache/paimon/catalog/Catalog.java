@@ -158,6 +158,22 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} identified by the given {@link Identifier}, accessed via a view (view
+     * penetration). If the caller has permission on the view, they can access the underlying table.
+     *
+     * <p>This API can only be called by trusted engines. The server must authenticate whether the
+     * caller is a trusted engine.
+     *
+     * @param table Path of the target table
+     * @param via Path of the view through which access is granted
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    default Table getTable(Identifier table, Identifier via) throws TableNotExistException {
+        return getTable(table);
+    }
+
+    /**
      * Return a {@link Table} identified by the given tableId.
      *
      * @param tableId Id of the table
