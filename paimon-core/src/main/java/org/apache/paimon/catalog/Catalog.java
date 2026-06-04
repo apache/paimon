@@ -169,7 +169,7 @@ public interface Catalog extends AutoCloseable {
      * @return The requested table
      * @throws TableNotExistException if the target does not exist
      */
-    default Table getTable(Identifier table, Identifier via) throws TableNotExistException {
+    default Table getTableVia(Identifier table, Identifier via) throws TableNotExistException {
         return getTable(table);
     }
 

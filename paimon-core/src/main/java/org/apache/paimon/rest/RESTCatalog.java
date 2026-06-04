@@ -320,7 +320,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(Identifier table, Identifier via) throws TableNotExistException {
+    public Table getTableVia(Identifier table, Identifier via) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
                 table,

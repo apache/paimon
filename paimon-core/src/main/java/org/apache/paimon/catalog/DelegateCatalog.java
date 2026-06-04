@@ -376,8 +376,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(Identifier table, Identifier via) throws TableNotExistException {
-        return wrapped.getTable(table, via);
+    public Table getTableVia(Identifier table, Identifier via) throws TableNotExistException {
+        return wrapped.getTableVia(table, via);
     }
 
     @Override
