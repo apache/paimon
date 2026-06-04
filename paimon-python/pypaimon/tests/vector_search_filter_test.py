@@ -177,7 +177,7 @@ class _FakeSchemaBuilder:
         self.fields = {}
 
     def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
-        self.fields[name] = {"fast": fast}
+        self.fields[name] = {"fast": fast, "stored": stored}
 
     def add_text_field(self, name, stored=False, tokenizer_name=None, **kwargs):
         if "index_option" in kwargs and kwargs["index_option"] is None:
@@ -531,7 +531,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["tantivy"] = old_tantivy
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_NGRAM_TOKENIZER}},
                          tantivy.last_schema.fields)
@@ -632,7 +632,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["tantivy"] = old_tantivy
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_CUSTOM_TOKENIZER,
                                    "index_option": "freq"}},
@@ -711,7 +711,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             else:
                 sys.modules["jieba"] = old_jieba
 
-        self.assertEqual({"row_id": {"fast": True},
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
                           "text": {"stored": False,
                                    "tokenizer_name": TANTIVY_JIEBA_TOKENIZER}},
                          tantivy.last_schema.fields)
