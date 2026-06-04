@@ -63,7 +63,9 @@ public class Changelog extends Snapshot {
                 snapshot.watermark(),
                 snapshot.statistics(),
                 snapshot.properties,
-                snapshot.nextRowId);
+                snapshot.nextRowId,
+                snapshot.totalFileSize(),
+                snapshot.totalDataFiles());
     }
 
     @JsonCreator
@@ -89,7 +91,9 @@ public class Changelog extends Snapshot {
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) Map<String, String> properties,
-            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId) {
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_TOTAL_FILE_SIZE) @Nullable Long totalFileSize,
+            @JsonProperty(FIELD_TOTAL_DATA_FILES) @Nullable Long totalDataFiles) {
         super(
                 version,
                 id,
@@ -111,7 +115,9 @@ public class Changelog extends Snapshot {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                totalFileSize,
+                totalDataFiles);
     }
 
     public static Changelog fromJson(String json) {

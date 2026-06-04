@@ -108,7 +108,9 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(10, "delta_record_count", new BigIntType(true)),
                             new DataField(11, "changelog_record_count", new BigIntType(true)),
                             new DataField(12, "watermark", new BigIntType(true)),
-                            new DataField(13, "next_row_id", new BigIntType(true))));
+                            new DataField(13, "next_row_id", new BigIntType(true)),
+                            new DataField(14, "total_file_size", new BigIntType(true)),
+                            new DataField(15, "total_data_files", new BigIntType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -339,7 +341,9 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.deltaRecordCount(),
                     snapshot.changelogRecordCount(),
                     snapshot.watermark(),
-                    snapshot.nextRowId());
+                    snapshot.nextRowId(),
+                    snapshot.totalFileSize(),
+                    snapshot.totalDataFiles());
         }
     }
 }

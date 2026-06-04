@@ -948,9 +948,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
+            long previousTotalFileSize = 0L;
+            long previousTotalDataFiles = 0L;
             Long currentWatermark = watermark;
             if (latestSnapshot != null) {
                 previousTotalRecordCount = latestSnapshot.totalRecordCount();
+                Long previousFileSize = latestSnapshot.totalFileSize();
+                previousTotalFileSize = previousFileSize == null ? 0L : previousFileSize;
+                Long previousDataFiles = latestSnapshot.totalDataFiles();
+                previousTotalDataFiles = previousDataFiles == null ? 0L : previousDataFiles;
                 // read all previous manifest files
                 mergeBeforeManifests = manifestList.readDataManifests(latestSnapshot);
                 Long latestWatermark = latestSnapshot.watermark();
@@ -988,6 +994,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // the added records subtract the deleted records from
             long deltaRecordCount = recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles);
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
+
+            long deltaFileSize = 0L;
+            long deltaDataFiles = 0L;
+            for (ManifestEntry entry : deltaFiles) {
+                int sign = FileKind.ADD.equals(entry.kind()) ? 1 : -1;
+                deltaFileSize += sign * entry.file().fileSize();
+                deltaDataFiles += sign;
+            }
+            long totalFileSize = previousTotalFileSize + deltaFileSize;
+            long totalDataFiles = previousTotalDataFiles + deltaDataFiles;
 
             // write new delta files into manifest files
             deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
@@ -1044,7 +1060,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             statsFileName,
                             // if empty properties, just set to null
                             properties.isEmpty() ? null : properties,
-                            nextRowIdStart);
+                            nextRowIdStart,
+                            totalFileSize,
+                            totalDataFiles);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             commitCleaner.cleanUpReuseTmpManifests(
@@ -1148,7 +1166,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.statistics(),
                         // if empty properties, just set to null
                         latest.properties(),
-                        nextRowId);
+                        nextRowId,
+                        latest.totalFileSize(),
+                        latest.totalDataFiles());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
@@ -1227,7 +1247,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
                         latestSnapshot.properties(),
-                        latestSnapshot.nextRowId());
+                        latestSnapshot.nextRowId(),
+                        latestSnapshot.totalFileSize(),
+                        latestSnapshot.totalDataFiles());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
