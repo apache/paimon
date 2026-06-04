@@ -48,6 +48,8 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
@@ -89,10 +91,10 @@ public class JdbcCatalog extends AbstractCatalog {
     private final JdbcClientPool connections;
     private final String catalogKey;
     private final Options options;
-    private final String warehouse;
+    @Nullable private final String warehouse;
 
     protected JdbcCatalog(
-            FileIO fileIO, String catalogKey, CatalogContext context, String warehouse) {
+            FileIO fileIO, String catalogKey, CatalogContext context, @Nullable String warehouse) {
         super(fileIO, context);
         this.catalogKey = catalogKey;
         this.options = context.options();
@@ -205,6 +207,19 @@ public class JdbcCatalog extends AbstractCatalog {
         Map<String, String> options = Maps.newHashMap();
         options.putAll(fetchProperties(databaseName));
         if (!options.containsKey(DB_LOCATION_PROP)) {
+            if (warehouse == null) {
+                LOG.error(
+                        "Database '{}' has no location property in catalog metadata "
+                                + "and no warehouse is configured.",
+                        databaseName);
+                throw new IllegalStateException(
+                        String.format(
+                                "Cannot resolve location for database '%s': "
+                                        + "no warehouse configured and no database location found in catalog metadata. "
+                                        + "Set 'warehouse' in catalog options or ensure the database "
+                                        + "has a location property.",
+                                databaseName));
+            }
             options.put(DB_LOCATION_PROP, newDatabasePath(databaseName).getName());
         }
         options.remove(DATABASE_EXISTS_PROPERTY);
@@ -220,6 +235,10 @@ public class JdbcCatalog extends AbstractCatalog {
         }
 
         if (!createProps.containsKey(DB_LOCATION_PROP)) {
+            Preconditions.checkNotNull(
+                    warehouse,
+                    "The 'warehouse' option is required to create databases. "
+                            + "Set 'warehouse' in catalog options.");
             Path databasePath = newDatabasePath(name);
             createProps.put(DB_LOCATION_PROP, databasePath.toString());
         }
@@ -295,7 +314,7 @@ public class JdbcCatalog extends AbstractCatalog {
         try {
             // Retrieve table location and custom-path flag BEFORE deleting JDBC metadata
             Optional<String> storedPath = fetchStoredPathIfSyncEnabled(identifier);
-            Path path = storedPath.map(Path::new).orElse(super.getTableLocation(identifier));
+            Path path = storedPath.map(Path::new).orElse(getTableLocation(identifier));
             boolean customPath = storedPath.isPresent();
 
             int deletedRecords =
@@ -405,7 +424,7 @@ public class JdbcCatalog extends AbstractCatalog {
             // Check custom path BEFORE renaming metadata
             Optional<String> storedPath = fetchStoredPathIfSyncEnabled(fromTable);
             boolean customPath = storedPath.isPresent();
-            Path fromPath = storedPath.map(Path::new).orElse(super.getTableLocation(fromTable));
+            Path fromPath = storedPath.map(Path::new).orElse(getTableLocation(fromTable));
 
             // update table metadata info
             updateTable(connections, catalogKey, fromTable, toTable);
@@ -428,7 +447,7 @@ public class JdbcCatalog extends AbstractCatalog {
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the JDBC catalog.
-                Path toPath = super.getTableLocation(toTable);
+                Path toPath = getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
                 } catch (IOException e) {
@@ -523,7 +542,18 @@ public class JdbcCatalog extends AbstractCatalog {
                 return new Path(storedPath.get());
             }
         }
-        return super.getTableLocation(identifier);
+        if (warehouse != null) {
+            return super.getTableLocation(identifier);
+        }
+        Map<String, String> dbProps = fetchProperties(identifier.getDatabaseName());
+        String dbLocation = dbProps.get(DB_LOCATION_PROP);
+        if (dbLocation != null) {
+            return new Path(dbLocation, identifier.getTableName());
+        }
+        throw new IllegalStateException(
+                "Cannot resolve table location for "
+                        + identifier.getFullName()
+                        + ": no warehouse configured and no database location found in catalog metadata.");
     }
 
     @Override
@@ -556,6 +586,10 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public void repairCatalog() {
+        Preconditions.checkNotNull(
+                warehouse,
+                "The 'warehouse' option is required to repair catalogs. "
+                        + "Set 'warehouse' in catalog options.");
         List<String> databases;
         try {
             databases = listDatabasesInFileSystem(new Path(warehouse));
@@ -570,6 +604,10 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public void repairDatabase(String databaseName) {
         checkNotSystemDatabase(databaseName);
+        Preconditions.checkNotNull(
+                warehouse,
+                "The 'warehouse' option is required to repair databases. "
+                        + "Set 'warehouse' in catalog options.");
 
         // First check if database exists in file system
         Path databasePath = newDatabasePath(databaseName);
@@ -697,7 +735,7 @@ public class JdbcCatalog extends AbstractCatalog {
         if (tableOptions.containsKey(CoreOptions.PATH.key())) {
             return new Path(tableOptions.get(CoreOptions.PATH.key()));
         }
-        return super.getTableLocation(identifier);
+        return getTableLocation(identifier);
     }
 
     private Optional<String> fetchStoredPathIfSyncEnabled(Identifier identifier) {

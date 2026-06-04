@@ -23,6 +23,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.fs.FileIO;
 
+import javax.annotation.Nullable;
+
 /** Loader to create {@link JdbcCatalog}. */
 public class JdbcCatalogLoader implements CatalogLoader {
 
@@ -31,10 +33,10 @@ public class JdbcCatalogLoader implements CatalogLoader {
     private final FileIO fileIO;
     private final String catalogKey;
     private final CatalogContext context;
-    private final String warehouse;
+    @Nullable private final String warehouse;
 
     public JdbcCatalogLoader(
-            FileIO fileIO, String catalogKey, CatalogContext context, String warehouse) {
+            FileIO fileIO, String catalogKey, CatalogContext context, @Nullable String warehouse) {
         this.fileIO = fileIO;
         this.catalogKey = catalogKey;
         this.context = context;
