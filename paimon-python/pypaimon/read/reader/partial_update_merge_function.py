@@ -16,26 +16,22 @@
 # limitations under the License.
 ################################################################################
 
-"""
-Python port of Java's ``PartialUpdateMergeFunction``
-(``paimon-core/src/main/java/org/apache/paimon/mergetree/compact/
-PartialUpdateMergeFunction.java``).
+"""Merge function for the ``partial-update`` merge engine on PK tables.
 
-The merge function used by the ``partial-update`` merge engine on PK
-tables: rows sharing a primary key are merged left-to-right, taking the
-latest non-null value per non-PK field. ``DeduplicateMergeFunction``
-keeps only the latest row; ``PartialUpdateMergeFunction`` instead lets
-later writes "fill in" fields the earlier writes left null, so users
-can write the same logical record across multiple commits with
-different sets of non-null columns.
+Rows sharing a primary key are merged left-to-right, taking the latest
+non-null value per non-PK field. ``DeduplicateMergeFunction`` keeps
+only the latest row; ``PartialUpdateMergeFunction`` instead lets later
+writes "fill in" fields the earlier writes left null, so users can
+write the same logical record across multiple commits with different
+sets of non-null columns.
 
-This is the **core merge semantics only**. The Java implementation also
+This is the **core merge semantics only**. The upstream engine also
 supports per-field aggregator overrides (``fields.<name>.aggregate-
 function``), sequence groups (``fields.<name>.sequence-group``),
 ``ignore-delete``, and ``partial-update.remove-record-on-*`` options.
-None of those are implemented yet; non-INSERT row kinds raise
-``NotImplementedError`` at ``add`` time so we never silently corrupt
-data with a half-implemented contract.
+None of those are implemented in pypaimon yet; non-INSERT row kinds
+raise ``NotImplementedError`` at ``add`` time so we never silently
+corrupt data with a half-implemented contract.
 """
 
 from typing import Any, List, Optional
@@ -56,19 +52,31 @@ class PartialUpdateMergeFunction:
     """
 
     def __init__(self, key_arity: int, value_arity: int,
-                 nullables: Optional[List[bool]] = None):
+                 nullables: Optional[List[bool]] = None,
+                 value_field_names: Optional[List[str]] = None):
         self._key_arity = key_arity
         self._value_arity = value_arity
         # Per-value-field nullable flags, parallel to value indices. When
         # ``None``, no nullability check runs (preserves the contract for
         # direct callers that don't have schema info handy). When given,
-        # mirrors Java's ``updateNonNullFields`` check: a null input on a
-        # NOT NULL field raises rather than being silently absorbed.
+        # the schema's NOT NULL declaration is enforced on every add():
+        # a null input on a NOT NULL field raises rather than being
+        # silently absorbed.
         if nullables is not None and len(nullables) != value_arity:
             raise ValueError(
                 "nullables length {} does not match value_arity {}".format(
                     len(nullables), value_arity))
         self._nullables = nullables
+        # Optional value-field names, parallel to value indices. When
+        # given, the NOT-NULL error message uses the field name instead
+        # of a bare position to make the failure actionable.
+        if value_field_names is not None \
+                and len(value_field_names) != value_arity:
+            raise ValueError(
+                "value_field_names length {} does not match "
+                "value_arity {}".format(
+                    len(value_field_names), value_arity))
+        self._value_field_names = value_field_names
         # Lazily allocated on first add(); ``None`` means "no rows yet".
         self._accumulator: Optional[List[Any]] = None
         # Reference to the most recently added kv. We use it only to
@@ -84,23 +92,24 @@ class PartialUpdateMergeFunction:
     def add(self, kv: KeyValue) -> None:
         row_kind_byte = kv.value_row_kind_byte
         if not RowKind.is_add_byte(row_kind_byte):
-            # DELETE / UPDATE_BEFORE need ignore-delete or
-            # partial-update.remove-record-on-delete to be set in Java;
-            # neither option is wired up in pypaimon yet, so refuse the
-            # row rather than silently swallow it.
+            # DELETE / UPDATE_BEFORE require ignore-delete or
+            # partial-update.remove-record-on-delete to be enabled,
+            # and neither option is implemented in pypaimon yet, so
+            # refuse the row rather than silently swallow it.
             raise NotImplementedError(
-                "PartialUpdateMergeFunction received a {} row; this "
-                "Python port does not yet implement the ignore-delete / "
-                "partial-update.remove-record-on-delete options. Use the "
-                "Java client for tables that produce DELETE / "
-                "UPDATE_BEFORE rows.".format(RowKind(row_kind_byte).to_string())
+                "PartialUpdateMergeFunction received a {} row; the "
+                "ignore-delete / partial-update.remove-record-on-delete "
+                "options needed to handle it are not yet implemented in "
+                "pypaimon. Tables that produce DELETE / UPDATE_BEFORE "
+                "rows are not supported here.".format(
+                    RowKind(row_kind_byte).to_string())
             )
 
-        # Mirror Java's reset() + updateNonNullFields(): the accumulator
-        # starts as all-null (equivalent to ``new GenericRow(arity)``) and
-        # each add() writes non-null inputs; null inputs are absorbed —
-        # except when the schema marks the field NOT NULL, in which case
-        # we raise to match Java's IllegalArgumentException check.
+        # The accumulator starts as all-null and each add() writes
+        # non-null inputs; null inputs are absorbed -- except when the
+        # schema marks the field NOT NULL, in which case we raise so
+        # the violation surfaces at write time instead of producing a
+        # row that breaks the schema invariant.
         if self._accumulator is None:
             self._accumulator = [None] * self._value_arity
         for i in range(self._value_arity):
@@ -108,7 +117,15 @@ class PartialUpdateMergeFunction:
             if v is not None:
                 self._accumulator[i] = v
             elif self._nullables is not None and not self._nullables[i]:
-                raise ValueError("Field {} can not be null".format(i))
+                if self._value_field_names is not None:
+                    field_ref = "'{}'".format(self._value_field_names[i])
+                else:
+                    field_ref = "at index {}".format(i)
+                raise ValueError(
+                    "Partial-update received NULL for non-nullable field "
+                    "{}. Declare the field nullable in the table schema "
+                    "if writes can leave it unset, or supply a value."
+                    .format(field_ref))
         self._latest_kv = kv
 
     def get_result(self) -> Optional[KeyValue]:

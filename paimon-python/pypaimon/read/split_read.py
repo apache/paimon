@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple
 
+from pypaimon.common.merge_engine_dispatch import build_merge_function
 from pypaimon.common.options.core_options import CoreOptions, MergeEngine
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
@@ -59,12 +60,7 @@ from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.aggregation_merge_function import (
     AggregateMergeFunction, build_field_aggregators)
-from pypaimon.read.reader.partial_update_merge_function import \
-    PartialUpdateMergeFunction
-from pypaimon.read.reader.first_row_merge_function import \
-    FirstRowMergeFunction
-from pypaimon.read.reader.sort_merge_reader import (DeduplicateMergeFunction,
-                                                    SortMergeReaderWithMinHeap,
+from pypaimon.read.reader.sort_merge_reader import (SortMergeReaderWithMinHeap,
                                                     builtin_seq_comparator)
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
@@ -125,7 +121,7 @@ class SplitRead(ABC):
         self.limit = limit
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
-        # flags to merge functions that mirror Java's NOT-NULL check.
+        # flags to merge functions that enforce NOT-NULL on every add().
         self.value_fields = list(read_type)
 
         self.trimmed_primary_key = self.table.trimmed_primary_keys
@@ -703,28 +699,20 @@ class MergeFileSplitRead(SplitRead):
             seq_comparator=self.seq_comparator)
 
     def _build_merge_function(self):
-        """Pick the right MergeFunction implementation for the table's
-        ``merge-engine`` option.
+        """Pick the MergeFunction for the table's ``merge-engine`` option.
 
-        The pre-flight checks that reject unsupported engines or option
-        combinations live in
-        :func:`pypaimon.read.merge_engine_support.check_supported` and
-        run at ``TableRead.__init__`` time, so by the point this method
-        executes only the supported engines are reachable.
+        Delegates to the shared dispatch in
+        ``pypaimon.common.merge_engine_dispatch`` so the read path and
+        the in-memory merge buffer on the write path cannot drift.
+        ``AGGREGATE`` is special-cased here because building the per-
+        field aggregators needs the full ``DataField`` objects, the
+        full primary-key list and the parsed ``CoreOptions`` -- which
+        sit outside the dispatch's raw-options contract. The writer-
+        side merge buffer falls back to dedupe for aggregation anyway
+        (see :meth:`FileStoreWrite._build_pk_merge_function`), so the
+        two sides only need to share the simple engines.
         """
         engine = self.table.options.merge_engine()
-        if engine == MergeEngine.DEDUPLICATE:
-            return DeduplicateMergeFunction()
-        if engine == MergeEngine.PARTIAL_UPDATE:
-            return PartialUpdateMergeFunction(
-                key_arity=len(self.trimmed_primary_key),
-                value_arity=self.value_arity,
-                nullables=[f.type.nullable for f in self.value_fields],
-            )
-        if engine == MergeEngine.FIRST_ROW:
-            return FirstRowMergeFunction(
-                ignore_delete=self.table.options.ignore_delete(),
-            )
         if engine == MergeEngine.AGGREGATE:
             # Use the full primary-key list, not ``trimmed_primary_key``:
             # ``value_fields`` still carries partition columns, so any PK
@@ -742,10 +730,13 @@ class MergeFileSplitRead(SplitRead):
                 value_arity=self.value_arity,
                 field_aggregators=field_aggregators,
             )
-        # check_supported() rejects everything else at TableRead.__init__.
-        raise AssertionError(
-            "unreachable: merge-engine '{}' should have been rejected by "
-            "merge_engine_support.check_supported".format(engine.value)
+        return build_merge_function(
+            engine=engine,
+            raw_options=self.table.options.options.to_map(),
+            key_arity=len(self.trimmed_primary_key),
+            value_arity=self.value_arity,
+            value_field_nullables=[f.type.nullable for f in self.value_fields],
+            value_field_names=[f.name for f in self.value_fields],
         )
 
     def create_reader(self) -> RecordReader:

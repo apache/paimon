@@ -36,6 +36,20 @@ class KeyValue:
         self._reused_value.replace(row_tuple)
         return self
 
+    def copy(self) -> 'KeyValue':
+        """Return an independent KeyValue carrying the current row tuple.
+
+        ``replace`` swaps the tuple reference rather than mutating it, so a
+        copy stays valid even if a pooled/reused source KeyValue is later
+        replaced again. Callers that need to hold onto a kv past the next
+        ``replace`` (e.g. FirstRowMergeFunction keeping the first row while
+        the writer folds with a single pooled KeyValue) use this.
+        """
+        new = KeyValue(self.key_arity, self.value_arity)
+        if self._row_tuple is not None:
+            new.replace(self._row_tuple)
+        return new
+
     def is_add(self) -> bool:
         return RowKind.is_add_byte(self.value_row_kind_byte)
 

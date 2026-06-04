@@ -88,6 +88,24 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             w.close()
             c.close()
 
+    def _write_many(self, table, batches):
+        """Multiple ``write_arrow`` calls inside a single ``prepare_commit``.
+
+        Mirrors the reviewer's question: rows that land in the same
+        underlying data file must still go through the merge-engine
+        dispatch; in-writer merging cannot silently degrade to dedupe.
+        """
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        c = wb.new_commit()
+        try:
+            for rows in batches:
+                w.write_arrow(pa.Table.from_pylist(rows, schema=self.pa_schema))
+            c.commit(w.prepare_commit())
+        finally:
+            w.close()
+            c.close()
+
     def _read(self, table):
         rb = table.new_read_builder()
         splits = rb.new_scan().plan().splits()
@@ -173,6 +191,46 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'A', 'b': 'B', 'c': 'C'}],
         )
 
+    # -- single-commit, multiple write_arrow calls -----------------------
+    #
+    # The in-memory merge buffer added to ``KeyValueDataWriter`` runs
+    # the merge function on flush, so rows from multiple ``write_arrow``
+    # calls that share a primary key are folded into a single row before
+    # the data file is written. The flushed file therefore satisfies the
+    # LSM "PK unique within a file" invariant the read-side
+    # ``raw_convertible`` fast path relies on.
+
+    def test_partial_update_two_write_arrows_single_commit(self):
+        """Two ``write_arrow`` calls + one ``prepare_commit``: each
+        carries a disjoint non-null field; result is the per-field merge.
+        """
+        table = self._create_pk_table('two_writes_single_commit')
+        self._write_many(table, [
+            [{'id': 1, 'a': 'A', 'b': None, 'c': None}],
+            [{'id': 1, 'a': None, 'b': 'B', 'c': None}],
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': None}],
+        )
+
+    def test_partial_update_three_write_arrows_single_commit(self):
+        """Three ``write_arrow`` calls in a single commit compose into
+        the union of non-null fields.
+        """
+        table = self._create_pk_table('three_writes_single_commit')
+        self._write_many(table, [
+            [{'id': 1, 'a': 'A', 'b': None, 'c': None}],
+            [{'id': 1, 'a': None, 'b': 'B', 'c': None}],
+            [{'id': 1, 'a': None, 'b': None, 'c': 'C'}],
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'A', 'b': 'B', 'c': 'C'}],
+        )
+
     # -- deduplicate (regression) ----------------------------------------
 
     def test_deduplicate_engine_unchanged(self):
@@ -188,10 +246,37 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             [{'id': 1, 'a': 'new', 'b': None, 'c': None}],
         )
 
+    def test_deduplicate_two_write_arrows_single_commit(self):
+        """Pre-PR master silently returned both rows because the
+        flushed file held two records sharing a primary key. With the
+        in-memory merge buffer in place, ``deduplicate`` collapses
+        same-PK rows in a single commit too -- LSM "PK unique within a
+        file" invariant restored.
+        """
+        table = self._create_pk_table(
+            'dedupe_two_writes_single_commit',
+            merge_engine='deduplicate',
+        )
+        self._write_many(table, [
+            [{'id': 1, 'a': 'first', 'b': 'old', 'c': None}],
+            [{'id': 1, 'a': 'second', 'b': 'new', 'c': None}],
+        ])
+
+        self.assertEqual(
+            self._read(table),
+            [{'id': 1, 'a': 'second', 'b': 'new', 'c': None}],
+        )
+
     # -- other supported engines (smoke) ---------------------------------
 
     def test_first_row_engine_keeps_first(self):
-        """The ``first-row`` engine must keep the earliest row per PK."""
+        """The ``first-row`` engine must keep the earliest row per PK.
+
+        Both the writer-side merge buffer and the reader-side merge
+        function go through ``merge_engine_dispatch``, so first-row is
+        a real supported engine (no dedupe fallback / no NotImplemented
+        raise) on both sides.
+        """
         table = self._create_pk_table('first_row_supported',
                                       merge_engine='first-row')
         self._write(table, [{'id': 1, 'a': 'first', 'b': None, 'c': None}])
@@ -201,6 +286,23 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
             self._read(table),
             [{'id': 1, 'a': 'first', 'b': None, 'c': None}],
         )
+
+    def test_aggregation_engine_write_logs_fallback_warning(self):
+        """The write-side fallback to deduplicate for unsupported engines
+        is silent in terms of return value -- a ``logging.warning`` is
+        the only signal that file contents will not match the table's
+        declared semantics. Important when the same table is read back
+        by a reader that honours the declared engine; the pypaimon
+        read-side raise wouldn't fire there.
+        """
+        table = self._create_pk_table('agg_warning',
+                                      merge_engine='aggregation')
+        with self.assertLogs(
+                'pypaimon.write.file_store_write', level='WARNING') as cm:
+            self._write(table, [{'id': 1, 'a': 'x', 'b': None, 'c': None}])
+        combined = '\n'.join(cm.output)
+        self.assertIn('aggregation', combined)
+        self.assertIn('deduplicate', combined)
 
     # -- partial-update + out-of-scope option combinations ---------------
     #
@@ -213,15 +315,14 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
 
     def _assert_partial_update_unsupported(self, table_name, extra_options,
                                            expected_keys):
+        # Shared dispatch runs at write time too, so the unsupported-
+        # option error surfaces inside the first ``write_arrow`` call
+        # (when ``FileStoreWrite._create_data_writer`` first runs)
+        # rather than waiting for read.
         table = self._create_pk_table(
             table_name, extra_options=extra_options)
-        self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
-        self._write(table, [{'id': 1, 'a': None, 'b': 'B', 'c': None}])
-
-        rb = table.new_read_builder()
-        splits = rb.new_scan().plan().splits()
         with self.assertRaises(NotImplementedError) as cm:
-            rb.new_read().to_arrow(splits)
+            self._write(table, [{'id': 1, 'a': 'A', 'b': None, 'c': None}])
         msg = str(cm.exception)
         self.assertIn("partial-update", msg)
         for key in expected_keys:
@@ -271,25 +372,25 @@ class PartialUpdateMergeEngineE2ETest(unittest.TestCase):
         )
 
     def test_partial_update_unsupported_options_guard_covers_raw_convertible(self):
-        """The unsupported-options guard must fire even when the scan
-        would dispatch every split through ``RawFileSplitRead`` (i.e. a
-        single-snapshot table where rows don't overlap).
+        """The read-side guard at ``TableRead.__init__`` must fire even
+        when the scan would dispatch every split through
+        ``RawFileSplitRead`` (single-snapshot, non-overlapping rows).
 
         Before the guard moved to ``TableRead.__init__`` this case
         silently bypassed validation because raw-convertible splits skip
-        ``MergeFileSplitRead`` entirely — and an option like
-        ``partial-update.remove-record-on-delete`` would be ignored on
-        the read path while the user assumed it was honoured.
+        ``MergeFileSplitRead`` entirely -- the read path's
+        ``_build_merge_function`` never ran, so an option like
+        ``partial-update.remove-record-on-delete`` was ignored on read.
+
+        The shared dispatch now also fires on the write path's first
+        flush (see ``_assert_partial_update_unsupported``), so we skip
+        ``_write`` here: the read-side guard runs at ``new_read()``
+        construction time regardless of whether data exists.
         """
         table = self._create_pk_table(
             'pu_rrod_raw_convertible',
             extra_options={'partial-update.remove-record-on-delete': 'true'},
         )
-        # Single write -> single snapshot -> splits are raw-convertible.
-        self._write(table, [
-            {'id': 1, 'a': 'A', 'b': None, 'c': None},
-            {'id': 2, 'a': 'B', 'b': None, 'c': None},
-        ])
         rb = table.new_read_builder()
         with self.assertRaises(NotImplementedError) as cm:
             rb.new_read()

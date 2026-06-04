@@ -64,6 +64,22 @@ class FirstRowMergeFunctionTest(unittest.TestCase):
         result = mf.get_result()
         self.assertEqual(_result_value(result), (10, "first"))
 
+    def test_keeps_first_row_when_kv_is_pooled(self):
+        # The writer's fold (KeyValueDataWriter._merge_pending_by_pk) reuses
+        # a single KeyValue and replace()s it per row. add() must snapshot
+        # the first row; otherwise get_result tracks the pooled kv's last
+        # replace() and returns the LAST row -- silently turning first-row
+        # into last-row. This is the case the per-row _kv() tests miss.
+        mf = FirstRowMergeFunction()
+        mf.reset()
+        pooled = KeyValue(key_arity=1, value_arity=2)
+        pooled.replace((1, 1, RowKind.INSERT.value, 10, "first"))
+        mf.add(pooled)
+        pooled.replace((1, 2, RowKind.INSERT.value, 20, "second"))
+        mf.add(pooled)
+        result = mf.get_result()
+        self.assertEqual(_result_value(result), (10, "first"))
+
     def test_reset_clears_state(self):
         mf = FirstRowMergeFunction()
         mf.reset()

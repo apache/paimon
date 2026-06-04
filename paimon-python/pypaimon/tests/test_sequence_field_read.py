@@ -363,15 +363,16 @@ class SequenceFieldReadE2ETest(unittest.TestCase):
 
     def test_sequence_group_still_rejected(self):
         """Top-level sequence.field is supported, but per-field
-        sequence-group is not -- the read must still raise.
+        sequence-group is not -- it must still be rejected. The shared
+        merge-engine dispatch now rejects this combination fail-fast on
+        the write path, so the write (not the read) is what raises.
         """
         table = self._create_pk_table(
             'seq_group', merge_engine='partial-update',
             extra_options={'sequence.field': 'ts',
                            'fields.ts2.sequence-group': 'val'})
-        self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
         with self.assertRaises(NotImplementedError):
-            self._read(table)
+            self._write(table, [{'id': 1, 'ts': 100, 'ts2': 0, 'val': 'x'}])
 
     def test_nested_sequence_field_rejected(self):
         """nested-sequence-field is unimplemented and must be rejected

@@ -16,40 +16,35 @@
 # limitations under the License.
 ################################################################################
 
+"""Default merge function for primary-key tables.
+
+Mirrors Java ``DeduplicateMergeFunction`` -- for a run of KVs sharing
+the same primary key, keep only the one with the highest sequence
+number (by virtue of ``add`` being called in sequence-number order).
+"""
+
 from typing import Optional
 
 from pypaimon.table.row.key_value import KeyValue
 
 
-class FirstRowMergeFunction:
-    """A MergeFunction where key is primary key (unique) and value is the
-    full record, only keep the first one."""
+class DeduplicateMergeFunction:
+    """Keep only the latest KV per primary key.
 
-    def __init__(self, ignore_delete: bool = False):
-        self.ignore_delete = ignore_delete
-        self.first: Optional[KeyValue] = None
+    Used by both the read path (``SortMergeReaderWithMinHeap``) and the
+    write path (``KeyValueDataWriter`` in-memory merge buffer) -- the
+    latter is what enforces the LSM "PK unique within a file"
+    invariant on flush.
+    """
+
+    def __init__(self):
+        self.latest_kv: Optional[KeyValue] = None
 
     def reset(self) -> None:
-        self.first = None
+        self.latest_kv = None
 
     def add(self, kv: KeyValue) -> None:
-        if not kv.is_add():
-            if self.ignore_delete:
-                return
-            raise ValueError(
-                "By default, First row merge engine can not accept "
-                "DELETE/UPDATE_BEFORE records.\n"
-                "You can config 'ignore-delete' to ignore the "
-                "DELETE/UPDATE_BEFORE records."
-            )
-
-        if self.first is None:
-            # Snapshot, don't keep the reference: the caller may pool/reuse
-            # a single KeyValue and replace() it for the next row (the write
-            # path's fold does exactly this). Holding the live reference
-            # would make get_result return the LAST row instead of the
-            # first, silently turning first-row into last-row.
-            self.first = kv.copy()
+        self.latest_kv = kv
 
     def get_result(self) -> Optional[KeyValue]:
-        return self.first
+        return self.latest_kv
