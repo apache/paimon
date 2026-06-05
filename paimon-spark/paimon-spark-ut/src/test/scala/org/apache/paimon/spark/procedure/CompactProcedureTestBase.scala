@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.data.GenericRow
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.utils.SparkProcedureUtils
