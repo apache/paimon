@@ -534,8 +534,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
 
-                // deduplicate
-                beforeEntries.removeIf(dataEntries::remove);
+                // deduplicate: remove entries common to both lists
+                deduplicate(beforeEntries, dataEntries);
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -630,15 +630,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     private Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> scanDvIndex(
             @Nullable Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
-        if (snapshot == null || snapshot.indexManifest() == null) {
+        if (snapshot == null || snapshot.indexManifest() == null || buckets.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
         Path indexManifestPath = indexFileHandler.indexManifestFilePath(snapshot.indexManifest());
+        Set<Pair<BinaryRow, Integer>> remainingBuckets = new HashSet<>(buckets);
 
         // 1. read from cache
         if (dvMetaCache != null) {
-            Iterator<Pair<BinaryRow, Integer>> iterator = buckets.iterator();
+            Iterator<Pair<BinaryRow, Integer>> iterator = remainingBuckets.iterator();
             while (iterator.hasNext()) {
                 Pair<BinaryRow, Integer> next = iterator.next();
                 BinaryRow partition = next.getLeft();
@@ -658,29 +659,56 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 }
             }
         }
+        if (remainingBuckets.isEmpty()) {
+            return result;
+        }
 
         // 2. read from file system
         Map<Pair<BinaryRow, Integer>, List<IndexFileMeta>> partitionFileMetas =
-                indexFileHandler.scan(
-                        snapshot,
-                        DELETION_VECTORS_INDEX,
-                        buckets.stream().map(Pair::getLeft).collect(Collectors.toSet()));
+                dvMetaCache == null
+                        ? indexFileHandler.scanBuckets(
+                                snapshot, DELETION_VECTORS_INDEX, remainingBuckets)
+                        : indexFileHandler.scan(
+                                snapshot,
+                                DELETION_VECTORS_INDEX,
+                                remainingBuckets.stream()
+                                        .map(Pair::getLeft)
+                                        .collect(Collectors.toSet()));
         partitionFileMetas.forEach(
                 (entry, indexFileMetas) -> {
-                    Map<String, DeletionFile> deletionFiles =
-                            toDeletionFiles(entry, indexFileMetas);
-                    if (dvMetaCache != null) {
-                        dvMetaCache.put(
+                    Pair<BinaryRow, Integer> partitionBucket = entry;
+                    if (remainingBuckets.contains(entry)) {
+                        Map<String, DeletionFile> deletionFiles =
+                                toDeletionFiles(partitionBucket, indexFileMetas);
+                        result.put(partitionBucket, deletionFiles);
+                        if (dvMetaCache != null) {
+                            dvMetaCache.put(
+                                    indexManifestPath,
+                                    partitionBucket.getLeft(),
+                                    partitionBucket.getRight(),
+                                    deletionFiles);
+                        }
+                    } else if (dvMetaCache != null) {
+                        dvMetaCache.putLazy(
                                 indexManifestPath,
-                                entry.getLeft(),
-                                entry.getRight(),
-                                deletionFiles);
-                    }
-                    if (buckets.contains(entry)) {
-                        result.put(entry, deletionFiles);
+                                partitionBucket.getLeft(),
+                                partitionBucket.getRight(),
+                                deletionFileNumber(indexFileMetas),
+                                () -> toDeletionFiles(partitionBucket, indexFileMetas));
                     }
                 });
         return result;
+    }
+
+    private int deletionFileNumber(List<IndexFileMeta> fileMetas) {
+        int count = 0;
+        for (IndexFileMeta indexFile : fileMetas) {
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            if (dvRanges != null) {
+                count += dvRanges.size();
+            }
+        }
+        return count;
     }
 
     private Map<String, DeletionFile> toDeletionFiles(
@@ -704,5 +732,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return deletionFiles;
+    }
+
+    /**
+     * Remove entries common to both lists using HashSet for O(n+m) complexity instead of O(n*m)
+     * with List.remove().
+     */
+    private static void deduplicate(
+            List<ManifestEntry> beforeEntries, List<ManifestEntry> dataEntries) {
+        Set<ManifestEntry> afterSet = new HashSet<>(dataEntries);
+        Set<ManifestEntry> commonEntries = new HashSet<>();
+        beforeEntries.removeIf(
+                entry -> {
+                    if (afterSet.contains(entry)) {
+                        commonEntries.add(entry);
+                        return true;
+                    }
+                    return false;
+                });
+        dataEntries.removeAll(commonEntries);
     }
 }

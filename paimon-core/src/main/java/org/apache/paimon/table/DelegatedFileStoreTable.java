@@ -296,6 +296,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void mergeBranch(String sourceBranch, String targetBranch) {
+        wrapped.mergeBranch(sourceBranch, targetBranch);
+    }
+
+    @Override
     public ExpireSnapshots newExpireSnapshots() {
         return wrapped.newExpireSnapshots();
     }

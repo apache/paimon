@@ -80,6 +80,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
+
     public static final String COUNT_LIMIT = "count-limit";
 
     public static final String DISTINCT = "distinct";
@@ -466,8 +468,61 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(30)
                     .withDescription(
-                            "To avoid frequent manifest merges, this parameter specifies the minimum number "
-                                    + "of ManifestFileMeta to merge.");
+                            Description.builder()
+                                    .text(
+                                            "To avoid frequent manifest merges, this parameter specifies the minimum number "
+                                                    + "of ManifestFileMeta to merge.")
+                                    .linebreak()
+                                    .text(
+                                            "Note: when '"
+                                                    + "manifest-sort.enabled"
+                                                    + "' is true, this minimum-count gate is only "
+                                                    + "applied to the trailing sub-segment of a "
+                                                    + "section that exceeds '"
+                                                    + "manifest-sort.max-rewrite-size"
+                                                    + "'. Small under-budget sections are sorted "
+                                                    + "and rewritten directly, so two small manifest "
+                                                    + "files may be merged into one even when their "
+                                                    + "count is below this threshold and full "
+                                                    + "compaction is not triggered.")
+                                    .build());
+
+    public static final ConfigOption<Boolean> MANIFEST_SORT_ENABLED =
+            key("manifest-sort.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            Description.builder()
+                                    .text("Whether to invoke manifest sort rewrite during commit.")
+                                    .linebreak()
+                                    .text(
+                                            "Note: enabling this changes the semantics of '"
+                                                    + "manifest.merge-min-count"
+                                                    + "'. In the sort rewrite path, small manifest "
+                                                    + "files within the rewrite budget are sorted "
+                                                    + "and merged directly, so the minimum-count "
+                                                    + "gate no longer prevents merging a small "
+                                                    + "number of under-budget manifest files when "
+                                                    + "full compaction is not triggered.")
+                                    .build());
+
+    public static final ConfigOption<String> MANIFEST_SORT_PARTITION_FIELD =
+            key("manifest-sort.partition-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Partition field name to sort manifest entries by. Validated by"
+                                    + " schema validation, if not configured, defaults to the first partition field.");
+
+    public static final ConfigOption<MemorySize> MANIFEST_SORT_MAX_REWRITE_SIZE =
+            key("manifest-sort.max-rewrite-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Maximum total size of manifest files to rewrite in a single"
+                                    + " sort rewrite pass. Sections exceeding this limit are"
+                                    + " skipped. Set to a larger value to allow more aggressive"
+                                    + " sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.");
 
     public static final ConfigOption<String> UPSERT_KEY =
             key("upsert-key")
@@ -966,6 +1021,24 @@ public class CoreOptions implements Serializable {
                     .withDescription("Specify the order of sequence.field.");
 
     @Immutable
+    public static final ConfigOption<Boolean> SEQUENCE_SNAPSHOT_ORDERING =
+            key("sequence.snapshot-ordering")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, merge uses the commit snapshot id as the ordering key "
+                                    + "for primary-key conflicts: records from later snapshots "
+                                    + "always win. Designed for multi-writer scenarios on the same "
+                                    + "primary-key table where wall-clock sequence numbers cannot "
+                                    + "be globally ordered. The order of records within the same "
+                                    + "snapshot is not guaranteed. Mutually exclusive with "
+                                    + "sequence.field. Requires a primary-key table with "
+                                    + "write-only=true. Inline compaction is not allowed because "
+                                    + "snapshot ids are assigned only after commit. To compact such "
+                                    + "tables, run a dedicated compaction job/action with "
+                                    + "write-only=false.");
+
+    @Immutable
     public static final ConfigOption<Boolean> AGGREGATION_REMOVE_RECORD_ON_DELETE =
             key("aggregation.remove-record-on-delete")
                     .booleanType()
@@ -1427,6 +1500,7 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
                     .intType()
@@ -1767,6 +1841,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Use customized name when creating tags in Batch mode.");
 
+    public static final ConfigOption<Duration> SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED =
+            key("scan.plan-auto-tag-for-read.time-retained")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When set, a temporary tag will be auto-created during batch scan planning "
+                                    + "to protect the read snapshot from expiration. The value specifies the tag's TTL. "
+                                    + "Should be longer than the longest expected batch read duration.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -1868,6 +1951,17 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(2))
                     .withDescription("The target size of deletion vector index file.");
+
+    public static final ConfigOption<Boolean> DELETION_VECTORS_MERGE_ON_READ =
+            key("deletion-vectors.merge-on-read")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When deletion vectors are enabled, uncompacted files are not visible by default. "
+                                    + "Set this to true to enable merge-on-read, which makes uncompacted data "
+                                    + "visible at the cost of read performance. "
+                                    + "This option only affects batch scan visibility of DV level-0 files, "
+                                    + "it does not change streaming scan or changelog behavior.");
 
     public static final ConfigOption<Boolean> DELETION_VECTOR_BITMAP64 =
             key("deletion-vectors.bitmap64")
@@ -2215,6 +2309,31 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
+            key("data-evolution.merge-into.file-pruning")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, enables the file-level pruning step for MergeInto partial column "
+                                    + "update on data-evolution tables. "
+                                    + "Set this to false when most files in the target partition are expected "
+                                    + "to be updated, so that the overhead of collecting touched file IDs "
+                                    + "outweighs the benefit of pruning untouched files.");
+
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST =
+            key("data-evolution.merge-into.source-persist")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to persist source when process merge into action on data evolution table.");
+
+    public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
+            key("blob-compaction.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to compact blob files when compacting a data evolution table.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")
                     .booleanType()
@@ -2280,6 +2399,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Format table commit hive sync uri.");
 
+    @Immutable
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
                     .stringType()
@@ -2310,12 +2430,30 @@ public class CoreOptions implements Serializable {
                                     + "as serialized BlobViewStruct bytes inline in data files and "
                                     + "resolve from upstream tables at read time.");
 
+    public static final ConfigOption<Boolean> BLOB_VIEW_RESOLVE_ENABLED =
+            key("blob-view.resolve.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to resolve blob-view-field values from upstream tables at "
+                                    + "read time. Set to false to preserve BlobViewStruct references "
+                                    + "when forwarding blob view values to another blob-view table.");
+
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
+
+    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
+            key("blob-write-null-on-missing-file")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write NULL for a descriptor BLOB value when the "
+                                    + "referenced file does not exist during Flink writes. When "
+                                    + "false, the write fails when the descriptor is read.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_PATH =
@@ -2399,10 +2537,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(32)
                     .withDescription(
-                            "The maximum number of concurrent scanner for global index."
-                                    + "By default is the number of processors available to the Java virtual machine.");
+                            "The maximum number of concurrent threads for global index I/O.");
 
     public static final ConfigOption<Boolean> OVERWRITE_UPGRADE =
             key("overwrite-upgrade")
@@ -2457,8 +2594,14 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "Target size of a vector-store file."
-                                                    + " Default is 10 * TARGET_FILE_SIZE.")
+                                                    + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
+
+    public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
+            key("vector-search.distribute.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to process distributed vector search.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -2553,6 +2696,19 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestFullCompactionThresholdSize() {
         return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
+    }
+
+    public boolean manifestSortEnabled() {
+        return options.get(MANIFEST_SORT_ENABLED);
+    }
+
+    @Nullable
+    public String manifestSortPartitionField() {
+        return options.get(MANIFEST_SORT_PARTITION_FIELD);
+    }
+
+    public long manifestSortMaxRewriteSize() {
+        return options.get(MANIFEST_SORT_MAX_REWRITE_SIZE).getBytes();
     }
 
     public String partitionDefaultName() {
@@ -2686,6 +2842,18 @@ public class CoreOptions implements Serializable {
         String keyString =
                 options.get(
                         key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY)
+                                .stringType()
+                                .noDefaultValue());
+        if (keyString == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
+    public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
+        String keyString =
+                options.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_SEQUENCE_FIELD)
                                 .stringType()
                                 .noDefaultValue());
         if (keyString == null) {
@@ -2972,6 +3140,11 @@ public class CoreOptions implements Serializable {
      */
     public Set<String> blobViewField() {
         return parseCommaSeparatedSet(BLOB_VIEW_FIELD);
+    }
+
+    /** Whether to resolve blob view references at read time. */
+    public boolean blobViewResolveEnabled() {
+        return options.get(BLOB_VIEW_RESOLVE_ENABLED);
     }
 
     /** Resolve blob fields that are stored inline in normal data files. */
@@ -3350,6 +3523,10 @@ public class CoreOptions implements Serializable {
         return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
     }
 
+    public boolean snapshotSequenceOrdering() {
+        return options.get(SEQUENCE_SNAPSHOT_ORDERING);
+    }
+
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
     }
@@ -3541,6 +3718,11 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_BATCH_CUSTOMIZED_NAME);
     }
 
+    @Nullable
+    public Duration scanPlanAutoTagTimeRetained() {
+        return options.get(SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED);
+    }
+
     public Duration snapshotWatermarkIdleTimeout() {
         return options.get(SNAPSHOT_WATERMARK_IDLE_TIMEOUT);
     }
@@ -3617,8 +3799,15 @@ public class CoreOptions implements Serializable {
         return options.get(FORCE_LOOKUP);
     }
 
+    public boolean deletionVectorsMergeOnRead() {
+        return options.get(DELETION_VECTORS_MERGE_ON_READ);
+    }
+
     public boolean batchScanSkipLevel0() {
-        return deletionVectorsEnabled() || mergeEngine() == FIRST_ROW;
+        if (deletionVectorsEnabled()) {
+            return !deletionVectorsMergeOnRead();
+        }
+        return mergeEngine() == FIRST_ROW;
     }
 
     public MemorySize dvIndexFileTargetSize() {
@@ -3665,6 +3854,18 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionMergeIntoFilePruning() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
+    }
+
+    public boolean dataEvolutionMergeIntoSourcePersist() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
+    public boolean blobCompactionEnabled() {
+        return options.get(BLOB_COMPACTION_ENABLED);
     }
 
     public boolean prepareCommitWaitCompaction() {
@@ -3808,6 +4009,10 @@ public class CoreOptions implements Serializable {
         return options.get(BLOB_AS_DESCRIPTOR);
     }
 
+    public boolean blobWriteNullOnMissingFile() {
+        return options.get(BLOB_WRITE_NULL_ON_MISSING_FILE);
+    }
+
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
     }
@@ -3873,10 +4078,13 @@ public class CoreOptions implements Serializable {
     }
 
     public long vectorTargetFileSize() {
-        // Since vectors are large, it would be better to set a larger target size for vectors.
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
-                .orElse(10 * targetFileSize(false));
+                .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorSearchDistributeEnabled() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

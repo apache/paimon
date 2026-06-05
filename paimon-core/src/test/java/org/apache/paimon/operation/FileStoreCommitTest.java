@@ -807,7 +807,7 @@ public class FileStoreCommitTest {
         ArrayList<DataField> newFields =
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         newFields.add(new DataField(-1, "newField", DataTypes.INT()));
-        store.mergeSchema(new RowType(false, newFields), true);
+        store.mergeSchema(new RowType(false, newFields), true, true, true);
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isEmpty();

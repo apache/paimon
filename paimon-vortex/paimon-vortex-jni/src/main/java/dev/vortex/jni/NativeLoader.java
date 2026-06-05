@@ -33,6 +33,15 @@ public final class NativeLoader {
             return;
         }
 
+        // Use Unsafe allocator for Arrow memory to guarantee buffer alignment.
+        // Vortex's Rust FFI requires buffers aligned to the scalar type's natural
+        // alignment (e.g. 16 bytes for Decimal128). Netty's pooled allocator may
+        // return sub-aligned addresses. Unsafe.allocateMemory provides at least
+        // 16-byte alignment on 64-bit systems.
+        if (System.getProperty("arrow.allocation.manager.type") == null) {
+            System.setProperty("arrow.allocation.manager.type", "Unsafe");
+        }
+
         // Load the native library
         String osName = System.getProperty("os.name").toLowerCase(Locale.ROOT);
         String osArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);

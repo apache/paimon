@@ -23,7 +23,6 @@ import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.DataTypes
 
-import org.apache.spark.SparkException
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
 import org.junit.jupiter.api.Assertions
@@ -41,10 +40,10 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     withTable("T") {
       sql("CREATE TABLE T (id INT NOT NULL, name STRING)")
 
-      val e1 = intercept[SparkException] {
+      val e1 = intercept[Exception] {
         sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (null, "c")""")
       }
-      Assertions.assertTrue(e1.getMessage().contains("Cannot write null to non-null column"))
+      Assertions.assertTrue(e1.getMessage().contains("value appeared in non-nullable field"))
 
       sql("""INSERT INTO T VALUES (1, "a"), (2, "b"), (3, null)""")
       checkAnswer(
@@ -65,15 +64,15 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
             |TBLPROPERTIES ('primary-key' = 'id,pt')
             |""".stripMargin)
 
-      val e1 = intercept[SparkException] {
+      val e1 = intercept[Exception] {
         sql("""INSERT INTO T VALUES (1, "a", "pt1"), (2, "b", null)""")
       }
-      Assertions.assertTrue(e1.getMessage().contains("Cannot write null to non-null column"))
+      Assertions.assertTrue(e1.getMessage().contains("value appeared in non-nullable field"))
 
-      val e2 = intercept[SparkException] {
+      val e2 = intercept[Exception] {
         sql("""INSERT INTO T VALUES (1, "a", "pt1"), (null, "b", "pt2")""")
       }
-      Assertions.assertTrue(e2.getMessage().contains("Cannot write null to non-null column"))
+      Assertions.assertTrue(e2.getMessage().contains("value appeared in non-nullable field"))
 
       sql("""INSERT INTO T VALUES (1, "a", "pt1"), (2, "b", "pt1"), (3, null, "pt2")""")
       checkAnswer(
@@ -273,6 +272,167 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
 
       Assertions.assertTrue(
         error.contains("CREATE TABLE LIKE ... STORED AS is not supported for SparkCatalog."))
+    }
+  }
+
+  test("Paimon DDL: REPLACE TABLE replaces in-place and preserves old snapshots") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      sql("""
+            |REPLACE TABLE t (id BIGINT, name STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '4')
+            |""".stripMargin)
+
+      val replaced = loadTable("t")
+      Assertions.assertEquals(oldLocation, replaced.location().toString)
+      Assertions.assertEquals("4", replaced.options().get("bucket"))
+      Assertions.assertEquals(Seq("id", "name"), spark.table("t").schema.fieldNames.toSeq)
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty[Row])
+
+      checkAnswer(
+        sql(s"SELECT id, data FROM t VERSION AS OF $oldSnapshotId"),
+        Seq((1L, "old")).toDF())
+    }
+  }
+
+  test("Paimon DDL: REPLACE TABLE without SELECT fails if table is missing") {
+    assume(gteqSpark3_4)
+    withTable("missing") {
+      val error = intercept[AnalysisException] {
+        sql("""
+              |REPLACE TABLE missing (id BIGINT, data STRING)
+              |USING paimon
+              |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+              |""".stripMargin)
+      }.getMessage
+
+      Assertions.assertTrue(
+        error.contains("TABLE_OR_VIEW_NOT_FOUND") ||
+          error.contains("cannot be found") ||
+          error.contains("not found"))
+    }
+  }
+
+  test("Paimon DDL: CREATE TABLE fails when table exists") {
+    withTable("t") {
+      sql("CREATE TABLE t (id BIGINT, data STRING) USING paimon")
+
+      val error = intercept[AnalysisException] {
+        sql("CREATE TABLE t (id BIGINT, name STRING) USING paimon")
+      }.getMessage
+
+      Assertions.assertTrue(
+        error.contains("TABLE_OR_VIEW_ALREADY_EXISTS") || error.contains("already exists"))
+    }
+  }
+
+  test("Paimon DDL: CREATE OR REPLACE TABLE AS SELECT on partitioned table") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      withTempView("source") {
+        sql("""
+              |CREATE TABLE t (id BIGINT, data STRING, pt STRING)
+              |USING paimon
+              |PARTITIONED BY (pt)
+              |TBLPROPERTIES ('primary-key' = 'id,pt', 'bucket' = '2')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'old', 'p0')")
+        val oldLocation = loadTable("t").location().toString
+        Seq((2L, "x2", "p1"), (3L, "x3", "p2"))
+          .toDF("id", "data", "pt")
+          .createOrReplaceTempView("source")
+
+        sql("""
+              |CREATE OR REPLACE TABLE t
+              |USING paimon
+              |PARTITIONED BY (pt)
+              |TBLPROPERTIES ('primary-key' = 'id,pt', 'bucket' = '3')
+              |AS SELECT * FROM source
+              |""".stripMargin)
+
+        val replaced = loadTable("t")
+        Assertions.assertEquals(oldLocation, replaced.location().toString)
+        Assertions.assertEquals("3", replaced.options().get("bucket"))
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq((2L, "x2", "p1"), (3L, "x3", "p2")).toDF())
+      }
+    }
+  }
+
+  test("Paimon DDL: CREATE OR REPLACE TABLE AS SELECT supports incompatible schema") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      withTempView("source") {
+        sql("""
+              |CREATE TABLE t (id BIGINT, data STRING)
+              |USING paimon
+              |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'old')")
+        val oldLocation = loadTable("t").location().toString
+        val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+        Seq(("2", 20), ("3", 30)).toDF("id", "amount").createOrReplaceTempView("source")
+
+        sql("""
+              |CREATE OR REPLACE TABLE t
+              |USING paimon
+              |TBLPROPERTIES ('bucket' = '-1')
+              |AS SELECT * FROM source
+              |""".stripMargin)
+
+        val replaced = loadTable("t")
+        Assertions.assertEquals(oldLocation, replaced.location().toString)
+        Assertions.assertEquals("-1", replaced.options().get("bucket"))
+        Assertions.assertEquals(Seq("id", "amount"), spark.table("t").schema.fieldNames.toSeq)
+        Assertions.assertEquals("string", spark.table("t").schema("id").dataType.typeName)
+        Assertions.assertEquals("integer", spark.table("t").schema("amount").dataType.typeName)
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(("2", 20), ("3", 30)).toDF())
+        checkAnswer(
+          sql(s"SELECT id, data FROM t VERSION AS OF $oldSnapshotId"),
+          Seq((1L, "old")).toDF())
+      }
+    }
+  }
+
+  test("Paimon DDL: REPLACE TABLE supports incompatible schema and preserves old snapshots") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      sql("""
+            |REPLACE TABLE t (id STRING, amount INT)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+
+      val replaced = loadTable("t")
+      Assertions.assertEquals(oldLocation, replaced.location().toString)
+      Assertions.assertEquals("-1", replaced.options().get("bucket"))
+      Assertions.assertEquals(Seq("id", "amount"), spark.table("t").schema.fieldNames.toSeq)
+      Assertions.assertEquals("string", spark.table("t").schema("id").dataType.typeName)
+      Assertions.assertEquals("integer", spark.table("t").schema("amount").dataType.typeName)
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty[Row])
+      checkAnswer(
+        sql(s"SELECT id, data FROM t VERSION AS OF $oldSnapshotId"),
+        Seq((1L, "old")).toDF())
     }
   }
 
@@ -700,7 +860,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   test("Paimon DDL: create unsupported table") {
     assert(intercept[Exception] {
       sql("CREATE TABLE t (id INT) USING paimon1")
-    }.getMessage.contains("Provider is not supported: paimon1"))
+    }.getMessage.contains("Provider 'paimon1' is not supported"))
   }
 
   test("Paimon DDL: Drop Partition by partial spec") {

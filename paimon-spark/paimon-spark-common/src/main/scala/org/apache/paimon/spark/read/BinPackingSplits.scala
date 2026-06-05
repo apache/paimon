@@ -78,14 +78,18 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
   def pack(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackSplit => false
-      case split: DataSplit => split.rawConvertible()
+      case split: DataSplit => split.rawConvertible() || coreOptions.dataEvolutionEnabled()
       // Currently, format table reader only supports reading one file.
       case _: FormatDataSplit => false
       case _ => false
     }
     if (toReshuffle.nonEmpty) {
       val startTS = System.currentTimeMillis()
-      val reshuffled = packDataSplit(toReshuffle.collect { case ds: DataSplit => ds })
+      val reshuffled = if (coreOptions.dataEvolutionEnabled()) {
+        packDataEvolutionSplit(toReshuffle.collect { case ds: DataSplit => ds })
+      } else {
+        packDataSplit(toReshuffle.collect { case ds: DataSplit => ds })
+      }
       val all = reserved.map(PaimonInputPartition.apply) ++ reshuffled
       val duration = System.currentTimeMillis() - startTS
       logInfo(
@@ -153,6 +157,41 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     }
     closeInputPartition()
 
+    partitions.toArray
+  }
+
+  private def packDataEvolutionSplit(splits: Array[DataSplit]): Array[PaimonInputPartition] = {
+    val maxSplitBytes = computeMaxSplitBytes(splits)
+
+    var currentSize = 0L
+    val currentSplits = new ArrayBuffer[DataSplit]
+    val partitions = new ArrayBuffer[PaimonInputPartition]
+
+    def closeInputPartition(): Unit = {
+      if (currentSplits.nonEmpty) {
+        partitions += PaimonInputPartition(currentSplits.toArray)
+        currentSplits.clear()
+        currentSize = 0L
+      }
+    }
+
+    splits.foreach {
+      split =>
+        val ddFiles = dataFileAndDeletionFiles(split)
+        val size = ddFiles.map {
+          case (dataFile, deletionFile) =>
+            (dataFile.fileSize() * readRowSizeRatio).toLong + openCostInBytes + Option(deletionFile)
+              .map(_.length())
+              .getOrElse(0L)
+        }.sum
+        if (currentSplits.nonEmpty && currentSize + size > maxSplitBytes) {
+          closeInputPartition()
+        }
+        currentSplits += split
+        currentSize += size
+    }
+
+    closeInputPartition()
     partitions.toArray
   }
 

@@ -22,6 +22,10 @@ import org.apache.paimon.data.variant.{GenericVariant, Variant}
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
 import org.apache.paimon.spark.data.{Spark4ArrayData, Spark4InternalRow, Spark4InternalRowWithBlob, SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.format.FormatTableBatchWrite
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.spark.write.PaimonBatchWrite
+import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.conf.Configuration
@@ -32,14 +36,16 @@ import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, SubstituteUnreso
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.ArrayData
-import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns}
+import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.SparkFormatTable
+import org.apache.spark.sql.connector.write.BatchWrite
+import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
+import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
 import org.apache.spark.sql.internal.SQLConf
@@ -102,6 +108,117 @@ class Spark4Shim extends SparkShim {
     tableCatalog.createTable(ident, columns, partitions, properties)
   }
 
+  override def createReplaceTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan = {
+    ReplaceTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createAtomicReplaceTableAsSelectExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan = {
+    AtomicReplaceTableAsSelectExec(
+      catalog,
+      ident,
+      partitioning,
+      query,
+      tableSpec,
+      writeOptions,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createReplaceTableExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan = {
+    ReplaceTableExec(
+      catalog,
+      ident,
+      columns,
+      partitioning,
+      tableSpec,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def createAtomicReplaceTableExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan = {
+    AtomicReplaceTableExec(
+      catalog,
+      ident,
+      columns,
+      partitioning,
+      tableSpec,
+      orCreate = orCreate,
+      invalidateCache)
+  }
+
+  override def toReplaceTableColumns(
+      tableSchema: StructType,
+      schemaOrColumns: Any,
+      catalog: TableCatalog,
+      ident: Identifier): Array[Column] = {
+    val statementType = "REPLACE TABLE"
+    val columns = schemaOrColumns.asInstanceOf[Seq[ColumnDefinition]]
+    ResolveDefaultColumns.validateCatalogForDefaultValue(columns, catalog, ident)
+    GeneratedColumn.validateGeneratedColumns(tableSchema, catalog, ident, statementType)
+    IdentityColumn.validateIdentityColumn(tableSchema, catalog, ident)
+    columns.map(_.toV2Column(statementType)).toArray
+  }
+
+  override def copyTableSpec(
+      tableSpec: TableSpec,
+      additionalProperties: Map[String, String],
+      location: Option[String]): TableSpec = {
+    tableSpec.copy(properties = tableSpec.properties ++ additionalProperties, location = location)
+  }
+
+  private def invalidateCache(tableCatalog: TableCatalog, table: Table, ident: Identifier): Unit = {
+    tableCatalog.invalidateTable(ident)
+  }
+
+  override def createPaimonBatchWrite(
+      table: FileStoreTable,
+      writeSchema: StructType,
+      dataSchema: StructType,
+      overwritePartitions: Option[Map[String, String]],
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
+    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+
+  override def createFormatTableBatchWrite(
+      table: FormatTable,
+      overwriteDynamic: Option[Boolean],
+      overwritePartitions: Option[Map[String, String]],
+      writeSchema: StructType): BatchWrite =
+    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+
   override def createCTERelationRef(
       cteId: Long,
       resolved: Boolean,
@@ -139,23 +256,24 @@ class Spark4Shim extends SparkShim {
       withSchemaEvolution)
   }
 
+  override def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] =
+    merge.notMatchedBySourceActions
+
+  override def createUpdateAction(
+      condition: Option[Expression],
+      assignments: Seq[Assignment]): UpdateAction =
+    UpdateAction(condition, assignments)
+
+  override def createInsertAction(
+      condition: Option[Expression],
+      assignments: Seq[Assignment]): InsertAction =
+    InsertAction(condition, assignments)
+
   override def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation = {
     relation.copy(table = table, output = output)
-  }
-
-  override def copyUpdateAction(
-      action: UpdateAction,
-      assignments: Seq[Assignment]): UpdateAction = {
-    action.copy(assignments = assignments)
-  }
-
-  override def copyInsertAction(
-      action: InsertAction,
-      assignments: Seq[Assignment]): InsertAction = {
-    action.copy(assignments = assignments)
   }
 
   // Spark 4.0 still has `SubstituteUnresolvedOrdinals` (Spark 4.1 removed it because the new

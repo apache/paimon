@@ -1,100 +1,96 @@
-This README gives an overview of how to build and contribute to the
-documentation of Paimon.
+# Apache Paimon Documentation
 
-The documentation is included with the source of Paimon in order to ensure
-that you always have docs corresponding to your checked-out version.
+This directory contains the source for the Apache Paimon documentation site, built with [Docusaurus 3](https://docusaurus.io/).
 
-# Requirements
+## Prerequisites
 
-### Install Hugo
+- Node.js >= 18
+- Yarn (`npm install -g yarn`)
 
-Make sure you have installed Hugo on your system.
-Note: An extended version of Hugo <= [0.124.1](https://github.com/gohugoio/hugo/releases/tag/v0.124.1) is required.
+## Quick Start
 
-From this directory:
+```bash
+# Install dependencies
+yarn install
 
-```sh
-# Install Hugo
-./setup_hugo.sh
-
-# Fetch the theme submodule
-git submodule update --init --recursive
+# Start development server (with hot reload)
+yarn start
 ```
 
-### Start Hugo local server
+The site will be available at http://localhost:3000/docs/master/.
 
-From this directory:
+## Build
 
-```sh
-hugo -b "" serve
+```bash
+# Production build
+yarn build
+
+# Preview the production build locally
+yarn serve
 ```
 
-The site can be viewed at http://localhost:1313/
-
-# Contribute
-
-## Markdown
-
-The documentation pages are written in
-[Markdown](http://daringfireball.net/projects/markdown/syntax). It is possible
-to use [GitHub flavored
-syntax](http://github.github.com/github-flavored-markdown) and intermix plain
-html.
-
-## Front matter
-
-In addition to Markdown, every page contains a Jekyll front matter, which
-specifies the title of the page and the layout to use. The title is used as the
-top-level heading for the page.
-
-    ---
-    title: "Title of the Page"
-    ---
-
-    ---
-    title: "Title of the Page" <-- Title rendered in the side nav
-    weight: 1 <-- Weight controls the ordering of pages in the side nav
-    type: docs <-- required
-    aliases:  <-- Alias to setup redirect from removed page to this one
-      - /alias/to/removed/page.html
-    ---
-
-## Structure
-
-### Page
-
-#### Headings
-
-All documents are structured with headings. From these headings, you can
-automatically generate a page table of contents (see below).
+## Project Structure
 
 ```
-# Level-1 Heading  <- Used for the title of the page 
-## Level-2 Heading <- Start with this one for content
-### Level-3 heading
-#### Level-4 heading
-##### Level-5 heading
+docs/
+├── docs/              # Markdown/MDX content files
+├── generated/         # Auto-generated config tables (from paimon-docs module)
+├── src/
+│   ├── components/    # Custom React components (Stable, Unstable, ConfigTable, etc.)
+│   ├── css/           # Custom styles
+│   └── plugins/       # Remark plugins (variable interpolation)
+├── static/            # Static assets (images, logos, OpenAPI spec)
+├── scripts/           # Migration utilities
+├── docusaurus.config.js
+├── sidebars.js
+└── package.json
 ```
 
-Please stick to the "logical order" when using the headlines, e.g. start with
-level-2 headings and use level-3 headings for subsections, etc. Don't use a
-different ordering, because you don't like how a headline looks.
+## Regenerating Config Tables
 
-#### Table of Contents
+The 28 HTML config tables in `generated/` are produced by the `paimon-docs` Maven module. To regenerate:
 
-Table of contents are added automatically to every page, based on heading levels
-2 - 4. The ToC can be omitted by adding the following to the front matter of
-the page:
+```bash
+cd .. && mvn -pl paimon-docs -am package -DskipTests
+```
 
-    ---
-    bookToc: false
-    ---
+## Adding a New Page
 
-### ShortCodes 
+1. Create a `.md` (or `.mdx` if you need React components like Tabs) file under `docs/`
+2. Add frontmatter:
+   ```yaml
+   ---
+   title: "Page Title"
+   sidebar_position: 5
+   ---
+   ```
+3. The page will automatically appear in the sidebar based on `sidebar_position`
 
-Paimon uses [shortcodes](https://gohugo.io/content-management/shortcodes/) to add
-custom functionality to its documentation markdown.
+## Using Tabs
 
-Its implementation and documentation can be found at
-`./layouts/shortcodes/artifact.html`. Please refer to `./layouts/shortcodes/`
-for other shortcodes available.
+```mdx
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<Tabs groupId="engine">
+<TabItem value="flink" label="Flink">
+
+Flink content here.
+
+</TabItem>
+<TabItem value="spark" label="Spark">
+
+Spark content here.
+
+</TabItem>
+</Tabs>
+```
+
+## Version Variables
+
+Use `@@VERSION@@` in markdown and it will be replaced with the current version (`1.5-SNAPSHOT`) at build time. Other available tokens:
+
+- `@@VERSION@@` — Paimon version
+- `@@FLINK_VERSION@@` — Flink version
+- `@@BRANCH@@` — Git branch
+- `@@GITHUB_REPO@@` — GitHub repo URL

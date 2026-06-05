@@ -22,7 +22,7 @@ import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.json_util import json_field
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser, VectorType
 
 
 @dataclass
@@ -62,34 +62,40 @@ class Schema:
                 if field.name in pk_set:
                     field.type.nullable = False
 
-        # Check if Blob type exists in the schema
-        has_blob_type = any(
-            'blob' in str(field.type).lower()
-            for field in fields
-        )
+        # Check if Vector type with dedicated file format
+        vector_names = [
+            field.name for field in fields
+            if isinstance(field.type, VectorType)
+        ]
+        vector_file_format = options.get(CoreOptions.VECTOR_FILE_FORMAT.key(), '') if options else ''
 
-        # If Blob type exists, validate required options
-        if has_blob_type:
+        if vector_names and vector_file_format:
             if options is None:
                 options = {}
 
-            required_options = {
-                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
-                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
-            }
-
-            missing_options = []
-            for key, expected_value in required_options.items():
-                if key not in options or options[key] != expected_value:
-                    missing_options.append(f"{key}='{expected_value}'")
-
-            if missing_options:
+            if len(fields) <= len(vector_names):
                 raise ValueError(
-                    f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
-                    f"Please add these options to the schema."
+                    "Table with VECTOR type column must have other normal columns."
                 )
 
-            if primary_keys is not None:
-                raise ValueError("Blob type is not supported with primary key.")
+            partition_key_set = set(partition_keys) if partition_keys else set()
+            vector_partitions = [n for n in vector_names if n in partition_key_set]
+            if vector_partitions:
+                raise ValueError(
+                    "The vector-store columns can not be part of partition keys."
+                )
+
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true',
+            }
+            missing = [
+                f"{k}='{v}'" for k, v in required_options.items()
+                if options.get(k) != v
+            ]
+            if missing:
+                raise ValueError(
+                    f"Table with vector-store file format requires: {', '.join(missing)}."
+                )
 
         return Schema(fields, partition_keys, primary_keys, options, comment)

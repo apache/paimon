@@ -20,7 +20,7 @@ package org.apache.paimon.spark.rowops
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonBaseScanBuilder
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH_COLUMN, ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.write.PaimonV2WriteBuilder
 import org.apache.paimon.table.FileStoreTable
 
@@ -57,6 +57,11 @@ class PaimonSparkCopyOnWriteOperation(table: FileStoreTable, info: RowLevelOpera
   }
 
   override def requiredMetadataAttributes(): Array[NamedReference] = {
-    Array(Expressions.column(FILE_PATH_COLUMN))
+    val base = Array(Expressions.column(FILE_PATH_COLUMN))
+    if (table.coreOptions().rowTrackingEnabled()) {
+      base ++ Array(Expressions.column(ROW_ID_COLUMN), Expressions.column(SEQUENCE_NUMBER_COLUMN))
+    } else {
+      base
+    }
   }
 }

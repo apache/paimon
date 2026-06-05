@@ -199,6 +199,25 @@ class TagManager:
         self.file_io.delete_quietly(path)
         return True
 
+    def replace_tag(self, snapshot: Snapshot, tag_name: str) -> None:
+        """
+        Replace an existing tag with a new snapshot.
+
+        Args:
+            snapshot: The new snapshot to associate with the tag
+            tag_name: Name of the tag to replace
+
+        Raises:
+            ValueError: If tag_name is blank or tag doesn't exist
+        """
+        if not tag_name or tag_name.isspace():
+            raise ValueError("Tag name shouldn't be blank.")
+
+        if not self.tag_exists(tag_name):
+            raise ValueError(f"Tag '{tag_name}' doesn't exist.")
+
+        self._create_or_replace_tag(snapshot, tag_name)
+
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """
         Rename a tag.

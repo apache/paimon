@@ -277,8 +277,15 @@ public interface DataFileMeta {
 
     SimpleStats valueStats();
 
+    /**
+     * Minimum sequence number of records in this file. When {@code sequence.snapshot-ordering} is
+     * enabled for a primary-key table, this field is repurposed to carry the commit snapshot id
+     * instead of the per-record sequence number range (the snapshot id is stamped into it at commit
+     * time by {@code FileStoreCommitImpl}).
+     */
     long minSequenceNumber();
 
+    /** @see #minSequenceNumber() */
     long maxSequenceNumber();
 
     long schemaId();
@@ -328,6 +335,8 @@ public interface DataFileMeta {
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
 
     DataFileMeta assignFirstRowId(long firstRowId);
+
+    DataFileMeta newFirstRowId(@Nullable Long newFirstRowId);
 
     default List<Path> collectFiles(DataFilePathFactory pathFactory) {
         List<Path> paths = new ArrayList<>();

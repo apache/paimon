@@ -17,6 +17,7 @@
 
 """FullTextSearch for performing full-text search on a text column."""
 
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Optional
 
@@ -35,6 +36,7 @@ class FullTextSearch:
     query_text: str
     limit: int
     field_name: str
+    query_operator: str = "or"
 
     def __post_init__(self):
         if not self.query_text:
@@ -43,10 +45,21 @@ class FullTextSearch:
             raise ValueError(f"Limit must be positive, got: {self.limit}")
         if not self.field_name:
             raise ValueError("Field name cannot be null or empty")
+        query_operator = (
+            "or" if self.query_operator is None else self.query_operator.strip().lower()
+        )
+        if query_operator not in ("or", "and"):
+            raise ValueError(
+                "Query operator must be 'or' or 'and', got: %s" % self.query_operator
+            )
+        self.query_operator = query_operator
 
-    def visit(self, visitor: 'GlobalIndexReader') -> Optional['ScoredGlobalIndexResult']:
+    def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""
         return visitor.visit_full_text_search(self)
 
     def __repr__(self) -> str:
-        return f"FullTextSearch(field={self.field_name}, query='{self.query_text}', limit={self.limit})"
+        return (
+            f"FullTextSearch(field={self.field_name}, query='{self.query_text}', "
+            f"limit={self.limit}, operator={self.query_operator})"
+        )

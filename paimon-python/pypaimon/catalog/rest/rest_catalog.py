@@ -221,12 +221,33 @@ class RESTCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        if identifier.is_system_table():
+            return self._load_system_table(identifier)
+        return self._load_data_table(identifier)
+
+    def _load_data_table(self, identifier: Identifier):
         return self.load_table(
             identifier,
             lambda path: self.file_io_for_data(path, identifier),
             self.file_io_from_options,
             self.load_table_metadata,
         )
+
+    def _load_system_table(self, identifier: Identifier):
+        from pypaimon.table.system import system_table_loader
+
+        base_identifier = Identifier.create(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch=identifier.get_branch_name(),
+        )
+        base_table = self._load_data_table(base_identifier)
+        sys_table = system_table_loader.load(
+            identifier.get_system_table_name(), base_table
+        )
+        if sys_table is None:
+            raise TableNotExistException(identifier)
+        return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         if not isinstance(identifier, Identifier):
@@ -625,16 +646,18 @@ class RESTCatalog(Catalog):
         Get FileIO for data access, supporting FUSE local path mapping.
         """
         if self._fuse_resolver is not None:
-            return self._fuse_resolver.get_file_io(
+            file_io = self._fuse_resolver.get_file_io(
                 table_path, identifier, self.data_token_enabled,
                 rest_token_file_io_factory=lambda: RESTTokenFileIO(
                     identifier, table_path, self.context.options),
                 default_file_io_factory=lambda: self.file_io_from_options(table_path),
             )
-
-        # Fallback to original logic
-        return RESTTokenFileIO(identifier, table_path, self.context.options) \
-            if self.data_token_enabled else self.file_io_from_options(table_path)
+        elif self.data_token_enabled:
+            file_io = RESTTokenFileIO(identifier, table_path, self.context.options)
+        else:
+            file_io = self.file_io_from_options(table_path)
+        return CachingFileIO.wrap_with_caching_if_needed(
+            file_io, self.context.options, self._cache_manager)
 
     def load_table(self,
                    identifier: Identifier,

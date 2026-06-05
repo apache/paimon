@@ -590,6 +590,28 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotBranch(identifier, "replaceTable");
+        checkNotSystemTable(identifier, "replaceTable");
+        validateCreateTable(newSchema, dataTokenEnabled);
+        try {
+            tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+            api.replaceTable(identifier, newSchema);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
@@ -739,15 +761,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
             throws BranchNotExistException, BranchAlreadyExistException {
-        try {
-            api.renameBranch(identifier, fromBranch, toBranch);
-        } catch (NoSuchResourceException e) {
-            throw new BranchNotExistException(identifier, fromBranch, e);
-        } catch (AlreadyExistsException e) {
-            throw new BranchAlreadyExistException(identifier, toBranch, e);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override

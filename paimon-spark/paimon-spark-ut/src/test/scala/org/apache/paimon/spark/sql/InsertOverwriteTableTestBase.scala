@@ -92,25 +92,22 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                 val msg1 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as col1 FROM t1")
                 }
-                assert(msg1.getMessage.contains("due to column name conflicts"))
+                assert(msg1.getMessage.contains("due to ambiguous column name `col1`"))
                 // name does not match
                 val msg2 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2 as colx FROM t1")
                 }
-                assert(msg2.getMessage.contains("due to unknown column names"))
+                assert(msg2.getMessage.contains("extra columns: `colx`"))
                 // query column size bigger than table's
                 val msg3 = intercept[Exception] {
                   sql("INSERT INTO TABLE t1 BY NAME SELECT col1, col2, col3, col4, col4 as col5 FROM t1")
                 }
-                assert(
-                  msg3.getMessage.contains(
-                    "the number of data columns don't match with the table schema"))
+                assert(msg3.getMessage.contains("extra columns: `col5`"))
                 // non-nullable column has no specified value
                 val msg4 = intercept[Exception] {
                   sql("INSERT INTO TABLE t2 BY NAME SELECT col2 FROM t2")
                 }
-                assert(
-                  msg4.getMessage.contains("non-nullable column `col1` has no specified value"))
+                assert(msg4.getMessage.contains("Cannot write null to non-null column(col1)"))
 
                 // by position
                 // column size does not match
@@ -119,7 +116,7 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
                 }
                 assert(
                   msg5.getMessage.contains(
-                    "the number of data columns don't match with the table schema"))
+                    "the number of data columns (1) doesn't match the table schema's (4)"))
               }
             }
           }
@@ -209,28 +206,7 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
           val msg = intercept[Exception] {
             sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
           }.getMessage
-          assert(msg.contains("name conflicts"))
-        }
-      }
-    }
-  }
-
-  test("Paimon: insert by name rejects nested struct target fields colliding under resolver") {
-    assume(gteqSpark3_5)
-    withSparkSQLConf("spark.sql.caseSensitive" -> "true") {
-      withTable("t1", "t2") {
-        spark.sql("""CREATE TABLE t1 (id INT NOT NULL, info STRUCT<name: STRING>)
-                    |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
-        // target has both `name` and `Name`, legal when session is case-sensitive
-        spark.sql("""CREATE TABLE t2 (id INT NOT NULL, info STRUCT<name: STRING, Name: STRING>)
-                    |TBLPROPERTIES ('write-only' = 'true')""".stripMargin)
-        sql("INSERT INTO t1 VALUES (1, struct('Alice'))")
-
-        withSparkSQLConf("spark.sql.caseSensitive" -> "false") {
-          val msg = intercept[Exception] {
-            sql("INSERT INTO t2 BY NAME SELECT * FROM t1")
-          }.getMessage
-          assert(msg.contains("conflicting target field names"))
+          assert(msg.contains("due to ambiguous column name `info.name`"))
         }
       }
     }

@@ -29,17 +29,19 @@ import scala.concurrent.duration.DurationInt
 
 class VisibilityCallbackTest extends PaimonSparkTestBase {
 
-  Seq((true, false), (false, true)).foreach {
+  Seq((true, false), (false, true), (true, true)).foreach {
     case (dv, postpone) =>
       test(s"Visibility callback with deletion-vectors $dv and postpone-bucket $postpone") {
         withTable("T") {
           val bucket = if (postpone) -2 else 1
+          val mergeOnRead = if (dv) "true" else "false"
           sql(s"""
                  |CREATE TABLE T (id INT, name STRING)
                  |TBLPROPERTIES (
                  | 'bucket' = '$bucket',
                  | 'primary-key' = 'id',
                  | 'deletion-vectors.enabled' = '$dv',
+                 | 'deletion-vectors.merge-on-read' = '$mergeOnRead',
                  | 'write-only' = 'true'
                  |)
                  |""".stripMargin)

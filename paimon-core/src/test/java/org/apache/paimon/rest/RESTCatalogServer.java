@@ -61,8 +61,8 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
-import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
@@ -429,6 +429,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "rollback-schema".equals(resources[3]);
+                        boolean isReplaceTable =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "replace".equals(resources[3]);
                         boolean isPartitions =
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -552,6 +556,8 @@ public class RESTCatalogServer {
                             }
                         } else if (isRollbackSchema) {
                             return rollbackSchemaHandle(identifier, restAuthParameter.data());
+                        } else if (isReplaceTable) {
+                            return replaceTableHandle(identifier, restAuthParameter.data());
                         } else if (isTable) {
                             return tableHandle(
                                     restAuthParameter.method(),
@@ -1754,6 +1760,38 @@ public class RESTCatalogServer {
         }
     }
 
+    private MockResponse replaceTableHandle(Identifier identifier, String data) throws Exception {
+        ReplaceTableRequest requestBody = RESTApi.fromJson(data, ReplaceTableRequest.class);
+        Schema newSchema = requestBody.getSchema();
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (isFormatTable(tableMetadata.schema().toSchema()) || isFormatTable(newSchema)) {
+            throw new UnsupportedOperationException("replaceTable does not support format tables.");
+        }
+        catalog.replaceTable(identifier, newSchema, false);
+        TableSchema replacedSchema = catalog.loadTableSchema(identifier);
+        TableMetadata newTableMetadata =
+                createTableMetadata(
+                        identifier,
+                        replacedSchema.id(),
+                        replacedSchema.toSchema(),
+                        tableMetadata.uuid(),
+                        tableMetadata.isExternal());
+        tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Snapshot truncateSnapshot = table.snapshotManager().latestSnapshot();
+        if (truncateSnapshot != null) {
+            tableLatestSnapshotStore.put(
+                    identifier.getFullName(), new TableSnapshot(truncateSnapshot, 0L, 0L, 0L, 0L));
+        } else {
+            tableLatestSnapshotStore.remove(identifier.getFullName());
+        }
+        tablePartitionsStore.remove(identifier.getFullName());
+        return new MockResponse().setResponseCode(200);
+    }
+
     private MockResponse renameTableHandle(String data) throws Exception {
         RenameTableRequest requestBody = RESTApi.fromJson(data, RenameTableRequest.class);
         Identifier fromTable = requestBody.getSource();
@@ -1849,31 +1887,7 @@ public class RESTCatalogServer {
                 case "POST":
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        if ("rename".equals(resources[5])) {
-                            // Rename branch: /branches/{branch}/rename
-                            RenameBranchRequest requestBody =
-                                    RESTApi.fromJson(data, RenameBranchRequest.class);
-                            String toBranch = requestBody.toBranch();
-                            table.renameBranch(branch, toBranch);
-                            // Update store for renamed branch
-                            Identifier fromBranchIdentifier =
-                                    new Identifier(
-                                            identifier.getDatabaseName(),
-                                            identifier.getTableName(),
-                                            branch);
-                            Identifier toBranchIdentifier =
-                                    new Identifier(
-                                            identifier.getDatabaseName(),
-                                            identifier.getTableName(),
-                                            toBranch);
-                            tableLatestSnapshotStore.put(
-                                    toBranchIdentifier.getFullName(),
-                                    tableLatestSnapshotStore.get(
-                                            fromBranchIdentifier.getFullName()));
-                            tableMetadataStore.put(
-                                    toBranchIdentifier.getFullName(),
-                                    tableMetadataStore.get(fromBranchIdentifier.getFullName()));
-                        } else if ("forward".equals(resources[5])) {
+                        if ("forward".equals(resources[5])) {
                             // Fast forward branch
                             branchManager.fastForward(branch);
                             branchIdentifier =

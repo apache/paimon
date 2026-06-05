@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 
@@ -46,6 +47,14 @@ public class KnownSplitsTable implements ReadonlyTable {
 
     public Split[] splits() {
         return splits;
+    }
+
+    @Override
+    public ReadBuilder newReadBuilder() {
+        // ReadonlyTable's default implementation creates ReadBuilderImpl(this), which makes the
+        // ReadBuilder capture this KnownSplitsTable. ReadBuilder should not carry all splits, so
+        // delegate to origin.
+        return origin.newReadBuilder();
     }
 
     @Override

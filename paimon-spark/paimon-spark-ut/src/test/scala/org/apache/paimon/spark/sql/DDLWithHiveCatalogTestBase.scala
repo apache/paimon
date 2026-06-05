@@ -726,6 +726,141 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
     }
   }
 
+  test("Paimon DDL with hive catalog: SparkGenericCatalog explicit Paimon replace") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("rt", "rtas", "missing") {
+        spark.sql("""
+                    |CREATE TABLE rt (id BIGINT, data STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                    |""".stripMargin)
+        spark.sql("INSERT INTO rt VALUES (1, 'old')")
+        val oldSnapshotId = loadTable("paimon_db", "rt").snapshotManager().latestSnapshotId()
+
+        spark.sql("""
+                    |REPLACE TABLE rt (id BIGINT, name STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '4')
+                    |""".stripMargin)
+
+        val replaced = loadTable("paimon_db", "rt")
+        Assertions.assertEquals("4", replaced.options().get("bucket"))
+        Assertions.assertEquals(Seq("id", "name"), spark.table("rt").schema.fieldNames.toSeq)
+        checkAnswer(spark.sql("SELECT * FROM rt"), Seq.empty[Row])
+        checkAnswer(
+          spark.sql(s"SELECT id, data FROM rt VERSION AS OF $oldSnapshotId"),
+          Row(1L, "old") :: Nil)
+
+        val error = intercept[AnalysisException] {
+          spark.sql("""
+                      |REPLACE TABLE missing (id BIGINT, data STRING)
+                      |USING paimon
+                      |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                      |""".stripMargin)
+        }.getMessage
+        Assertions.assertTrue(
+          error.contains("TABLE_OR_VIEW_NOT_FOUND") ||
+            error.contains("cannot be found") ||
+            error.contains("not found"))
+
+        Seq((2L, "new")).toDF("id", "data").createOrReplaceTempView("source")
+        spark.sql("""
+                    |CREATE TABLE rtas (id BIGINT, data STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+                    |""".stripMargin)
+        spark.sql("INSERT INTO rtas VALUES (1, 'old')")
+        val oldLocation = loadTable("paimon_db", "rtas").location().toString
+        val oldRtasSnapshotId =
+          loadTable("paimon_db", "rtas").snapshotManager().latestSnapshotId()
+        spark.sql("""
+                    |CREATE OR REPLACE TABLE rtas
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '3')
+                    |AS SELECT * FROM source
+                    |""".stripMargin)
+
+        val replacedAsSelect = loadTable("paimon_db", "rtas")
+        Assertions.assertEquals(oldLocation, replacedAsSelect.location().toString)
+        Assertions.assertEquals("3", replacedAsSelect.options().get("bucket"))
+        checkAnswer(spark.sql("SELECT * FROM rtas"), Row(2L, "new") :: Nil)
+        checkAnswer(
+          spark.sql(s"SELECT id, data FROM rtas VERSION AS OF $oldRtasSnapshotId"),
+          Row(1L, "old") :: Nil)
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: SparkGenericCatalog explicit Paimon replace fallback") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("csv_to_paimon", "rtas_csv_to_paimon") {
+        spark.sql("CREATE TABLE csv_to_paimon (id BIGINT, data STRING) USING csv")
+        spark.sql("INSERT INTO csv_to_paimon VALUES (1, 'csv')")
+
+        spark.sql("""
+                    |REPLACE TABLE csv_to_paimon (id BIGINT, name STRING)
+                    |USING paimon
+                    |TBLPROPERTIES ('bucket' = '-1')
+                    |""".stripMargin)
+
+        val paimonTable = loadTable("paimon_db", "csv_to_paimon")
+        Assertions.assertEquals("-1", paimonTable.options().get("bucket"))
+        Assertions.assertEquals(
+          Seq("id", "name"),
+          spark.table("csv_to_paimon").schema.fieldNames.toSeq)
+        checkAnswer(spark.sql("SELECT * FROM csv_to_paimon"), Seq.empty[Row])
+
+        Seq((2L, "new")).toDF("id", "data").createOrReplaceTempView("provider_source")
+        spark.sql("""
+                    |CREATE TABLE rtas_csv_to_paimon (id BIGINT, data STRING)
+                    |USING csv
+                    |""".stripMargin)
+
+        spark.sql("""
+                    |CREATE OR REPLACE TABLE rtas_csv_to_paimon
+                    |USING paimon
+                    |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '3')
+                    |AS SELECT * FROM provider_source
+                    |""".stripMargin)
+
+        val rtasPaimonTable = loadTable("paimon_db", "rtas_csv_to_paimon")
+        Assertions.assertEquals("3", rtasPaimonTable.options().get("bucket"))
+        checkAnswer(spark.sql("SELECT * FROM rtas_csv_to_paimon"), Row(2L, "new") :: Nil)
+      }
+    }
+  }
+
+  test("Paimon DDL with hive catalog: SparkGenericCatalog CTAS with non-Paimon provider") {
+    assume(gteqSpark3_4)
+    spark.sql(s"USE $sparkCatalogName")
+    withDatabase("paimon_db") {
+      spark.sql("CREATE DATABASE paimon_db")
+      spark.sql("USE paimon_db")
+
+      withTable("csv_ctas") {
+        Seq((1L, "x1"), (2L, "x2")).toDF("id", "data").createOrReplaceTempView("source")
+        spark.sql("CREATE TABLE csv_ctas USING csv AS SELECT * FROM source")
+
+        val csvTable = spark.sessionState.catalog.getTableMetadata(
+          TableIdentifier("csv_ctas", Some("paimon_db")))
+        Assertions.assertTrue(csvTable.provider.contains("csv"))
+        checkAnswer(
+          spark.sql("SELECT * FROM csv_ctas ORDER BY id"),
+          Row(1L, "x1") :: Row(2L, "x2") :: Nil)
+      }
+    }
+  }
+
   test("Paimon DDL with hive catalog: Create Table As Select") {
     Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>

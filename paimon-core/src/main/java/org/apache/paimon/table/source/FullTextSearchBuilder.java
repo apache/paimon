@@ -34,6 +34,9 @@ public interface FullTextSearchBuilder extends Serializable {
     /** The query text to search. */
     FullTextSearchBuilder withQueryText(String queryText);
 
+    /** The default query operator. Supported values are 'or' and 'and'. */
+    FullTextSearchBuilder withQueryOperator(String queryOperator);
+
     /** Create full-text scan to scan index files. */
     FullTextScan newFullTextScan();
 

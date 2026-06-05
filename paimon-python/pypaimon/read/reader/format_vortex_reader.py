@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Any, Set
+from typing import List, Optional, Any, Set, Tuple
 
 import pyarrow as pa
 from pyarrow import RecordBatch
@@ -32,9 +32,12 @@ class FormatVortexReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
+    # row_indices: from IndexedSplit (ANN vector search), discrete local row offsets within the file.
+    # shard_range: from SlicedSplit (parallel shard scan), a contiguous [start, end) row range within the file.
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
-                 row_indices: Optional[Any] = None,
+                 row_indices: Optional[List[int]] = None,
+                 shard_range: Optional[Tuple[int, int]] = None,
                  predicate_fields: Optional[Set[str]] = None):
         import vortex
 
@@ -71,6 +74,10 @@ class FormatVortexReader(RecordBatchReader):
         indices = None
         if row_indices is not None:
             indices = vortex.array(row_indices)
+        elif shard_range is not None:
+            # Vortex lacks a native range/slice scan API, so we materialize an
+            # index array. Acceptable trade-off vs reading the full file.
+            indices = vortex.array(range(shard_range[0], shard_range[1]))
 
         self.record_batch_reader = vortex_file.scan(
             columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
@@ -79,29 +86,23 @@ class FormatVortexReader(RecordBatchReader):
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
 
-        # Collect predicate-referenced fields for targeted view type casting
-        self._cast_fields = predicate_fields if predicate_fields and vortex_expr is not None else set()
-
     @staticmethod
-    def _cast_view_types(batch: RecordBatch, target_fields: Set[str]) -> RecordBatch:
-        """Cast string_view/binary_view columns to string/binary, only for target fields."""
-        if not target_fields:
-            return batch
+    def _cast_view_types(batch: RecordBatch) -> RecordBatch:
+        """Cast all string_view/binary_view columns to string/binary."""
         columns = []
         fields = []
         changed = False
         for i in range(batch.num_columns):
             col = batch.column(i)
             field = batch.schema.field(i)
-            if field.name in target_fields:
-                if col.type == pa.string_view():
-                    col = col.cast(pa.utf8())
-                    field = field.with_type(pa.utf8())
-                    changed = True
-                elif col.type == pa.binary_view():
-                    col = col.cast(pa.binary())
-                    field = field.with_type(pa.binary())
-                    changed = True
+            if col.type == pa.string_view():
+                col = col.cast(pa.utf8())
+                field = field.with_type(pa.utf8())
+                changed = True
+            elif col.type == pa.binary_view():
+                col = col.cast(pa.binary())
+                field = field.with_type(pa.binary())
+                changed = True
             columns.append(col)
             fields.append(field)
         if changed:
@@ -111,7 +112,7 @@ class FormatVortexReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
             batch = next(self.record_batch_reader)
-            batch = self._cast_view_types(batch, self._cast_fields)
+            batch = self._cast_view_types(batch)
 
             if not self.missing_fields:
                 return batch

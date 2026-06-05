@@ -178,7 +178,11 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             }
             if (inMemorySortBuffer.isEmpty()) {
                 // did not fit in a fresh buffer, must be large...
-                throw new IOException("The record exceeds the maximum size of a sort buffer.");
+                throw new IOException(
+                        "The record exceeds the maximum size of a Paimon write sort buffer. "
+                                + "A single serialized record cannot fit into an empty write buffer. "
+                                + "Please check whether the input contains an oversized row, "
+                                + "or increase the table option 'write-buffer-size'.");
             } else {
                 spill();
 

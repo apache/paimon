@@ -19,24 +19,29 @@
 package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.codegen.Projection;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -52,10 +57,23 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final Projection keyProjection;
     @Nullable private final RecordEqualiser elementEqualiser;
 
+    @Nullable private final Projection sequenceProjection;
+    @Nullable private final RecordComparator sequenceComparator;
+    private final boolean hasSequenceField;
+
     private final int countLimit;
 
     public FieldNestedUpdateAgg(
             String name, ArrayType dataType, List<String> nestedKey, int countLimit) {
+        this(name, dataType, nestedKey, Collections.emptyList(), countLimit);
+    }
+
+    public FieldNestedUpdateAgg(
+            String name,
+            ArrayType dataType,
+            List<String> nestedKey,
+            List<String> nestedSequenceField,
+            int countLimit) {
         super(name, dataType);
         RowType nestedType = (RowType) dataType.getElementType();
         this.nestedFields = nestedType.getFieldCount();
@@ -65,6 +83,31 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         } else {
             this.keyProjection = newProjection(nestedType, nestedKey);
             this.elementEqualiser = null;
+        }
+
+        // If nestedSequenceField is set, we need to compare sequence fields to determine
+        // whether to update. Only update when the new sequence is greater than the old one.
+        if (!nestedSequenceField.isEmpty()) {
+            checkArgument(
+                    this.keyProjection != null,
+                    "nested-sequence-field requires nested-key to be set.");
+            this.sequenceProjection = newProjection(nestedType, nestedSequenceField);
+            this.hasSequenceField = true;
+
+            // Extract the data types of the sequence fields to generate a native record comparator
+            int sequenceFields = nestedSequenceField.size();
+            List<DataType> seqTypes = new ArrayList<>(sequenceFields);
+            int[] sortFields = new int[sequenceFields];
+            for (int i = 0; i < sequenceFields; i++) {
+                String fieldName = nestedSequenceField.get(i);
+                seqTypes.add(nestedType.getTypeAt(nestedType.getFieldIndex(fieldName)));
+                sortFields[i] = i;
+            }
+            this.sequenceComparator = newRecordComparator(seqTypes, sortFields);
+        } else {
+            this.sequenceProjection = null;
+            this.sequenceComparator = null;
+            this.hasSequenceField = false;
         }
 
         // If deduplicate key is set, we don't guarantee that the result is exactly right
@@ -94,7 +137,15 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             Map<BinaryRow, InternalRow> map = new HashMap<>();
             for (InternalRow row : rows) {
                 BinaryRow key = keyProjection.apply(row).copy();
-                map.put(key, row);
+                if (hasSequenceField) {
+                    // When sequence field is configured, only update if the new sequence is greater
+                    InternalRow existing = map.get(key);
+                    if (existing == null || compareSequence(row, existing) >= 0) {
+                        map.put(key, row);
+                    }
+                } else {
+                    map.put(key, row);
+                }
             }
 
             rows = new ArrayList<>(map.values());
@@ -144,6 +195,22 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
             return new GenericArray(new ArrayList<>(map.values()).toArray());
         }
+    }
+
+    private int compareSequence(InternalRow newRow, InternalRow oldRow) {
+        checkNotNull(
+                sequenceComparator,
+                "sequenceComparator should not be null when hasSequenceField is true.");
+        checkNotNull(
+                sequenceProjection,
+                "sequenceProjection should not be null when hasSequenceField is true.");
+
+        // Project the rows into sub-rows containing only sequence fields
+        BinaryRow newSeqRow = sequenceProjection.apply(newRow).copy();
+        BinaryRow oldSeqRow = sequenceProjection.apply(oldRow).copy();
+
+        // Triggers native CodeGen comparison (Nulls First by default)
+        return sequenceComparator.compare(newSeqRow, oldSeqRow);
     }
 
     private void addNonNullRows(InternalArray array, List<InternalRow> rows) {

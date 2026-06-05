@@ -35,6 +35,8 @@ import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 
 abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSparkPlanHelper {
 
+  import testImplicits._
+
   override protected def beforeEach(): Unit = {
     sql(s"USE $paimonHiveCatalogName")
     sql(s"USE $hiveDbName")
@@ -155,6 +157,48 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
               |AS SELECT * FROM t1
               |""".stripMargin)
       }
+    }
+  }
+
+  test("Format table: create or replace as select supports table type change") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+      Seq((2L, "new")).toDF("id", "data").createOrReplaceTempView("source")
+
+      sql("""
+            |CREATE OR REPLACE TABLE t
+            |USING csv
+            |AS SELECT * FROM source
+            |""".stripMargin)
+
+      assert(paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).isInstanceOf[FormatTable])
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(2L, "new")))
+    }
+  }
+
+  test("Format table: replace table supports table type change") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+
+      sql("""
+            |REPLACE TABLE t (id BIGINT, data STRING)
+            |USING csv
+            |""".stripMargin)
+
+      assert(paimonCatalog.getTable(Identifier.create(hiveDbName, "t")).isInstanceOf[FormatTable])
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty[Row])
     }
   }
 

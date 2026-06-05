@@ -35,6 +35,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private int limit;
     private DataField textColumn;
     private String queryText;
+    private String queryOperator = "or";
 
     public FullTextSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -59,6 +60,12 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     }
 
     @Override
+    public FullTextSearchBuilder withQueryOperator(String queryOperator) {
+        this.queryOperator = queryOperator;
+        return this;
+    }
+
+    @Override
     public FullTextScan newFullTextScan() {
         checkNotNull(textColumn, "Text column must be set via withTextColumn()");
         return new FullTextScanImpl(table, textColumn);
@@ -69,6 +76,6 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(textColumn, "Text column must be set via withTextColumn()");
         checkNotNull(queryText, "Query text must be set via withQueryText()");
-        return new FullTextReadImpl(table, limit, textColumn, queryText);
+        return new FullTextReadImpl(table, limit, textColumn, queryText, queryOperator);
     }
 }

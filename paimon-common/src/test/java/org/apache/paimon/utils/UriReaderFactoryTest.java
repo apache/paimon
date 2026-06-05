@@ -24,6 +24,9 @@ import org.apache.paimon.utils.UriReader.FileUriReader;
 import org.apache.paimon.utils.UriReader.HttpUriReader;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,6 +35,8 @@ public class UriReaderFactoryTest {
 
     private final UriReaderFactory factory =
             new UriReaderFactory(CatalogContext.create(new Options()));
+
+    @TempDir java.nio.file.Path tempPath;
 
     @Test
     public void testCreateHttpUriReader() {
@@ -76,6 +81,20 @@ public class UriReaderFactoryTest {
     public void testCreateUriReaderWithLocalPath() {
         UriReader reader = factory.create("/local/path/to/file.txt");
         assertThat(reader).isInstanceOf(FileUriReader.class);
+    }
+
+    @Test
+    public void testExistsUsesCachedFileUriReader() throws Exception {
+        java.nio.file.Path file = tempPath.resolve("file.txt");
+        Files.write(file, new byte[] {1});
+
+        assertThat(factory.exists(file.toUri().toString())).isTrue();
+        assertThat(factory.exists(tempPath.resolve("missing.txt").toUri().toString())).isFalse();
+    }
+
+    @Test
+    public void testExistsSkipsHttpUriReader() throws Exception {
+        assertThat(factory.exists("https://example.com/missing.txt")).isTrue();
     }
 
     @Test

@@ -23,10 +23,15 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /** Factory for creating Tantivy full-text index. */
 public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
 
     public static final String IDENTIFIER = "tantivy-fulltext";
+
+    private volatile TantivySearcherPool searcherPool;
 
     @Override
     public String identifier() {
@@ -35,6 +40,27 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new TantivyFullTextGlobalIndexer();
+        if (searcherPool == null) {
+            synchronized (this) {
+                if (searcherPool == null) {
+                    int maxSize = options.get(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE);
+                    searcherPool = new TantivySearcherPool(maxSize);
+                }
+            }
+        }
+        return new TantivyFullTextGlobalIndexer(
+                searcherPool, new TantivyFullTextIndexOptions(removeTantivyPrefix(options)));
+    }
+
+    static Map<String, Object> removeTantivyPrefix(Options options) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String key : options.keySet()) {
+            if (key.startsWith(TantivyFullTextIndexOptions.TANTIVY_PREFIX)) {
+                result.put(
+                        key.substring(TantivyFullTextIndexOptions.TANTIVY_PREFIX.length()),
+                        options.get(key));
+            }
+        }
+        return result;
     }
 }

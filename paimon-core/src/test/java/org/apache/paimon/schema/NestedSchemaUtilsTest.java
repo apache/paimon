@@ -86,6 +86,35 @@ public class NestedSchemaUtilsTest {
     }
 
     @Test
+    public void testNullabilityChangeNotNullToNullable() {
+        List<String> fieldNames = Arrays.asList("column1");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Test non-nullable to nullable
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                fieldNames, DataTypes.INT().notNull(), DataTypes.INT().nullable(), schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("column1");
+        assertThat(nullabilityChange.newNullability()).isTrue();
+    }
+
+    @Test
+    public void testSameNullabilityNoChange() {
+        List<String> fieldNames = Arrays.asList("column1");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Same nullability should not generate nullability change
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                fieldNames, DataTypes.INT().nullable(), DataTypes.INT().nullable(), schemaChanges);
+
+        assertThat(schemaChanges).isEmpty();
+    }
+
+    @Test
     public void testTypeAndNullabilityChange() {
         List<String> fieldNames = Arrays.asList("column1");
         List<SchemaChange> schemaChanges = new ArrayList<>();
@@ -263,6 +292,217 @@ public class NestedSchemaUtilsTest {
                         })
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("can only be updated to multiset type");
+    }
+
+    @Test
+    public void testMultisetTypeUpdateNullability() {
+        List<String> fieldNames = Arrays.asList("multiset_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        MultisetType oldType = new MultisetType(true, DataTypes.INT());
+        MultisetType newType = new MultisetType(false, DataTypes.INT());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("multiset_column");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testArrayElementNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("arr_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Array element changes from nullable INT to non-nullable INT
+        ArrayType oldType = new ArrayType(true, DataTypes.INT().nullable());
+        ArrayType newType = new ArrayType(true, DataTypes.INT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("arr_column", "element");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testArrayElementTypeAndNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("arr_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Array element changes from nullable INT to non-nullable BIGINT
+        ArrayType oldType = new ArrayType(true, DataTypes.INT().nullable());
+        ArrayType newType = new ArrayType(true, DataTypes.BIGINT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(2);
+        assertThat(schemaChanges)
+                .anyMatch(change -> change instanceof SchemaChange.UpdateColumnType);
+        assertThat(schemaChanges)
+                .anyMatch(change -> change instanceof SchemaChange.UpdateColumnNullability);
+
+        SchemaChange.UpdateColumnType typeChange =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnType)
+                        .map(c -> (SchemaChange.UpdateColumnType) c)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(typeChange).isNotNull();
+        assertThat(typeChange.fieldNames()).containsExactly("arr_column", "element");
+
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnNullability)
+                        .map(c -> (SchemaChange.UpdateColumnNullability) c)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(nullabilityChange).isNotNull();
+        assertThat(nullabilityChange.fieldNames()).containsExactly("arr_column", "element");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testArrayNullabilityAndElementNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("arr_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Both array-level and element-level nullability change
+        ArrayType oldType = new ArrayType(true, DataTypes.INT().nullable());
+        ArrayType newType = new ArrayType(false, DataTypes.INT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(2);
+
+        // element-level nullability change
+        SchemaChange.UpdateColumnNullability elementNullability =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnNullability)
+                        .map(c -> (SchemaChange.UpdateColumnNullability) c)
+                        .filter(c -> c.fieldNames().length == 2)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(elementNullability).isNotNull();
+        assertThat(elementNullability.fieldNames()).containsExactly("arr_column", "element");
+        assertThat(elementNullability.newNullability()).isFalse();
+
+        // array-level nullability change
+        SchemaChange.UpdateColumnNullability arrayNullability =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnNullability)
+                        .map(c -> (SchemaChange.UpdateColumnNullability) c)
+                        .filter(c -> c.fieldNames().length == 1)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(arrayNullability).isNotNull();
+        assertThat(arrayNullability.fieldNames()).containsExactly("arr_column");
+        assertThat(arrayNullability.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testMapValueNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("map_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Map value changes from nullable to non-nullable
+        MapType oldType = new MapType(true, DataTypes.STRING(), DataTypes.INT().nullable());
+        MapType newType = new MapType(true, DataTypes.STRING(), DataTypes.INT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("map_column", "value");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testMapValueTypeAndNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("map_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Map value changes both type and nullability
+        MapType oldType = new MapType(true, DataTypes.STRING(), DataTypes.INT().nullable());
+        MapType newType = new MapType(true, DataTypes.STRING(), DataTypes.BIGINT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(2);
+        assertThat(schemaChanges)
+                .anyMatch(change -> change instanceof SchemaChange.UpdateColumnType);
+        assertThat(schemaChanges)
+                .anyMatch(change -> change instanceof SchemaChange.UpdateColumnNullability);
+
+        SchemaChange.UpdateColumnType typeChange =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnType)
+                        .map(c -> (SchemaChange.UpdateColumnType) c)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(typeChange).isNotNull();
+        assertThat(typeChange.fieldNames()).containsExactly("map_column", "value");
+
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                schemaChanges.stream()
+                        .filter(c -> c instanceof SchemaChange.UpdateColumnNullability)
+                        .map(c -> (SchemaChange.UpdateColumnNullability) c)
+                        .findFirst()
+                        .orElse(null);
+        assertThat(nullabilityChange).isNotNull();
+        assertThat(nullabilityChange.fieldNames()).containsExactly("map_column", "value");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testMultisetElementNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("multiset_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        // Multiset element changes from nullable to non-nullable
+        MultisetType oldType = new MultisetType(true, DataTypes.INT().nullable());
+        MultisetType newType = new MultisetType(true, DataTypes.INT().notNull());
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("multiset_column", "element");
+        assertThat(nullabilityChange.newNullability()).isFalse();
+    }
+
+    @Test
+    public void testRowFieldNullabilityChange() {
+        List<String> fieldNames = Arrays.asList("row_column");
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+
+        RowType oldType =
+                RowType.of(
+                        new DataField(0, "f1", DataTypes.INT().nullable()),
+                        new DataField(1, "f2", DataTypes.STRING()));
+        RowType newType =
+                RowType.of(
+                        new DataField(0, "f1", DataTypes.INT().notNull()),
+                        new DataField(1, "f2", DataTypes.STRING()));
+
+        NestedSchemaUtils.generateNestedColumnUpdates(fieldNames, oldType, newType, schemaChanges);
+
+        assertThat(schemaChanges).hasSize(1);
+        assertThat(schemaChanges.get(0)).isInstanceOf(SchemaChange.UpdateColumnNullability.class);
+        SchemaChange.UpdateColumnNullability nullabilityChange =
+                (SchemaChange.UpdateColumnNullability) schemaChanges.get(0);
+        assertThat(nullabilityChange.fieldNames()).containsExactly("row_column", "f1");
+        assertThat(nullabilityChange.newNullability()).isFalse();
     }
 
     @Test

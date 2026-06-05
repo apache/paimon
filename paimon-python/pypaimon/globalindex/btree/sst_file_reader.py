@@ -21,14 +21,17 @@ An SST File Reader which serves point queries and range queries.
 Users can call createIterator to create a file iterator and then use seek
 and read methods to do range queries.
 
-Note that this class is NOT thread-safe.
+Thread-safe when the underlying stream supports position-based reads
+(PyArrow NativeFile.read_at or os.pread).
 """
 
 import struct
+import threading
 import zlib
 from typing import Optional, Callable
 from typing import BinaryIO
 
+from pypaimon.common.file_io import pread
 from pypaimon.globalindex.btree.block_handle import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
@@ -103,27 +106,38 @@ class SstFileIterator:
 class SstFileReader:
     """
     An SST File Reader which serves point queries and range queries.
-    
+
     Users can call createIterator to create a file iterator and then use seek
     and read methods to do range queries.
-    
-    Note that this class is NOT thread-safe.
+
+    Thread-safe when the underlying stream supports pread, or when an
+    io_lock is provided for seek+read fallback.
     """
-    
+
     def __init__(
         self,
         input_stream: BinaryIO,
         comparator: Callable[[bytes, bytes], int],
-        index_block_handle: BlockHandle
+        index_block_handle: BlockHandle,
+        use_pread: bool = False,
+        io_lock: Optional[threading.Lock] = None,
     ):
         self.comparator = comparator
         self.input_stream = input_stream
+        self._supports_pread = use_pread
+        self._lock = io_lock or threading.Lock()
         self.index_block = self._read_block(index_block_handle)
 
+    def _read_from(self, offset: int, length: int) -> bytes:
+        if self._supports_pread:
+            return pread(self.input_stream, length, offset)
+        with self._lock:
+            self.input_stream.seek(offset)
+            return self.input_stream.read(length)
+
     def _read_block(self, block_handle: BlockHandle) -> BlockReader:
-        self.input_stream.seek(block_handle.offset)
         # Read block data + 5 bytes trailer (1 byte compression type + 4 bytes CRC32)
-        block_data = self.input_stream.read(block_handle.size + 5)
+        block_data = self._read_from(block_handle.offset, block_handle.size + 5)
         # Parse block trailer (last 5 bytes: 1 byte compression type + 4 bytes CRC32)
         if len(block_data) < 5:
             raise ValueError("Block data too short to contain trailer")

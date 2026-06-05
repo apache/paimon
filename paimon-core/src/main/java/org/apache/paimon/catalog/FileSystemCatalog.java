@@ -25,6 +25,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -173,6 +174,19 @@ public class FileSystemCatalog extends AbstractCatalog {
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
                 | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    protected void replaceTableImpl(
+            Identifier identifier, FileStoreTable existingTable, Schema newSchema) {
+        truncateTable(existingTable);
+        try {
+            runWithLock(identifier, () -> appendNewSchema(existingTable, newSchema));
+        } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -20,6 +20,8 @@ package org.apache.spark.sql.paimon.shims
 
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
@@ -27,11 +29,13 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
-import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
+import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.write.BatchWrite
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 
@@ -66,6 +70,72 @@ trait SparkShim {
       partitions: Array[Transform],
       properties: JMap[String, String]): Table
 
+  def createReplaceTableAsSelectExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan
+
+  def createAtomicReplaceTableAsSelectExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      partitioning: Seq[Transform],
+      query: LogicalPlan,
+      tableSpec: TableSpec,
+      writeOptions: Map[String, String],
+      orCreate: Boolean): SparkPlan
+
+  def createReplaceTableExec(
+      catalog: TableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan
+
+  def createAtomicReplaceTableExec(
+      catalog: StagingTableCatalog,
+      ident: Identifier,
+      columns: Array[Column],
+      partitioning: Seq[Transform],
+      tableSpec: TableSpec,
+      orCreate: Boolean): SparkPlan
+
+  def toReplaceTableColumns(
+      tableSchema: StructType,
+      schemaOrColumns: Any,
+      catalog: TableCatalog,
+      ident: Identifier): Array[Column]
+
+  def copyTableSpec(
+      tableSpec: TableSpec,
+      additionalProperties: Map[String, String],
+      location: Option[String]): TableSpec
+
+  /**
+   * Constructs a `BatchWrite` for Paimon's V2 write path. The implementation lives in each
+   * per-version shim module so the `extends BatchWrite` mixin is compiled against the right Spark
+   * minor version: Spark 4.1 added a default method `BatchWrite.commit(.., WriteSummary)` whose
+   * inherited signature triggers `ClassNotFoundException: WriteSummary` lazy-linking on Spark 4.0
+   * runtimes when the class is loaded for task serialization.
+   */
+  def createPaimonBatchWrite(
+      table: FileStoreTable,
+      writeSchema: StructType,
+      dataSchema: StructType,
+      overwritePartitions: Option[Map[String, String]],
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite
+
+  /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
+  def createFormatTableBatchWrite(
+      table: FormatTable,
+      overwriteDynamic: Option[Boolean],
+      overwritePartitions: Option[Map[String, String]],
+      writeSchema: StructType): BatchWrite
+
   def createCTERelationRef(
       cteId: Long,
       resolved: Boolean,
@@ -89,15 +159,23 @@ trait SparkShim {
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
 
+  // Spark 3.4 added `notMatchedBySourceActions` to `MergeIntoTable`. On 3.2/3.3 the field doesn't
+  // exist on the AST, so this returns `Seq.empty`. Lets `paimon-spark-common` (which compiles
+  // against 3.5/4.1) reference NMBS via a single accessor that works on all minor versions.
+  def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction]
+
+  // Per-version shim: Spark 4.1 added a 3rd `fromStar: Boolean = false` field. A 2-arg call site
+  // compiled against 4.1 emits an `apply$default$3()` lookup absent on 4.0. Paimon tracks star
+  // intent via [[PaimonMergeActionTags]], so `fromStar` stays unused here.
+  def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
+
+  def createInsertAction(condition: Option[Expression], assignments: Seq[Assignment]): InsertAction
+
   def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
       : DataSourceV2Relation
-
-  def copyUpdateAction(action: UpdateAction, assignments: Seq[Assignment]): UpdateAction
-
-  def copyInsertAction(action: InsertAction, assignments: Seq[Assignment]): InsertAction
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.

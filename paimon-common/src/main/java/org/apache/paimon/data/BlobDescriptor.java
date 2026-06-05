@@ -117,7 +117,7 @@ public class BlobDescriptor implements Serializable {
         ByteBuffer buffer = ByteBuffer.allocate(totalSize);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
 
-        buffer.put(version);
+        buffer.put(CURRENT_VERSION);
         buffer.putLong(MAGIC);
         buffer.putInt(uriLength);
         buffer.put(uriBytes);

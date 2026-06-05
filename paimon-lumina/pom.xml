@@ -34,7 +34,7 @@ under the License.
     <repositories>
         <repository>
             <id>lumina</id>
-            <url>https://lumina-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+            <url>https://dlf-mvn-repo.oss-cn-shanghai.aliyuncs.com/mvn-repo/release</url>
         </repository>
         <repository>
             <id>jindodata</id>
@@ -53,7 +53,7 @@ under the License.
         <dependency>
             <groupId>org.aliyun.lumina</groupId>
             <artifactId>lumina-jni</artifactId>
-            <version>0.1.0</version>
+            <version>0.2.0</version>
         </dependency>
 
         <dependency>

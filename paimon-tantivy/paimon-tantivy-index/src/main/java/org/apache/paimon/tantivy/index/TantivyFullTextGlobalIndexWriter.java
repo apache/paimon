@@ -55,20 +55,29 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
             LoggerFactory.getLogger(TantivyFullTextGlobalIndexWriter.class);
 
     private final GlobalIndexFileWriter fileWriter;
+    private final TantivyFullTextIndexOptions indexOptions;
     private File tempIndexDir;
     private TantivyIndexWriter writer;
     private long rowId;
     private boolean closed;
 
     public TantivyFullTextGlobalIndexWriter(GlobalIndexFileWriter fileWriter) {
+        this(fileWriter, TantivyFullTextIndexOptions.defaults());
+    }
+
+    public TantivyFullTextGlobalIndexWriter(
+            GlobalIndexFileWriter fileWriter, TantivyFullTextIndexOptions indexOptions) {
         this.fileWriter = fileWriter;
+        this.indexOptions = indexOptions;
         this.rowId = 0;
         this.closed = false;
 
         try {
             this.tempIndexDir = Files.createTempDirectory("tantivy-index-").toFile();
             this.tempIndexDir.deleteOnExit();
-            this.writer = new TantivyIndexWriter(tempIndexDir.getAbsolutePath());
+            this.writer =
+                    new TantivyIndexWriter(
+                            tempIndexDir.getAbsolutePath(), indexOptions.toNativeConfigJson());
         } catch (IOException e) {
             throw new RuntimeException("Failed to create temp index directory", e);
         }
@@ -162,7 +171,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
         }
 
         LOG.info("Tantivy index packed: {} documents", rowId);
-        return new ResultEntry(fileName, rowId, null);
+        return new ResultEntry(fileName, rowId, indexOptions.serialize());
     }
 
     private static void writeInt(PositionOutputStream out, int value) throws IOException {

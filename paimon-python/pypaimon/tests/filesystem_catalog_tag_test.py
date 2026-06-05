@@ -178,6 +178,62 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
         self.assertEqual(result.elements, [])
         self.assertIsNone(result.next_page_token)
 
+    # -- replace_tag -----------------------------------------------------------
+
+    def test_replace_tag_with_snapshot_id(self):
+        table = self.catalog.get_table(self.identifier)
+        # Create a second snapshot
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": [4, 5], "value": ["d", "e"]},
+            schema=self.pa_schema,
+        ))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        # Create tag pointing to snapshot 1
+        table.create_tag("replace_test", snapshot_id=1)
+        tag = table.tag_manager().get("replace_test")
+        self.assertEqual(tag.trim_to_snapshot().id, 1)
+
+        # Replace tag to point to snapshot 2
+        table.replace_tag("replace_test", snapshot_id=2)
+        tag = table.tag_manager().get("replace_test")
+        self.assertEqual(tag.trim_to_snapshot().id, 2)
+
+    def test_replace_tag_with_latest_snapshot(self):
+        table = self.catalog.get_table(self.identifier)
+        # Create a second snapshot
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": [4], "value": ["d"]},
+            schema=self.pa_schema,
+        ))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        # Create tag pointing to snapshot 1
+        table.create_tag("latest_test", snapshot_id=1)
+        # Replace with latest (should be snapshot 2)
+        table.replace_tag("latest_test")
+        tag = table.tag_manager().get("latest_test")
+        self.assertEqual(tag.trim_to_snapshot().id, 2)
+
+    def test_replace_tag_not_exists_raises(self):
+        table = self.catalog.get_table(self.identifier)
+        with self.assertRaises(ValueError) as cm:
+            table.replace_tag("nonexistent", snapshot_id=1)
+        self.assertIn("doesn't exist", str(cm.exception))
+
+    def test_replace_tag_snapshot_not_exists_raises(self):
+        table = self.catalog.get_table(self.identifier)
+        table.create_tag("exists_tag", snapshot_id=1)
+        with self.assertRaises(ValueError) as cm:
+            table.replace_tag("exists_tag", snapshot_id=999)
+        self.assertIn("doesn't exist", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

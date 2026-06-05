@@ -152,7 +152,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             return new NoopCompactManager();
         }
 
-        CompactStrategy compactStrategy = createCompactStrategy(options);
+        CompactStrategy compactStrategy = createCompactStrategy(options, restoreFiles);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
@@ -188,7 +188,10 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 options.isChainTable());
     }
 
-    private CompactStrategy createCompactStrategy(CoreOptions options) {
+    private CompactStrategy createCompactStrategy(
+            CoreOptions options, List<DataFileMeta> restoreFiles) {
+        Long initialLastFullCompaction =
+                estimateLastFullCompactionTime(restoreFiles, options.numLevels());
         if (options.needLookup()) {
             Integer compactMaxInterval = null;
             switch (options.lookupCompact()) {
@@ -203,7 +206,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                             options.maxSizeAmplificationPercent(),
                             options.sortedRunSizeRatio(),
                             options.numSortedRunCompactionTrigger(),
-                            EarlyFullCompaction.create(options),
+                            EarlyFullCompaction.create(options, initialLastFullCompaction),
                             OffPeakHours.create(options)),
                     compactMaxInterval);
         }
@@ -213,13 +216,29 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
-                        EarlyFullCompaction.create(options),
+                        EarlyFullCompaction.create(options, initialLastFullCompaction),
                         OffPeakHours.create(options));
         if (options.compactionForceUpLevel0()) {
             return new ForceUpLevel0Compaction(universal, null);
         } else {
             return universal;
         }
+    }
+
+    @Nullable
+    private static Long estimateLastFullCompactionTime(
+            List<DataFileMeta> restoreFiles, int numLevels) {
+        int maxLevel = numLevels - 1;
+        long max = -1;
+        for (DataFileMeta f : restoreFiles) {
+            if (f.level() == maxLevel) {
+                long t = f.creationTimeEpochMillis();
+                if (t > max) {
+                    max = t;
+                }
+            }
+        }
+        return max < 0 ? null : max;
     }
 
     private MergeTreeCompactRewriter createRewriter(

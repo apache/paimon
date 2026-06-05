@@ -78,6 +78,8 @@ class PyArrowFileIO(FileIO):
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
             self.filesystem = self._initialize_hdfs_fs(scheme, netloc)
+        elif scheme == "gs":
+            self.filesystem = self._initialize_gcs_fs()
         else:
             raise ValueError(f"Unrecognized filesystem type in URI: {scheme}")
 
@@ -301,28 +303,39 @@ class PyArrowFileIO(FileIO):
                 user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
             )
 
+    def _initialize_gcs_fs(self) -> FileSystem:
+        if not hasattr(pafs, 'GcsFileSystem'):
+            raise ImportError(
+                "GCS filesystem support requires PyArrow built with GCS support. "
+                "Please upgrade PyArrow or install a version with GCS enabled."
+            )
+
+        access_token = self._get_property("gcs.access-token")
+        token_expiry = self._get_property("gcs.access-token.expiration")
+        project_id = self._get_property("gcs.project-id")
+
+        kwargs = {}
+        if access_token:
+            from datetime import datetime
+            kwargs["access_token"] = access_token
+            kwargs["credential_token_expiration"] = (
+                datetime.fromisoformat(token_expiry) if token_expiry
+                else datetime(9999, 12, 31)
+            )
+        if project_id:
+            kwargs["project_id"] = project_id
+
+        return pafs.GcsFileSystem(**kwargs)
+
     @staticmethod
     def _kerberos_login_from_keytab(principal: str, keytab: str):
-        if not os.path.isfile(keytab):
-            raise FileNotFoundError(f"Kerberos keytab file not found: {keytab}")
-        if not os.access(keytab, os.R_OK):
-            raise PermissionError(f"Kerberos keytab file is not readable: {keytab}")
-        subprocess.run(
-            ['kinit', '-kt', keytab, principal],
-            check=True, capture_output=True, text=True
-        )
+        from pypaimon.filesystem import _kerberos
+        _kerberos.kerberos_login_from_keytab(principal, keytab)
 
     @staticmethod
     def _get_ticket_cache_path() -> Optional[str]:
-        cc = os.environ.get('KRB5CCNAME')
-        if cc:
-            if cc.startswith('FILE:'):
-                return cc[5:]
-            return cc
-        default_path = f'/tmp/krb5cc_{os.getuid()}'
-        if os.path.exists(default_path):
-            return default_path
-        return None
+        from pypaimon.filesystem import _kerberos
+        return _kerberos.get_ticket_cache_path()
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -629,6 +642,15 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
+    def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import mosaic
+            with self.new_output_stream(path) as output_stream:
+                mosaic.write_table(data, output_stream)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
+
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import vortex
@@ -646,6 +668,21 @@ class PyArrowFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
+
+    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
+        try:
+            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+
+            if fields is None:
+                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
+
+            with self.new_output_stream(path) as output_stream:
+                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer.write_table(data)
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
@@ -705,6 +742,16 @@ class PyArrowFileIO(FileIO):
                     return result if result else '.'
             else:
                 return str(path)
+
+        try:
+            from pyarrow.fs import GcsFileSystem
+        except ImportError:
+            GcsFileSystem = None
+        if GcsFileSystem is not None and isinstance(self.filesystem, GcsFileSystem):
+            if parsed.scheme and parsed.netloc:
+                path_part = normalized_path.lstrip('/')
+                return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+            return str(path)
 
         if parsed.scheme:
             if not normalized_path:

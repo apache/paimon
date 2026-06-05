@@ -236,7 +236,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         @Override
         public Plan plan() {
             List<Split> splits = new ArrayList<>();
-            PartitionPredicate partitionPredicate = getPartitionPredicate();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
@@ -256,11 +255,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
             Set<BinaryRow> snapshotPartitions =
                     new HashSet<>(
-                            newChainPartitionListingScan(true, partitionPredicate)
+                            newChainPartitionListingScan(true, getMainPartitionPredicate())
                                     .listPartitions());
 
             DataTableScan deltaPartitionScan =
-                    newChainPartitionListingScan(false, partitionPredicate);
+                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
             List<BinaryRow> deltaPartitions =
                     deltaPartitionScan.listPartitions().stream()
                             .filter(p -> !snapshotPartitions.contains(p))
@@ -433,9 +432,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            PartitionPredicate partitionPredicate = getPartitionPredicate();
-            DataTableScan snapshotScan = newChainPartitionListingScan(true, partitionPredicate);
-            DataTableScan deltaScan = newChainPartitionListingScan(false, partitionPredicate);
+            DataTableScan snapshotScan =
+                    newChainPartitionListingScan(true, getMainPartitionPredicate());
+            DataTableScan deltaScan =
+                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
             List<PartitionEntry> partitionEntries =
                     new ArrayList<>(snapshotScan.listPartitionEntries());
             Set<BinaryRow> partitions =

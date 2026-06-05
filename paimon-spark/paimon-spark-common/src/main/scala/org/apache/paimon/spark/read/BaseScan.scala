@@ -52,6 +52,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedTopN: Option[TopN] = None
   def pushedVectorSearch: Option[VectorSearch] = None
   def pushedFullTextSearch: Option[FullTextSearch] = None
+  def pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty
 
   // Runtime push down
   val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty
@@ -78,13 +79,17 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
   }
 
+  /** Pruned read RowType, with variant fields rewritten if variant pushdown was accepted. */
   private[paimon] val (readTableRowType, metadataFields) = {
     requiredSchema.fields.foreach(f => checkMetadataColumn(f.name))
     val (_requiredTableFields, _metadataFields) =
       requiredSchema.fields.partition(field => tableRowType.containsField(field.name))
-    val _readTableRowType =
+    val pruned =
       SparkTypeUtils.prunePaimonRowType(StructType(_requiredTableFields), tableRowType)
-    (_readTableRowType, _metadataFields)
+    val withVariants =
+      if (pushedVariantExtractions.isEmpty) pruned
+      else VariantPushDownUtils.rewriteRowType(pruned, pushedVariantExtractions)
+    (withVariants, _metadataFields)
   }
 
   private def checkMetadataColumn(fieldName: String): Unit = {
@@ -185,6 +190,13 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
+    val pushedVariantsStr =
+      if (pushedVariantExtractions.isEmpty) ""
+      else
+        VariantPushDownUtils
+          .describeRewrittenRowType(readTableRowType)
+          .map(s => s", PushedVariants: [$s]")
+          .getOrElse("")
     s"${getClass.getSimpleName}: [${table.name}]" +
       pushedPartitionFiltersStr +
       pushedRuntimePartitionFiltersStr +
@@ -192,6 +204,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
       pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
       pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("") +
-      pushedFullTextSearch.map(fts => s", FullTextSearch: [$fts]").getOrElse("")
+      pushedFullTextSearch.map(fts => s", FullTextSearch: [$fts]").getOrElse("") +
+      pushedVariantsStr
   }
 }

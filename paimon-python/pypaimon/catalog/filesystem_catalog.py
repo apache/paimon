@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from pypaimon.api.api_response import GetTagResponse, PagedList
 from pypaimon.catalog.catalog import Catalog
@@ -131,21 +131,42 @@ class FileSystemCatalog(Catalog):
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
+        if identifier.is_system_table():
+            return self._load_system_table(identifier)
+        return self._load_data_table(identifier)
+
+    def _load_data_table(self, identifier: Identifier) -> FileStoreTable:
         if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
 
         # Create catalog environment for filesystem catalog
-        # Filesystem catalog doesn't support version management by default
+        from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=identifier,
-            uuid=None,  # Filesystem catalog doesn't track table UUIDs
-            catalog_loader=None,  # No catalog loader for filesystem
+            uuid=None,
+            catalog_loader=FileSystemCatalogLoader(self.catalog_context),
             supports_version_management=False
         )
 
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
+
+    def _load_system_table(self, identifier: Identifier) -> Table:
+        from pypaimon.table.system import system_table_loader
+
+        base_identifier = Identifier.create(
+            identifier.get_database_name(),
+            identifier.get_table_name(),
+            branch=identifier.get_branch_name(),
+        )
+        base_table = self._load_data_table(base_identifier)
+        sys_table = system_table_loader.load(
+            identifier.get_system_table_name(), base_table
+        )
+        if sys_table is None:
+            raise TableNotExistException(identifier)
+        return sys_table
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
@@ -353,6 +374,22 @@ class FileSystemCatalog(Catalog):
             next_page_token = str(end_index)
 
         return PagedList(elements=result_partitions, next_page_token=next_page_token)
+
+    def drop_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
 
     # ===================== Tag CRUD =====================
     # Thin wrappers that delegate to FileStoreTable's existing tag helpers

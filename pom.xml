@@ -74,6 +74,7 @@ under the License.
         <module>paimon-api</module>
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
+        <module>paimon-mosaic</module>
         <module>paimon-tantivy</module>
     </modules>
 
@@ -433,14 +434,14 @@ under the License.
                 <target.java.version>17</target.java.version>
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
-                <!-- Spark 4.1.1 is built against Scala 2.13.17; force the same stdlib here so that
+                <!-- Spark 4.1.2 is built against Scala 2.13.17; force the same stdlib here so that
                      `MurmurHash3.caseClassHash$default$2` and related APIs resolve at runtime. -->
                 <scala.version>2.13.17</scala.version>
-                <paimon-spark-common.spark.version>4.1.1</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.1.2</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
                 <test.spark.main.version>4.1</test.spark.main.version>
-                <test.spark.version>4.1.1</test.spark.version>
+                <test.spark.version>4.1.2</test.spark.version>
             </properties>
             <activation>
                 <property>
@@ -640,12 +641,17 @@ under the License.
                         <!-- Generated content -->
                         <exclude>**/target/**</exclude>
                         <exclude>**/scalastyle-output.xml</exclude>
-                        <exclude>docs/resources/**</exclude>
-                        <exclude>docs/public/**</exclude>
-                        <exclude>docs/themes/book/**</exclude>
-                        <exclude>docs/assets/github.css</exclude>
-                        <exclude>docs/static/js/anchor.min.js</exclude>
-                        <exclude>docs/static/js/redoc.standalone.js</exclude>
+                        <exclude>docs/node_modules/**</exclude>
+                        <exclude>docs/build/**</exclude>
+                        <exclude>docs/.docusaurus/**</exclude>
+                        <exclude>docs/yarn.lock</exclude>
+                        <exclude>docs/**/*.js</exclude>
+                        <exclude>docs/**/*.jsx</exclude>
+                        <exclude>docs/**/*.json</exclude>
+                        <exclude>docs/**/*.css</exclude>
+                        <exclude>docs/**/*.mdx</exclude>
+                        <exclude>docs/generated/**</exclude>
+                        <exclude>docs/static/**</exclude>
                         <exclude>**/*.svg</exclude>
                         <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->

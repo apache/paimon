@@ -24,6 +24,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -221,6 +222,13 @@ public class CachingCatalog extends DelegateCatalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         super.alterTable(identifier, changes, ignoreIfNotExists);
+        invalidateTable(identifier);
+    }
+
+    @Override
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        super.replaceTable(identifier, newSchema, ignoreIfNotExists);
         invalidateTable(identifier);
     }
 

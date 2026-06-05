@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -25,6 +26,26 @@ import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
+
+
+def supports_pread(stream) -> bool:
+    """Check if the stream supports position-based reads (thread-safe I/O)."""
+    if hasattr(stream, 'read_at'):
+        return True
+    if hasattr(stream, 'fileno'):
+        try:
+            stream.fileno()
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def pread(stream, length: int, offset: int) -> bytes:
+    """Position-based read without changing the stream cursor. Thread-safe."""
+    if hasattr(stream, 'read_at'):
+        return stream.read_at(length, offset)
+    return os.pread(stream.fileno(), length, offset)
 
 
 class FileIO(ABC):
@@ -257,6 +278,9 @@ class FileIO(ABC):
     def write_vortex(self, path: str, data, **kwargs):
         raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
+
     def close(self):
         pass
 
@@ -265,8 +289,11 @@ class FileIO(ABC):
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
         - LocalFileIO for local file system (file:// or no scheme)
-        - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
+        - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
+        - PyArrowFileIO for other remote file systems (oss://, s3://, gs://, ...),
+          and for HDFS when explicitly requested via hdfs.client.impl=pyarrow
         """
+        import os as _os
         from urllib.parse import urlparse
 
         uri = urlparse(path)
@@ -276,5 +303,39 @@ class FileIO(ABC):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 
+        opts = catalog_options or Options({})
+
+        if scheme in ("hdfs", "viewfs"):
+            from pypaimon.common.options.config import HdfsOptions
+            impl_source = "hdfs.client.impl option"
+            # Treat an empty option value the same as "unset" so callers can
+            # blank it out (common in templated configs) without tripping
+            # the unsupported-impl branch.
+            impl_value = opts.to_map().get(HdfsOptions.HDFS_CLIENT_IMPL.key())
+            if not impl_value:
+                impl_value = _os.environ.get("PYPAIMON_HDFS_IMPL")
+                impl_source = "PYPAIMON_HDFS_IMPL env var"
+            if not impl_value:
+                impl_value = HdfsOptions.HDFS_CLIENT_IMPL.default_value()
+                impl_source = "default"
+            impl = impl_value.lower()
+            if impl == "native":
+                try:
+                    from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
+                    return HdfsNativeFileIO(path, opts)
+                except (ImportError, RuntimeError) as e:
+                    fallback = opts.get(HdfsOptions.HDFS_CLIENT_FALLBACK_TO_PYARROW)
+                    if not fallback:
+                        raise
+                    logging.getLogger(__name__).warning(
+                        "Native HDFS backend init failed, falling back to "
+                        "pyarrow: %s", e,
+                    )
+            elif impl != "pyarrow":
+                raise ValueError(
+                    f"Unsupported hdfs.client.impl '{impl_value}' "
+                    f"(from {impl_source}). Supported: 'native', 'pyarrow'."
+                )
+
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-        return PyArrowFileIO(path, catalog_options or Options({}))
+        return PyArrowFileIO(path, opts)

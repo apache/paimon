@@ -21,8 +21,52 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.types.{DataType, StructField, StructType}
 
 abstract class VariantTestBase extends PaimonSparkTestBase {
+
+  private def variantPushDownEnabled: Boolean =
+    spark.conf.getOption("spark.sql.variant.pushVariantIntoScan").contains("true")
+
+  private def scanReadSchemaOf(df: org.apache.spark.sql.DataFrame): StructType = {
+    df.queryExecution.optimizedPlan
+      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.readSchema() }
+      .getOrElse(fail("expected a DataSourceV2ScanRelation in the optimized plan"))
+  }
+
+  private def fieldByPath(schema: StructType, path: Seq[String]): StructField = {
+    var current: StructType = schema
+    var field: StructField = null
+    path.zipWithIndex.foreach {
+      case (name, i) =>
+        field = current.find(_.name == name).getOrElse(fail(s"missing ${path.take(i + 1)}"))
+        if (i < path.length - 1) {
+          current = field.dataType match {
+            case s: StructType => s
+            case other => fail(s"${path.take(i + 1)} should be a struct, got $other")
+          }
+        }
+    }
+    field
+  }
+
+  // Compare via `typeName` so `paimon-spark-ut` builds under Spark 3.x (no VariantType class).
+  private def isVariantType(t: DataType): Boolean = t.typeName == "variant"
+
+  private def assertVariantStruct(field: StructField, expectedFieldCount: Int): Unit = {
+    val s = field.dataType match {
+      case s: StructType => s
+      case other =>
+        fail(s"${field.name} should be a struct under variant pushdown, got $other")
+    }
+    assert(
+      s.length == expectedFieldCount,
+      s"${field.name} should expose $expectedFieldCount extracted field(s), got ${s.fields.toSeq}")
+    assert(
+      !s.fields.exists(f => isVariantType(f.dataType)),
+      s"no extracted field on ${field.name} should still be of Variant type when pushdown succeeds")
+  }
 
   test("Paimon Variant: read and write variant") {
     sql("CREATE TABLE T (id INT, v VARIANT)")
@@ -981,5 +1025,94 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       sql("SELECT size(data.tags), size(data.attrs) FROM T WHERE id = 1"),
       Seq(Row(2, 2))
     )
+  }
+
+  test("Paimon Variant pushdown: top-level variant column rewrites readSchema iff conf is on") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES (1, parse_json('{"age":26,"city":"Beijing"}'))""")
+
+    val df =
+      sql("SELECT id, variant_get(v, '$.age', 'int'), variant_get(v, '$.city', 'string') FROM T")
+    val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
+    if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 2)
+    else assert(isVariantType(v.dataType))
+    checkAnswer(df, Seq(Row(1, 26, "Beijing")))
+  }
+
+  test("Paimon Variant pushdown: nested variant column inside a struct") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, nested STRUCT<v: VARIANT, x: INT>)")
+    sql("""INSERT INTO T VALUES (1, named_struct('v', parse_json('{"age":26}'), 'x', 100))""")
+
+    val df = sql("SELECT id, variant_get(nested.v, '$.age', 'int') FROM T")
+    val v = fieldByPath(scanReadSchemaOf(df), Seq("nested", "v"))
+    if (variantPushDownEnabled) assertVariantStruct(v, expectedFieldCount = 1)
+    else assert(isVariantType(v.dataType))
+    checkAnswer(df, Seq(Row(1, 26)))
+  }
+
+  test("Paimon Variant pushdown: full variant access (SELECT v) blocks per-column pushdown") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES (1, parse_json('{"age":26}'))""")
+
+    // SELECT v + variant_get(v, ...) requires the full Variant value alongside extractions —
+    // Paimon can't reconstruct a Variant from shredded fields, so the entire column's
+    // extractions must be rejected, regardless of the pushdown conf.
+    val df = sql("SELECT v, variant_get(v, '$.age', 'int') FROM T")
+    val v = fieldByPath(scanReadSchemaOf(df), Seq("v"))
+    assert(isVariantType(v.dataType))
+    checkAnswer(df, sql("""SELECT parse_json('{"age":26}'), 26"""))
+  }
+
+  test("Paimon Variant pushdown: multiple variant columns rewrite independently") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v1 VARIANT, v2 VARIANT)")
+    sql("""INSERT INTO T VALUES (1, parse_json('{"a":1}'), parse_json('{"x":"hi","y":"bye"}'))""")
+
+    val df = sql(
+      "SELECT variant_get(v1, '$.a', 'int'), variant_get(v2, '$.x', 'string'), variant_get(v2, '$.y', 'string') FROM T")
+    val readSchema = scanReadSchemaOf(df)
+    val v1 = fieldByPath(readSchema, Seq("v1"))
+    val v2 = fieldByPath(readSchema, Seq("v2"))
+    if (variantPushDownEnabled) {
+      assertVariantStruct(v1, expectedFieldCount = 1)
+      assertVariantStruct(v2, expectedFieldCount = 2)
+    } else {
+      assert(isVariantType(v1.dataType))
+      assert(isVariantType(v2.dataType))
+    }
+    checkAnswer(df, Seq(Row(1, "hi", "bye")))
+  }
+
+  test("Paimon Variant pushdown: column pruning still applies for non-variant queries") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, x INT, y INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES (1, 10, 100, parse_json('{"age":26}'))""")
+
+    // No variant_get → Spark's `pushDownVariants` rule does NOT short-circuit `pruneColumns`,
+    // so the scan must report only the projected columns.
+    val df = sql("SELECT id, x FROM T")
+    val readSchema = scanReadSchemaOf(df)
+    assert(readSchema.fieldNames.toSet == Set("id", "x"), s"got ${readSchema.fieldNames.toSeq}")
+    checkAnswer(df, Seq(Row(1, 10)))
+  }
+
+  test("Paimon Variant pushdown: scan description exposes PushedVariants only when active") {
+    assume(gteqSpark4_1)
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""INSERT INTO T VALUES (1, parse_json('{"age":26}'))""")
+
+    val df = sql("SELECT variant_get(v, '$.age', 'int') FROM T")
+    val desc = df.queryExecution.optimizedPlan
+      .collectFirst { case DataSourceV2ScanRelation(_, scan, _, _, _) => scan.description() }
+      .getOrElse(fail("expected a DataSourceV2ScanRelation in the plan"))
+
+    if (variantPushDownEnabled) {
+      assert(desc.contains("PushedVariants: [v=[$.age]]"), s"got: $desc")
+    } else {
+      assert(!desc.contains("PushedVariants"), s"got: $desc")
+    }
   }
 }

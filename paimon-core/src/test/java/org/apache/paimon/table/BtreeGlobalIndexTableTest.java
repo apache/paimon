@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
@@ -27,11 +28,15 @@ import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -81,7 +86,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
         RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
+        scan.withGlobalIndexResult(GlobalIndexResult.create(finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
         table.newRead()
@@ -163,6 +168,36 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         });
 
         assertThat(result).containsExactly("a200", "a56789");
+    }
+
+    @Test
+    public void testBTreeGlobalIndexOnAddedColumnContainsOldRowsAsNull() throws Exception {
+        long oldRowCount = 10L;
+        write(oldRowCount);
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            100,
+                            BinaryString.fromString("a-new"),
+                            BinaryString.fromString("b-new"),
+                            BinaryString.fromString("not-null")));
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        createIndex("f3");
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate = new PredicateBuilder(table.rowType()).isNull(3);
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
+        assertNotNull(rowIds);
+        assertThat(rowIds.getLongCardinality()).isEqualTo(oldRowCount);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(0L, oldRowCount - 1));
     }
 
     private void createIndex(String fieldName) throws Exception {

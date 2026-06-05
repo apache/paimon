@@ -18,6 +18,7 @@
 """Global index reader interface."""
 
 from abc import ABC, abstractmethod
+from concurrent.futures import Future
 from typing import List, Optional
 
 
@@ -30,82 +31,81 @@ class FieldRef:
         self.data_type = data_type
 
 
-class GlobalIndexReader(ABC):
-    """
-    Index reader for global index, returns GlobalIndexResult.
-    
-    This is the base interface for all global index readers.
-    """
+def _completed_future(value):
+    """Create a Future that is already completed with the given value."""
+    f = Future()
+    f.set_result(value)
+    return f
 
-    def visit_vector_search(self, vector_search: 'VectorSearch') -> Optional['GlobalIndexResult']:
-        """Visit a vector search query."""
+
+def _map_future(source, transform):
+    """Create a new Future whose result is transform(source.result())."""
+    result = Future()
+
+    def on_done(f):
+        try:
+            result.set_result(transform(f.result()))
+        except Exception as e:
+            result.set_exception(e)
+
+    source.add_done_callback(on_done)
+    return result
+
+
+class GlobalIndexReader(ABC):
+    """Index reader for global index. All visit methods return Future[Optional[GlobalIndexResult]]."""
+
+    def visit_vector_search(self, vector_search: 'VectorSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Vector search not supported by this reader")
 
-    def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> Optional['GlobalIndexResult']:
-        """Visit a full-text search query."""
+    def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Full-text search not supported by this reader")
 
-    def visit_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit an equality predicate."""
-        return None
+    def visit_equal(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_not_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a not-equal predicate."""
-        return None
+    def visit_not_equal(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_less_than(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a less-than predicate."""
-        return None
+    def visit_less_than(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_less_or_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a less-or-equal predicate."""
-        return None
+    def visit_less_or_equal(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_greater_than(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a greater-than predicate."""
-        return None
+    def visit_greater_than(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_greater_or_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a greater-or-equal predicate."""
-        return None
+    def visit_greater_or_equal(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_is_null(self, field_ref: FieldRef) -> Optional['GlobalIndexResult']:
-        """Visit an is-null predicate."""
-        return None
+    def visit_is_null(self, field_ref: FieldRef) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_is_not_null(self, field_ref: FieldRef) -> Optional['GlobalIndexResult']:
-        """Visit an is-not-null predicate."""
-        return None
+    def visit_is_not_null(self, field_ref: FieldRef) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_in(self, field_ref: FieldRef, literals: List[object]) -> Optional['GlobalIndexResult']:
-        """Visit an in predicate."""
-        return None
+    def visit_in(self, field_ref: FieldRef, literals: List[object]) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_not_in(self, field_ref: FieldRef, literals: List[object]) -> Optional['GlobalIndexResult']:
-        """Visit a not-in predicate."""
-        return None
+    def visit_not_in(self, field_ref: FieldRef, literals: List[object]) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_starts_with(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a starts-with predicate."""
-        return None
+    def visit_starts_with(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_ends_with(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit an ends-with predicate."""
-        return None
+    def visit_ends_with(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_contains(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a contains predicate."""
-        return None
+    def visit_contains(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_like(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
-        """Visit a like predicate."""
-        return None
+    def visit_like(self, field_ref: FieldRef, literal: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
-    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> Optional['GlobalIndexResult']:
-        """Visit a between predicate."""
-        return None
+    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
 
     @abstractmethod
     def close(self) -> None:
-        """Close the reader and release resources."""
         pass

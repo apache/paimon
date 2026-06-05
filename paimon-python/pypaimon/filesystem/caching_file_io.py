@@ -31,7 +31,7 @@ import threading
 from collections import OrderedDict
 from typing import Optional
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
@@ -202,6 +202,8 @@ class CachingInputStream:
         self._file_size = -1
         self._cache = cache
         self._pos = 0
+        self._io_lock = threading.Lock()
+        self._remote_supports_pread = None
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -249,6 +251,28 @@ class CachingInputStream:
         self._pos = end
         return bytes(result)
 
+    def read_at(self, nbytes: int, offset: int) -> bytes:
+        """Position-based read. Does not change the cursor. Thread-safe."""
+        if nbytes <= 0 or offset >= self._get_file_size():
+            return b''
+
+        end = min(offset + nbytes, self._get_file_size())
+        block_size = self._cache.block_size
+
+        first_block = offset // block_size
+        last_block = (end - 1) // block_size
+
+        result = bytearray()
+        for bi in range(first_block, last_block + 1):
+            block_data = self._read_block(bi)
+
+            block_start = bi * block_size
+            start_in_block = max(offset - block_start, 0)
+            end_in_block = min(end - block_start, len(block_data))
+            result.extend(block_data[start_in_block:end_in_block])
+
+        return bytes(result)
+
     def _read_block(self, block_index: int) -> bytes:
         cached = self._cache.get_block(self._file_path, block_index)
         if cached is not None:
@@ -258,12 +282,19 @@ class CachingInputStream:
         offset = block_index * block_size
         read_size = min(block_size, self._get_file_size() - offset)
 
-        stream = self._get_remote_stream()
-        stream.seek(offset)
-        data = self._read_fully(stream, read_size)
-
+        data = self._read_remote(offset, read_size)
         self._cache.put_block(self._file_path, block_index, data)
         return data
+
+    def _read_remote(self, offset: int, size: int) -> bytes:
+        stream = self._get_remote_stream()
+        if self._remote_supports_pread is None:
+            self._remote_supports_pread = supports_pread(stream)
+        if self._remote_supports_pread:
+            return pread(stream, size, offset)
+        with self._io_lock:
+            stream.seek(offset)
+            return self._read_fully(stream, size)
 
     def _read_fully(self, stream, size: int) -> bytes:
         buf = bytearray()
@@ -310,6 +341,10 @@ class CachingFileIO(FileIO):
         else:
             self._whitelist = whitelist
 
+    # Fallback caps when local-cache.max-size is unset (memory shares the heap).
+    _DEFAULT_MEMORY_CACHE_MAX_SIZE = 256 * 1024 * 1024
+    _DEFAULT_DISK_CACHE_MAX_SIZE = 10 * 1024 * 1024 * 1024
+
     @staticmethod
     def create_cache_manager(options):
         """Creates a cache manager from options, or returns None if caching is not enabled."""
@@ -319,11 +354,14 @@ class CachingFileIO(FileIO):
             return None
         cache_dir = opts.local_cache_dir()
         max_size_opt = opts.local_cache_max_size()
-        max_size = max_size_opt.get_bytes() if max_size_opt is not None else (2 ** 63 - 1)
         block_size = opts.local_cache_block_size().get_bytes()
         if cache_dir is not None:
+            max_size = (max_size_opt.get_bytes() if max_size_opt is not None
+                        else CachingFileIO._DEFAULT_DISK_CACHE_MAX_SIZE)
             return LocalDiskCacheManager(cache_dir, max_size, block_size)
         else:
+            max_size = (max_size_opt.get_bytes() if max_size_opt is not None
+                        else CachingFileIO._DEFAULT_MEMORY_CACHE_MAX_SIZE)
             return LocalMemoryCacheManager(max_size, block_size)
 
     @staticmethod
@@ -348,6 +386,10 @@ class CachingFileIO(FileIO):
         if not whitelist:
             return file_io
         return CachingFileIO(file_io, cache, whitelist)
+
+    @property
+    def properties(self):
+        return self._delegate.properties
 
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
@@ -381,6 +423,37 @@ class CachingFileIO(FileIO):
 
     def is_dir(self, path: str) -> bool:
         return self._delegate.is_dir(path)
+
+    # FileIO base has raising / no-op defaults that block __getattr__ — forward explicitly.
+    def to_filesystem_path(self, path: str) -> str:
+        return self._delegate.to_filesystem_path(path)
+
+    def try_to_write_atomic(self, *args, **kwargs):
+        return self._delegate.try_to_write_atomic(*args, **kwargs)
+
+    def write_parquet(self, *args, **kwargs):
+        return self._delegate.write_parquet(*args, **kwargs)
+
+    def write_orc(self, *args, **kwargs):
+        return self._delegate.write_orc(*args, **kwargs)
+
+    def write_avro(self, *args, **kwargs):
+        return self._delegate.write_avro(*args, **kwargs)
+
+    def write_lance(self, *args, **kwargs):
+        return self._delegate.write_lance(*args, **kwargs)
+
+    def write_blob(self, *args, **kwargs):
+        return self._delegate.write_blob(*args, **kwargs)
+
+    def write_mosaic(self, *args, **kwargs):
+        return self._delegate.write_mosaic(*args, **kwargs)
+
+    def write_vortex(self, *args, **kwargs):
+        return self._delegate.write_vortex(*args, **kwargs)
+
+    def write_row(self, *args, **kwargs):
+        return self._delegate.write_row(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._delegate, name)

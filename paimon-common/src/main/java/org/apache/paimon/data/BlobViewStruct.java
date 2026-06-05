@@ -26,6 +26,7 @@ import java.nio.ByteOrder;
 import java.util.Objects;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 
 /**
  * Serialized metadata for a BLOB view field.
@@ -64,6 +65,11 @@ public class BlobViewStruct implements Serializable {
     }
 
     public byte[] serialize() {
+        if (UNKNOWN_DATABASE.equals(identifier.getDatabaseName())) {
+            throw new IllegalArgumentException(
+                    "Blob view upstream table identifier must include database name: "
+                            + identifier.getFullName());
+        }
         byte[] identifierBytes = identifier.getFullName().getBytes(UTF_8);
 
         int totalSize = 1 + 8 + 4 + identifierBytes.length + 4 + 8;

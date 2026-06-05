@@ -38,7 +38,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -527,6 +529,60 @@ public class BranchActionITCase extends ActionITCaseBase {
         sortedActual = new ArrayList<>(result);
         expected = Arrays.asList("+I[1, Hi]", "+I[2, Hello]", "+I[3, Paimon]");
         assertEquals(expected, sortedActual);
+    }
+
+    @Test
+    void testMergeBranch() throws Exception {
+        init(warehouse);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "-1");
+        options.put("branch-merge.enabled", "true");
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options);
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'merge_branch')", database, tableName));
+
+        FileStoreTable branchTable = table.switchToBranch("merge_branch");
+        StreamWriteBuilder branchWriteBuilder =
+                branchTable.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = branchWriteBuilder.newWrite();
+        commit = branchWriteBuilder.newCommit();
+
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+
+        createAction(
+                        MergeBranchAction.class,
+                        "merge_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--source_branch",
+                        "merge_branch")
+                .run();
+
+        table = getFileStoreTable(tableName);
+        List<String> result = readTableData(table);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, Hi]", "+I[2, Hello]");
     }
 
     protected List<String> readTableData(FileStoreTable table) throws Exception {

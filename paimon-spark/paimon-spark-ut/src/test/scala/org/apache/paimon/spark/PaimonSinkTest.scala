@@ -263,6 +263,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             .writeStream
             .option("checkpointLocation", checkpointDir.getCanonicalPath)
             .option("write.merge-schema", "true")
+            .option("write.merge-schema.type-widening", "true")
             .option("write.merge-schema.explicit-cast", "true")
             .format("paimon")
             .start(location)
@@ -356,6 +357,56 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             stream.processAllAvailable()
             checkAnswer(query(), Seq(Row(1, 1), Row(2, 2), Row(3, 1)))
             assert(table.snapshotManager().latestSnapshot().commitKind == COMPACT)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Sink: batch then stream should not overwrite batch data") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // create a primary key table
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          // Phase 1 - batch insert
+          spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+          checkAnswer(
+            spark.sql("SELECT * FROM T ORDER BY a"),
+            Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+
+          // Phase 2 - streaming should append, not overwrite
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], id: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          try {
+            inputData.addData((4, "d"))
+            stream.processAllAvailable()
+            // batch data must still be present alongside stream data
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Nil)
+
+            inputData.addData((5, "e"))
+            stream.processAllAvailable()
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Row(5, "e") :: Nil)
           } finally {
             stream.stop()
           }

@@ -34,6 +34,24 @@ public class TantivySearcher implements AutoCloseable {
         this.closed = false;
     }
 
+    public TantivySearcher(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase) {
+        this.searcherPtr =
+                openIndexWithTokenizer(
+                        indexPath, tokenizerName, minGram, maxGram, prefixOnly, lowerCase);
+        this.closed = false;
+    }
+
+    public TantivySearcher(String indexPath, String configJson) {
+        this.searcherPtr = openIndexWithTokenizerConfig(indexPath, configJson);
+        this.closed = false;
+    }
+
     /**
      * Open a searcher from a stream-backed archive.
      *
@@ -51,6 +69,42 @@ public class TantivySearcher implements AutoCloseable {
         this.closed = false;
     }
 
+    public TantivySearcher(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase) {
+        this.searcherPtr =
+                openFromStreamWithTokenizer(
+                        fileNames,
+                        fileOffsets,
+                        fileLengths,
+                        streamInput,
+                        tokenizerName,
+                        minGram,
+                        maxGram,
+                        prefixOnly,
+                        lowerCase);
+        this.closed = false;
+    }
+
+    public TantivySearcher(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String configJson) {
+        this.searcherPtr =
+                openFromStreamWithTokenizerConfig(
+                        fileNames, fileOffsets, fileLengths, streamInput, configJson);
+        this.closed = false;
+    }
+
     /**
      * Search the index with a query string, returning top N results ranked by score.
      *
@@ -59,8 +113,12 @@ public class TantivySearcher implements AutoCloseable {
      * @return search results containing rowIds and scores
      */
     public SearchResult search(String queryString, int limit) {
+        return search(queryString, limit, "or");
+    }
+
+    public SearchResult search(String queryString, int limit, String queryOperator) {
         checkNotClosed();
-        return searchIndex(searcherPtr, queryString, limit);
+        return searchIndex(searcherPtr, queryString, limit, queryOperator);
     }
 
     @Override
@@ -70,6 +128,10 @@ public class TantivySearcher implements AutoCloseable {
             searcherPtr = 0;
             closed = true;
         }
+    }
+
+    public boolean isClosed() {
+        return closed;
     }
 
     private void checkNotClosed() {
@@ -82,10 +144,40 @@ public class TantivySearcher implements AutoCloseable {
 
     static native long openIndex(String indexPath);
 
+    static native long openIndexWithTokenizer(
+            String indexPath,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase);
+
+    static native long openIndexWithTokenizerConfig(String indexPath, String configJson);
+
     static native long openFromStream(
             String[] fileNames, long[] fileOffsets, long[] fileLengths, StreamFileInput streamInput);
 
-    static native SearchResult searchIndex(long searcherPtr, String queryString, int limit);
+    static native long openFromStreamWithTokenizer(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String tokenizerName,
+            int minGram,
+            int maxGram,
+            boolean prefixOnly,
+            boolean lowerCase);
+
+    static native long openFromStreamWithTokenizerConfig(
+            String[] fileNames,
+            long[] fileOffsets,
+            long[] fileLengths,
+            StreamFileInput streamInput,
+            String configJson);
+
+    static native SearchResult searchIndex(
+            long searcherPtr, String queryString, int limit, String queryOperator);
 
     static native void freeSearcher(long searcherPtr);
+
 }

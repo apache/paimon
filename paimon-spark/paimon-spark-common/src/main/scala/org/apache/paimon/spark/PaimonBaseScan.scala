@@ -18,16 +18,18 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.{InnerTableScan, Split}
+import org.apache.paimon.table.source.{DataTableBatchScan, InnerTableScan, Split}
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.Batch
@@ -43,15 +45,22 @@ abstract class PaimonBaseScan(table: InnerTable)
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
   protected def getInputSplits: Array[Split] = {
-    readBuilder
+    val scan = readBuilder
       .newScan()
       .withGlobalIndexResult(evalGlobalIndexSearch())
       .asInstanceOf[InnerTableScan]
       .withMetricRegistry(paimonMetricsRegistry)
-      .plan()
-      .splits()
-      .asScala
-      .toArray
+
+    val plan = scan.plan()
+
+    Option(scan.readProtectionTagName).foreach {
+      name =>
+        BatchReadTagCleanupListener
+          .getOrCreate(SparkSession.active)
+          .registerCleanup(name, table)
+    }
+
+    plan.splits().asScala.toArray
   }
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
@@ -70,8 +79,13 @@ abstract class PaimonBaseScan(table: InnerTable)
 
   private def evalVectorSearch(): GlobalIndexResult = {
     val vectorSearch = pushedVectorSearch.get
-    val vectorBuilder = table
-      .newVectorSearchBuilder()
+    val vectorSearchBuilder =
+      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
+        new SparkVectorSearchBuilderImpl(table)
+      } else {
+        table.newVectorSearchBuilder()
+      }
+    val vectorBuilder = vectorSearchBuilder
       .withVector(vectorSearch.vector())
       .withVectorColumn(vectorSearch.fieldName())
       .withLimit(vectorSearch.limit())

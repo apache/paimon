@@ -385,6 +385,85 @@ class CachingFileIOTest(unittest.TestCase):
         caching_io.new_output_stream("/out")
         delegate.new_output_stream.assert_called_once_with("/out")
 
+    def test_to_filesystem_path_forwarded_to_delegate(self):
+        delegate = MagicMock()
+        delegate.to_filesystem_path.side_effect = lambda p: p.replace("oss://", "")
+        cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        caching_io = CachingFileIO(delegate, cache)
+
+        self.assertEqual("bucket/key", caching_io.to_filesystem_path("oss://bucket/key"))
+        delegate.to_filesystem_path.assert_called_once_with("oss://bucket/key")
+
+    def test_write_parquet_when_enable_local_cache(self):
+        import pyarrow as pa
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+
+        delegate = LocalFileIO()
+        cache = LocalDiskCacheManager(self.cache_dir, 2 ** 63 - 1, block_size=64)
+        caching_io = CachingFileIO(delegate, cache)
+
+        out_path = os.path.join(self.cache_dir, "data.parquet")
+        table = pa.table({"a": [1, 2, 3]})
+        caching_io.write_parquet(out_path, table)
+
+        self.assertTrue(os.path.exists(out_path))
+        self.assertEqual(table, pa.parquet.read_table(out_path))
+
+    def test_file_io_for_data_wraps_cache_when_data_token_enabled(self):
+        from pypaimon.catalog.rest.rest_catalog import RESTCatalog
+        from pypaimon.common.identifier import Identifier
+        from pypaimon.common.options.options import Options
+
+        catalog = MagicMock(spec=RESTCatalog)
+        catalog.data_token_enabled = True
+        catalog.fuse_enabled = False
+        catalog._fuse_resolver = None
+        catalog.context = MagicMock()
+        catalog.context.options = Options({
+            'local-cache.enabled': 'true',
+            'local-cache.dir': self.cache_dir,
+            'local-cache.whitelist': 'meta,global-index,data',
+        })
+        catalog._cache_manager = CachingFileIO.create_cache_manager(
+            catalog.context.options)
+        catalog.file_io_for_data = RESTCatalog.file_io_for_data.__get__(
+            catalog, RESTCatalog)
+
+        file_io = catalog.file_io_for_data(
+            "oss://catalog/db1/table1", Identifier.create("db1", "table1"))
+
+        self.assertIsInstance(
+            file_io, CachingFileIO,
+            msg="Cache wrap should apply even when data-token.enabled=true; "
+                "currently bypassed in DLF mode (RESTTokenFileIO returned).")
+
+    def test_default_memory_cache_max_size_capped(self):
+        from pypaimon.common.options.options import Options
+        from pypaimon.filesystem.caching_file_io import LocalMemoryCacheManager
+
+        cache = CachingFileIO.create_cache_manager(Options({
+            'local-cache.enabled': 'true',
+        }))
+        self.assertIsInstance(cache, LocalMemoryCacheManager)
+        self.assertEqual(
+            cache._max_size_bytes, 256 * 1024 * 1024,
+            msg="Memory cache without explicit max-size should default to "
+                "256 MB, not unlimited (OOM risk).")
+
+    def test_default_disk_cache_max_size_capped(self):
+        from pypaimon.common.options.options import Options
+        from pypaimon.filesystem.caching_file_io import LocalDiskCacheManager
+
+        cache = CachingFileIO.create_cache_manager(Options({
+            'local-cache.enabled': 'true',
+            'local-cache.dir': self.cache_dir,
+        }))
+        self.assertIsInstance(cache, LocalDiskCacheManager)
+        self.assertEqual(
+            cache._max_size_bytes, 10 * 1024 * 1024 * 1024,
+            msg="Disk cache without explicit max-size should default to "
+                "10 GB, not unlimited (disk-full risk).")
+
 
 class ConfigOptionsTest(unittest.TestCase):
 

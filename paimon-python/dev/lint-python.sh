@@ -152,7 +152,12 @@ function license_check() {
 
 # Flake8 check
 function flake8_check() {
-    local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox -o -path ./.venv \) -prune -o -type f -name "*.py" -print )"
+    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv"
+    if python -c "import sys; sys.exit(0 if sys.version_info < (3, 10) else 1)" 2>/dev/null; then
+        PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft -o -path ./pypaimon/tests/daft"
+    fi
+    PRUNE_PATHS="$PRUNE_PATHS \)"
+    local PYTHON_SOURCE="$(eval "find . $PRUNE_PATHS -prune -o -type f -name '*.py' -print")"
 
     print_function "STAGE" "flake8 checks"
     if [ ! -f "$FLAKE8_PATH" ]; then

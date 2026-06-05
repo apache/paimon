@@ -49,6 +49,12 @@ public class UriReaderFactory implements Serializable {
         return readers.computeIfAbsent(key, k -> newReader(k, uri));
     }
 
+    public boolean exists(String input) throws IOException {
+        UriReader reader = create(input);
+        return !(reader instanceof UriReader.FileUriReader)
+                || ((UriReader.FileUriReader) reader).exists(input);
+    }
+
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         this.readers = new ConcurrentHashMap<>();

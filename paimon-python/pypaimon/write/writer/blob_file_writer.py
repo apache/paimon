@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import pyarrow as pa
 from pathlib import Path
+from typing import Optional
+
+import pyarrow as pa
 
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 from pypaimon.table.row.generic_row import GenericRow, RowKind
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobConsumer, BlobData, BlobDescriptor
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
 
@@ -30,11 +32,16 @@ class BlobFileWriter:
     Writes rows one by one and tracks file size.
     """
 
-    def __init__(self, file_io, file_path: Path):
+    def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None):
         self.file_io = file_io
         self.file_path = file_path
+        self._blob_consumer = blob_consumer
         self.output_stream = file_io.new_output_stream(file_path)
-        self.writer = BlobFormatWriter(self.output_stream)
+        self.writer = BlobFormatWriter(
+            self.output_stream,
+            blob_consumer=blob_consumer,
+            file_path=str(file_path),
+        )
         self.row_count = 0
         self.closed = False
 
@@ -50,17 +57,30 @@ class BlobFileWriter:
 
         blob_data = self._to_blob(col_data)
 
-        # Create GenericRow
-        fields = [DataField(0, field_name, PyarrowFieldParser.to_paimon_type(row_data.schema[0].type, False))]
+        self.write_blob(field_name, row_data.schema[0].type, blob_data)
+
+    def write_blob(self, field_name: str, arrow_type, blob_data):
+        blob_data = self._to_blob(blob_data)
+        fields = [
+            DataField(
+                0,
+                field_name,
+                PyarrowFieldParser.to_paimon_type(arrow_type, False),
+            )
+        ]
         row = GenericRow([blob_data], fields, RowKind.INSERT)
 
         # Write to blob format writer
         self.writer.add_element(row)
         self.row_count += 1
 
-    def _to_blob(self, col_data) -> Blob:
+    def _to_blob(self, col_data) -> Optional[Blob]:
+        if col_data is Blob.PLACE_HOLDER:
+            return Blob.PLACE_HOLDER
         if hasattr(col_data, 'as_py'):
             col_data = col_data.as_py()
+        if col_data is None:
+            return None
         if isinstance(col_data, str):
             col_data = col_data.encode('utf-8')
         if isinstance(col_data, bytearray):
@@ -103,7 +123,7 @@ class BlobFileWriter:
         return file_size
 
     def abort(self):
-        """Abort the writer and delete the file."""
+        """Abort the writer and delete the file (unless a blob consumer holds references)."""
         if not self.closed:
             try:
                 if hasattr(self.output_stream, 'close'):
@@ -112,5 +132,5 @@ class BlobFileWriter:
                 pass
             self.closed = True
 
-        # Delete the file
-        self.file_io.delete_quietly(self.file_path)
+        if self._blob_consumer is None:
+            self.file_io.delete_quietly(self.file_path)

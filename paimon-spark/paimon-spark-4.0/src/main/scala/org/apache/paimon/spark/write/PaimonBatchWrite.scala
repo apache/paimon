@@ -18,136 +18,45 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
-import org.apache.paimon.spark.catalyst.Compatibility
-import org.apache.paimon.spark.commands.SparkDataFileMeta
-import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 
-import org.apache.spark.sql.PaimonSparkSession
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
-import org.apache.spark.sql.execution.SQLExecution
-import org.apache.spark.sql.execution.metric.SQLMetrics
 import org.apache.spark.sql.types.StructType
 
-import java.util.Collections
-
-import scala.collection.JavaConverters._
-
-case class PaimonBatchWrite(
+/**
+ * Spark-4.0 shadow wrapper. Source-identical to the `paimon-spark4-common` version but compiled
+ * against Spark 4.0.2; the maven shade order picks `paimon-spark-4.0/target/classes` ahead of the
+ * shaded 4-common copy, so the class metadata loaded at runtime does not include the 4.1-only
+ * `BatchWrite.commit(.., WriteSummary)` signature that triggers `ClassNotFoundException` via
+ * `ObjectStreamClass.getPrivateMethod` during Spark task serialization.
+ */
+class PaimonBatchWrite(
     table: FileStoreTable,
     writeSchema: StructType,
     dataSchema: StructType,
     overwritePartitions: Option[Map[String, String]],
     copyOnWriteScan: Option[PaimonCopyOnWriteScan])
-  extends BatchWrite
-  with WriteHelper {
+  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+  with BatchWrite
+  with Serializable {
 
-  protected val metricRegistry = SparkMetricRegistry()
-
-  @volatile private var commitStarted: Boolean = false
-
-  protected val batchWriteBuilder: BatchWriteBuilder = {
-    val builder = table.newBatchWriteBuilder()
-    overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
-    builder
-  }
-
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    (_: Int, _: Long) =>
-      {
-        PaimonV2DataWriter(
-          batchWriteBuilder,
-          writeSchema,
-          dataSchema,
-          coreOptions,
-          table.catalogEnvironment().catalogContext())
-      }
-  }
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
+    createPaimonDataWriterFactory(info)
 
   override def useCommitCoordinator(): Boolean = false
 
-  override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    commitStarted = true
-    logInfo(s"Committing to table ${table.name()}")
-    val batchTableCommit = batchWriteBuilder.newCommit()
-    batchTableCommit.withMetricRegistry(metricRegistry)
-    val addCommitMessage = WriteTaskResult.merge(messages)
-    val deletedCommitMessage = copyOnWriteScan match {
-      case Some(scan) => buildDeletedCommitMessage(scan.scannedFiles)
-      case None => Seq.empty
-    }
-    val commitMessages = addCommitMessage ++ deletedCommitMessage
-    try {
-      val start = System.currentTimeMillis()
-      batchTableCommit.commit(commitMessages.asJava)
-      logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
-    } finally {
-      batchTableCommit.close()
-    }
-    postDriverMetrics()
-    postCommit(commitMessages)
-  }
+  override def commit(messages: Array[WriterCommitMessage]): Unit = commitMessages(messages)
 
-  // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
-  // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
-  protected def postDriverMetrics(): Unit = {
-    val spark = PaimonSparkSession.active
-    // todo: find a more suitable way to get metrics.
-    val commitMetrics = metricRegistry.buildSparkCommitMetrics()
-    val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
-    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
-    val metricUpdates = executionMetrics.flatMap {
-      m =>
-        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
-          case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
-          case None => None
-        }
-    }
-    SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
-  }
+  override def abort(messages: Array[WriterCommitMessage]): Unit = abortMessages(messages)
+}
 
-  override def abort(messages: Array[WriterCommitMessage]): Unit = {
-    if (commitStarted) {
-      logWarning(s"Skip abort cleanup for table ${table.name()} because commit has already started")
-      return
-    }
-
-    logInfo(s"Aborting write to table ${table.name()}")
-    val batchTableCommit = batchWriteBuilder.newCommit()
-    try {
-      val commitMessages = WriteTaskResult.merge(messages.filter(_ != null))
-      batchTableCommit.abort(commitMessages.asJava)
-    } finally {
-      batchTableCommit.close()
-    }
-  }
-
-  private def buildDeletedCommitMessage(
-      deletedFiles: Seq[SparkDataFileMeta]): Seq[CommitMessage] = {
-    logInfo(s"[V2 Write] Building deleted commit message for ${deletedFiles.size} files")
-    deletedFiles
-      .groupBy(f => (f.partition, f.bucket))
-      .map {
-        case ((partition, bucket), files) =>
-          val deletedDataFileMetas = files.map(_.dataFileMeta).toList.asJava
-
-          new CommitMessageImpl(
-            partition,
-            bucket,
-            files.head.totalBuckets,
-            new DataIncrement(
-              Collections.emptyList[DataFileMeta],
-              deletedDataFileMetas,
-              Collections.emptyList[DataFileMeta]),
-            new CompactIncrement(
-              Collections.emptyList[DataFileMeta],
-              Collections.emptyList[DataFileMeta],
-              Collections.emptyList[DataFileMeta])
-          )
-      }
-      .toSeq
-  }
+object PaimonBatchWrite {
+  def apply(
+      table: FileStoreTable,
+      writeSchema: StructType,
+      dataSchema: StructType,
+      overwritePartitions: Option[Map[String, String]],
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): PaimonBatchWrite =
+    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
 }

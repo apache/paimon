@@ -16,11 +16,14 @@
 # under the License.
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.write.compact_increment import CompactIncrement
 from pypaimon.write.data_increment import DataIncrement
+
+if TYPE_CHECKING:
+    from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 
 
 @dataclass
@@ -39,6 +42,8 @@ class CommitMessage:
     - compact_increment: ADD/DELETE/changelog/index deltas from compaction.
     - check_from_snapshot: row-tracking conflict-detection anchor; -1 means
       "no check" (default). Read per-message by write/commit/conflict_detection.py.
+    - index_deletes: index manifest entries removed by this message (e.g. global
+      index deletions); committed alongside the data/compact increments.
     """
 
     partition: Tuple
@@ -47,6 +52,7 @@ class CommitMessage:
     data_increment: DataIncrement = field(default_factory=DataIncrement)
     compact_increment: CompactIncrement = field(default_factory=CompactIncrement)
     check_from_snapshot: Optional[int] = -1
+    index_deletes: List['IndexManifestEntry'] = field(default_factory=list)
 
     # ---- Convenience accessors ---------------------------------------------
     # Callers usually want the individual file lists rather than reaching
@@ -77,4 +83,8 @@ class CommitMessage:
         return self.compact_increment.changelog_files
 
     def is_empty(self) -> bool:
-        return self.data_increment.is_empty() and self.compact_increment.is_empty()
+        return (
+            self.data_increment.is_empty()
+            and self.compact_increment.is_empty()
+            and not self.index_deletes
+        )

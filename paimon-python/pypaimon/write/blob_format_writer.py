@@ -17,20 +17,26 @@
 
 import struct
 import zlib
-from typing import BinaryIO, List
+from typing import BinaryIO, List, Optional
 
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
 class BlobFormatWriter:
     VERSION = 1
     MAGIC_NUMBER = 1481511375
+    NULL_LENGTH = -1
+    PLACE_HOLDER_LENGTH = -2
     BUFFER_SIZE = 4096
     METADATA_SIZE = 12  # 8-byte length + 4-byte CRC
 
-    def __init__(self, output_stream: BinaryIO):
+    def __init__(self, output_stream: BinaryIO,
+                 blob_consumer: Optional[BlobConsumer] = None,
+                 file_path: Optional[str] = None):
         self.output_stream = output_stream
+        self._blob_consumer = blob_consumer
+        self._file_path = file_path
         self.lengths: List[int] = []
         self.position = 0
 
@@ -38,13 +44,20 @@ class BlobFormatWriter:
         if not hasattr(row, 'values') or len(row.values) != 1:
             raise ValueError("BlobFormatWriter only supports one field")
 
+        blob_field_name = row.fields[0].name
         blob_value = row.values[0]
         if blob_value is None:
-            self.lengths.append(-1)
+            self.lengths.append(self.NULL_LENGTH)
+            if self._blob_consumer is not None:
+                self._blob_consumer(blob_field_name, None)
             return
 
         if not isinstance(blob_value, Blob):
             raise ValueError("Field must be Blob/BlobData instance")
+
+        if blob_value is Blob.PLACE_HOLDER:
+            self.lengths.append(self.PLACE_HOLDER_LENGTH)
+            return
 
         previous_pos = self.position
         crc32 = 0  # Initialize CRC32
@@ -52,6 +65,8 @@ class BlobFormatWriter:
         # Write magic number
         magic_bytes = struct.pack('<I', self.MAGIC_NUMBER)  # Little endian
         crc32 = self._write_with_crc(magic_bytes, crc32)
+
+        blob_pos = self.position
 
         # Write blob data
         if isinstance(blob_value, BlobData):
@@ -68,6 +83,8 @@ class BlobFormatWriter:
             finally:
                 stream.close()
 
+        blob_length = self.position - blob_pos
+
         # Calculate total length including magic + data + metadata (length + CRC)
         bin_length = self.position - previous_pos + self.METADATA_SIZE
         self.lengths.append(bin_length)
@@ -81,6 +98,12 @@ class BlobFormatWriter:
         crc_bytes = struct.pack('<I', crc32 & 0xffffffff)
         self.output_stream.write(crc_bytes)
         self.position += 4
+
+        if self._blob_consumer is not None:
+            descriptor = BlobDescriptor(self._file_path, blob_pos, blob_length)
+            flush = self._blob_consumer(blob_field_name, descriptor)
+            if flush:
+                self.output_stream.flush()
 
     def _write_with_crc(self, data: bytes, crc32: int) -> int:
         crc32 = zlib.crc32(data, crc32)
@@ -97,7 +120,7 @@ class BlobFormatWriter:
         if col_data is None:
             if not is_blob:
                 raise RuntimeError("Null values are only supported for BLOB type fields")
-            self.lengths.append(-1)
+            self.lengths.append(self.NULL_LENGTH)
             return
 
         if is_blob:

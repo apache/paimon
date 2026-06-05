@@ -21,13 +21,20 @@ Each test protects a distinct behavior introduced by this feature; no
 redundancy.
 """
 
+import io
+import json
+import struct
+import sys
+import types
 import unittest
 from typing import List
 from unittest import mock
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
+from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -117,6 +124,214 @@ def _patch_snapshot(testcase, entries):
     testcase._travel_patch.start()
 
 
+def _java_tantivy_meta(tokenizer="ngram", min_gram=2, max_gram=2,
+                       prefix_only=False, lower_case=True,
+                       max_token_length=40, ascii_folding=False,
+                       stem=False, language="english",
+                       remove_stop_words=False, stop_words="",
+                       with_position=True):
+    config = {}
+    if tokenizer != "default":
+        config["tokenizer"] = tokenizer
+    if min_gram != 2:
+        config["ngram.min-gram"] = min_gram
+    if max_gram != 2:
+        config["ngram.max-gram"] = max_gram
+    if prefix_only:
+        config["ngram.prefix-only"] = prefix_only
+    if not lower_case:
+        config["lower-case"] = lower_case
+    if max_token_length != 40:
+        config["max-token-length"] = max_token_length
+    if ascii_folding:
+        config["ascii-folding"] = ascii_folding
+    if stem:
+        config["stem"] = stem
+    if language != "english":
+        config["language"] = language
+    if remove_stop_words:
+        config["remove-stop-words"] = remove_stop_words
+    if stop_words:
+        config["stop-words"] = stop_words
+    if not with_position:
+        config["with-position"] = with_position
+    return json.dumps(config, separators=(",", ":")).encode("utf-8")
+
+
+class _FakeFileIO:
+    def new_input_stream(self, path):
+        buf = io.BytesIO()
+        buf.write(struct.pack(">i", 1))
+        name = b"meta.json"
+        buf.write(struct.pack(">i", len(name)))
+        buf.write(name)
+        data = b"{}"
+        buf.write(struct.pack(">q", len(data)))
+        buf.write(data)
+        buf.seek(0)
+        return buf
+
+
+class _FakeSchemaBuilder:
+    def __init__(self):
+        self.fields = {}
+
+    def add_unsigned_field(self, name, stored=False, indexed=True, fast=False):
+        self.fields[name] = {"fast": fast, "stored": stored}
+
+    def add_text_field(self, name, stored=False, tokenizer_name=None, **kwargs):
+        if "index_option" in kwargs and kwargs["index_option"] is None:
+            raise TypeError("index_option must not be None")
+        self.fields[name] = {
+            "stored": stored,
+            "tokenizer_name": tokenizer_name or "default",
+        }
+        if "index_option" in kwargs:
+            self.fields[name]["index_option"] = kwargs["index_option"]
+
+    def build(self):
+        return types.SimpleNamespace(fields=self.fields)
+
+
+class _FakeTokenizer:
+    @staticmethod
+    def ngram(min_gram=2, max_gram=3, prefix_only=False):
+        return ("ngram", min_gram, max_gram, prefix_only)
+
+    @staticmethod
+    def simple():
+        return ("simple",)
+
+    @staticmethod
+    def whitespace():
+        return ("whitespace",)
+
+    @staticmethod
+    def raw():
+        return ("raw",)
+
+
+class _FakeFilter:
+    @staticmethod
+    def lowercase():
+        return "lowercase"
+
+    @staticmethod
+    def remove_long(length_limit):
+        return ("remove_long", length_limit)
+
+    @staticmethod
+    def ascii_fold():
+        return "ascii_fold"
+
+    @staticmethod
+    def stemmer(language):
+        return ("stemmer", language)
+
+    @staticmethod
+    def stopword(language):
+        return ("stopword", language)
+
+    @staticmethod
+    def custom_stopword(stopwords):
+        return ("custom_stopword", tuple(stopwords))
+
+
+class _FakeTextAnalyzerBuilder:
+    def __init__(self, tokenizer):
+        self._tokenizer = tokenizer
+        self._filters = []
+
+    def filter(self, filter_):
+        result = _FakeTextAnalyzerBuilder(self._tokenizer)
+        result._filters = self._filters + [filter_]
+        return result
+
+    def build(self):
+        return self._tokenizer + (tuple(self._filters),)
+
+
+class _FakeQuery:
+    @staticmethod
+    def empty_query():
+        return ("empty",)
+
+    @staticmethod
+    def term_query(schema, field_name, field_value, index_option="position"):
+        return ("term", schema, field_name, field_value, index_option)
+
+    @staticmethod
+    def boolean_query(subqueries, minimum_number_should_match=None):
+        return ("boolean", tuple(subqueries), minimum_number_should_match)
+
+
+class _FakeOccur:
+    Should = "should"
+    Must = "must"
+
+
+class _FakeSearchResults:
+    hits = [(2.0, "addr")]
+
+
+class _FakeSearcher:
+    def __init__(self):
+        self.query = None
+
+    def search(self, query, limit):
+        self.query = query
+        return _FakeSearchResults()
+
+    def fast_field_values(self, name, addresses):
+        return [7]
+
+
+class _FakeIndex:
+    def __init__(self, schema, directory=None):
+        self.schema = schema
+        self.directory = directory
+        self.registered_tokenizer = None
+
+    def register_tokenizer(self, name, analyzer):
+        self.registered_tokenizer = (name, analyzer)
+
+    def reload(self):
+        pass
+
+    def searcher(self):
+        self.searcher_instance = _FakeSearcher()
+        return self.searcher_instance
+
+    def parse_query(self, query_text, fields, **kwargs):
+        return (query_text, tuple(fields), kwargs)
+
+
+class _FakeTantivy(types.SimpleNamespace):
+    def __init__(self):
+        super().__init__()
+        self.Tokenizer = _FakeTokenizer
+        self.Filter = _FakeFilter
+        self.TextAnalyzerBuilder = _FakeTextAnalyzerBuilder
+        self.Query = _FakeQuery
+        self.Occur = _FakeOccur
+        self.last_schema = None
+        self.last_index = None
+        parent = self
+
+        class SchemaBuilder(_FakeSchemaBuilder):
+            def build(self_inner):
+                parent.last_schema = super().build()
+                return parent.last_schema
+
+        class Index(_FakeIndex):
+            def __init__(self_inner, schema, directory=None):
+                super().__init__(schema, directory=directory)
+                parent.last_index = self_inner
+
+        self.SchemaBuilder = SchemaBuilder
+        self.Index = Index
+
+
 # ----------------------------- tests ---------------------------------------
 
 
@@ -138,6 +353,414 @@ class VectorReaderFactoryTest(unittest.TestCase):
                 self.assertIsInstance(reader, LuminaVectorGlobalIndexReader)
             finally:
                 reader.close()
+
+
+class TantivyFullTextIndexOptionsTest(unittest.TestCase):
+    """Tantivy full-text tokenizer metadata compatibility."""
+
+    def test_empty_metadata_uses_default_tokenizer(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(b"")
+
+        self.assertEqual("default", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual(40, options.max_token_length)
+        self.assertFalse(options.ascii_folding)
+        self.assertFalse(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertFalse(options.remove_stop_words)
+        self.assertEqual("", options.stop_words)
+        self.assertTrue(options.with_position)
+        self.assertEqual("default", options.tokenizer_name())
+
+    def test_empty_json_metadata_uses_default_tokenizer(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(b"{}")
+
+        self.assertEqual("default", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual(40, options.max_token_length)
+        self.assertFalse(options.ascii_folding)
+        self.assertFalse(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertFalse(options.remove_stop_words)
+        self.assertEqual("", options.stop_words)
+        self.assertTrue(options.with_position)
+        self.assertEqual("default", options.tokenizer_name())
+
+    def test_deserializes_java_ngram_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" NGRAM ", min_gram=2, max_gram=3,
+                prefix_only=True, lower_case=False))
+
+        self.assertEqual("ngram", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(3, options.ngram_max_gram)
+        self.assertTrue(options.ngram_prefix_only)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
+
+    def test_deserializes_java_json_ngram_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" NGRAM ", min_gram=2, max_gram=3,
+                prefix_only=True, lower_case=False))
+
+        self.assertEqual("ngram", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(3, options.ngram_max_gram)
+        self.assertTrue(options.ngram_prefix_only)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(TANTIVY_NGRAM_TOKENIZER, options.tokenizer_name())
+
+    def test_deserializes_extended_analyzer_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
+                ascii_folding=True, stem=True, language="English",
+                remove_stop_words=True, stop_words="paimon;lake",
+                with_position=False))
+
+        self.assertEqual("whitespace", options.tokenizer)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(12, options.max_token_length)
+        self.assertTrue(options.ascii_folding)
+        self.assertTrue(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertTrue(options.remove_stop_words)
+        self.assertEqual("paimon;lake", options.stop_words)
+        self.assertEqual(["paimon", "lake"], options.stop_word_list())
+        self.assertFalse(options.with_position)
+        self.assertEqual("paimon_custom", options.tokenizer_name())
+
+    def test_deserializes_java_json_analyzer_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(
+                tokenizer=" WHITESPACE ", lower_case=False, max_token_length=12,
+                ascii_folding=True, stem=True, language="English",
+                remove_stop_words=True, stop_words=["paimon", "lake"],
+                with_position=False))
+
+        self.assertEqual("whitespace", options.tokenizer)
+        self.assertFalse(options.lower_case)
+        self.assertEqual(12, options.max_token_length)
+        self.assertTrue(options.ascii_folding)
+        self.assertTrue(options.stem)
+        self.assertEqual("english", options.language)
+        self.assertTrue(options.remove_stop_words)
+        self.assertEqual("paimon;lake", options.stop_words)
+        self.assertEqual(["paimon", "lake"], options.stop_word_list())
+        self.assertFalse(options.with_position)
+        self.assertEqual("paimon_custom", options.tokenizer_name())
+
+    def test_deserializes_java_jieba_metadata(self):
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_JIEBA_TOKENIZER,
+            TantivyFullTextIndexOptions,
+        )
+
+        options = TantivyFullTextIndexOptions.deserialize(
+            _java_tantivy_meta(tokenizer=" JIEBA "))
+
+        self.assertEqual("jieba", options.tokenizer)
+        self.assertEqual(2, options.ngram_min_gram)
+        self.assertEqual(2, options.ngram_max_gram)
+        self.assertFalse(options.ngram_prefix_only)
+        self.assertTrue(options.lower_case)
+        self.assertEqual(TANTIVY_JIEBA_TOKENIZER, options.tokenizer_name())
+
+    def test_ngram_reader_registers_matching_tantivy_analyzer(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_NGRAM_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(
+                        min_gram=2, max_gram=3,
+                        prefix_only=True, lower_case=True))])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch("中文", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_NGRAM_TOKENIZER}},
+                         tantivy.last_schema.fields)
+        self.assertEqual(
+            (TANTIVY_NGRAM_TOKENIZER,
+             ("ngram", 2, 3, True, ("lowercase",))),
+            tantivy.last_index.registered_tokenizer)
+        self.assertEqual([7], sorted(list(result.results())))
+
+        query = tantivy.last_index.searcher_instance.query
+        self.assertEqual(("中文", ("text",), {}), query)
+
+    def test_schema_fallback_for_pre_7670_indexes(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        call_count = [0]
+
+        class _FakeTantivyWithSchemaFallback(_FakeTantivy):
+            def __init__(self_outer):
+                super().__init__()
+                parent = self_outer
+
+                class SchemaBuilder(_FakeSchemaBuilder):
+                    def build(self_inner):
+                        parent.last_schema = super().build()
+                        return parent.last_schema
+
+                class Index(_FakeIndex):
+                    def __init__(self_inner, schema, directory=None):
+                        call_count[0] += 1
+                        row_id_opts = schema.fields.get("row_id", {})
+                        if not row_id_opts.get("stored", False):
+                            raise ValueError(
+                                "Schema error: 'An index exists but "
+                                "the schema does not match.'"
+                            )
+                        super().__init__(schema, directory=directory)
+                        parent.last_index = self_inner
+
+                self_outer.SchemaBuilder = SchemaBuilder
+                self_outer.Index = Index
+
+        tantivy = _FakeTantivyWithSchemaFallback()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(), "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch("hello", 5, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual(2, call_count[0])
+        self.assertTrue(
+            tantivy.last_schema.fields["row_id"].get("stored", False))
+
+    def test_custom_analyzer_reader_registers_matching_tantivy_analyzer(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_CUSTOM_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(
+                        tokenizer="simple", max_token_length=16,
+                        ascii_folding=True, stem=True, language="english",
+                        remove_stop_words=True, stop_words="paimon;lake",
+                        with_position=False))])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch("running", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_CUSTOM_TOKENIZER,
+                                   "index_option": "freq"}},
+                         tantivy.last_schema.fields)
+        self.assertEqual(
+            (TANTIVY_CUSTOM_TOKENIZER,
+             ("simple",
+              (("remove_long", 16), "lowercase", "ascii_fold", ("stemmer", "english"),
+               ("stopword", "english"), ("custom_stopword", ("paimon", "lake"))))),
+            tantivy.last_index.registered_tokenizer)
+
+    def test_ngram_reader_requires_custom_tokenizer_api(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = types.SimpleNamespace(SchemaBuilder=object)
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta())])
+            with self.assertRaisesRegex(
+                    RuntimeError, "ngram tokenizer support"):
+                reader.visit_full_text_search(
+                    FullTextSearch("中文", 10, "content")).result()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+    def test_jieba_reader_builds_token_query(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TANTIVY_JIEBA_TOKENIZER,
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        jieba = types.SimpleNamespace(
+            tokenize=lambda text, mode, HMM: [
+                ("售货", 0, 2),
+                ("货员", 1, 3),
+                ("售货员", 0, 3),
+                ("售货员", 0, 3)])
+        old_tantivy = sys.modules.get("tantivy")
+        old_jieba = sys.modules.get("jieba")
+        sys.modules["tantivy"] = tantivy
+        sys.modules["jieba"] = jieba
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(tokenizer="jieba"))])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch("售货员", 10, "content", "and")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+            if old_jieba is None:
+                sys.modules.pop("jieba", None)
+            else:
+                sys.modules["jieba"] = old_jieba
+
+        self.assertEqual({"row_id": {"fast": True, "stored": False},
+                          "text": {"stored": False,
+                                   "tokenizer_name": TANTIVY_JIEBA_TOKENIZER}},
+                         tantivy.last_schema.fields)
+        self.assertIsNone(tantivy.last_index.registered_tokenizer)
+        self.assertEqual([7], sorted(list(result.results())))
+
+        query = tantivy.last_index.searcher_instance.query
+        self.assertEqual("boolean", query[0])
+        self.assertEqual(
+            ("售货", "货员", "售货员"),
+            tuple(sub_query[1][3] for sub_query in query[1]))
+        self.assertEqual(
+            ("must", "must", "must"),
+            tuple(sub_query[0] for sub_query in query[1]))
+
+    def test_jieba_reader_requires_jieba_package(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        old_jieba = sys.modules.get("jieba")
+        sys.modules["tantivy"] = tantivy
+        sys.modules["jieba"] = None
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(
+                    file_name="ft.index",
+                    file_size=1,
+                    metadata=_java_tantivy_meta(tokenizer="jieba"))])
+            try:
+                with self.assertRaisesRegex(RuntimeError, "pip install jieba"):
+                    reader.visit_full_text_search(
+                        FullTextSearch("售货员", 10, "content")).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+            if old_jieba is None:
+                sys.modules.pop("jieba", None)
+            else:
+                sys.modules["jieba"] = old_jieba
 
 
 class VectorSearchFilterTest(unittest.TestCase):
@@ -210,7 +833,7 @@ class VectorSearchFilterTest(unittest.TestCase):
         for rid in range(5, 10):
             bitmap.add(rid)
         scanner = mock.MagicMock()
-        scanner.scan.return_value = GlobalIndexResult.create(lambda: bitmap)
+        scanner.scan.return_value = GlobalIndexResult.create(bitmap)
 
         captured_searches = []
         captured_io_metas = []
@@ -222,7 +845,7 @@ class VectorSearchFilterTest(unittest.TestCase):
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
                     captured_searches.append(vs)
-                    return ScoredGlobalIndexResult.create_empty()
+                    return _completed_future(ScoredGlobalIndexResult.create_empty())
 
                 def close(self_inner):
                     pass
@@ -266,33 +889,34 @@ class VectorSearchFilterTest(unittest.TestCase):
         from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 
         scalar_file = self.entries[2].index_file
-        scanner = GlobalIndexScanner(
-            fields=self.table.fields,
-            file_io=self.table.file_io,
-            index_path="/unused/index-path",
-            index_files=[scalar_file],
-        )
-        captured = []
 
-        class _FakeBTreeReader:
+        captured_io_metas = []
+
+        class _FakeLazyReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_meta):
-                captured.append(io_meta)
+                         io_metas, executor=None):
+                captured_io_metas.append(list(io_metas))
 
             def close(self_inner):
                 pass
 
-        try:
-            with mock.patch(
-                    "pypaimon.globalindex.btree.BTreeIndexReader",
-                    _FakeBTreeReader):
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.LazyFilteredBTreeReader",
+                _FakeLazyReader):
+            scanner = GlobalIndexScanner(
+                fields=self.table.fields,
+                file_io=self.table.file_io,
+                index_path="/unused/index-path",
+                index_files=[scalar_file],
+            )
+            try:
                 list(scanner._evaluator._readers_function(self.id_field))
-        finally:
-            scanner.close()
+            finally:
+                scanner.close()
 
-        self.assertEqual(1, len(captured))
+        self.assertEqual(1, len(captured_io_metas))
         self.assertEqual("oss://bucket/id-btree-0.index",
-                         captured[0].external_path)
+                         captured_io_metas[0][0].external_path)
 
 
 class VectorSearchMultiShardScalarTest(unittest.TestCase):
@@ -306,7 +930,6 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
     """
 
     def test_hit_only_in_later_shard_returns_global_row_id(self):
-        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.globalindex.global_index_scanner import (
             GlobalIndexScanner,
@@ -327,34 +950,44 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         # Stub BTreeIndexReader: shard_a returns empty, shard_b returns {2}
         # (local row id). After Offset wrapping the scanner should emit {7}.
-        class _StubBTreeReader(GlobalIndexReader):
+        class _StubBTreeReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
                          io_meta):
                 self_inner._file = io_meta.file_name
 
-            def visit_equal(self_inner, field_ref, literal):
+            def visit_equal(self_inner, literal):
                 bm = RoaringBitmap64()
                 if self_inner._file == "id-1.index":
                     bm.add(2)  # local offset inside [5,9]
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return GlobalIndexResult.create(bm)
 
             def close(self_inner):
                 pass
 
-        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
-                        _StubBTreeReader):
-            scanner = GlobalIndexScanner(
-                fields=table.fields,
-                file_io=table.file_io,
-                index_path="/unused",
-                index_files=[shard_a, shard_b],
-            )
-            try:
-                result = scanner.scan(
-                    Predicate(method="equal", index=0, field="id",
-                              literals=[7]))
-            finally:
-                scanner.close()
+        import struct
+        wide_meta = BTreeIndexMeta(
+            first_key=struct.pack('<i', 0),
+            last_key=struct.pack('<i', 9),
+            has_nulls=False)
+
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
+                _StubBTreeReader):
+            with mock.patch(
+                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    return_value=wide_meta):
+                scanner = GlobalIndexScanner(
+                    fields=table.fields,
+                    file_io=table.file_io,
+                    index_path="/unused",
+                    index_files=[shard_a, shard_b],
+                )
+                try:
+                    result = scanner.scan(
+                        Predicate(method="equal", index=0, field="id",
+                                  literals=[7]))
+                finally:
+                    scanner.close()
 
         self.assertIsNotNone(result)
         hits = sorted(list(result.results()))
@@ -384,6 +1017,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         captured_ctor_args = []
         visit_calls = []
 
+        from pypaimon.globalindex.global_index_reader import _completed_future as _cf
+
         class _StubTantivyReader:
             def __init__(self_inner, file_io, index_path, io_metas):
                 captured_ctor_args.append(
@@ -393,7 +1028,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 visit_calls.append(("equal", literal))
                 bm = RoaringBitmap64()
                 bm.add(4)
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return _cf(GlobalIndexResult.create(bm))
 
             def close(self_inner):
                 pass
@@ -429,7 +1064,6 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         """Evaluator must dispatch ``like`` to reader.visit_like — otherwise
         the pre-filter is silently skipped and vector search returns rows
         that violate the predicate."""
-        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
         from pypaimon.globalindex.global_index_scanner import (
             GlobalIndexScanner,
@@ -444,34 +1078,38 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         observed_calls = []
 
-        class _StubBTreeReader(GlobalIndexReader):
+        class _StubBTreeReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
                          io_meta):
                 pass
 
-            def visit_like(self_inner, field_ref, literal):
+            def visit_like(self_inner, literal):
                 observed_calls.append(("like", literal))
                 bm = RoaringBitmap64()
                 bm.add(3)  # local, will be offset-rebased to 3 (range starts at 0)
-                return GlobalIndexResult.create(lambda b=bm: b)
+                return GlobalIndexResult.create(bm)
 
             def close(self_inner):
                 pass
 
-        with mock.patch("pypaimon.globalindex.btree.BTreeIndexReader",
-                        _StubBTreeReader):
-            scanner = GlobalIndexScanner(
-                fields=table.fields,
-                file_io=table.file_io,
-                index_path="/unused",
-                index_files=[shard],
-            )
-            try:
-                result = scanner.scan(
-                    Predicate(method="like", index=0, field="name",
-                              literals=["abc%"]))
-            finally:
-                scanner.close()
+        with mock.patch(
+                "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
+                _StubBTreeReader):
+            with mock.patch(
+                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    return_value=BTreeIndexMeta(first_key=None, last_key=None, has_nulls=False)):
+                scanner = GlobalIndexScanner(
+                    fields=table.fields,
+                    file_io=table.file_io,
+                    index_path="/unused",
+                    index_files=[shard],
+                )
+                try:
+                    result = scanner.scan(
+                        Predicate(method="like", index=0, field="name",
+                                  literals=["abc%"]))
+                finally:
+                    scanner.close()
 
         self.assertEqual([("like", "abc%")], observed_calls)
         self.assertIsNotNone(result)
@@ -567,7 +1205,8 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
             class _FakeReader:
                 def visit_vector_search(self_inner, vs):
-                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: float(row_id)}))
 
                 def close(self_inner):
                     pass
@@ -605,6 +1244,48 @@ class VectorSearchManySplitsTest(unittest.TestCase):
 
 class FullTextSearchManySplitsTest(unittest.TestCase):
 
+    def test_full_text_read_threads_external_path_to_reader(self):
+        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(None, field_id=1, index_type="tantivy-fulltext",
+                       file_name="ft.index",
+                       row_range_start=0, row_range_end=9,
+                       external_path="oss://bucket/ft.index")
+        table = _StubTable(fields=[text_field], entries=[entry])
+        captured_io_metas = []
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list):
+            captured_io_metas.append(list(index_io_meta_list))
+
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    return _completed_future(None)
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        split = FullTextSearchSplit(
+            row_range_start=0, row_range_end=9,
+            full_text_index_files=[entry.index_file])
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            reader = FullTextReadImpl(
+                table, limit=10, text_column=text_field,
+                query_text="test")
+            reader.read([split])
+
+        self.assertEqual(1, len(captured_io_metas))
+        self.assertEqual("oss://bucket/ft.index",
+                         captured_io_metas[0][0].external_path)
+
     def test_full_text_search_with_many_splits(self):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
@@ -632,7 +1313,8 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
 
             class _FakeReader:
                 def visit_full_text_search(self_inner, fts):
-                    return DictBasedScoredIndexResult({row_id: float(row_id)})
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: float(row_id)}))
 
                 def close(self_inner):
                     pass

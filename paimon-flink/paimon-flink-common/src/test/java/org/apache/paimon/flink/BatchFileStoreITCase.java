@@ -1205,6 +1205,32 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIncrementScanModeWithInsertOverwrite() throws Exception {
+
+        sql("CREATE TABLE test_scan_mode (id INT PRIMARY KEY NOT ENFORCED, v STRING)");
+
+        // snapshot 1
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'A'), (1, 'B'), (1, 'C')");
+        // snapshot 2
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'C'), (1, 'D')");
+
+        List<Row> result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='1,2','incremental-between-scan-mode'='diff') */");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 1, "D"));
+
+        // snapshot 3
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'D')");
+
+        result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='2,2','incremental-between-scan-mode'='diff') */");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     public void testAuditLogTableWithComputedColumn() throws Exception {
         sql("CREATE TABLE test_table (a int, b int, c AS a + b);");
         String ddl = sql("SHOW CREATE TABLE `test_table$audit_log`").get(0).getFieldAs(0);
@@ -1387,6 +1413,38 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         batchSql(
                                 "SELECT * FROM T /*+ OPTIONS('scan.dedicated-split-generation'='true') */ limit 2"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+    }
+
+    @Test
+    public void testDedicatedPathLimitTenOnManyRows() {
+        sql("CREATE TABLE limit_many_rows (a INT, b INT, c INT)");
+        StringBuilder insertValues = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            if (i > 1) {
+                insertValues.append(", ");
+            }
+            insertValues.append(String.format("(%d, %d, %d)", i, i * 10, i * 100));
+        }
+        batchSql("INSERT INTO limit_many_rows VALUES " + insertValues);
+
+        List<Row> result =
+                batchSql(
+                        "SELECT * FROM limit_many_rows "
+                                + "/*+ OPTIONS('scan.dedicated-split-generation'='true') */ "
+                                + "LIMIT 10");
+        assertThat(result).hasSize(10);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 10, 100),
+                        Row.of(2, 20, 200),
+                        Row.of(3, 30, 300),
+                        Row.of(4, 40, 400),
+                        Row.of(5, 50, 500),
+                        Row.of(6, 60, 600),
+                        Row.of(7, 70, 700),
+                        Row.of(8, 80, 800),
+                        Row.of(9, 90, 900),
+                        Row.of(10, 100, 1000));
     }
 
     @Test

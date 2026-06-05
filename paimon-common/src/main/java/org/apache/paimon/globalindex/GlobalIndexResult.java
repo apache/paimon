@@ -18,12 +18,10 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.List;
-import java.util.function.Supplier;
 
 /** Global index result represents row ids as a compressed bitmap. */
 public interface GlobalIndexResult {
@@ -41,56 +39,39 @@ public interface GlobalIndexResult {
         for (long rowId : roaringNavigableMap64) {
             roaringNavigableMap64Offset.add(rowId + startOffset);
         }
-        return create(() -> roaringNavigableMap64Offset);
+        return create(roaringNavigableMap64Offset);
     }
 
-    /**
-     * Returns the intersection of this result and the other result.
-     *
-     * <p>Uses native bitmap AND operation for optimal performance.
-     */
     default GlobalIndexResult and(GlobalIndexResult other) {
-        return create(() -> RoaringNavigableMap64.and(this.results(), other.results()));
+        return create(RoaringNavigableMap64.and(this.results(), other.results()));
     }
 
-    /**
-     * Returns the union of this result and the other result.
-     *
-     * <p>Uses native bitmap OR operation for optimal performance.
-     */
     default GlobalIndexResult or(GlobalIndexResult other) {
-        return create(() -> RoaringNavigableMap64.or(this.results(), other.results()));
+        return create(RoaringNavigableMap64.or(this.results(), other.results()));
     }
 
     /** Returns an empty {@link GlobalIndexResult}. */
     static GlobalIndexResult createEmpty() {
-        return create(RoaringNavigableMap64::new);
+        return create(new RoaringNavigableMap64());
     }
 
-    /** Returns a new {@link GlobalIndexResult} from supplier. */
-    static GlobalIndexResult create(Supplier<RoaringNavigableMap64> supplier) {
-        LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
-        return lazyField::get;
+    /** Returns a new {@link GlobalIndexResult} from bitmap. */
+    static GlobalIndexResult create(RoaringNavigableMap64 bitmap) {
+        return () -> bitmap;
     }
 
     /** Returns a new {@link GlobalIndexResult} from {@link Range}. */
     static GlobalIndexResult fromRange(Range range) {
-        return create(
-                () -> {
-                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
-                    result64.addRange(range);
-                    return result64;
-                });
+        RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+        result64.addRange(range);
+        return create(result64);
     }
 
     static GlobalIndexResult fromRanges(List<Range> ranges) {
-        return create(
-                () -> {
-                    RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
-                    for (Range range : ranges) {
-                        result64.addRange(range);
-                    }
-                    return result64;
-                });
+        RoaringNavigableMap64 result64 = new RoaringNavigableMap64();
+        for (Range range : ranges) {
+            result64.addRange(range);
+        }
+        return create(result64);
     }
 }

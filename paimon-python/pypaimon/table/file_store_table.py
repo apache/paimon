@@ -81,6 +81,10 @@ class FileStoreTable(Table):
 
         return cls(file_io, identifier, table_path, table_schema)
 
+    def schema(self) -> TableSchema:
+        """Get the table schema."""
+        return self.table_schema
+
     def current_branch(self) -> str:
         """Get the current branch name from the identifier."""
         return self.identifier.get_branch_name_or_default()
@@ -113,14 +117,15 @@ class FileStoreTable(Table):
         """Get the branch manager for this table."""
         # If catalog environment has a catalog loader, use CatalogBranchManager
         catalog_loader = self.catalog_environment.catalog_loader
-        if catalog_loader is not None:
+        if catalog_loader is not None and self.catalog_environment.supports_version_management:
             from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
             return CatalogBranchManager(
                 catalog_loader,
                 self.identifier
             )
         # Otherwise, use FileSystemBranchManager
-        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        from pypaimon.branch.filesystem_branch_manager import \
+            FileSystemBranchManager
         current_branch = self.current_branch() or "main"
         return FileSystemBranchManager(
             self.file_io,
@@ -298,6 +303,23 @@ class FileStoreTable(Table):
         return RollbackHelper(
             self.snapshot_manager(), self.tag_manager(), self.file_io)
 
+    def rollback_to_timestamp(self, timestamp_millis: int) -> None:
+        """Rollback table to the latest snapshot with commit time <= the given timestamp.
+
+        Args:
+            timestamp_millis: The timestamp in milliseconds to rollback to.
+
+        Raises:
+            ValueError: If no snapshot exists at or before the given timestamp.
+        """
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.earlier_or_equal_time_mills(timestamp_millis)
+        if snapshot is None:
+            raise ValueError(
+                f"No snapshot found with timestamp earlier than or equal to {timestamp_millis}ms."
+            )
+        self.rollback_to(snapshot.id)
+
     def rename_tag(self, old_name: str, new_name: str) -> None:
         """
         Rename a tag.
@@ -312,6 +334,28 @@ class FileStoreTable(Table):
         """
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
+
+    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+        """
+        Replace an existing tag with a new snapshot.
+
+        Args:
+            tag_name: Name of the tag to replace
+            snapshot_id: The snapshot id to associate with the tag.
+                        If None, uses the latest snapshot.
+
+        Raises:
+            ValueError: If tag doesn't exist, or snapshot doesn't exist
+        """
+        if snapshot_id is None:
+            snapshot = self.snapshot_manager().get_latest_snapshot()
+            if snapshot is None:
+                raise ValueError("Cannot replace tag because latest snapshot doesn't exist.")
+        else:
+            snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
+        self.tag_manager().replace_tag(snapshot, tag_name)
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -337,6 +381,8 @@ class FileStoreTable(Table):
             file_compression=file_compression,
             data_file_path_directory=None,
             external_paths=external_paths,
+            external_path_strategy=self.options.data_file_external_paths_strategy(),
+            external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=False,
         )
 
@@ -374,11 +420,13 @@ class FileStoreTable(Table):
         return StreamWriteBuilder(self)
 
     def new_full_text_search_builder(self) -> 'FullTextSearchBuilder':
-        from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilderImpl
+        from pypaimon.table.source.full_text_search_builder import \
+            FullTextSearchBuilderImpl
         return FullTextSearchBuilderImpl(self)
 
     def new_vector_search_builder(self) -> 'VectorSearchBuilder':
-        from pypaimon.table.source.vector_search_builder import VectorSearchBuilderImpl
+        from pypaimon.table.source.vector_search_builder import \
+            VectorSearchBuilderImpl
         return VectorSearchBuilderImpl(self)
 
     def create_row_key_extractor(self) -> RowKeyExtractor:
@@ -453,6 +501,7 @@ class FileStoreTable(Table):
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
+
         from pypaimon.common.options.core_options import ExternalPathStrategy
 
         external_paths_str = self.options.data_file_external_paths()

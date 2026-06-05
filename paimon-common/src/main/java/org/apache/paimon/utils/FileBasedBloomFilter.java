@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.io.cache.CacheCallback;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheKey.PositionCacheKey;
@@ -95,9 +96,15 @@ public class FileBasedBloomFilter implements Closeable {
 
     private byte[] readBytes(CacheKey k) throws IOException {
         PositionCacheKey key = (PositionCacheKey) k;
-        input.seek(key.position());
         byte[] bytes = new byte[key.length()];
-        IOUtils.readFully(input, bytes);
+        if (input instanceof VectoredReadable) {
+            ((VectoredReadable) input).preadFully(key.position(), bytes, 0, key.length());
+        } else {
+            synchronized (input) {
+                input.seek(key.position());
+                IOUtils.readFully(input, bytes);
+            }
+        }
         return bytes;
     }
 
