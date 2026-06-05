@@ -172,7 +172,8 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, loadFilter, readFilter, readTFilter, convertor);
+            return cache.read(
+                    path, fileSize, new ObjectsCache.Filters<>(readFilter, readTFilter), convertor);
         }
 
         return readFromIterator(
