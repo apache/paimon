@@ -65,22 +65,11 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
     }
 
     public List<V> read(K key, @Nullable Long fileSize, Filters<V> filters) throws IOException {
-        return read(
-                key,
-                fileSize,
-                Filter.alwaysTrue(),
-                filters.readFilter(),
-                filters.readVFilter(),
-                Function.identity());
+        return read(key, fileSize, filters, Function.identity());
     }
 
     public <R> List<R> read(
-            K key,
-            @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
-            Filter<InternalRow> readFilter,
-            Filter<V> readVFilter,
-            Function<V, R> convertor)
+            K key, @Nullable Long fileSize, Filters<V> filters, Function<V, R> convertor)
             throws IOException {
         @SuppressWarnings("unchecked")
         S segments = (S) cache.getIfPresents(key);
@@ -88,8 +77,7 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return convert(
-                    readFromSegments(segments, new Filters<>(readFilter, readVFilter)), convertor);
+            return convert(readFromSegments(segments, filters), convertor);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
@@ -98,17 +86,15 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
                 fileSize = fileSizeFunction.apply(key);
             }
             if (fileSize <= cache.maxElementSize()) {
-                segments = createSegments(key, fileSize, loadFilter);
+                segments = createSegments(key, fileSize);
                 cache.put(key, segments);
-                return convert(
-                        readFromSegments(segments, new Filters<>(readFilter, readVFilter)),
-                        convertor);
+                return convert(readFromSegments(segments, filters), convertor);
             } else {
                 return readFromIterator(
                         reader.apply(key, fileSize),
                         projectedSerializer,
-                        readFilter,
-                        readVFilter,
+                        filters.readFilter(),
+                        filters.readVFilter(),
                         convertor);
             }
         }
@@ -124,12 +110,7 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
 
     protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
 
-    protected abstract S createSegments(
-            K k, @Nullable Long fileSize, Filter<InternalRow> loadFilter);
-
-    protected S createSegments(K k, @Nullable Long fileSize) {
-        return createSegments(k, fileSize, Filter.alwaysTrue());
-    }
+    protected abstract S createSegments(K k, @Nullable Long fileSize);
 
     /** Filter context for reading. */
     public static class Filters<V> {

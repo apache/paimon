@@ -131,13 +131,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 ManifestEntryFilters filters =
                         new ManifestEntryFilters(
                                 partitionFilter, bucketFilter, readFilter, readTFilter);
-                return cache.read(
-                        path,
-                        fileSize,
-                        Filter.alwaysTrue(),
-                        filters.readFilter(),
-                        filters.readVFilter(),
-                        convertor);
+                return cache.read(path, fileSize, filters, convertor);
             }
 
             return readFromIterator(
