@@ -543,7 +543,6 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         self.assertEqual(self._snapshot_id(target), before)
 
-    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_matched_on_partitioned_table(self):
         pt_schema = pa.schema([
             ('pt', pa.string()),
