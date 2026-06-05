@@ -20,8 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.{SparkTable, SparkTypeUtils}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.spark.commands.SchemaHelper
-import org.apache.paimon.spark.schema.SparkSystemColumns
+import org.apache.paimon.spark.commands.SchemaEvolutionHelper
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
@@ -29,17 +28,17 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, ExprId, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, MergeAction, MergeIntoTable}
-import org.apache.spark.sql.connector.catalog.TableCatalog
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{StructField, StructType}
 
 /**
- * Shared MERGE INTO `merge-schema=true` evolution. Triggers on `UPDATE *` / `INSERT *` (via
- * [[PaimonMergeActionTags]]) or on any explicit assignment whose key resolved to a source-bound
- * attribute (via [[PaimonMergeIntoResolver.resolveAssignments]] fallback — that shape is the
- * marker, no extra tag). Evolution is scoped to source columns referenced by matched / not-matched
- * actions; NOT MATCHED BY SOURCE can't reference source columns.
+ * MERGE INTO schema evolution (merge-schema=true). Computes the evolved schema in memory and
+ * rewrites the merge plan so that action alignment targets the new columns; the actual schema
+ * commit is deferred to execution (the merge command's `run`).
+ *
+ * Triggered by `UPDATE *` / `INSERT *` or explicit source-bound assignment keys. Scoped to source
+ * columns referenced in matched/not-matched actions.
  */
 trait MergeSchemaEvolutionHelper extends ExpressionHelper {
 
@@ -77,25 +76,24 @@ trait MergeSchemaEvolutionHelper extends ExpressionHelper {
     }
 
     val fileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+    // Pass raw source types: the core merge decides whether to keep or widen the target type, and
+    // the action alignment layer casts incoming values to the result.
     val sourceSchema = StructType(
       merge.sourceTable.output
         .filter(a => scopedNames.exists(n => resolver(n, a.name)))
         .map(a => StructField(a.name, a.dataType, a.nullable)))
-    val filteredSourceSchema = SparkSystemColumns.filterSparkSystemColumns(sourceSchema)
-    val allowExplicitCast = OptionUtils.writeMergeSchemaExplicitCastEnabled()
-    val updatedFileStoreTable = SchemaHelper
-      .mergeAndCommitSchema(fileStoreTable, filteredSourceSchema, allowExplicitCast)
+    // Compute the evolved schema in memory only; the actual schema commit is deferred to execution
+    // (the merge command's run / the V2 write's toBatch) so analysis stays side-effect-free. The
+    // evolved relation presents the new columns to the plan; existing rows read them as NULL.
+    val updatedFileStoreTable = SchemaEvolutionHelper
+      .evolvedTableInMemory(fileStoreTable, sourceSchema, spark)
       .getOrElse(return None)
 
-    // Invalidate Spark catalog cache so subsequent queries see the new schema.
-    for (catalog <- relation.catalog; ident <- relation.identifier) {
-      catalog.asInstanceOf[TableCatalog].invalidateTable(ident)
-    }
-
     val updatedV2Table = v2Table.copy(table = updatedFileStoreTable)
-    val mergedSparkSchema =
-      SparkTypeUtils.fromPaimonRowType(updatedFileStoreTable.schema().logicalRowType())
-    val newOutput = buildEvolvedOutput(mergedSparkSchema, relation.output, resolver)
+    val newOutput = buildEvolvedOutput(
+      SparkTypeUtils.fromPaimonRowType(updatedFileStoreTable.schema().logicalRowType()),
+      relation.output,
+      resolver)
     val updatedRelation =
       SparkShimLoader.shim.copyDataSourceV2Relation(relation, updatedV2Table, newOutput)
     val updatedTargetTable = merge.targetTable.transform {

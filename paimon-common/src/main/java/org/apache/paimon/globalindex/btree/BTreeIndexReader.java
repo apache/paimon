@@ -21,14 +21,12 @@ package org.apache.paimon.globalindex.btree;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BlockIterator;
@@ -40,6 +38,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
@@ -49,8 +48,11 @@ import java.util.Optional;
 import java.util.function.LongConsumer;
 import java.util.zip.CRC32;
 
-/** The {@link GlobalIndexReader} implementation for btree index. */
-public class BTreeIndexReader implements GlobalIndexReader {
+/**
+ * Synchronous index reader for a single BTree index file. Parallelism across multiple files is
+ * handled by {@link LazyFilteredBTreeReader}.
+ */
+public class BTreeIndexReader implements Closeable {
 
     private final SeekableInputStream input;
     private final SstFileReader reader;
@@ -236,202 +238,98 @@ public class BTreeIndexReader implements GlobalIndexReader {
         }
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        // nulls are stored separately in null bitmap.
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return allNonNullRows();
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitIsNotNull() {
+        return createResult(this::allNonNullRows);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        // nulls are stored separately in null bitmap.
-        return Optional.of(GlobalIndexResult.create(nullBitmap::get));
+    public Optional<GlobalIndexResult> visitIsNull() {
+        return createResult(nullBitmap::get);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        // todo: `startsWith` can also be covered by btree index.
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return allNonNullRows();
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitStartsWith(Object literal) {
+        return createResult(this::allNonNullRows);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return allNonNullRows();
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitEndsWith(Object literal) {
+        return createResult(this::allNonNullRows);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return allNonNullRows();
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitContains(Object literal) {
+        return createResult(this::allNonNullRows);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return allNonNullRows();
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitLike(Object literal) {
+        return createResult(this::allNonNullRows);
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(minKey, literal, true, false);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitLessThan(Object literal) {
+        return createResult(() -> rangeQuery(minKey, literal, true, false));
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(literal, maxKey, true, true);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitGreaterOrEqual(Object literal) {
+        return createResult(() -> rangeQuery(literal, maxKey, true, true));
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                RoaringNavigableMap64 result = allNonNullRows();
-                                result.andNot(rangeQuery(literal, literal, true, true));
-                                return result;
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitNotEqual(Object literal) {
+        return createResult(
+                () -> {
+                    RoaringNavigableMap64 result = allNonNullRows();
+                    result.andNot(rangeQuery(literal, literal, true, true));
+                    return result;
+                });
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(minKey, literal, true, true);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitLessOrEqual(Object literal) {
+        return createResult(() -> rangeQuery(minKey, literal, true, true));
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(literal, literal, true, true);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitEqual(Object literal) {
+        return createResult(() -> rangeQuery(literal, literal, true, true));
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(literal, maxKey, false, true);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitGreaterThan(Object literal) {
+        return createResult(() -> rangeQuery(literal, maxKey, false, true));
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                RoaringNavigableMap64 result = new RoaringNavigableMap64();
-                                for (Object literal : literals) {
-                                    result.or(rangeQuery(literal, literal, true, true));
-                                }
-                                return result;
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitIn(List<Object> literals) {
+        return createResult(
+                () -> {
+                    RoaringNavigableMap64 result = new RoaringNavigableMap64();
+                    for (Object literal : literals) {
+                        result.or(rangeQuery(literal, literal, true, true));
+                    }
+                    return result;
+                });
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                RoaringNavigableMap64 result = allNonNullRows();
-                                result.andNot(this.visitIn(fieldRef, literals).get().results());
-                                return result;
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitNotIn(List<Object> literals) {
+        return createResult(
+                () -> {
+                    RoaringNavigableMap64 result = allNonNullRows();
+                    RoaringNavigableMap64 inResult = new RoaringNavigableMap64();
+                    for (Object literal : literals) {
+                        inResult.or(rangeQuery(literal, literal, true, true));
+                    }
+                    result.andNot(inResult);
+                    return result;
+                });
     }
 
-    @Override
-    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
-        return Optional.of(
-                GlobalIndexResult.create(
-                        () -> {
-                            try {
-                                return rangeQuery(from, to, true, true);
-                            } catch (IOException ioe) {
-                                throw new RuntimeException("fail to read btree index file.", ioe);
-                            }
-                        }));
+    public Optional<GlobalIndexResult> visitBetween(Object from, Object to) {
+        return createResult(() -> rangeQuery(from, to, true, true));
+    }
+
+    private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {
+        try {
+            return Optional.of(GlobalIndexResult.create(supplier.get()));
+        } catch (IOException e) {
+            throw new RuntimeException("fail to read btree index file.", e);
+        }
+    }
+
+    @FunctionalInterface
+    private interface IOSupplier<T> {
+        T get() throws IOException;
     }
 
     private RoaringNavigableMap64 allNonNullRows() throws IOException {

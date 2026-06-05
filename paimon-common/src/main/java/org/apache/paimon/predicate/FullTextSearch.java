@@ -18,11 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-
 import java.io.Serializable;
-import java.util.Optional;
 
 /** FullTextSearch to perform full-text search on a text column. */
 public class FullTextSearch implements Serializable {
@@ -32,8 +28,13 @@ public class FullTextSearch implements Serializable {
     private final String queryText;
     private final String fieldName;
     private final int limit;
+    private final String queryOperator;
 
     public FullTextSearch(String queryText, int limit, String fieldName) {
+        this(queryText, limit, fieldName, "or");
+    }
+
+    public FullTextSearch(String queryText, int limit, String fieldName, String queryOperator) {
         if (queryText == null || queryText.isEmpty()) {
             throw new IllegalArgumentException("Query text cannot be null or empty");
         }
@@ -46,6 +47,13 @@ public class FullTextSearch implements Serializable {
         this.queryText = queryText;
         this.limit = limit;
         this.fieldName = fieldName;
+        String normalizedOperator =
+                queryOperator == null ? "or" : queryOperator.trim().toLowerCase();
+        if (!"or".equals(normalizedOperator) && !"and".equals(normalizedOperator)) {
+            throw new IllegalArgumentException(
+                    "Query operator must be 'or' or 'and', got: " + queryOperator);
+        }
+        this.queryOperator = normalizedOperator;
     }
 
     public String queryText() {
@@ -60,13 +68,14 @@ public class FullTextSearch implements Serializable {
         return fieldName;
     }
 
-    public Optional<ScoredGlobalIndexResult> visit(GlobalIndexReader visitor) {
-        return visitor.visitFullTextSearch(this);
+    public String queryOperator() {
+        return queryOperator;
     }
 
     @Override
     public String toString() {
         return String.format(
-                "FullTextSearch{field=%s, query='%s', limit=%d}", fieldName, queryText, limit);
+                "FullTextSearch{field=%s, query='%s', limit=%d, operator=%s}",
+                fieldName, queryText, limit, queryOperator);
     }
 }

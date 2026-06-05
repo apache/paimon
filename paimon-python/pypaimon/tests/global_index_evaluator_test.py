@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.schema.data_types import DataField, AtomicType
 from pypaimon.utils.range import Range
@@ -33,7 +35,21 @@ class StubGlobalIndexReader(GlobalIndexReader):
         self._result = result
 
     def visit_equal(self, field_ref, literal):
-        return self._result
+        return _completed_future(self._result)
+
+    def close(self):
+        pass
+
+
+class AsyncStubReader(GlobalIndexReader):
+    """A test reader that dispatches to an executor (simulating real async readers)."""
+
+    def __init__(self, result, executor):
+        self._result = result
+        self._executor = executor
+
+    def visit_equal(self, field_ref, literal):
+        return self._executor.submit(lambda: self._result)
 
     def close(self):
         pass
@@ -79,8 +95,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         predicate = Predicate(
@@ -112,8 +127,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         predicate = Predicate(
@@ -144,8 +158,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
                 return [StubGlobalIndexReader(result_a)]
             return []
 
-        executor = ThreadPoolExecutor(max_workers=2)
-        evaluator = GlobalIndexEvaluator(fields, readers_fn, executor)
+        evaluator = GlobalIndexEvaluator(fields, readers_fn)
 
         predicate = Predicate(
             method='or', index=None, field=None,
@@ -159,7 +172,6 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
 
         self.assertIsNone(result)
         evaluator.close()
-        executor.shutdown(wait=False)
 
     def test_and_with_disjoint_results(self):
         fields = _make_fields()
@@ -171,8 +183,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         predicate = Predicate(
@@ -229,8 +240,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         # Nested binary tree: and(and(a, b), c)
@@ -270,8 +280,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         # Nested binary tree: or(or(a, b), c)
@@ -311,8 +320,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         # AND(OR(a, b), OR(a, c)) — mixed nesting
@@ -360,8 +368,7 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
-            lambda field: [StubGlobalIndexReader(field_results[field.id])],
-            executor,
+            lambda field: [AsyncStubReader(field_results[field.id], executor)],
         )
 
         # AND(OR(AND(a, b), c), OR(AND(a, c), b)) — deep mixed nesting
@@ -410,28 +417,29 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator.close()
         executor.shutdown(wait=False)
 
-    def test_same_field_predicates_not_accessed_concurrently(self):
-        import threading
-        import time
-
+    def test_same_field_predicates_accessed_concurrently(self):
         fields = _make_fields()
 
         concurrency = [0]
         max_concurrency = [0]
         lock = threading.Lock()
 
+        executor = ThreadPoolExecutor(max_workers=4)
+
         class ConcurrencyDetectingReader(GlobalIndexReader):
             def __init__(self, result):
                 self._result = result
 
             def visit_equal(self, field_ref, literal):
-                with lock:
-                    concurrency[0] += 1
-                    max_concurrency[0] = max(max_concurrency[0], concurrency[0])
-                time.sleep(0.05)
-                with lock:
-                    concurrency[0] -= 1
-                return self._result
+                def _work():
+                    with lock:
+                        concurrency[0] += 1
+                        max_concurrency[0] = max(max_concurrency[0], concurrency[0])
+                    time.sleep(0.05)
+                    with lock:
+                        concurrency[0] -= 1
+                    return self._result
+                return executor.submit(_work)
 
             def close(self):
                 pass
@@ -439,14 +447,12 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         result_a = GlobalIndexResult.from_range(Range(1, 5))
         reader = ConcurrencyDetectingReader(result_a)
 
-        executor = ThreadPoolExecutor(max_workers=4)
         evaluator = GlobalIndexEvaluator(
             fields,
             lambda field: [reader],
-            executor,
         )
 
-        # AND(a=1, a=2, a=3) — all same field, must not run concurrently
+        # AND(a=1, a=2, a=3) — evaluator dispatches concurrently, readers own their thread-safety
         predicate = Predicate(
             method='and', index=None, field=None,
             literals=[
@@ -458,32 +464,33 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
 
         evaluator.evaluate(predicate)
 
-        self.assertEqual(max_concurrency[0], 1)
+        self.assertGreater(max_concurrency[0], 1)
         evaluator.close()
         executor.shutdown(wait=False)
 
-    def test_mixed_nested_same_field_not_accessed_concurrently(self):
-        import threading
-        import time
-
+    def test_mixed_nested_same_field_accessed_concurrently(self):
         fields = _make_fields()
 
         concurrency_a = [0]
         max_concurrency_a = [0]
         lock = threading.Lock()
 
+        executor = ThreadPoolExecutor(max_workers=4)
+
         class ConcurrencyDetectingReader(GlobalIndexReader):
             def __init__(self, result):
                 self._result = result
 
             def visit_equal(self, field_ref, literal):
-                with lock:
-                    concurrency_a[0] += 1
-                    max_concurrency_a[0] = max(max_concurrency_a[0], concurrency_a[0])
-                time.sleep(0.05)
-                with lock:
-                    concurrency_a[0] -= 1
-                return self._result
+                def _work():
+                    with lock:
+                        concurrency_a[0] += 1
+                        max_concurrency_a[0] = max(max_concurrency_a[0], concurrency_a[0])
+                    time.sleep(0.05)
+                    with lock:
+                        concurrency_a[0] -= 1
+                    return self._result
+                return executor.submit(_work)
 
             def close(self):
                 pass
@@ -497,10 +504,10 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
                 return [detecting_reader]
             return [normal_reader]
 
-        executor = ThreadPoolExecutor(max_workers=4)
-        evaluator = GlobalIndexEvaluator(fields, readers_fn, executor)
+        evaluator = GlobalIndexEvaluator(fields, readers_fn)
 
         # AND(OR(a=1, b=2), OR(a=3, c=4)) — field a in both OR subtrees
+        # evaluator dispatches concurrently, readers own their thread-safety
         predicate = Predicate(
             method='and', index=None, field=None,
             literals=[
@@ -523,48 +530,49 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
 
         evaluator.evaluate(predicate)
 
-        self.assertEqual(max_concurrency_a[0], 1)
+        self.assertGreater(max_concurrency_a[0], 1)
         evaluator.close()
         executor.shutdown(wait=False)
 
-    def test_lazy_result_not_materialized_concurrently(self):
-        import threading
-        import time
-
+    def test_internally_locked_reader_serializes_access(self):
         fields = _make_fields()
 
         concurrency = [0]
         max_concurrency = [0]
-        lock = threading.Lock()
+        count_lock = threading.Lock()
 
-        class LazyIOReader(GlobalIndexReader):
+        executor = ThreadPoolExecutor(max_workers=4)
+
+        class InternallyLockedReader(GlobalIndexReader):
+            def __init__(self):
+                self._lock = threading.Lock()
+
             def visit_equal(self, field_ref, literal):
-                def supplier():
-                    with lock:
-                        concurrency[0] += 1
-                        max_concurrency[0] = max(max_concurrency[0], concurrency[0])
-                    time.sleep(0.05)
-                    with lock:
-                        concurrency[0] -= 1
-                    return GlobalIndexResult.from_range(Range(1, 3)).results()
-
-                return GlobalIndexResult.create(supplier)
+                def _work():
+                    with self._lock:
+                        with count_lock:
+                            concurrency[0] += 1
+                            max_concurrency[0] = max(max_concurrency[0], concurrency[0])
+                        time.sleep(0.05)
+                        with count_lock:
+                            concurrency[0] -= 1
+                        return GlobalIndexResult.from_range(Range(1, 3))
+                return executor.submit(_work)
 
             def close(self):
                 pass
 
-        lazy_reader = LazyIOReader()
+        locked_reader = InternallyLockedReader()
 
         def readers_fn(field):
             if field.id == 0:
-                return [lazy_reader]
+                return [locked_reader]
             return [StubGlobalIndexReader(GlobalIndexResult.from_range(Range(1, 5)))]
 
-        executor = ThreadPoolExecutor(max_workers=4)
-        evaluator = GlobalIndexEvaluator(fields, readers_fn, executor)
+        evaluator = GlobalIndexEvaluator(fields, readers_fn)
 
         # AND(OR(a=1, b=2), OR(a=3, c=4)) — field a in both OR subtrees
-        # lazy results for field a must not be materialized concurrently
+        # reader with internal lock serializes access
         predicate = Predicate(
             method='and', index=None, field=None,
             literals=[
@@ -600,10 +608,9 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         evaluator = GlobalIndexEvaluator(
             fields,
             lambda field: [
-                StubGlobalIndexReader(reader_result1),
-                StubGlobalIndexReader(reader_result2),
+                AsyncStubReader(reader_result1, executor),
+                AsyncStubReader(reader_result2, executor),
             ],
-            executor,
         )
 
         predicate = Predicate(method='equal', index=0, field='a', literals=[42])
@@ -622,11 +629,9 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         fields = _make_fields()
         result_a = GlobalIndexResult.from_range(Range(1, 3))
 
-        executor = ThreadPoolExecutor(max_workers=2)
         evaluator = GlobalIndexEvaluator(
             fields,
             lambda field: [StubGlobalIndexReader(result_a)],
-            executor,
         )
 
         # AND(non-field leaf, a=1) — non-field leaf has field=None
@@ -644,7 +649,6 @@ class GlobalIndexEvaluatorTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.results().cardinality(), 3)
         evaluator.close()
-        executor.shutdown(wait=False)
 
     def test_null_predicate(self):
         fields = _make_fields()

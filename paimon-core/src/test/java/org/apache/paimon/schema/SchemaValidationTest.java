@@ -40,6 +40,8 @@ import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
+import static org.apache.paimon.schema.TableSchema.CURRENT_VERSION;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -469,6 +471,55 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testSnapshotSequenceOrderingHappyPath() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsNonWriteOnly() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(CoreOptions.WRITE_ONLY.key());
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsSequenceField() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.SEQUENCE_FIELD.key(), "f2");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("sequence.field");
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsNonPkTable() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("primary-key");
+    }
+
+    @Test
     public void testFileFormatPerLevelRejectsIncompatibleSchema() {
         List<DataField> fields =
                 Arrays.asList(
@@ -510,6 +561,68 @@ class SchemaValidationTest {
     }
 
     @Test
+    void testManifestSortValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+
+        // Test 1: manifest-sort.enabled on non-partition table should fail
+        Map<String, String> options1 = new HashMap<>();
+        options1.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options1.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options1,
+                                                "")))
+                .hasMessageContaining(
+                        "Cannot enable 'manifest-sort.enabled' for non-partition table.");
+
+        // Test 2: manifest-sort-partition-field not in partition keys should fail
+        Map<String, String> options2 = new HashMap<>();
+        options2.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options2.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f1");
+        options2.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options2,
+                                                "")))
+                .hasMessageContaining("is not a partition field");
+
+        // Test 3: valid manifest-sort config should pass
+        Map<String, String> options3 = new HashMap<>();
+        options3.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options3.put(CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), "f0");
+        options3.put(BUCKET.key(), String.valueOf(-1));
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options3,
+                                                "")));
+    }
+
+    @Test
     public void testMergeOnReadCoexistsWithVisibilityCallback() {
         Map<String, String> options = new HashMap<>();
         options.put("deletion-vectors.enabled", "true");
@@ -543,6 +656,69 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testBucketAppendBackwardCompatibility() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.STRING()));
+
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(BUCKET.key(), "1");
+
+        TableSchema legacySchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyOptions,
+                        "",
+                        0L);
+
+        assertThatCode(() -> validateTableSchema(legacySchema)).doesNotThrowAnyException();
+
+        Map<String, String> currentOptions = new HashMap<>();
+        currentOptions.put(BUCKET.key(), "1");
+
+        TableSchema currentSchema =
+                new TableSchema(
+                        CURRENT_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        currentOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(currentSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
+
+        Map<String, String> legacyMultiBucketOptions = new HashMap<>();
+        legacyMultiBucketOptions.put(BUCKET.key(), "2");
+
+        TableSchema legacyMultiBucketSchema =
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        0L,
+                        fields,
+                        1,
+                        emptyList(),
+                        emptyList(),
+                        legacyMultiBucketOptions,
+                        "",
+                        0L);
+
+        assertThatThrownBy(() -> validateTableSchema(legacyMultiBucketSchema))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("bucket-key");
     }
 
     @Test

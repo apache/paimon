@@ -31,7 +31,7 @@ from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
 from pypaimon.read.reader.format_blob_reader import BlobRecordIterator, FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -165,6 +165,25 @@ class BlobTest(unittest.TestCase):
     def test_from_bytes_invalid_type_raises(self):
         with self.assertRaises(TypeError):
             Blob.from_bytes(12345)
+
+    def test_blob_view_struct_roundtrip(self):
+        """Test BlobViewStruct serialization compatibility."""
+        view_struct = BlobViewStruct("test_db.source_table", 7, 42)
+        serialized = view_struct.serialize()
+
+        self.assertTrue(BlobViewStruct.is_blob_view_struct(serialized))
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(serialized))
+
+        restored = BlobViewStruct.deserialize(serialized)
+        self.assertEqual(restored, view_struct)
+        self.assertEqual(restored.identifier.get_full_name(), "test_db.source_table")
+        self.assertEqual(restored.field_id, 7)
+        self.assertEqual(restored.row_id, 42)
+
+        blob = Blob.from_bytes(view_struct.serialize())
+        self.assertIsInstance(blob, BlobView)
+        self.assertFalse(blob.is_resolved())
+        self.assertEqual(blob.view_struct, view_struct)
 
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
@@ -683,6 +702,106 @@ class BlobEndToEndTest(unittest.TestCase):
             self.assertEqual(read_blob_data, expected_blob_data, f"{field_name} data should match")
 
             reader.close()
+
+    def test_blob_read_inline_bytes_reuses_reader_stream(self):
+        class CountingFileIO:
+
+            def __init__(self, delegate):
+                self._delegate = delegate
+                self.input_stream_count = 0
+
+            def __getattr__(self, name):
+                return getattr(self._delegate, name)
+
+            def new_input_stream(self, path):
+                self.input_stream_count += 1
+                return self._delegate.new_input_stream(path)
+
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_field_name = "blob_field"
+        blob_data = [b"hello", b"world"]
+        schema = pa.schema([pa.field(blob_field_name, pa.large_binary())])
+        table = pa.table([blob_data], schema=schema)
+        blob_file_path = Path(self.temp_dir) / (blob_field_name + "_inline.blob")
+        blob_file_url = _to_url(blob_file_path)
+        file_io.write_blob(blob_file_url, table)
+
+        counting_file_io = CountingFileIO(file_io)
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=counting_file_io,
+            file_path=str(blob_file_path),
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.num_rows, 2)
+        self.assertEqual(batch.column(0)[0].as_py(), b"hello")
+        self.assertEqual(batch.column(0)[1].as_py(), b"world")
+        self.assertEqual(counting_file_io.input_stream_count, 1)
+        reader.close()
+
+    def test_blob_reader_row_indices_pushdown(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_field_name = "blob_field"
+        blob_data = [f"value_{i}".encode("utf-8") for i in range(6)]
+        schema = pa.schema([pa.field(blob_field_name, pa.large_binary())])
+        table = pa.table([blob_data], schema=schema)
+        blob_file_path = Path(self.temp_dir) / "row_indices.blob"
+        blob_file_url = _to_url(blob_file_path)
+        file_io.write_blob(blob_file_url, table)
+
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(blob_file_path),
+            read_fields=[blob_field_name],
+            full_fields=read_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+            batch_size=2,
+            row_indices=[1, 3, 4],
+        )
+        try:
+            batch = reader.read_arrow_batch()
+            self.assertIsNotNone(batch)
+            self.assertEqual(batch.column(0).to_pylist(), [blob_data[1], blob_data[3]])
+
+            batch = reader.read_arrow_batch()
+            self.assertIsNotNone(batch)
+            self.assertEqual(batch.column(0).to_pylist(), [blob_data[4]])
+
+            self.assertIsNone(reader.read_arrow_batch())
+        finally:
+            reader.close()
+
+    def test_blob_reader_row_indices_out_of_range(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        blob_field_name = "blob_field"
+        blob_data = [b"value_0", b"value_1"]
+        schema = pa.schema([pa.field(blob_field_name, pa.large_binary())])
+        table = pa.table([blob_data], schema=schema)
+        blob_file_path = Path(self.temp_dir) / "row_indices_out_of_range.blob"
+        blob_file_url = _to_url(blob_file_path)
+        file_io.write_blob(blob_file_url, table)
+
+        read_fields = [DataField(0, blob_field_name, AtomicType("BLOB"))]
+        with self.assertRaises(IndexError) as context:
+            FormatBlobReader(
+                file_io=file_io,
+                file_path=str(blob_file_path),
+                read_fields=[blob_field_name],
+                full_fields=read_fields,
+                push_down_predicate=None,
+                blob_as_descriptor=False,
+                row_indices=[0, 2],
+            )
+
+        self.assertIn("Blob row index 2 is out of range", str(context.exception))
 
     def test_blob_complex_types_throw_exception(self):
         """Test that complex types containing BLOB elements throw exceptions during read/write operations."""

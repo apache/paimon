@@ -20,7 +20,7 @@ Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from ray.data.datasource.datasink import Datasink
 
@@ -72,12 +72,17 @@ class PaimonDatasink(_DatasinkBase):
         self,
         table: "Table",
         overwrite: bool = False,
+        static_partition: Optional[Dict[str, Any]] = None,
     ):
         self.table = table
         self.overwrite = overwrite
+        self.static_partition = static_partition
         self._table_name = table.identifier.get_full_name()
         self._writer_builder: Optional["WriteBuilder"] = None
         self._pending_commit_messages: List["CommitMessage"] = []
+
+    def _is_overwrite(self) -> bool:
+        return self.overwrite or self.static_partition is not None
 
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
@@ -90,13 +95,15 @@ class PaimonDatasink(_DatasinkBase):
             self._writer_builder = None
         if not hasattr(self, '_table_name'):
             self._table_name = self.table.identifier.get_full_name()
+        if not hasattr(self, 'static_partition'):
+            self.static_partition = None
 
     def on_write_start(self, schema=None) -> None:
         logger.info(f"Starting write job for table {self._table_name}")
 
         self._writer_builder = self.table.new_batch_write_builder()
-        if self.overwrite:
-            self._writer_builder = self._writer_builder.overwrite()
+        if self._is_overwrite():
+            self._writer_builder = self._writer_builder.overwrite(self.static_partition)
 
     def write(
         self,
@@ -108,8 +115,8 @@ class PaimonDatasink(_DatasinkBase):
 
         try:
             writer_builder = self.table.new_batch_write_builder()
-            if self.overwrite:
-                writer_builder = writer_builder.overwrite()
+            if self._is_overwrite():
+                writer_builder = writer_builder.overwrite(self.static_partition)
             
             table_write = writer_builder.new_write()
 
@@ -135,22 +142,26 @@ class PaimonDatasink(_DatasinkBase):
 
         return commit_messages_list
 
+    @staticmethod
+    def _extract_write_returns(write_result: Any):
+        """Normalize WriteResult.write_returns (Ray 2.44+) vs list of returns
+        (older Ray) into a list of per-task commit-message lists."""
+        if hasattr(write_result, "write_returns"):
+            return write_result.write_returns
+        if isinstance(write_result, list):
+            return write_result
+        raise TypeError(
+            f"Unexpected write_result type {type(write_result).__name__}: "
+            "expected object with .write_returns or list of commit message "
+            "lists. Refusing to proceed to avoid silent data loss."
+        )
+
     def on_write_complete(
         self, write_result: Any
     ):
         table_commit = None
         try:
-            # WriteResult.write_returns (Ray 2.44+); older Ray may pass list of returns
-            if hasattr(write_result, "write_returns"):
-                write_returns = write_result.write_returns
-            elif isinstance(write_result, list):
-                write_returns = write_result
-            else:
-                raise TypeError(
-                    f"Unexpected write_result type {type(write_result).__name__}: "
-                    "expected object with .write_returns or list of commit message lists. "
-                    "Refusing to proceed to avoid silent data loss."
-                )
+            write_returns = self._extract_write_returns(write_result)
             all_commit_messages = [
                 commit_message
                 for commit_messages in write_returns
@@ -163,7 +174,7 @@ class PaimonDatasink(_DatasinkBase):
 
             self._pending_commit_messages = non_empty_messages
 
-            if not non_empty_messages:
+            if not non_empty_messages and not self._is_overwrite():
                 logger.info("No data to commit (all commit messages are empty)")
                 self._pending_commit_messages = []
                 return

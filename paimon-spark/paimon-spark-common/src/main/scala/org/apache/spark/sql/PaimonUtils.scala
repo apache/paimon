@@ -22,7 +22,7 @@ import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
@@ -135,6 +135,10 @@ object PaimonUtils {
   def equalsIgnoreCompatibleNullability(from: DataType, to: DataType): Boolean = {
     DataType.equalsIgnoreCompatibleNullability(from, to)
   }
+
+  /** `StructType` to fresh `AttributeReference`s (the `StructType.toAttributes` removed in 3.4+). */
+  def toAttributes(schema: StructType): Seq[AttributeReference] =
+    schema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
 
   def classIsLoadable(clazz: String): Boolean = {
     SparkUtils.classIsLoadable(clazz)

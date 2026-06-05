@@ -28,6 +28,7 @@ _EXPECTED_SYSTEM_TABLES = (
     "manifests",
     "files",
     "partitions",
+    "buckets",
     "tags",
     "branches",
 )
@@ -41,7 +42,6 @@ _UNREGISTERED_NAMES = {
     "consumers",
     "statistics",
     "aggregation_fields",
-    "buckets",
     "file_key_ranges",
     "table_indexes",
     "row_tracking",

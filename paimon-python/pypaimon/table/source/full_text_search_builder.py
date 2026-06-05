@@ -44,6 +44,11 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
+    def with_query_operator(self, query_operator: str) -> 'FullTextSearchBuilder':
+        """The default operator for query terms. Supported values are 'or' and 'and'."""
+        pass
+
+    @abstractmethod
     def new_full_text_scan(self) -> FullTextScan:
         """Create full-text scan to scan index files."""
         pass
@@ -66,6 +71,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._limit: int = 0
         self._text_column: Optional['DataField'] = None
         self._query_text: Optional[str] = None
+        self._query_operator: str = "or"
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
@@ -82,6 +88,10 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._query_text = query_text
         return self
 
+    def with_query_operator(self, query_operator: str) -> 'FullTextSearchBuilder':
+        self._query_operator = query_operator
+        return self
+
     def new_full_text_scan(self) -> FullTextScan:
         if self._text_column is None:
             raise ValueError("Text column must be set via with_text_column()")
@@ -95,5 +105,6 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         if self._query_text is None:
             raise ValueError("Query text must be set via with_query_text()")
         return FullTextReadImpl(
-            self._table, self._limit, self._text_column, self._query_text
+            self._table, self._limit, self._text_column,
+            self._query_text, self._query_operator
         )

@@ -22,6 +22,7 @@ import pyarrow as pa
 
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 
 class TableWrite:
-    def __init__(self, table, commit_user):
+    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -38,6 +39,7 @@ class TableWrite:
         self.file_store_write = FileStoreWrite(self.table, commit_user)
         self.row_key_extractor = self.table.create_row_key_extractor()
         self.commit_user = commit_user
+        self.static_partition = static_partition
 
     def write_arrow(self, table: pa.Table):
         batches_iterator = table.to_batches()
@@ -71,12 +73,22 @@ class TableWrite:
         self.file_store_write.write_cols = write_cols
         return self
 
+    def with_blob_consumer(self, blob_consumer: BlobConsumer):
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "with_blob_consumer must be called before any write operation."
+            )
+        self.file_store_write.blob_consumer = blob_consumer
+        return self
+
     def write_ray(
         self,
         dataset: "Dataset",
         overwrite: bool = False,
         concurrency: Optional[int] = None,
         ray_remote_args: Optional[Dict[str, Any]] = None,
+        hash_fixed_precluster: str = "auto",
+        static_partition: Optional[dict] = None,
     ) -> None:
         """
         Write a Ray Dataset to Paimon table.
@@ -85,13 +97,35 @@ class TableWrite:
             dataset: Ray Dataset to write. This is a distributed data collection
                 from Ray Data (ray.data.Dataset).
             overwrite: Whether to overwrite existing data. Defaults to False.
+                Builder-level or static_partition overwrite mode takes precedence.
             concurrency: Optional max number of Ray tasks to run concurrently.
                 By default, dynamically decided based on available resources.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
+            hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
+                and ``"off"`` write append-only HASH_FIXED tables directly
+                and reject HASH_FIXED primary-key tables. ``"map_groups"``
+                preserves the legacy small-file optimization and its single
+                group memory bound for HASH_FIXED primary-key tables.
+            static_partition: Optional partition spec to overwrite. When set,
+                the Ray write runs in overwrite mode for this partition and
+                overrides any builder-level partition spec.
         """
+        from pypaimon.ray.shuffle import maybe_apply_repartition
         from pypaimon.write.ray_datasink import PaimonDatasink
-        datasink = PaimonDatasink(self.table, overwrite=overwrite)
+
+        dataset = maybe_apply_repartition(
+            dataset, self.table, hash_fixed_precluster)
+
+        overwrite_partition = self.static_partition
+        if static_partition is not None:
+            overwrite_partition = static_partition
+
+        datasink = PaimonDatasink(
+            self.table,
+            overwrite=overwrite,
+            static_partition=overwrite_partition,
+        )
         dataset.write_datasink(
             datasink,
             concurrency=concurrency,
@@ -130,8 +164,8 @@ class TableWrite:
 
 
 class BatchTableWrite(TableWrite):
-    def __init__(self, table, commit_user):
-        super().__init__(table, commit_user)
+    def __init__(self, table, commit_user, static_partition: Optional[dict] = None):
+        super().__init__(table, commit_user, static_partition)
         self.batch_committed = False
 
     def prepare_commit(self) -> List[CommitMessage]:

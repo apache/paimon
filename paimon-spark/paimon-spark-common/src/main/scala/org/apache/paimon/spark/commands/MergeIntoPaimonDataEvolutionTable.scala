@@ -27,17 +27,21 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualTo, Expression, ExprId, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -61,7 +65,9 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with WithFileStoreTable {
+  with WithFileStoreTable
+  with ExpressionHelper
+  with Logging {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -136,12 +142,16 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = v2Table.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
+    SchemaEvolutionHelper.commitEvolvedSchemaAtExecution(table, targetRelation, sparkSession)
     invokeMergeInto(sparkSession)
     Seq.empty[Row]
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
-    val plan = table.newSnapshotReader().read()
+    val snapshotReader = table.newSnapshotReader()
+    pushDownMergePartitionFilter(snapshotReader)
+    val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
@@ -179,44 +189,113 @@ case class MergeIntoPaimonDataEvolutionTable(
       map.toMap
     }
 
-    // step 1: find the related data splits, make it target file plan
-    val dataSplits: Seq[DataSplit] =
-      targetRelatedSplits(sparkSession, tableSplits, firstRowIds, firstRowIdToBlobFirstRowIds)
-    val touchedFileTargetRelation =
-      createNewScanPlan(dataSplits, targetRelation)
+    val persistSourceDss: Option[Dataset[Row]] =
+      if (
+        table.coreOptions().dataEvolutionMergeIntoSourcePersist()
+        && (matchedActions.nonEmpty || notMatchedActions.nonEmpty)
+      ) {
+        val dss = createDataset(sparkSession, sourceTable)
+        dss.persist()
+        Some(dss)
+      } else {
+        None
+      }
 
-    // step 2: invoke update action
-    val updateCommit =
-      if (matchedActions.nonEmpty) {
-        val updateResult =
-          updateActionInvoke(dataSplits, sparkSession, touchedFileTargetRelation, firstRowIds)
-        checkUpdateResult(updateResult)
-      } else Nil
+    try {
+      // step 1: find the related data splits, make it target file plan
+      val dataSplits: Seq[DataSplit] = targetRelatedSplits(
+        sparkSession,
+        tableSplits,
+        firstRowIds,
+        firstRowIdToBlobFirstRowIds,
+        persistSourceDss)
+      val touchedFileTargetRelation =
+        createNewScanPlan(dataSplits, targetRelation)
 
-    // step 3: invoke insert action
-    val insertCommit =
-      if (notMatchedActions.nonEmpty)
-        insertActionInvoke(sparkSession, touchedFileTargetRelation)
-      else Nil
+      // step 2: invoke update action
+      val updateCommit =
+        if (matchedActions.nonEmpty) {
+          val updateResult = updateActionInvoke(
+            dataSplits,
+            sparkSession,
+            touchedFileTargetRelation,
+            firstRowIds,
+            persistSourceDss)
+          checkUpdateResult(updateResult)
+        } else Nil
 
-    if (plan.snapshotId() != null) {
-      writer.rowIdCheckConflict(plan.snapshotId())
+      // step 3: invoke insert action
+      val insertCommit =
+        if (notMatchedActions.nonEmpty)
+          insertActionInvoke(sparkSession, touchedFileTargetRelation, persistSourceDss)
+        else Nil
+
+      if (plan.snapshotId() != null) {
+        writer.rowIdCheckConflict(plan.snapshotId())
+      }
+      writer.commit(updateCommit ++ insertCommit)
+    } finally {
+      if (persistSourceDss.isDefined) {
+        persistSourceDss.get.unpersist(blocking = false)
+      }
     }
-    writer.commit(updateCommit ++ insertCommit)
+  }
+
+  private def pushDownMergePartitionFilter(snapshotReader: SnapshotReader): Unit = {
+    val partitionRowType = table.schema().logicalPartitionType()
+    if (partitionRowType.getFieldCount == 0) {
+      return
+    }
+
+    // matchedCondition comes from MergeIntoTable.mergeCondition, which is the MERGE ON condition.
+    val partitionPredicates = getExpressionOnlyRelated(matchedCondition, targetTable)
+      .map(splitConjunctivePredicates)
+      .map(extractMergePartitionFilters(_, partitionRowType))
+      .getOrElse(Seq.empty)
+
+    if (partitionPredicates.nonEmpty) {
+      val filter = convertConditionToPaimonPredicate(
+        partitionPredicates.reduce(And),
+        targetRelation.output,
+        rowType,
+        ignorePartialFailure = true)
+      filter.foreach(snapshotReader.withFilter)
+    }
+  }
+
+  private def extractMergePartitionFilters(
+      filters: Seq[Expression],
+      partitionRowType: RowType): Seq[Expression] = {
+    val partitionColumns = partitionRowType.getFieldNames.asScala.toSet
+    filters.filter {
+      f =>
+        f.deterministic &&
+        f.references.forall(attr => partitionColumns.exists(_.equalsIgnoreCase(attr.name))) &&
+        !SubqueryExpression.hasSubquery(f) &&
+        f.collect { case _: PythonUDF => true }.isEmpty
+    }
   }
 
   private def targetRelatedSplits(
       sparkSession: SparkSession,
       tableSplits: Seq[DataSplit],
       firstRowIds: immutable.IndexedSeq[Long],
-      firstRowIdToBlobFirstRowIds: Map[Long, List[Long]]): Seq[DataSplit] = {
+      firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
+      persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
     // Self-Merge shortcut:
     // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
     if (isSelfMergeOnRowId) {
       return tableSplits
     }
 
-    val sourceDss = createDataset(sparkSession, sourceTable)
+    if (!table.coreOptions().dataEvolutionMergeIntoFilePruning()) {
+      logInfo(
+        "Skip file-level pruning for MergeInto partial column update on data-evolution table " +
+          s"${table.name()}.")
+      return tableSplits
+    }
+
+    val sourceDss = persistSourceDss.getOrElse(createDataset(sparkSession, sourceTable))
 
     val firstRowIdsTouched = extractSourceRowIdMapping match {
       case Some(sourceRowIdAttr) =>
@@ -253,7 +332,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       dataSplits: Seq[DataSplit],
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
-      firstRowIds: immutable.IndexedSeq[Long]): Seq[CommitMessage] = {
+      firstRowIds: immutable.IndexedSeq[Long],
+      persistSourceDss: Option[Dataset[Row]]): Seq[CommitMessage] = {
     val mergeFields = extractFields(matchedCondition)
     val allFields = mutable.SortedSet.empty[AttributeReference](
       (o1, o2) => {
@@ -374,7 +454,8 @@ case class MergeIntoPaimonDataEvolutionTable(
 
       val sourceTableProjExprs =
         allReadFieldsOnSource.toSeq :+ Alias(TrueLiteral, ROW_FROM_SOURCE)()
-      val sourceTableProj = Project(sourceTableProjExprs, sourceTable)
+      val sourceChild = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
+      val sourceTableProj = Project(sourceTableProjExprs, sourceChild)
 
       val joinPlan =
         Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
@@ -417,16 +498,18 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def insertActionInvoke(
       sparkSession: SparkSession,
-      touchedFileTargetRelation: DataSourceV2Relation): Seq[CommitMessage] = {
+      touchedFileTargetRelation: DataSourceV2Relation,
+      persistSourceDss: Option[Dataset[Row]]): Seq[CommitMessage] = {
     val mergeFields = extractFields(matchedCondition)
     val allReadFieldsOnTarget =
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
 
     val targetReadPlan =
       touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
+    val sourceReadPlan = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
 
     val joinPlan =
-      Join(sourceTable, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
+      Join(sourceReadPlan, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
 
     // merge rows as there are multiple not matched actions
     val mergeRows = MergeRows(

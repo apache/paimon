@@ -277,6 +277,55 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # which explicitly reads KeyValue objects and checks valueKind
         print(f"Format: {file_format}, Python read completed. ValueKind verification should be done in Java test.")
 
+    def test_py_write_row_append_table(self):
+        """Python writes a ROW-format append-only table for Java to read."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'file.format': 'row', 'bucket': '-1'}
+        )
+
+        table_name = 'default.mixed_test_append_tablep_row'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4, 5, 6], type=pa.int32()),
+            'name': pa.array(['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef']),
+            'value': pa.array([1.5, 0.8, 0.6, 1.2, 5.0, 8.0]),
+        })
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Verify Python can read it back
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
+    def test_read_row_append_table(self):
+        """Python reads a ROW-format append-only table written by Java."""
+        table = self.catalog.get_table('default.mixed_test_append_tablej_row')
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
     def test_pk_dv_read(self):
         pa_schema = pa.schema([
             pa.field('pt', pa.int32(), nullable=False),
@@ -394,7 +443,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
         self._test_read_btree_index_null()
-        self._test_index_manifest_inherited_after_write()
+        self._test_partial_append_does_not_trigger_index_action()
+        if sys.version_info[:2] >= (3, 7):
+            self._test_index_manifest_inherited_after_write()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -514,6 +565,72 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertIsNotNone(
             snapshot_after.index_manifest,
             "index_manifest lost after Python data write - indexes become invisible"
+        )
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        read_builder.with_projection(['k', '_ROW_ID'])
+        splits = read_builder.new_scan().plan().splits()
+        row_ids = read_builder.new_read().to_arrow(splits)['_ROW_ID'].to_pylist()
+        self.assertTrue(len(row_ids) > 0, "k2 should exist before update")
+
+        wb = table.new_batch_write_builder()
+        tu = wb.new_update().with_update_type(['k'])
+        update_data = pa.table({
+            '_ROW_ID': pa.array(row_ids, type=pa.int64()),
+            'k': ['k_updated'] * len(row_ids),
+        })
+        msgs = tu.update_by_arrow_with_row_id(update_data)
+        with self.assertRaises(RuntimeError) as cm:
+            wb.new_commit().commit(msgs)
+        self.assertIn("'k'", str(cm.exception))
+        self.assertIn("Conflicted columns", str(cm.exception))
+
+        table_drop = table.copy(
+            {'global-index.column-update-action': 'DROP_PARTITION_INDEX'}
+        )
+        wb_drop = table_drop.new_batch_write_builder()
+        tu_drop = wb_drop.new_update().with_update_type(['k'])
+        wb_drop.new_commit().commit(tu_drop.update_by_arrow_with_row_id(update_data))
+
+        table_after = self.catalog.get_table('default.test_btree_index_string')
+        rb = table_after.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', 'k_updated'))
+        rows_new = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertGreater(len(rows_new), 0,
+                           "after DROP_PARTITION_INDEX, new value should read")
+
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+        snap = table_after.snapshot_manager().get_latest_snapshot()
+        entries = (IndexManifestFile(table_after).read(snap.index_manifest)
+                   if snap.index_manifest else [])
+        field_by_id = {f.id: f.name for f in table_after.fields}
+        remaining = [e for e in entries
+                     if e.index_file.global_index_meta is not None
+                     and field_by_id.get(
+                         e.index_file.global_index_meta.index_field_id) == 'k']
+        self.assertEqual(remaining, [],
+                         "btree index entries for 'k' should be dropped")
+
+    def _test_partial_append_does_not_trigger_index_action(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+        snap_before = table.snapshot_manager().get_latest_snapshot()
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tw.with_write_type(['k'])
+        tw.write_arrow(pa.table({'k': ['k_new']}))
+        tc = wb.new_commit()
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snap_after.id, snap_before.id)
+        self.assertIsNotNone(
+            snap_after.index_manifest,
+            "partial append should not drop index manifest"
         )
 
     @parameterized.expand([('json',), ('csv',)])
@@ -831,6 +948,103 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids3 = pa_table3.column('id').to_pylist()
         self.assertIn(1, ids3)
         self.assertIn(3, ids3)
+
+        ngram_table = self.catalog.get_table('default.test_tantivy_fulltext_ngram')
+
+        # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
+        ngram_builder = ngram_table.new_full_text_search_builder()
+        ngram_builder.with_text_column('content')
+        ngram_builder.with_query_text('中文')
+        ngram_builder.with_limit(10)
+
+        ngram_result = ngram_builder.execute_local()
+        ngram_row_ids = sorted(list(ngram_result.results()))
+        print(f"Tantivy ngram search for '中文': row_ids={ngram_row_ids}")
+        self.assertEqual(ngram_row_ids, [0, 4])
+
+        ngram_read_builder = ngram_table.new_read_builder()
+        ngram_scan = ngram_read_builder.new_scan().with_global_index_result(ngram_result)
+        ngram_pa_table = ngram_read_builder.new_read().to_arrow(ngram_scan.plan().splits())
+        ngram_pa_table = table_sort_by(ngram_pa_table, 'id')
+        self.assertEqual(ngram_pa_table.column('id').to_pylist(), [0, 4])
+        self.assertEqual(
+            ngram_pa_table.column('content').to_pylist(),
+            ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
+
+        fragment_builder = ngram_table.new_full_text_search_builder()
+        fragment_builder.with_text_column('content')
+        fragment_builder.with_query_text('片段')
+        fragment_builder.with_limit(10)
+
+        fragment_result = fragment_builder.execute_local()
+        fragment_row_ids = sorted(list(fragment_result.results()))
+        print(f"Tantivy ngram search for '片段': row_ids={fragment_row_ids}")
+        self.assertEqual(fragment_row_ids, [4])
+
+        ngram_and_builder = ngram_table.new_full_text_search_builder()
+        ngram_and_builder.with_text_column('content')
+        ngram_and_builder.with_query_text('中文 片段')
+        ngram_and_builder.with_query_operator('and')
+        ngram_and_builder.with_limit(10)
+
+        ngram_and_result = ngram_and_builder.execute_local()
+        ngram_and_row_ids = sorted(list(ngram_and_result.results()))
+        print(f"Tantivy ngram AND search for '中文 片段': row_ids={ngram_and_row_ids}")
+        self.assertEqual(ngram_and_row_ids, [4])
+
+        simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
+        simple_builder = simple_table.new_full_text_search_builder()
+        simple_builder.with_text_column('content')
+        simple_builder.with_query_text('running')
+        simple_builder.with_limit(10)
+
+        simple_result = simple_builder.execute_local()
+        simple_row_ids = sorted(list(simple_result.results()))
+        print(f"Tantivy simple stemmed search for 'running': row_ids={simple_row_ids}")
+        self.assertEqual(simple_row_ids, [0, 1, 2])
+
+        jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')
+
+        # Search for Chinese words using the jieba tokenizer metadata written by Java.
+        jieba_builder = jieba_table.new_full_text_search_builder()
+        jieba_builder.with_text_column('content')
+        jieba_builder.with_query_text('售货员')
+        jieba_builder.with_limit(10)
+
+        jieba_result = jieba_builder.execute_local()
+        jieba_row_ids = sorted(list(jieba_result.results()))
+        print(f"Tantivy jieba search for '售货员': row_ids={jieba_row_ids}")
+        self.assertEqual(jieba_row_ids, [0])
+
+        jieba_read_builder = jieba_table.new_read_builder()
+        jieba_scan = jieba_read_builder.new_scan().with_global_index_result(jieba_result)
+        jieba_pa_table = jieba_read_builder.new_read().to_arrow(jieba_scan.plan().splits())
+        jieba_pa_table = table_sort_by(jieba_pa_table, 'id')
+        self.assertEqual(jieba_pa_table.column('id').to_pylist(), [0])
+        self.assertEqual(
+            jieba_pa_table.column('content').to_pylist(),
+            ['张华在百货公司当售货员'])
+
+        jieba_phrase_builder = jieba_table.new_full_text_search_builder()
+        jieba_phrase_builder.with_text_column('content')
+        jieba_phrase_builder.with_query_text('自然')
+        jieba_phrase_builder.with_limit(10)
+
+        jieba_phrase_result = jieba_phrase_builder.execute_local()
+        jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
+        print(f"Tantivy jieba search for '自然': row_ids={jieba_phrase_row_ids}")
+        self.assertEqual(jieba_phrase_row_ids, [3])
+
+        jieba_and_builder = jieba_table.new_full_text_search_builder()
+        jieba_and_builder.with_text_column('content')
+        jieba_and_builder.with_query_text('中文 自然')
+        jieba_and_builder.with_query_operator('and')
+        jieba_and_builder.with_limit(10)
+
+        jieba_and_result = jieba_and_builder.execute_local()
+        jieba_and_row_ids = sorted(list(jieba_and_result.results()))
+        print(f"Tantivy jieba AND search for '中文 自然': row_ids={jieba_and_row_ids}")
+        self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
         """Test reading a Lumina vector index built by Java (orc and lance formats)."""

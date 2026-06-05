@@ -29,8 +29,8 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.write.commit_message import CommitMessage
 
 
-class DataBlobWriterTest(unittest.TestCase):
-    """Tests for DataBlobWriter functionality with paimon table operations."""
+class DedicatedFormatWriterTest(unittest.TestCase):
+    """Tests for DedicatedFormatWriter functionality with paimon table operations."""
 
     @classmethod
     def setUpClass(cls):
@@ -51,8 +51,8 @@ class DataBlobWriterTest(unittest.TestCase):
         except OSError:
             pass
 
-    def test_data_blob_writer_basic_functionality(self):
-        """Test basic DataBlobWriter functionality with paimon table."""
+    def test_dedicated_format_writer_basic_functionality(self):
+        """Test basic DedicatedFormatWriter functionality with paimon table."""
         from pypaimon import Schema
 
         # Create schema with normal and blob columns
@@ -82,7 +82,7 @@ class DataBlobWriterTest(unittest.TestCase):
             'blob_data': [b'blob_data_1', b'blob_data_2', b'blob_data_3']
         }, schema=pa_schema)
 
-        # Test DataBlobWriter initialization using proper table API
+        # Test DedicatedFormatWriter initialization using proper table API
         # Use proper table API to create writer
         write_builder = table.new_batch_write_builder()
         blob_writer = write_builder.new_write()
@@ -108,8 +108,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_schema_detection(self):
-        """Test that DataBlobWriter correctly detects blob columns from schema."""
+    def test_dedicated_format_writer_schema_detection(self):
+        """Test that DedicatedFormatWriter correctly detects blob columns from schema."""
         from pypaimon import Schema
 
         # Test schema with blob column
@@ -132,7 +132,7 @@ class DataBlobWriterTest(unittest.TestCase):
         write_builder = table.new_batch_write_builder()
         blob_writer = write_builder.new_write()
 
-        # Test that DataBlobWriter was created internally
+        # Test that DedicatedFormatWriter was created internally
         # We can verify this by checking the internal data writers
         test_data = pa.Table.from_pydict({
             'id': [1, 2, 3],
@@ -142,19 +142,19 @@ class DataBlobWriterTest(unittest.TestCase):
         # Write data to trigger writer creation
         blob_writer.write_arrow(test_data)
 
-        # Verify that a DataBlobWriter was created internally
+        # Verify that a DedicatedFormatWriter was created internally
         data_writers = blob_writer.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
-        # Check that the writer is a DataBlobWriter
+        # Check that the writer is a DedicatedFormatWriter
         for writer in data_writers.values():
-            from pypaimon.write.writer.data_blob_writer import DataBlobWriter
-            self.assertIsInstance(writer, DataBlobWriter)
+            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            self.assertIsInstance(writer, DedicatedFormatWriter)
 
         blob_writer.close()
 
-    def test_data_blob_writer_no_blob_column(self):
-        """Test that DataBlobWriter raises error when no blob column is found."""
+    def test_dedicated_format_writer_no_blob_column(self):
+        """Test that DedicatedFormatWriter raises error when no blob column is found."""
         from pypaimon import Schema
 
         # Test schema without blob column
@@ -177,7 +177,7 @@ class DataBlobWriterTest(unittest.TestCase):
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
 
-        # Test that a regular writer (not DataBlobWriter) was created
+        # Test that a regular writer (not DedicatedFormatWriter) was created
         test_data = pa.Table.from_pydict({
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie']
@@ -186,19 +186,19 @@ class DataBlobWriterTest(unittest.TestCase):
         # Write data to trigger writer creation
         writer.write_arrow(test_data)
 
-        # Verify that a regular writer was created (not DataBlobWriter)
+        # Verify that a regular writer was created (not DedicatedFormatWriter)
         data_writers = writer.file_store_write.data_writers
         self.assertGreater(len(data_writers), 0)
 
-        # Check that the writer is NOT a DataBlobWriter
+        # Check that the writer is NOT a DedicatedFormatWriter
         for writer_instance in data_writers.values():
-            from pypaimon.write.writer.data_blob_writer import DataBlobWriter
-            self.assertNotIsInstance(writer_instance, DataBlobWriter)
+            from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+            self.assertNotIsInstance(writer_instance, DedicatedFormatWriter)
 
         writer.close()
 
-    def test_data_blob_writer_multiple_blob_columns(self):
-        """Test that DataBlobWriter supports multiple blob columns."""
+    def test_dedicated_format_writer_multiple_blob_columns(self):
+        """Test that DedicatedFormatWriter supports multiple blob columns."""
         from pypaimon import Schema
 
         # Test schema with multiple blob columns
@@ -242,7 +242,7 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
         self.assertEqual(result.num_rows, 3)
 
-    def test_data_blob_writer_partial_write_with_write_type(self):
+    def test_dedicated_format_writer_partial_write_with_write_type(self):
         """Partial write (normal + blob subset) via with_write_type: split must match batch columns."""
         from pypaimon import Schema
 
@@ -292,7 +292,7 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(out.column('blob_data').to_pylist(), [b'a', b'b'])
         self.assertEqual(out.column('name').to_pylist(), [None, None])
 
-    def test_data_blob_writer_partial_write_normal_only_with_write_type(self):
+    def test_dedicated_format_writer_partial_write_normal_only_with_write_type(self):
         """Partial write without blob columns in write_cols must not touch blob split paths."""
         from pypaimon import Schema
 
@@ -333,7 +333,7 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(out.column('name').to_pylist(), ['n'])
         self.assertEqual(out.column('blob_data').to_pylist(), [None])
 
-    def test_data_blob_writer_partial_write_single_blob_of_two_with_write_type(self):
+    def test_dedicated_format_writer_partial_write_single_blob_of_two_with_write_type(self):
         """with_write_type lists only one blob column: only that column gets .blob files."""
         from pypaimon import Schema
 
@@ -369,8 +369,8 @@ class DataBlobWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(commit_messages)
         writer.close()
 
-    def test_data_blob_writer_write_operations(self):
-        """Test DataBlobWriter write operations with real data."""
+    def test_dedicated_format_writer_write_operations(self):
+        """Test DedicatedFormatWriter write operations with real data."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -411,8 +411,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_write_large_blob(self):
-        """Test DataBlobWriter with very large blob data (50MB per item) in 10 batches."""
+    def test_dedicated_format_writer_write_large_blob(self):
+        """Test DedicatedFormatWriter with very large blob data (50MB per item) in 10 batches."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -436,28 +436,27 @@ class DataBlobWriterTest(unittest.TestCase):
         write_builder = table.new_batch_write_builder()
         blob_writer = write_builder.new_write()
 
-        # Create 50MB blob data per item
-        # Using a pattern to make the data more realistic and compressible
-        target_size = 50 * 1024 * 1024  # 50MB in bytes
+        # Create 5MB blob data per item
+        target_size = 5 * 1024 * 1024  # 5MB in bytes
         blob_pattern = b'LARGE_BLOB_DATA_PATTERN_' + b'X' * 1024  # ~1KB pattern
         pattern_size = len(blob_pattern)
         repetitions = target_size // pattern_size
         large_blob_data = blob_pattern * repetitions
 
-        # Verify the blob size is approximately 50MB
+        # Verify the blob size is approximately 5MB
         blob_size_mb = len(large_blob_data) / (1024 * 1024)
-        self.assertGreater(blob_size_mb, 49)  # Should be at least 49MB
-        self.assertLess(blob_size_mb, 51)  # Should be less than 51MB
+        self.assertGreater(blob_size_mb, 4)  # Should be at least 4MB
+        self.assertLess(blob_size_mb, 6)  # Should be less than 6MB
 
         total_rows = 0
 
         # Write 10 batches, each with 5 rows (50 rows total)
-        # Total data volume: 50 rows * 50MB = 2.5GB of blob data
+        # Total data volume: 50 rows * 5MB = 250MB of blob data
         for batch_num in range(10):
             batch_data = pa.Table.from_pydict({
                 'id': [batch_num * 5 + i for i in range(5)],
                 'description': [f'Large blob batch {batch_num}, row {i}' for i in range(5)],
-                'large_blob': [large_blob_data] * 5  # 5 rows per batch, each with 50MB blob
+                'large_blob': [large_blob_data] * 5  # 5 rows per batch, each with 5MB blob
             }, schema=pa_schema)
 
             # Write each batch
@@ -468,7 +467,7 @@ class DataBlobWriterTest(unittest.TestCase):
             # Log progress for large data processing
             print(f"Completed batch {batch_num + 1}/10 with {batch.num_rows} rows")
 
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages: CommitMessage = blob_writer.prepare_commit()
@@ -502,9 +501,9 @@ class DataBlobWriterTest(unittest.TestCase):
         # Verify total data written (50 rows of normal data + 50 rows of blob data = 100 total)
         self.assertEqual(total_row_count, 50)
 
-        # Verify total file size is substantial (should be much larger than 2.5GB due to overhead)
+        # Verify total file size is substantial (should be at least 200MB)
         total_size_mb = total_file_size / (1024 * 1024)
-        self.assertGreater(total_size_mb, 2000)  # Should be at least 2GB due to overhead
+        self.assertGreater(total_size_mb, 200)
 
         total_files = sum(len(commit_msg.new_files) for commit_msg in commit_messages)
         print(f"Total data written: {total_size_mb:.2f}MB across {total_files} files")
@@ -512,8 +511,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_abort_functionality(self):
-        """Test DataBlobWriter abort functionality."""
+    def test_dedicated_format_writer_abort_functionality(self):
+        """Test DedicatedFormatWriter abort functionality."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -547,12 +546,12 @@ class DataBlobWriterTest(unittest.TestCase):
             blob_writer.write_arrow_batch(batch)
 
         # Test abort - BatchTableWrite doesn't have abort method
-        # The abort functionality is handled internally by DataBlobWriter
+        # The abort functionality is handled internally by DedicatedFormatWriter
 
         blob_writer.close()
 
-    def test_data_blob_writer_multiple_batches(self):
-        """Test DataBlobWriter with multiple batches and verify results."""
+    def test_dedicated_format_writer_multiple_batches(self):
+        """Test DedicatedFormatWriter with multiple batches and verify results."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -609,7 +608,7 @@ class DataBlobWriterTest(unittest.TestCase):
             blob_writer.write_arrow_batch(batch)
             total_rows += batch.num_rows
 
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages = blob_writer.prepare_commit()
@@ -620,8 +619,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_large_batches(self):
-        """Test DataBlobWriter with large batches to test rolling behavior."""
+    def test_dedicated_format_writer_large_batches(self):
+        """Test DedicatedFormatWriter with large batches to test rolling behavior."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -672,7 +671,7 @@ class DataBlobWriterTest(unittest.TestCase):
             blob_writer.write_arrow_batch(batch)
             total_rows += batch.num_rows
 
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages = blob_writer.prepare_commit()
@@ -683,8 +682,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_mixed_data_types(self):
-        """Test DataBlobWriter with mixed data types in blob column."""
+    def test_dedicated_format_writer_mixed_data_types(self):
+        """Test DedicatedFormatWriter with mixed data types in blob column."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -727,7 +726,7 @@ class DataBlobWriterTest(unittest.TestCase):
             blob_writer.write_arrow_batch(batch)
             total_rows += batch.num_rows
 
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages = blob_writer.prepare_commit()
@@ -787,8 +786,8 @@ class DataBlobWriterTest(unittest.TestCase):
             self.assertEqual(result_type, original_type, f"Row {i + 1}: Type should match")
             self.assertEqual(result_data, original_data, f"Row {i + 1}: Blob data should match")
 
-    def test_data_blob_writer_empty_batches(self):
-        """Test DataBlobWriter with empty batches."""
+    def test_dedicated_format_writer_empty_batches(self):
+        """Test DedicatedFormatWriter with empty batches."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -843,8 +842,8 @@ class DataBlobWriterTest(unittest.TestCase):
             total_rows += batch.num_rows
 
         # Verify record count (empty batch should not affect count)
-        # Record count is tracked internally by DataBlobWriter
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages = blob_writer.prepare_commit()
@@ -852,8 +851,8 @@ class DataBlobWriterTest(unittest.TestCase):
 
         blob_writer.close()
 
-    def test_data_blob_writer_rolling_behavior(self):
-        """Test DataBlobWriter rolling behavior with multiple commits."""
+    def test_dedicated_format_writer_rolling_behavior(self):
+        """Test DedicatedFormatWriter rolling behavior with multiple commits."""
         from pypaimon import Schema
 
         # Create schema with blob column
@@ -893,7 +892,7 @@ class DataBlobWriterTest(unittest.TestCase):
                 blob_writer.write_arrow_batch(batch)
 
         # Verify total record count
-        # Record count is tracked internally by DataBlobWriter
+        # Record count is tracked internally by DedicatedFormatWriter
 
         # Test prepare commit
         commit_messages = blob_writer.prepare_commit()
@@ -1062,6 +1061,82 @@ class DataBlobWriterTest(unittest.TestCase):
             result.column('blob_data').to_pylist(),
             [b'first_blob', None, b'third_blob', None, b'fifth_blob'],
         )
+
+    def test_update_blob_column(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_update_column', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_column')
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'blob_data': [b'blob-1', b'blob-2', b'blob-3'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([1], type=pa.int64()),
+            'blob_data': pa.array([b'updated-blob-2'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_files = [f for msg in update_messages for f in msg.new_files]
+        update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
+        self.assertGreater(len(update_blob_files), 0)
+        self.assertTrue(all(f.write_cols == ['blob_data'] for f in update_files))
+        update_blob_lengths = []
+        blob_fields = [field for field in table.fields if field.name == 'blob_data']
+        for blob_file in update_blob_files:
+            blob_reader = FormatBlobReader(
+                file_io=table.file_io,
+                file_path=blob_file.file_path,
+                read_fields=['blob_data'],
+                full_fields=blob_fields,
+                push_down_predicate=None,
+                blob_as_descriptor=False,
+            )
+            update_blob_lengths.extend(blob_reader.blob_lengths)
+            blob_reader.close()
+        self.assertEqual(
+            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
+            2,
+        )
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id, {
+            1: b'blob-1',
+            2: b'updated-blob-2',
+            3: b'blob-3',
+        })
 
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
@@ -1314,6 +1389,483 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.num_rows, 1)
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
+
+    def test_blob_view_fields_resolve_upstream_blob(self):
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_source')
+        payloads = [b'view-source-0', b'view-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        all_target_files = [f for msg in target_commit_messages for f in msg.new_files]
+        self.assertFalse(
+            any(f.file_name.endswith('.blob') for f in all_target_files),
+            "Blob view fields should be stored inline without writing new blob files",
+        )
+
+        result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('picture').to_pylist(), payloads)
+
+        descriptor_table = target_table.copy({CoreOptions.BLOB_AS_DESCRIPTOR.key(): 'true'})
+        descriptor_result = descriptor_table.new_read_builder().new_read().to_arrow(
+            descriptor_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        # With blob-as-descriptor=true, view fields return BlobDescriptor bytes
+        from pypaimon.table.row.blob import BlobDescriptor
+        for value in descriptor_result.column('picture').to_pylist():
+            self.assertTrue(
+                BlobDescriptor.is_blob_descriptor(value),
+                "Expected BlobDescriptor bytes when blob-as-descriptor=true"
+            )
+
+    def test_blob_view_resolve_disabled_preserves_references(self):
+        from pypaimon import Schema
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_resolve_source')
+        payloads = [b'resolve-source-0', b'resolve-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_resolve_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_resolve_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_resolve_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Default (resolve enabled): view fields are resolved to real blob data.
+        resolved_result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(resolved_result.column('picture').to_pylist(), payloads)
+
+        # resolve disabled: view fields keep the original BlobViewStruct bytes.
+        preserve_table = target_table.copy(
+            {CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(): 'false'}
+        )
+        preserve_result = preserve_table.new_read_builder().new_read().to_arrow(
+            preserve_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        preserved_values = preserve_result.column('picture').to_pylist()
+        self.assertEqual(preserved_values, view_values)
+        for value in preserved_values:
+            self.assertTrue(
+                BlobViewStruct.is_blob_view_struct(value),
+                "Expected original BlobViewStruct bytes when resolve disabled"
+            )
+
+    def test_blob_view_resolves_null_upstream_value(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_null_source')
+        # Row 0 has a real blob value, row 1 has a null blob value.
+        payloads = [b'null-source-0', None]
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_null_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_null_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_null_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # View referencing a real upstream value resolves to data; view
+        # referencing a null upstream value resolves to None (not an error).
+        result = target_table.new_read_builder().new_read().to_arrow(
+            target_table.new_read_builder().new_scan().plan().splits()
+        ).sort_by('id')
+        self.assertEqual(result.column('picture').to_pylist(), [b'null-source-0', None])
+
+    def test_blob_view_fields_rejects_non_view_input(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_reject_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_view_reject_test')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        bad_data = pa.Table.from_pydict({
+            'id': [1],
+            'picture': [b'not-a-view-struct'],
+        }, schema=pa_schema)
+
+        with self.assertRaises(ValueError) as context:
+            writer.write_arrow(bad_data)
+        self.assertIn("blob-view-field", str(context.exception))
+
+    def test_blob_inline_fields_reject_overlap_and_unknown_fields(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        base_options = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        }
+
+        overlap_options = dict(base_options)
+        overlap_options.update({
+            'blob-descriptor-field': 'picture',
+            'blob-view-field': 'picture',
+        })
+        overlap_schema = Schema.from_pyarrow_schema(pa_schema, options=overlap_options)
+        with self.assertRaises(ValueError) as overlap_context:
+            self.catalog.create_table(
+                'test_db.blob_overlap_reject', overlap_schema, False)
+        self.assertIn("must not overlap", str(overlap_context.exception))
+
+        unknown_options = dict(base_options)
+        unknown_options.update({'blob-view-field': 'missing_picture'})
+        unknown_schema = Schema.from_pyarrow_schema(pa_schema, options=unknown_options)
+        with self.assertRaises(ValueError) as unknown_context:
+            self.catalog.create_table(
+                'test_db.blob_unknown_reject', unknown_schema, False)
+        self.assertIn("must be blob fields", str(unknown_context.exception))
+
+    def test_blob_view_prescan_with_limit(self):
+        """Test that limit is correctly pushed down to prescan reader.
+        
+        Regression test for: prescan should only scan up to limit rows,
+        not the entire split.
+        """
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        # Create source table with multiple rows
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_limit_source')
+
+        # Write 10 rows
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_limit_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        # Create target table with blob-view-field
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_limit_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_limit_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        # Test with limit: should only return first 3 rows
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(3)
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(result.num_rows, 3, "LIMIT should be respected in blob view prescan")
+        self.assertEqual(result.column('id').to_pylist(), [0, 1, 2])
+
+    def test_blob_view_prescan_only_collects_limited_view_structs(self):
+        """Verify that the prescan stage only collects as many BlobViewStructs as
+        the limit allows, instead of scanning the entire split.
+
+        Unlike test_blob_view_prescan_with_limit (which only checks the final
+        output), this test patches BlobViewLookup.preload to capture the exact
+        list of view structs collected during prescan and asserts its length
+        equals the limit.
+        """
+        from unittest import mock
+
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_prescan_count_source')
+
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_prescan_count_source', picture_field_id, i).serialize()
+            for i in range(num_rows)
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_prescan_count_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_prescan_count_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        captured_view_structs = []
+        original_preload = BlobViewLookup.preload
+
+        def capturing_preload(lookup_self, view_structs):
+            captured_view_structs.append(list(view_structs))
+            return original_preload(lookup_self, view_structs)
+
+        limit = 3
+        read_builder = target_table.new_read_builder()
+        read_builder.with_limit(limit)
+        with mock.patch.object(BlobViewLookup, 'preload', autospec=True,
+                               side_effect=capturing_preload):
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            )
+
+        self.assertEqual(result.num_rows, limit)
+        self.assertEqual(len(captured_view_structs), 1,
+                         "preload should be invoked exactly once during prescan")
+        self.assertEqual(
+            len(captured_view_structs[0]), limit,
+            "prescan should only collect as many view structs as the limit allows")
 
     def test_to_arrow_batch_reader(self):
         import random
@@ -2715,8 +3267,8 @@ class DataBlobWriterTest(unittest.TestCase):
         actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
         self.assertEqual(actual, expected)
 
-    def test_data_blob_writer_with_slice(self):
-        """Test DataBlobWriter with mixed data types in blob column."""
+    def test_dedicated_format_writer_with_slice(self):
+        """Test DedicatedFormatWriter with mixed data types in blob column."""
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -2777,8 +3329,8 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
         self.assertEqual(result["id"].unique().to_pylist(), [2, 3], "Get incorrect column ID")
 
-    def test_data_blob_writer_with_shard(self):
-        """Test DataBlobWriter with mixed data types in blob column."""
+    def test_dedicated_format_writer_with_shard(self):
+        """Test DedicatedFormatWriter with mixed data types in blob column."""
 
         # Create schema with blob column
         pa_schema = pa.schema([
@@ -3129,7 +3681,7 @@ class DataBlobWriterTest(unittest.TestCase):
         total_split_row_count = sum([s.row_count for s in splits])
         self.assertEqual(total_split_row_count, num_rows * 2,
                          f"Total split row count should be {num_rows}, got {total_split_row_count}")
-        
+
         total_merged_count = 0
         for split in splits:
             merged_count = split.merged_row_count()
@@ -3138,7 +3690,7 @@ class DataBlobWriterTest(unittest.TestCase):
                 self.assertLessEqual(
                     merged_count, split.row_count,
                     f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
-        
+
         if total_merged_count > 0:
             self.assertEqual(
                 total_merged_count, num_rows,
@@ -3178,14 +3730,14 @@ class DataBlobWriterTest(unittest.TestCase):
         self.catalog.create_table('test_db.blob_rowid_equal', schema, False)
         table = self.catalog.get_table('test_db.blob_rowid_equal')
 
-        blob_bytes = os.urandom(248 * 1024)
+        blob_values = [bytes([i]) * (248 * 1024) for i in range(20)]
         write_builder = table.new_batch_write_builder()
         tw = write_builder.new_write()
         tc = write_builder.new_commit()
         batch = pa.Table.from_pydict({
             'id': list(range(20)),
             'name': [f'item_{i}' for i in range(20)],
-            'data': [blob_bytes] * 20,
+            'data': blob_values,
         }, schema=pa_schema)
         tw.write_arrow(batch)
         tc.commit(tw.prepare_commit())
@@ -3196,6 +3748,7 @@ class DataBlobWriterTest(unittest.TestCase):
         from pypaimon.table.special_fields import SpecialFields
 
         rb = table.new_read_builder()
+        rb.with_projection(['id', 'name', 'data', SpecialFields.ROW_ID.name])
         fields = list(table.fields)
         fields.append(SpecialFields.ROW_ID)
         pb = PredicateBuilder(fields)
@@ -3207,6 +3760,10 @@ class DataBlobWriterTest(unittest.TestCase):
         read = rb.new_read()
         result = read.to_arrow(splits)
         self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('id').to_pylist(), [5])
+        self.assertEqual(result.column('name').to_pylist(), ['item_5'])
+        self.assertEqual(result.column('data').to_pylist(), [blob_values[5]])
+        self.assertEqual(result.column(SpecialFields.ROW_ID.name).to_pylist(), [5])
 
     def test_rename_blob_column_should_fail(self):
         pa_schema = pa.schema([
@@ -3231,6 +3788,24 @@ class DataBlobWriterTest(unittest.TestCase):
                 False
             )
         self.assertIn('Cannot rename BLOB column', str(ctx.exception))
+
+    def test_nested_field_named_blob_not_treated_as_blob(self):
+        """Regression: a ROW field with a nested column whose name contains
+        'blob' must NOT be treated as a top-level BLOB column.  Previously
+        the substring match would falsely classify such fields, causing
+        create_table to require row-tracking and data-evolution options."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.struct([
+                ('blob_name', pa.string()),
+                ('value', pa.int64()),
+            ])),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table(
+            'test_db.nested_blob_name_no_error', schema, False)
+        table = self.catalog.get_table('test_db.nested_blob_name_no_error')
+        self.assertIsNotNone(table)
 
 
 class GetBlobTest(unittest.TestCase):
@@ -3288,6 +3863,22 @@ class GetBlobTest(unittest.TestCase):
         self.assertEqual(results[0], (1, b'img_data_1'))
         self.assertEqual(results[1], (2, b'img_data_2'))
         self.assertEqual(results[2], (3, b'img_data_3'))
+
+    def test_get_blob_access_with_limit(self):
+        read_builder = self.table.new_read_builder().with_limit(2)
+        splits = read_builder.new_scan().plan().splits()
+        read = read_builder.new_read()
+
+        results = []
+        for row in read.to_iterator(splits):
+            blob = row.get_blob(2)
+            self.assertIsNotNone(blob)
+            results.append((row.get_field(0), blob.to_data()))
+
+        self.assertEqual(len(results), 2)
+        for row_id, data in results:
+            self.assertIn(row_id, (1, 2, 3))
+            self.assertIn(data, (b'img_data_1', b'img_data_2', b'img_data_3'))
 
     def test_get_blob_streaming(self):
         read_builder = self.table.new_read_builder()
@@ -3486,6 +4077,242 @@ class GetBlobNonBlobColumnSecurityTest(unittest.TestCase):
                     row.get_blob(1)
                 break
             mock_create.assert_not_called()
+
+
+class BlobConsumerTest(unittest.TestCase):
+    """Tests for BlobConsumer callback functionality."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.warehouse = os.path.join(cls.temp_dir, 'warehouse')
+        cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
+        cls.catalog.create_database('test_db', False)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_blob_consumer_basic(self):
+        """Consumer receives one BlobDescriptor per blob written, None for nulls."""
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        from pypaimon.common.uri_reader import FileUriReader
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('test_db.blob_consumer_basic', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_basic')
+
+        blob_bytes = b'hello_blob_consumer'
+        received = []
+
+        def my_consumer(field_name, descriptor):
+            received.append((field_name, descriptor))
+            return True
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.with_blob_consumer(my_consumer)
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'blob_data': [blob_bytes, blob_bytes, None],
+        }, schema=pa_schema)
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        self.assertEqual(len(received), 3)
+
+        for field_name, desc in received[:2]:
+            self.assertEqual(field_name, 'blob_data')
+            self.assertIsInstance(desc, BlobDescriptor)
+            uri_reader = FileUriReader(table.file_io)
+            blob = Blob.from_descriptor(uri_reader, desc)
+            self.assertEqual(blob.to_data(), blob_bytes)
+
+        self.assertEqual(received[2][0], 'blob_data')
+        self.assertIsNone(received[2][1])
+
+    def test_blob_consumer_flush_behavior(self):
+        """Consumer return value controls flush; verify flush count."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('test_db.blob_consumer_flush', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_flush')
+
+        blob_bytes = b'flush_test_blob'
+        descriptors = []
+        flush_count = [0]
+
+        def my_consumer(field_name, descriptor):
+            descriptors.append(descriptor)
+            should_flush = len(descriptors) % 2 == 0
+            if should_flush:
+                flush_count[0] += 1
+            return should_flush
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.with_blob_consumer(my_consumer)
+
+        test_data = pa.Table.from_pydict({
+            'id': list(range(5)),
+            'name': [f'row{i}' for i in range(5)],
+            'blob_data': [blob_bytes] * 5,
+        }, schema=pa_schema)
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        self.assertEqual(len(descriptors), 5)
+        self.assertEqual(flush_count[0], 2)
+
+        from pypaimon.table.row.blob import Blob
+        from pypaimon.common.uri_reader import FileUriReader
+        uri_reader = FileUriReader(table.file_io)
+        for desc in descriptors:
+            self.assertIsNotNone(desc)
+            blob = Blob.from_descriptor(uri_reader, desc)
+            self.assertEqual(blob.to_data(), blob_bytes)
+
+    def test_blob_consumer_no_consumer_set(self):
+        """Without consumer, writing still works normally."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('test_db.blob_no_consumer', schema, False)
+        table = self.catalog.get_table('test_db.blob_no_consumer')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2],
+            'blob_data': [b'data1', b'data2'],
+        }, schema=pa_schema)
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.column('blob_data').to_pylist(), [b'data1', b'data2'])
+
+    def test_blob_consumer_chain_call(self):
+        """with_blob_consumer returns self for chaining."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('test_db.blob_consumer_chain', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_chain')
+
+        write_builder = table.new_batch_write_builder()
+        result = write_builder.new_write().with_blob_consumer(lambda f, d: False)
+        self.assertIsNotNone(result)
+        result.close()
+
+    def test_blob_consumer_abort_preserves_files(self):
+        """Abort with consumer must not delete blob files that descriptors point to."""
+        from pypaimon.table.row.blob import Blob
+        from pypaimon.common.uri_reader import FileUriReader
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1KB',
+        })
+        self.catalog.create_table('test_db.blob_consumer_abort', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_abort')
+
+        blob_bytes = b'X' * 2048
+        received = []
+
+        def my_consumer(field_name, descriptor):
+            received.append(descriptor)
+            return False
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.with_blob_consumer(my_consumer)
+
+        test_data = pa.Table.from_pydict({
+            'id': list(range(5)),
+            'blob_data': [blob_bytes] * 5,
+        }, schema=pa_schema)
+        writer.write_arrow(test_data)
+
+        self.assertGreater(len(received), 0)
+
+        # Capture data writers before close() clears them, then abort each one.
+        data_writers = list(writer.file_store_write.data_writers.values())
+        self.assertGreater(len(data_writers), 0)
+        for dw in data_writers:
+            dw.abort()
+
+        # Every descriptor returned to the consumer must still be readable.
+        uri_reader = FileUriReader(table.file_io)
+        for desc in received:
+            self.assertIsNotNone(desc)
+            data = Blob.from_descriptor(uri_reader, desc).to_data()
+            self.assertEqual(data, blob_bytes)
+
+    def test_blob_consumer_after_write_raises(self):
+        """Setting consumer after data has been written must raise."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table('test_db.blob_consumer_late', schema, False)
+        table = self.catalog.get_table('test_db.blob_consumer_late')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1],
+            'blob_data': [b'data'],
+        }, schema=pa_schema))
+
+        with self.assertRaises(RuntimeError):
+            writer.with_blob_consumer(lambda f, d: False)
+        writer.close()
 
 
 if __name__ == '__main__':

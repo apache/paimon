@@ -94,7 +94,7 @@ class ExternalStorageBlobValidationTest(unittest.TestCase):
         })
         with self.assertRaises(ValueError) as ctx:
             self.catalog.create_table('test_db.not_blob_type_test', schema, False)
-        self.assertIn('must be a BLOB type field', str(ctx.exception))
+        self.assertIn('must be blob fields', str(ctx.exception))
 
     def test_validation_blob_not_null_field_passes(self):
         """BLOB NOT NULL fields should pass validation (not be rejected by str comparison)."""

@@ -997,6 +997,68 @@ public class JavaPyE2ETest {
         return GenericRow.ofKind(rowKind, values[0], values[1], values[2]);
     }
 
+    /** Java writes a ROW-format append-only table for Python to read (Java→Python E2E). */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteRowAppendTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_append_tablej_row");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("value", DataTypes.DOUBLE())
+                        .option("file.format", "row")
+                        .option("bucket", "-1")
+                        .build();
+
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("Apple"), 1.5));
+            write.write(GenericRow.of(2, BinaryString.fromString("Banana"), 0.8));
+            write.write(GenericRow.of(3, BinaryString.fromString("Carrot"), 0.6));
+            write.write(GenericRow.of(4, BinaryString.fromString("Broccoli"), 1.2));
+            write.write(GenericRow.of(5, BinaryString.fromString("Chicken"), 5.0));
+            write.write(GenericRow.of(6, BinaryString.fromString("Beef"), 8.0));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res).hasSize(6);
+        LOG.info("testJavaWriteRowAppendTable: wrote and read back {} ROW-format rows", res.size());
+    }
+
+    /** Java reads a ROW-format append-only table written by Python (Python→Java E2E). */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadRowAppendTable() throws Exception {
+        Identifier identifier = identifier("mixed_test_append_tablep_row");
+        Table table = catalog.getTable(identifier);
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        List<Split> splits =
+                new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+        TableRead read = fileStoreTable.newRead();
+        List<String> res =
+                getResult(
+                        read,
+                        splits,
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(res).hasSize(6);
+        LOG.info(
+                "testReadRowAppendTable: Java read {} ROW-format rows written by Python",
+                res.size());
+    }
+
     /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")

@@ -761,15 +761,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
             throws BranchNotExistException, BranchAlreadyExistException {
-        try {
-            api.renameBranch(identifier, fromBranch, toBranch);
-        } catch (NoSuchResourceException e) {
-            throw new BranchNotExistException(identifier, fromBranch, e);
-        } catch (AlreadyExistsException e) {
-            throw new BranchAlreadyExistException(identifier, toBranch, e);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+        throw new UnsupportedOperationException();
     }
 
     @Override

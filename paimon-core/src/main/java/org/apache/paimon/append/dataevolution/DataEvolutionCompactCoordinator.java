@@ -434,11 +434,36 @@ public class DataEvolutionCompactCoordinator {
         private List<List<DataFileMeta>> fileGroupsToCompact(List<DataFileMeta> files) {
             List<List<DataFileMeta>> result = new ArrayList<>();
             List<DataFileMeta> sortedFiles = new ArrayList<>(files);
-            sortedFiles.sort(comparingLong(DataFileMeta::nonNullFirstRowId));
+            sortedFiles.sort(
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
+                            .thenComparingLong(DataFileMeta::maxSequenceNumber));
+
+            RangeHelper<DataFileMeta> rangeHelper =
+                    new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+            List<DataFileMeta> smallFileCandidates = new ArrayList<>();
+            for (List<DataFileMeta> rowRangeGroup :
+                    rangeHelper.mergeOverlappingRanges(sortedFiles)) {
+                if (rowRangeGroup.size() >= BLOB_COMPACT_MIN_FILE_NUM) {
+                    rowRangeGroup.sort(
+                            comparingLong(DataFileMeta::nonNullFirstRowId)
+                                    .thenComparingLong(DataFileMeta::maxSequenceNumber));
+                    result.add(rowRangeGroup);
+                } else {
+                    smallFileCandidates.add(rowRangeGroup.get(0));
+                }
+            }
+
+            result.addAll(smallFileGroupsToCompact(smallFileCandidates));
+            result.sort(comparingLong(group -> group.get(0).nonNullFirstRowId()));
+            return result;
+        }
+
+        private List<List<DataFileMeta>> smallFileGroupsToCompact(List<DataFileMeta> files) {
+            List<List<DataFileMeta>> result = new ArrayList<>();
 
             List<DataFileMeta> continuousFiles = new ArrayList<>();
             long expectedFirstRowId = -1;
-            for (DataFileMeta file : sortedFiles) {
+            for (DataFileMeta file : files) {
                 if (file.fileSize() >= blobTargetFileSize) {
                     addFileGroupsToCompact(result, continuousFiles);
                     continuousFiles.clear();

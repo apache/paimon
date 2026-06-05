@@ -27,7 +27,7 @@ import java.nio.file.Files
 
 class CopyIntoTestBase extends PaimonSparkTestBase {
 
-  private def createCsvFile(dir: File, name: String, content: String): File = {
+  protected def createCsvFile(dir: File, name: String, content: String): File = {
     val file = new File(dir, name)
     val writer = new PrintWriter(file)
     try writer.write(content)
@@ -35,13 +35,13 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     file
   }
 
-  private def withCsvDir(testBody: File => Unit): Unit = {
+  protected def withCsvDir(testBody: File => Unit): Unit = {
     val dir = Files.createTempDirectory("copy_into_test").toFile
     try testBody(dir)
     finally deleteRecursively(dir)
   }
 
-  private def deleteRecursively(file: File): Unit = {
+  protected def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)
     }
@@ -234,10 +234,12 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
         val e = intercept[IllegalArgumentException] {
           spark.sql(s"""COPY INTO $dbName0.copy_unsup
                        |FROM '${dir.getAbsolutePath}'
-                       |FILE_FORMAT = (TYPE = PARQUET)
+                       |FILE_FORMAT = (TYPE = ORC)
                        |""".stripMargin)
         }
-        assert(e.getMessage.contains("Unsupported file format type"))
+        assert(
+          e.getMessage.contains("Unsupported file format type") ||
+            e.getMessage.contains("Supported types"))
     }
 
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_unsup")
@@ -646,6 +648,423 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_dup_col")
   }
 
+  protected def createJsonFile(dir: File, name: String, content: String): File = {
+    val file = new File(dir, name)
+    val writer = new PrintWriter(file)
+    try writer.write(content)
+    finally writer.close()
+    file
+  }
+
+  protected def withJsonDir(testBody: File => Unit): Unit = {
+    val dir = Files.createTempDirectory("copy_into_json_test").toFile
+    try testBody(dir)
+    finally deleteRecursively(dir)
+  }
+
+  test("COPY INTO: basic JSON import") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_basic")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_basic (id INT, name STRING, age INT)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice","age":"30"}
+            |{"id":"2","name":"Bob","age":"25"}
+            |""".stripMargin)
+
+        val result = spark.sql(s"""COPY INTO $dbName0.copy_json_basic
+                                  |FROM '${dir.getAbsolutePath}'
+                                  |FILE_FORMAT = (TYPE = JSON)
+                                  |""".stripMargin)
+
+        assert(result.collect().length > 0)
+        assert(result.collect()(0).getString(1) == "LOADED")
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_basic ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_basic")
+  }
+
+  test("COPY INTO: JSON column name matching ignores order") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_order")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_order (id INT, name STRING, age INT)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"age":"30","name":"Alice","id":"1"}
+            |{"name":"Bob","id":"2","age":"25"}
+            |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_order
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_order ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_order")
+  }
+
+  test("COPY INTO: JSON with MULTI_LINE") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_ml")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_ml (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """[
+            |  {"id":"1","name":"Alice"},
+            |  {"id":"2","name":"Bob"}
+            |]""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_ml
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON, MULTI_LINE = TRUE)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_ml ORDER BY id"),
+          Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_ml")
+  }
+
+  test("COPY INTO: JSON with explicit column list") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_cols")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_cols (id INT, name STRING, age INT)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice"}
+            |{"id":"2","name":"Bob"}
+            |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_cols (id, name)
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_cols ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, "Bob", null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_cols")
+  }
+
+  test("COPY INTO: JSON NULL_IF") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_null")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_null (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"NULL"}
+            |{"id":"2","name":"\\N"}
+            |{"id":"3","name":"Alice"}
+            |""".stripMargin
+        )
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_null
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON, NULL_IF = ('NULL', '\\N'))
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_null ORDER BY id"),
+          Seq(Row(1, null), Row(2, null), Row(3, "Alice")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_null")
+  }
+
+  test("COPY INTO: JSON export") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_export")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_export (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_json_export VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withJsonDir {
+      dir =>
+        val outputPath = new File(dir, "output").getAbsolutePath
+
+        val result = spark.sql(s"""COPY INTO '$outputPath'
+                                  |FROM $dbName0.copy_json_export
+                                  |FILE_FORMAT = (TYPE = JSON)
+                                  |""".stripMargin)
+
+        val row = result.collect()(0)
+        assert(row.getString(0) == outputPath)
+        assert(row.getLong(2) == 2L)
+
+        val exported = spark.read.json(outputPath)
+        assert(exported.count() == 2)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_export")
+  }
+
+  test("COPY INTO: JSON rejects CSV-only options") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_bad_opt")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_bad_opt (id INT)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(dir, "data.json", """{"id":"1"}""")
+
+        val e = intercept[Exception] {
+          spark.sql(s"""COPY INTO $dbName0.copy_json_bad_opt
+                       |FROM '${dir.getAbsolutePath}'
+                       |FILE_FORMAT = (TYPE = JSON, FIELD_DELIMITER = ',')
+                       |""".stripMargin)
+        }
+        assert(e.getMessage.contains("Unsupported FILE_FORMAT options"))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_bad_opt")
+  }
+
+  test("COPY INTO: JSON with date and timestamp columns") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_date")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_date (id INT, dt DATE, ts TIMESTAMP)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","dt":"2024-01-15","ts":"2024-01-15T10:30:00"}
+            |{"id":"2","dt":"2024-06-20","ts":"2024-06-20T14:45:30"}
+            |""".stripMargin
+        )
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_date
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        val rows = spark.sql(s"SELECT * FROM $dbName0.copy_json_date ORDER BY id").collect()
+        assert(rows.length == 2)
+        assert(rows(0).getInt(0) == 1)
+        assert(rows(0).getDate(1).toString == "2024-01-15")
+        assert(rows(1).getInt(0) == 2)
+        assert(rows(1).getDate(1).toString == "2024-06-20")
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_date")
+  }
+
+  test("COPY INTO: JSON rows_loaded count is accurate") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_count")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_count (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice"}
+            |{"id":"2","name":"Bob"}
+            |{"id":"3","name":"Charlie"}
+            |""".stripMargin
+        )
+
+        val result = spark.sql(s"""COPY INTO $dbName0.copy_json_count
+                                  |FROM '${dir.getAbsolutePath}'
+                                  |FILE_FORMAT = (TYPE = JSON)
+                                  |""".stripMargin)
+
+        val rows = result.collect()
+        assert(rows.length == 1)
+        assert(rows(0).getString(1) == "LOADED")
+        assert(rows(0).getLong(2) == 3L)
+        assert(rows(0).getLong(3) == 3L)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_count")
+  }
+
+  test("COPY INTO: JSON export then import round-trip") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_rt_dst")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_rt_src (id INT, name STRING, score DOUBLE)")
+    spark.sql(s"INSERT INTO $dbName0.copy_json_rt_src VALUES (1, 'Alice', 95.5), (2, 'Bob', 87.3)")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_rt_dst (id INT, name STRING, score DOUBLE)")
+
+    withJsonDir {
+      dir =>
+        val exportPath = new File(dir, "exported").getAbsolutePath
+
+        spark.sql(s"""COPY INTO '$exportPath'
+                     |FROM $dbName0.copy_json_rt_src
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_rt_dst
+                     |FROM '$exportPath'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |PATTERN = '.*\\.json'
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_rt_dst ORDER BY id"),
+          Seq(Row(1, "Alice", 95.5), Row(2, "Bob", 87.3)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_rt_dst")
+  }
+
+  test("COPY INTO: JSON extra fields are ignored") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_extra")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_extra (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice","extra_field":"ignored","another":"also_ignored"}
+            |{"id":"2","name":"Bob","extra_field":"ignored2"}
+            |""".stripMargin
+        )
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_extra
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_extra ORDER BY id"),
+          Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_extra")
+  }
+
+  test("COPY INTO: JSON missing fields become null") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_missing")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_missing (id INT, name STRING, age INT)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice"}
+            |{"id":"2"}
+            |""".stripMargin
+        )
+
+        spark.sql(s"""COPY INTO $dbName0.copy_json_missing
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = JSON)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_json_missing ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, null, null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_missing")
+  }
+
+  test("COPY INTO: JSON malformed data fails with ABORT_STATEMENT") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_malformed")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_malformed (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(
+          dir,
+          "data.json",
+          """{"id":"1","name":"Alice"}
+            |{this is not valid json}
+            |""".stripMargin
+        )
+
+        intercept[Exception] {
+          spark.sql(s"""COPY INTO $dbName0.copy_json_malformed
+                       |FROM '${dir.getAbsolutePath}'
+                       |FILE_FORMAT = (TYPE = JSON)
+                       |""".stripMargin)
+        }
+        assert(spark.sql(s"SELECT * FROM $dbName0.copy_json_malformed").count() == 0)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_malformed")
+  }
+
+  test("COPY INTO: JSON bad cast fails with ABORT_STATEMENT") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_badcast")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_badcast (id INT, name STRING)")
+
+    withJsonDir {
+      dir =>
+        createJsonFile(dir, "data.json", """{"id":"not_a_number","name":"Alice"}""")
+
+        val e = intercept[Exception] {
+          spark.sql(s"""COPY INTO $dbName0.copy_json_badcast
+                       |FROM '${dir.getAbsolutePath}'
+                       |FILE_FORMAT = (TYPE = JSON)
+                       |""".stripMargin)
+        }
+        val msg = e.getMessage
+        assert(
+          msg.contains("Cast failure") ||
+            msg.contains("ABORT_STATEMENT") ||
+            msg.contains("CAST_INVALID_INPUT") ||
+            msg.contains("cannot be cast to") ||
+            e.getCause != null)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_badcast")
+  }
+
+  test("COPY INTO: JSON export with COMPRESSION") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_compress")
+    spark.sql(s"CREATE TABLE $dbName0.copy_json_compress (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_json_compress VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withJsonDir {
+      dir =>
+        val outputPath = new File(dir, "compressed").getAbsolutePath
+
+        val result = spark.sql(s"""COPY INTO '$outputPath'
+                                  |FROM $dbName0.copy_json_compress
+                                  |FILE_FORMAT = (TYPE = JSON, COMPRESSION = GZIP)
+                                  |OVERWRITE = TRUE
+                                  |""".stripMargin)
+
+        assert(result.collect()(0).getLong(2) == 2L)
+
+        val outputDir = new File(outputPath)
+        val gzFiles = outputDir.listFiles().filter(_.getName.endsWith(".gz"))
+        assert(gzFiles.nonEmpty)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_json_compress")
+  }
+
   test("COPY INTO: case-insensitive column matching") {
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_case")
     spark.sql(s"CREATE TABLE $dbName0.copy_case (id INT, name STRING, age INT)")
@@ -663,5 +1082,344 @@ class CopyIntoTestBase extends PaimonSparkTestBase {
     }
 
     spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_case")
+  }
+
+  // ========== Parquet Tests ==========
+
+  protected def withParquetDir(testBody: File => Unit): Unit = {
+    val dir = Files.createTempDirectory("copy_into_parquet_test").toFile
+    try testBody(dir)
+    finally deleteRecursively(dir)
+  }
+
+  private def createParquetFile(
+      dir: File,
+      name: String,
+      data: Seq[Row],
+      schema: org.apache.spark.sql.types.StructType): Unit = {
+    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    df.coalesce(1).write.parquet(new File(dir, name).getAbsolutePath)
+  }
+
+  protected def createParquetSingleFile(
+      dir: File,
+      fileName: String,
+      data: Seq[Row],
+      schema: org.apache.spark.sql.types.StructType): Unit = {
+    val tmpDir = new File(dir, s"_tmp_$fileName")
+    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    df.coalesce(1).write.parquet(tmpDir.getAbsolutePath)
+    val partFile = tmpDir.listFiles().find(_.getName.endsWith(".parquet")).get
+    partFile.renameTo(new File(dir, fileName))
+    deleteRecursively(tmpDir)
+  }
+
+  test("COPY INTO: basic Parquet import") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_basic")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_basic (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType),
+            StructField("name", StringType),
+            StructField("age", IntegerType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_basic
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_basic ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_basic")
+  }
+
+  test("COPY INTO: Parquet column name matching ignores order") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_order")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_order (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("age", IntegerType),
+            StructField("name", StringType),
+            StructField("id", IntegerType)))
+        createParquetFile(dir, "data", Seq(Row(30, "Alice", 1), Row(25, "Bob", 2)), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_order
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_order ORDER BY id"),
+          Seq(Row(1, "Alice", 30), Row(2, "Bob", 25)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_order")
+  }
+
+  test("COPY INTO: Parquet with explicit column list") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_cols")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_cols (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice"), Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_cols (id, name)
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_cols ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, "Bob", null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_cols")
+  }
+
+  test("COPY INTO: Parquet export") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_export")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_export (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_parquet_export VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "output").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_export
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        val readBack = spark.read.parquet(outputPath)
+        checkAnswer(readBack.orderBy("id"), Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_export")
+  }
+
+  test("COPY INTO: Parquet export with COMPRESSION") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_compress")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_compress (id INT, name STRING)")
+    spark.sql(s"INSERT INTO $dbName0.copy_parquet_compress VALUES (1, 'Alice'), (2, 'Bob')")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "output").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_compress
+                     |FILE_FORMAT = (TYPE = PARQUET, COMPRESSION = GZIP)
+                     |""".stripMargin)
+
+        val readBack = spark.read.parquet(outputPath)
+        checkAnswer(readBack.orderBy("id"), Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_compress")
+  }
+
+  test("COPY INTO: Parquet export then import round-trip") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_dst")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_rt_src (id INT, name STRING, score DOUBLE)")
+    spark.sql(
+      s"INSERT INTO $dbName0.copy_parquet_rt_src VALUES (1, 'Alice', 95.5), (2, 'Bob', 87.3)")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_rt_dst (id INT, name STRING, score DOUBLE)")
+
+    withParquetDir {
+      dir =>
+        val outputPath = new File(dir, "export").getAbsolutePath
+        spark.sql(s"""COPY INTO '$outputPath'
+                     |FROM $dbName0.copy_parquet_rt_src
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_rt_dst
+                     |FROM '$outputPath'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_rt_dst ORDER BY id"),
+          Seq(Row(1, "Alice", 95.5), Row(2, "Bob", 87.3)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_src")
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_rt_dst")
+  }
+
+  test("COPY INTO: Parquet extra fields are ignored") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_extra")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_extra (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType),
+            StructField("name", StringType),
+            StructField("extra", StringType)))
+        createParquetFile(
+          dir,
+          "data",
+          Seq(Row(1, "Alice", "ignore"), Row(2, "Bob", "ignore")),
+          schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_extra
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_extra ORDER BY id"),
+          Seq(Row(1, "Alice"), Row(2, "Bob")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_extra")
+  }
+
+  test("COPY INTO: Parquet missing fields become null") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_missing")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_missing (id INT, name STRING, age INT)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice"), Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_missing
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_missing ORDER BY id"),
+          Seq(Row(1, "Alice", null), Row(2, "Bob", null)))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_missing")
+  }
+
+  test("COPY INTO: Parquet FORCE=FALSE skips already-loaded files") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_force")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_force (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_force
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |""".stripMargin)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_force
+                     |FROM '${dir.getAbsolutePath}/data'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |FORCE = FALSE
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_force ORDER BY id"),
+          Seq(Row(1, "Alice")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_force")
+  }
+
+  test("COPY INTO: Parquet PATTERN filters files") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_pattern")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_pattern (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetSingleFile(dir, "include_data.parquet", Seq(Row(1, "Alice")), schema)
+        createParquetSingleFile(dir, "exclude_data.parquet", Seq(Row(2, "Bob")), schema)
+
+        spark.sql(s"""COPY INTO $dbName0.copy_parquet_pattern
+                     |FROM '${dir.getAbsolutePath}'
+                     |FILE_FORMAT = (TYPE = PARQUET)
+                     |PATTERN = 'include.*'
+                     |""".stripMargin)
+
+        checkAnswer(
+          spark.sql(s"SELECT * FROM $dbName0.copy_parquet_pattern ORDER BY id"),
+          Seq(Row(1, "Alice")))
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_pattern")
+  }
+
+  test("COPY INTO: Parquet unsupported option errors") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_opt_err")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_opt_err (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(dir, "data", Seq(Row(1, "Alice")), schema)
+
+        intercept[IllegalArgumentException] {
+          spark.sql(s"""COPY INTO $dbName0.copy_parquet_opt_err
+                       |FROM '${dir.getAbsolutePath}/data'
+                       |FILE_FORMAT = (TYPE = PARQUET, FIELD_DELIMITER = ',')
+                       |""".stripMargin)
+        }
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_opt_err")
+  }
+
+  test("COPY INTO: Parquet rows_loaded count is accurate") {
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_count")
+    spark.sql(s"CREATE TABLE $dbName0.copy_parquet_count (id INT, name STRING)")
+
+    withParquetDir {
+      dir =>
+        import org.apache.spark.sql.types._
+        val schema =
+          StructType(Seq(StructField("id", IntegerType), StructField("name", StringType)))
+        createParquetFile(
+          dir,
+          "data",
+          Seq(Row(1, "Alice"), Row(2, "Bob"), Row(3, "Charlie")),
+          schema)
+
+        val result = spark.sql(s"""COPY INTO $dbName0.copy_parquet_count
+                                  |FROM '${dir.getAbsolutePath}/data'
+                                  |FILE_FORMAT = (TYPE = PARQUET)
+                                  |""".stripMargin)
+
+        val rows = result.collect()
+        val totalLoaded = rows.map(_.getLong(2)).sum
+        assert(totalLoaded == 3)
+    }
+
+    spark.sql(s"DROP TABLE IF EXISTS $dbName0.copy_parquet_count")
   }
 }

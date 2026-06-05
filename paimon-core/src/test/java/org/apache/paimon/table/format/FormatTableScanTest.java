@@ -238,6 +238,31 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
+    void testComputeScanPathWithDateEqualityFilter() {
+        Path tableLocation = new Path(tmpPath.toUri());
+        RowType datePartitionType = RowType.builder().field("dt", DataTypes.DATE()).build();
+        List<String> datePartitionKeys = datePartitionType.getFieldNames();
+
+        PredicateBuilder builder = new PredicateBuilder(datePartitionType);
+        Predicate equalityPredicate =
+                builder.equal(0, (int) java.time.LocalDate.parse("2026-05-01").toEpochDay());
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromPredicate(datePartitionType, equalityPredicate);
+
+        Pair<Path, Integer> result =
+                FormatTableScan.computeScanPathAndLevel(
+                        tableLocation,
+                        datePartitionKeys,
+                        partitionFilter,
+                        datePartitionType,
+                        enablePartitionValueOnly);
+        String partitionPath = enablePartitionValueOnly ? "2026-05-01" : "dt=2026-05-01";
+
+        assertThat(result.getLeft().toString()).isEqualTo(tableLocation + partitionPath);
+        assertThat(result.getRight()).isEqualTo(0);
+    }
+
+    @TestTemplate
     void testComputeScanPathWithFirstLevel() throws IOException {
         Path tableLocation = new Path(tmpPath.toUri());
         // Create equality predicate for only the first partition key
@@ -554,7 +579,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, equalityPredicate);
+                        partitionKeys, equalityPredicate, type);
 
         assertThat(result).hasSize(3);
         assertThat(result.get("year")).isEqualTo("2023");
@@ -581,7 +606,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
 
         assertThat(result).isNotNull();
         assertThat(result).hasSize(2);
@@ -609,7 +634,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
         assertThat(result).hasSize(1);
         assertThat(result.get("year")).isEqualTo("2023");
         assertThat(result.containsKey("month")).isFalse();
@@ -635,7 +660,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, mixedPredicate);
+                        partitionKeys, mixedPredicate, type);
 
         assertThat(result).isEmpty();
     }
@@ -656,7 +681,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, nonEqualityPredicate);
+                        partitionKeys, nonEqualityPredicate, type);
 
         assertThat(result).isEmpty();
     }
@@ -676,7 +701,7 @@ public class FormatTableScanTest {
 
         Map<String, String> result =
                 FormatTableScan.extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                        partitionKeys, orPredicate);
+                        partitionKeys, orPredicate, type);
 
         assertThat(result).isEmpty();
     }

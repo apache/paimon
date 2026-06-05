@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -33,15 +34,15 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.IOUtils;
 
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
-import static java.util.Collections.singletonList;
-import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextRead}. */
@@ -51,13 +52,24 @@ public class FullTextReadImpl implements FullTextRead {
     private final int limit;
     private final DataField textColumn;
     private final String queryText;
+    private final String queryOperator;
 
     public FullTextReadImpl(
             FileStoreTable table, int limit, DataField textColumn, String queryText) {
+        this(table, limit, textColumn, queryText, "or");
+    }
+
+    public FullTextReadImpl(
+            FileStoreTable table,
+            int limit,
+            DataField textColumn,
+            String queryText,
+            String queryOperator) {
         this.table = table;
         this.limit = limit;
         this.textColumn = textColumn;
         this.queryText = queryText;
+        this.queryOperator = queryOperator;
     }
 
     @Override
@@ -66,29 +78,33 @@ public class FullTextReadImpl implements FullTextRead {
             return GlobalIndexResult.createEmpty();
         }
 
-        Integer threadNum = table.coreOptions().globalIndexThreadNum();
-
         String indexType = splits.get(0).fullTextIndexFiles().get(0).indexType();
         GlobalIndexer globalIndexer =
                 GlobalIndexerFactoryUtils.load(indexType)
                         .create(textColumn, table.coreOptions().toConfiguration());
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
-        Iterator<Optional<ScoredGlobalIndexResult>> resultIterators =
-                randomlyExecuteSequentialReturn(
-                        split ->
-                                singletonList(
-                                        eval(
-                                                globalIndexer,
-                                                indexPathFactory,
-                                                split.rowRangeStart(),
-                                                split.rowRangeEnd(),
-                                                split.fullTextIndexFiles())),
-                        splits,
-                        threadNum);
+
+        int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
+        ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
+
+        List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
+                new ArrayList<>(splits.size());
+        for (FullTextSearchSplit split : splits) {
+            futures.add(
+                    eval(
+                            globalIndexer,
+                            indexPathFactory,
+                            split.rowRangeStart(),
+                            split.rowRangeEnd(),
+                            split.fullTextIndexFiles(),
+                            executor));
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-        while (resultIterators.hasNext()) {
-            Optional<ScoredGlobalIndexResult> next = resultIterators.next();
+        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
+            Optional<ScoredGlobalIndexResult> next = f.join();
             if (next.isPresent()) {
                 result = result.or(next.get());
             }
@@ -97,12 +113,13 @@ public class FullTextReadImpl implements FullTextRead {
         return result.topK(limit);
     }
 
-    private Optional<ScoredGlobalIndexResult> eval(
+    private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
             GlobalIndexer globalIndexer,
             IndexPathFactory indexPathFactory,
             long rowRangeStart,
             long rowRangeEnd,
-            List<IndexFileMeta> fullTextIndexFiles) {
+            List<IndexFileMeta> fullTextIndexFiles,
+            ExecutorService executor) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : fullTextIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -115,13 +132,12 @@ public class FullTextReadImpl implements FullTextRead {
         @SuppressWarnings("resource")
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList)) {
-            FullTextSearch fullTextSearch = new FullTextSearch(queryText, limit, textColumn.name());
-            return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                    .visitFullTextSearch(fullTextSearch);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        GlobalIndexReader reader =
+                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+        FullTextSearch fullTextSearch =
+                new FullTextSearch(queryText, limit, textColumn.name(), queryOperator);
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                .visitFullTextSearch(fullTextSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 }

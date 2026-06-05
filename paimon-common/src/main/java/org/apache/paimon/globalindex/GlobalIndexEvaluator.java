@@ -39,11 +39,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator implements Closeable {
@@ -51,16 +48,11 @@ public class GlobalIndexEvaluator implements Closeable {
     private final RowType rowType;
     private final IntFunction<Collection<GlobalIndexReader>> readersFunction;
     private final Map<Integer, Collection<GlobalIndexReader>> indexReadersCache;
-    private final ExecutorService executorService;
 
     public GlobalIndexEvaluator(
-            RowType rowType,
-            IntFunction<Collection<GlobalIndexReader>> readersFunction,
-            @Nullable ExecutorService executorService) {
+            RowType rowType, IntFunction<Collection<GlobalIndexReader>> readersFunction) {
         this.rowType = rowType;
         this.readersFunction = readersFunction;
-        this.executorService =
-                executorService == null ? newDirectExecutorService() : executorService;
         this.indexReadersCache = new ConcurrentHashMap<>();
     }
 
@@ -104,19 +96,7 @@ public class GlobalIndexEvaluator implements Closeable {
         List<CompletableFuture<Optional<GlobalIndexResult>>> readerFutures =
                 new ArrayList<>(readers.size());
         for (GlobalIndexReader reader : readers) {
-            readerFutures.add(
-                    CompletableFuture.supplyAsync(
-                            () -> {
-                                synchronized (reader) {
-                                    Optional<GlobalIndexResult> result =
-                                            predicate
-                                                    .function()
-                                                    .visit(reader, fieldRef, predicate.literals());
-                                    result.ifPresent(GlobalIndexResult::results);
-                                    return result;
-                                }
-                            },
-                            executorService));
+            readerFutures.add(predicate.function().visit(reader, fieldRef, predicate.literals()));
         }
 
         return CompletableFuture.allOf(readerFutures.toArray(new CompletableFuture[0]))
@@ -147,7 +127,10 @@ public class GlobalIndexEvaluator implements Closeable {
             CompoundPredicate predicate) {
         List<Predicate> children = flattenChildren(predicate);
         List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
-                children.stream().map(this::visitAsync).collect(Collectors.toList());
+                new ArrayList<>(children.size());
+        for (Predicate child : children) {
+            childFutures.add(visitAsync(child));
+        }
 
         return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
                 .thenApply(

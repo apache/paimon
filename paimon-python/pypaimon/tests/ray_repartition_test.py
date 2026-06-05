@@ -16,21 +16,25 @@
 # limitations under the License.
 ################################################################################
 
-"""End-to-end tests for HASH_FIXED auto-clustering on ``write_paimon``.
+"""End-to-end tests for HASH_FIXED Ray writes.
 
-For HASH_FIXED tables, ``write_paimon`` automatically pre-clusters rows
-by ``(partition_keys..., bucket)`` (matching Spark/Flink). These tests
-cover:
+For append-only HASH_FIXED tables, ``write_paimon`` writes rows to the
+correct bucket by default without pre-clustering. HASH_FIXED
+primary-key tables fail fast unless the legacy ``map_groups`` mode is
+explicitly selected. These tests cover:
 
-  * roundtrip correctness on a HASH_FIXED PK table.
+  * default roundtrip correctness on an append-only HASH_FIXED table.
+  * default fail-fast behaviour on a HASH_FIXED PK table.
   * roundtrip correctness on a partitioned HASH_FIXED PK table.
-  * the transient bucket column is stripped from the sink-visible
-    schema.
-  * the output is one file per (partition, bucket) — i.e. the
-    small-file storm is eliminated.
+  * explicit ``map_groups`` mode strips the transient bucket column
+    from the sink-visible schema.
+  * explicit ``map_groups`` mode can produce one file per
+    (partition, bucket) on the small test dataset.
   * regression: a table whose schema already contains a column named
     ``__paimon_bucket__`` still works (collision-safe column name).
-  * non-HASH_FIXED tables (BUCKET_UNAWARE etc.) pass through unchanged.
+  * non-HASH_FIXED append-only tables pass through unchanged.
+  * dynamic-bucket primary-key tables fail fast, while postpone-bucket
+    primary-key tables pass through.
 """
 
 import glob
@@ -114,19 +118,18 @@ class RayShuffleTest(unittest.TestCase):
             ))
         return files
 
-    # ----- HASH_FIXED auto-clustering -----
+    # ----- HASH_FIXED writes -----
 
-    def test_fixed_bucket_roundtrip(self):
+    def test_append_only_fixed_bucket_roundtrip(self):
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
-            pa.field('id', pa.int32(), nullable=False),
+            ('id', pa.int32()),
             ('name', pa.string()),
         ])
-        table_name = 'test_fixed_bucket_roundtrip'
+        table_name = 'test_append_only_fixed_bucket_roundtrip'
         identifier = self._make_table(
-            table_name, pa_schema,
-            primary_keys=['id'], options={'bucket': '4'},
+            table_name, pa_schema, options={'bucket': '4'},
         )
 
         rows = pa.Table.from_pydict(
@@ -140,6 +143,131 @@ class RayShuffleTest(unittest.TestCase):
         self.assertEqual(len(result), 40)
         self.assertEqual(set(result['id']), set(range(40)))
         self.assertNotIn('__paimon_bucket__', result.columns)
+
+    def test_primary_key_fixed_bucket_default_fails_fast(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_pk_fixed_bucket_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id'], options={'bucket': '4'},
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        with self.assertRaisesRegex(ValueError, "HASH_FIXED primary-key"):
+            write_paimon(ds, identifier, self.catalog_options)
+
+    def test_table_write_ray_primary_key_fixed_bucket_default_fails_fast(self):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_table_write_ray_pk_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id'], options={'bucket': '4'},
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        catalog = CatalogFactory.create(self.catalog_options)
+        table = catalog.get_table(identifier)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            with self.assertRaisesRegex(ValueError, "HASH_FIXED primary-key"):
+                writer.write_ray(ds)
+        finally:
+            writer.close()
+
+    def test_primary_key_dynamic_bucket_default_fails_fast(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_pk_dynamic_bucket_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
+            write_paimon(ds, identifier, self.catalog_options)
+
+    def test_table_write_ray_primary_key_dynamic_bucket_default_fails_fast(self):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_table_write_ray_pk_dynamic_default_fails_fast'
+        identifier = self._make_table(
+            table_name, pa_schema, primary_keys=['id'],
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        catalog = CatalogFactory.create(self.catalog_options)
+        table = catalog.get_table(identifier)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
+                writer.write_ray(ds)
+        finally:
+            writer.close()
+
+    def test_primary_key_postpone_bucket_roundtrip_to_postpone_files(self):
+        from pypaimon.ray import write_paimon
+
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('dt', pa.string()),
+            ('value', pa.int64()),
+        ])
+        table_name = 'test_pk_postpone_bucket_ray_write'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id', 'dt'], partition_keys=['dt'],
+            options={'bucket': '-2'},
+        )
+
+        rows = pa.Table.from_pydict({
+            'id': list(range(10)),
+            'dt': ['2026-01-01'] * 5 + ['2026-01-02'] * 5,
+            'value': list(range(10)),
+        }, schema=pa_schema)
+        write_paimon(
+            ray.data.from_arrow(rows).repartition(2),
+            identifier,
+            self.catalog_options,
+        )
+
+        files = self._count_data_files(table_name)
+        self.assertGreater(len(files), 0)
+        self.assertTrue(all('/bucket-postpone/' in path for path in files))
+        self.assertEqual(len(self._read_table(identifier)), 0)
 
     def test_partitioned_fixed_bucket_roundtrip(self):
         """Partitioned table — confirms the post-groupby schema does not
@@ -164,16 +292,50 @@ class RayShuffleTest(unittest.TestCase):
             'value': list(range(20)),
         }, schema=pa_schema)
         ds = ray.data.from_arrow(rows).repartition(4)
-        write_paimon(ds, identifier, self.catalog_options)
+        write_paimon(
+            ds,
+            identifier,
+            self.catalog_options,
+            hash_fixed_precluster="map_groups",
+        )
 
         result = self._read_table(identifier)
         self.assertEqual(set(result.columns), {'id', 'dt', 'value'})
         self.assertEqual(len(result), 20)
         self.assertEqual(set(result['dt']), {'2026-01-01', '2026-01-02'})
 
+    def test_table_write_ray_primary_key_fixed_bucket_map_groups_roundtrip(self):
+        pa_schema = pa.schema([
+            pa.field('id', pa.int32(), nullable=False),
+            ('name', pa.string()),
+        ])
+        table_name = 'test_table_write_ray_pk_map_groups'
+        identifier = self._make_table(
+            table_name, pa_schema,
+            primary_keys=['id'], options={'bucket': '4'},
+        )
+
+        rows = pa.Table.from_pydict(
+            {'id': list(range(40)), 'name': [f'v{i}' for i in range(40)]},
+            schema=pa_schema,
+        )
+        ds = ray.data.from_arrow(rows).repartition(4)
+
+        catalog = CatalogFactory.create(self.catalog_options)
+        table = catalog.get_table(identifier)
+        writer = table.new_batch_write_builder().new_write()
+        try:
+            writer.write_ray(ds, hash_fixed_precluster="map_groups")
+        finally:
+            writer.close()
+
+        result = self._read_table(identifier)
+        self.assertEqual(len(result), 40)
+        self.assertEqual(set(result['id']), set(range(40)))
+
     def test_fixed_bucket_writes_one_file_per_bucket(self):
-        """With multiple input blocks, auto-clustering collapses per-task
-        files into per-bucket files."""
+        """With multiple input blocks, explicit map_groups clustering
+        collapses per-task files into per-bucket files."""
         from pypaimon.ray import write_paimon
 
         pa_schema = pa.schema([
@@ -190,11 +352,12 @@ class RayShuffleTest(unittest.TestCase):
             primary_keys=['id'], options={'bucket': '4'},
         )
 
-        # Materialise 4 input blocks. Without auto-clustering each task
-        # would emit one file per bucket it touched (up to 16 files).
+        # Materialise 4 input blocks. Without the explicit map_groups
+        # mode, each task would emit one file per bucket it touched.
         write_paimon(
             ray.data.from_arrow(rows).repartition(4),
             identifier, self.catalog_options,
+            hash_fixed_precluster="map_groups",
         )
 
         files = self._count_data_files('test_one_file_per_bucket')
@@ -223,7 +386,12 @@ class RayShuffleTest(unittest.TestCase):
             schema=pa_schema,
         )
         ds = ray.data.from_arrow(rows).repartition(2)
-        write_paimon(ds, identifier, self.catalog_options)
+        write_paimon(
+            ds,
+            identifier,
+            self.catalog_options,
+            hash_fixed_precluster="map_groups",
+        )
 
         result = self._read_table(identifier)
         self.assertEqual(len(result), 10)

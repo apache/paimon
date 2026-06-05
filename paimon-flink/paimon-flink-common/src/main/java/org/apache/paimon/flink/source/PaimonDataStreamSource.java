@@ -84,7 +84,6 @@ public class PaimonDataStreamSource<T, SplitT extends SourceSplit, CheckpointT>
 
     @Override
     public LineageVertex getLineageVertex() {
-        return LineageUtils.sourceLineageVertex(
-                table.fullName(), getBoundedness() == Boundedness.BOUNDED, table);
+        return LineageUtils.sourceLineageVertex(getBoundedness() == Boundedness.BOUNDED, table);
     }
 }

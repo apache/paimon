@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.sink.PaimonDiscardingSink;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
@@ -26,8 +27,10 @@ import org.apache.paimon.flink.source.PaimonDataStreamSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.IntType;
@@ -82,6 +85,24 @@ class LineageUtilsTest {
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
     }
 
+    private FileStoreTable createTableWithCatalogOptions(Map<String, String> catalogOptions)
+            throws Exception {
+        FileStoreTable table =
+                createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
+        CatalogEnvironment catalogEnvironment =
+                new CatalogEnvironment(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        CatalogContext.create(Options.fromMap(catalogOptions)),
+                        false,
+                        false);
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(), tablePath, table.schema(), catalogEnvironment);
+    }
+
     @Test
     void testGetNamespace() throws Exception {
         FileStoreTable table =
@@ -121,6 +142,28 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testSourceLineageVertexKeepsProvidedNameWhenCatalogKeyExists() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        SourceLineageVertex vertex = LineageUtils.sourceLineageVertex("paimon.db.src", true, table);
+
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon.db.src");
+    }
+
+    @Test
+    void testDataStreamSourceLineageVertexUsesCatalogKey() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        SourceLineageVertex vertex = LineageUtils.sourceLineageVertex(true, table);
+
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("jdbc-warehouse." + table.fullName());
+    }
+
+    @Test
     void testSinkLineageVertex() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
@@ -133,6 +176,17 @@ class LineageUtilsTest {
         LineageDataset dataset = vertex.datasets().get(0);
         assertThat(dataset.name()).isEqualTo("paimon.db.sink");
         assertThat(dataset.namespace()).startsWith("paimon://");
+    }
+
+    @Test
+    void testDataStreamSinkLineageVertexUsesCatalogKey() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        LineageVertex vertex = LineageUtils.sinkLineageVertex(table);
+
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("jdbc-warehouse." + table.fullName());
     }
 
     @Test

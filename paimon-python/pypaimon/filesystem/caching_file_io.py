@@ -31,7 +31,7 @@ import threading
 from collections import OrderedDict
 from typing import Optional
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.utils.file_type import FileType
 
 
@@ -202,6 +202,8 @@ class CachingInputStream:
         self._file_size = -1
         self._cache = cache
         self._pos = 0
+        self._io_lock = threading.Lock()
+        self._remote_supports_pread = None
 
     def _get_file_size(self) -> int:
         if self._file_size == -1:
@@ -249,6 +251,28 @@ class CachingInputStream:
         self._pos = end
         return bytes(result)
 
+    def read_at(self, nbytes: int, offset: int) -> bytes:
+        """Position-based read. Does not change the cursor. Thread-safe."""
+        if nbytes <= 0 or offset >= self._get_file_size():
+            return b''
+
+        end = min(offset + nbytes, self._get_file_size())
+        block_size = self._cache.block_size
+
+        first_block = offset // block_size
+        last_block = (end - 1) // block_size
+
+        result = bytearray()
+        for bi in range(first_block, last_block + 1):
+            block_data = self._read_block(bi)
+
+            block_start = bi * block_size
+            start_in_block = max(offset - block_start, 0)
+            end_in_block = min(end - block_start, len(block_data))
+            result.extend(block_data[start_in_block:end_in_block])
+
+        return bytes(result)
+
     def _read_block(self, block_index: int) -> bytes:
         cached = self._cache.get_block(self._file_path, block_index)
         if cached is not None:
@@ -258,12 +282,19 @@ class CachingInputStream:
         offset = block_index * block_size
         read_size = min(block_size, self._get_file_size() - offset)
 
-        stream = self._get_remote_stream()
-        stream.seek(offset)
-        data = self._read_fully(stream, read_size)
-
+        data = self._read_remote(offset, read_size)
         self._cache.put_block(self._file_path, block_index, data)
         return data
+
+    def _read_remote(self, offset: int, size: int) -> bytes:
+        stream = self._get_remote_stream()
+        if self._remote_supports_pread is None:
+            self._remote_supports_pread = supports_pread(stream)
+        if self._remote_supports_pread:
+            return pread(stream, size, offset)
+        with self._io_lock:
+            stream.seek(offset)
+            return self._read_fully(stream, size)
 
     def _read_fully(self, stream, size: int) -> bytes:
         buf = bytearray()
@@ -356,6 +387,10 @@ class CachingFileIO(FileIO):
             return file_io
         return CachingFileIO(file_io, cache, whitelist)
 
+    @property
+    def properties(self):
+        return self._delegate.properties
+
     def new_input_stream(self, path: str):
         file_type = FileType.classify(path)
         if self._cache is None or file_type not in self._whitelist or FileType.is_mutable(path):
@@ -411,8 +446,14 @@ class CachingFileIO(FileIO):
     def write_blob(self, *args, **kwargs):
         return self._delegate.write_blob(*args, **kwargs)
 
+    def write_mosaic(self, *args, **kwargs):
+        return self._delegate.write_mosaic(*args, **kwargs)
+
     def write_vortex(self, *args, **kwargs):
         return self._delegate.write_vortex(*args, **kwargs)
+
+    def write_row(self, *args, **kwargs):
+        return self._delegate.write_row(*args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._delegate, name)

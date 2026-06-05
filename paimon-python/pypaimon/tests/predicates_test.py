@@ -23,6 +23,7 @@ import unittest
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.dataset as ds
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
@@ -462,6 +463,13 @@ class PredicateTest(unittest.TestCase):
         self.assertFalse(predicate.test(OffsetRow([5], 0, 1)))
         self.assertFalse(predicate.test(OffsetRow([3], 0, 1)))
         self.assertFalse(predicate.test(OffsetRow([None], 0, 1)))
+
+    def test_not_in_arrow_filter_excludes_nulls(self):
+        predicate = Predicate(method='notIn', index=0, field='val', literals=[1, 2])
+        table = pa.table({"val": [None, 1, 3]})
+        scanner = ds.InMemoryDataset(table).scanner(filter=predicate.to_arrow())
+
+        self.assertEqual(scanner.to_table().to_pydict(), {"val": [3]})
 
     def test_pk_reader_with_filter(self):
         pa_schema = pa.schema([

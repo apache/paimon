@@ -73,7 +73,7 @@ public class FlinkFormatTableDataStreamSink {
 
         @Override
         public LineageVertex getLineageVertex() {
-            return LineageUtils.sinkLineageVertex(table.fullName(), table);
+            return LineageUtils.sinkLineageVertex(table);
         }
 
         /**

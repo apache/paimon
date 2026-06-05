@@ -31,6 +31,7 @@ import org.apache.paimon.types.FloatType;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -75,7 +76,9 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
 
     @Override
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
         return new TestVectorGlobalIndexReader(fileReader, files.get(0), metric);
     }

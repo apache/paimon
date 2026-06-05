@@ -18,4 +18,21 @@
 
 package org.apache.paimon.spark.sql
 
-class RowTrackingTest extends RowTrackingTestBase {}
+import org.apache.paimon.spark.SparkTable
+
+import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations
+
+class RowTrackingTest extends RowTrackingTestBase {
+
+  test("Row Tracking: Spark 3.5 keeps row-tracking tables on V1 DML path") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      withTable("t", "rt") {
+        sql("CREATE TABLE t (id INT, data INT)")
+        assert(SparkTable.of(loadTable("t")).isInstanceOf[SupportsRowLevelOperations])
+
+        sql("CREATE TABLE rt (id INT, data INT) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        assert(!SparkTable.of(loadTable("rt")).isInstanceOf[SupportsRowLevelOperations])
+      }
+    }
+  }
+}

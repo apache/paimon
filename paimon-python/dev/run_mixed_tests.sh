@@ -373,6 +373,11 @@ run_tantivy_fulltext_test() {
         return 1
     fi
     cd "$PAIMON_PYTHON_DIR"
+    echo "Installing Python jieba tokenizer dependency for Tantivy jieba index reads..."
+    if ! python -m pip install 'jieba>=0.42,<1'; then
+        echo -e "${RED}✗ Failed to install jieba${NC}"
+        return 1
+    fi
     echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_tantivy_full_text_index -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
@@ -612,6 +617,48 @@ run_py_variant_write_java_read_test() {
     fi
 }
 
+# Function to run ROW format test (Java write, Python read, Python write, Java read)
+run_row_format_test() {
+    echo -e "${YELLOW}=== Running ROW Format Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testJavaWriteRowAppendTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteRowAppendTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java ROW write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java ROW write test completed successfully${NC}"
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_row_append_table..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_row_append_table -v; then
+        echo -e "${RED}✗ Python ROW read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ROW read test completed successfully${NC}"
+
+    echo ""
+
+    echo "Running Python test for JavaPyReadWriteTest.test_py_write_row_append_table..."
+    if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_py_write_row_append_table -v; then
+        echo -e "${RED}✗ Python ROW write test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Python ROW write test completed successfully${NC}"
+
+    echo ""
+
+    cd "$PROJECT_ROOT"
+    echo "Running Maven test for JavaPyE2ETest.testReadRowAppendTable..."
+    if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadRowAppendTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${RED}✗ Java ROW read test failed${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Java ROW read test completed successfully${NC}"
+    return 0
+}
+
 # Main execution
 main() {
     local java_write_result=0
@@ -635,6 +682,7 @@ main() {
     local multi_vector_dedicated_py_write_result=0
     local java_variant_write_py_read_result=0
     local py_variant_write_java_read_result=0
+    local row_format_result=0
 
     # Detect Python version
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
@@ -815,6 +863,13 @@ main() {
 
     echo ""
 
+    # Run ROW format test (Java write + Python read + Python write + Java read)
+    if ! run_row_format_test; then
+        row_format_result=1
+    fi
+
+    echo ""
+
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
@@ -943,12 +998,18 @@ main() {
         echo -e "${RED}✗ VARIANT Type Test (Python Write, Java Read): FAILED${NC}"
     fi
 
+    if [[ $row_format_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ ROW Format Test (Java Write ↔ Python Read/Write): PASSED${NC}"
+    else
+        echo -e "${RED}✗ ROW Format Test (Java Write ↔ Python Read/Write): FAILED${NC}"
+    fi
+
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

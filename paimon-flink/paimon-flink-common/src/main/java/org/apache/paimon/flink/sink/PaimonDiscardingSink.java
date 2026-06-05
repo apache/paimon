@@ -41,6 +41,6 @@ public class PaimonDiscardingSink<T> extends DiscardingSink<T> implements Lineag
 
     @Override
     public LineageVertex getLineageVertex() {
-        return LineageUtils.sinkLineageVertex(table.fullName(), table);
+        return LineageUtils.sinkLineageVertex(table);
     }
 }

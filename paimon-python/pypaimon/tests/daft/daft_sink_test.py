@@ -303,6 +303,28 @@ def test_write_paimon_invalid_mode(append_only_table):
         _write_table(df, table, mode="upsert")
 
 
+def test_write_paimon_sink_serializes_without_file_io(append_only_table):
+    """PaimonDataSink should not pickle table FileIO objects."""
+    from daft.pickle import dumps, loads
+
+    class Unpicklable:
+        def __reduce__(self):
+            raise TypeError("file io marker should not be serialized")
+
+    table, _ = append_only_table
+    table.file_io._unpicklable_marker = Unpicklable()
+    sink = PaimonDataSink(table, mode="overwrite")
+    commit_user = sink._write_builder.commit_user
+
+    restored = loads(dumps(sink))
+
+    assert restored.name() == sink.name()
+    assert restored._mode == "overwrite"
+    assert restored._write_builder.commit_user == commit_user
+    assert restored._write_builder.static_partition == {}
+    assert restored._table.identifier.get_full_name() == table.identifier.get_full_name()
+
+
 def test_write_paimon_rejects_extra_columns(local_paimon_catalog):
     """Extra input columns should fail instead of being silently dropped."""
     catalog, _ = local_paimon_catalog

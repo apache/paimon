@@ -166,7 +166,6 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
         .option("bucket", "-1")
         .option("target-file-size", "256MB")
         .option("write.merge-schema", "true")
-        .option("write.merge-schema.explicit-cast", "true")
         .saveAsTable("test_ctas")
 
       val paimonTable = loadTable("test_ctas")
@@ -179,7 +178,6 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
       // non-core options should not be here.
       Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
-      Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
     }
   }
 
@@ -597,6 +595,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .format("paimon")
                   .mode("append")
                   .option("write.merge-schema", "true")
+                  .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected3 = if (hasPk) {
                   Row(1L, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
@@ -641,6 +640,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .format("paimon")
                   .mode("append")
                   .option("write.merge-schema", "true")
+                  .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected4 =
                   expected3 ++ Seq(Row(99L, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
@@ -712,19 +712,21 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
               "c",
               "d")
 
-            // throw UnsupportedOperationException if write.merge-schema.explicit-cast = false
+            // throw UnsupportedOperationException when type-widening is on but explicit-cast = false
             assertThrows[UnsupportedOperationException] {
               df3.write
                 .format("paimon")
                 .mode("append")
                 .option("write.merge-schema", "true")
+                .option("write.merge-schema.type-widening", "true")
                 .save(location)
             }
-            // merge schema and write data when write.merge-schema.explicit-cast = true
+            // merge schema and write data when type-widening + explicit-cast = true
             df3.write
               .format("paimon")
               .mode("append")
               .option("write.merge-schema", "true")
+              .option("write.merge-schema.type-widening", "true")
               .option("write.merge-schema.explicit-cast", "true")
               .save(location)
             val expected3 = if (hasPk) {
@@ -864,56 +866,50 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon Schema Evolution: some columns is absent in the coming data") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, b STRING)")
 
-    spark.sql(s"""
-                 |CREATE TABLE T (a INT, b STRING)
-                 |""".stripMargin)
+      val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
+      df1.write.format("paimon").mode("append").saveAsTable("T")
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY a, b"),
+        Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
 
-    val paimonTable = loadTable("T")
-    val location = paimonTable.location().toString
+      // Case 1: two additional fields: DoubleType and TimestampType
+      val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
+      val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
+        .toDF("a", "b", "c", "d")
+      df2.write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("T")
 
-    val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
-    df1.write.format("paimon").mode("append").save(location)
-    checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY a, b"),
-      Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
-
-    // Case 1: two additional fields: DoubleType and TimestampType
-    val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
-    val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
-      .toDF("a", "b", "c", "d")
-    df2.write
-      .format("paimon")
-      .mode("append")
-      .option("write.merge-schema", "true")
-      .save(location)
-
-    // Case 2: colum b and d are absent in the coming data
-    val df3 = Seq((4, 45.6d), (5, 56.7d))
-      .toDF("a", "c")
-    df3.write
-      .format("paimon")
-      .mode("append")
-      .option("write.merge-schema", "true")
-      .save(location)
-    val expected3 =
-      Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
-        2,
-        "2023-08-02",
-        null,
-        null) :: Row(3, "2023-08-03", 34.5d, ts) :: Row(4, null, 45.6d, null) :: Row(
-        5,
-        null,
-        56.7d,
-        null) :: Nil
-    checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+      // Case 2: column b and d are absent in the coming data
+      val df3 = Seq((4, 45.6d), (5, 56.7d))
+        .toDF("a", "c")
+      df3.write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("T")
+      val expected3 =
+        Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
+          2,
+          "2023-08-02",
+          null,
+          null) :: Row(3, "2023-08-03", 34.5d, ts) :: Row(4, null, 45.6d, null) :: Row(
+          5,
+          null,
+          56.7d,
+          null) :: Nil
+      checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+    }
   }
 
   test("Paimon write merge-schema conflict: deep nested array element bigint -> string") {
     for (useV2Write <- Seq("true", "false")) {
-      withSparkSQLConf(
-        "spark.paimon.write.use-v2-write" -> useV2Write,
-        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
         withTable("target") {
           sql("""
                 |CREATE TABLE target (
@@ -953,9 +949,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
   test("Paimon write merge-schema conflict: top-level same-name column string vs bigint") {
     for (useV2Write <- Seq("true", "false")) {
-      withSparkSQLConf(
-        "spark.paimon.write.use-v2-write" -> useV2Write,
-        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
         withTable("target") {
           sql("CREATE TABLE target (id STRING, value BIGINT) USING paimon")
           sql("INSERT INTO target VALUES ('r0', 1000L)")

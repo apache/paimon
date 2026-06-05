@@ -393,6 +393,16 @@ class LocalFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
+    def write_mosaic(self, path: str, data: pyarrow.Table, **kwargs):
+        try:
+            import mosaic
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as f:
+                mosaic.write_table(data, f)
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e
+
     def write_vortex(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import vortex
@@ -411,6 +421,27 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
+
+    def write_row(self, path: str, data: pyarrow.Table, fields=None, zstd_level: int = 1, **kwargs):
+        try:
+            from pypaimon.write.writer.format_row_writer import FormatRowWriter
+            from pypaimon.schema.data_types import PyarrowFieldParser
+
+            if fields is None:
+                fields = PyarrowFieldParser.to_paimon_schema(data.schema)
+
+            file_path = self._to_file(path)
+            parent = file_path.parent
+            if parent and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+
+            with open(file_path, 'wb') as output_stream:
+                writer = FormatRowWriter(output_stream, fields, zstd_level=zstd_level)
+                writer.write_table(data)
+                writer.close()
+        except Exception as e:
+            self.delete_quietly(path)
+            raise RuntimeError(f"Failed to write row file {path}: {e}") from e
 
     def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:

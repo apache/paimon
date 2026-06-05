@@ -115,7 +115,9 @@ class PaimonCatalog(Catalog):
             raise NotFoundError(f"Namespace '{db_name}' not found.") from ex
 
     def _drop_table(self, ident: Identifier) -> None:
-        paimon_ident = _to_paimon_ident(ident)
+        paimon_ident = _to_paimon_table_ident(ident)
+        if paimon_ident is None:
+            raise NotFoundError(f"Table '{ident}' not found.")
         try:
             self._inner.drop_table(paimon_ident, ignore_if_not_exists=False)
         except TableNotExistException as ex:
@@ -134,7 +136,9 @@ class PaimonCatalog(Catalog):
             return False
 
     def _has_table(self, ident: Identifier) -> bool:
-        paimon_ident = _to_paimon_ident(ident)
+        paimon_ident = _to_paimon_table_ident(ident)
+        if paimon_ident is None:
+            return False
         try:
             self._inner.get_table(paimon_ident)
             return True
@@ -149,7 +153,9 @@ class PaimonCatalog(Catalog):
         raise NotFoundError(f"Function '{ident}' not found in catalog '{self.name}'")
 
     def _get_table(self, ident: Identifier) -> PaimonTable:
-        paimon_ident = _to_paimon_ident(ident)
+        paimon_ident = _to_paimon_table_ident(ident)
+        if paimon_ident is None:
+            raise NotFoundError(f"Table '{ident}' not found.")
         try:
             inner = self._inner.get_table(paimon_ident)
             return PaimonTable(inner, catalog_options=self._catalog_options)
@@ -216,6 +222,29 @@ class PaimonTable(Table):
         Table._validate_options("Paimon read", options, set())
         return _read_table(self._inner, catalog_options=self._catalog_options)
 
+    def explain_scan(
+        self,
+        *,
+        filters: Any = None,
+        partition_filters: Any = None,
+        columns: list[str] | None = None,
+        limit: int | None = None,
+        io_config=None,
+        verbose: bool = False,
+    ) -> Any:
+        from pypaimon.daft.daft_paimon import _explain_table
+
+        return _explain_table(
+            self._inner,
+            catalog_options=self._catalog_options,
+            filters=filters,
+            partition_filters=partition_filters,
+            columns=columns,
+            limit=limit,
+            io_config=io_config,
+            verbose=verbose,
+        )
+
     def append(self, df: DataFrame, **options: Any) -> None:
         from pypaimon.daft.daft_paimon import _write_table
 
@@ -250,7 +279,7 @@ class PaimonTable(Table):
 def _to_paimon_ident(ident: Identifier) -> str:
     """Convert a Daft identifier to a pypaimon identifier string.
 
-    - 1 part  (table,)              -> 'table'
+    - 1 part  (namespace/table,)    -> 'namespace_or_table'
     - 2 parts (db, table)           -> 'db.table'
     - 3 parts (catalog, db, table)  -> 'db.table'  (catalog prefix stripped)
     """
@@ -261,6 +290,18 @@ def _to_paimon_ident(ident: Identifier) -> str:
         if len(parts) == 2:
             return f"{parts[0]}.{parts[1]}"
         return str(parts[0])
+    return ident
+
+
+def _to_paimon_table_ident(ident: Identifier) -> str | None:
+    """Convert a Daft table identifier to Paimon's required db.table form."""
+    if isinstance(ident, Identifier):
+        parts = tuple(ident)
+        if len(parts) == 3:
+            return f"{parts[1]}.{parts[2]}"
+        if len(parts) == 2:
+            return f"{parts[0]}.{parts[1]}"
+        return None
     return ident
 
 

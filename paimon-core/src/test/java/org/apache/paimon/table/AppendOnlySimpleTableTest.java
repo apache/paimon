@@ -77,6 +77,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchMergeHandler;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
@@ -85,6 +86,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -101,7 +103,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -319,7 +320,14 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     public void testDiscardDuplicateFilesMultiThread() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
-                        options -> options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true));
+                        options -> {
+                            options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true);
+                            options.set(CoreOptions.COMMIT_MAX_RETRIES, 50);
+                            options.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ofMillis(100));
+                            // Keep all snapshots so concurrent expiry does not race readers.
+                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1000);
+                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1000);
+                        });
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         List<List<CommitMessage>> messages = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
@@ -328,33 +336,43 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 messages.add(write.prepareCommit());
             }
         }
-        Runnable doCommit =
-                () -> {
-                    ThreadLocalRandom rnd = ThreadLocalRandom.current();
-                    for (int i = 0; i < 10; i++) {
-                        try (BatchTableCommit commit = writeBuilder.newCommit()) {
-                            commit.commit(messages.get(rnd.nextInt(messages.size())));
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                };
-
+        int commitThreadNum = 10;
+        int commitsPerThread = 10;
         Runnable asserter =
                 () -> {
                     List<Split> splits = table.newReadBuilder().newScan().plan().splits();
                     assertThat(splits.size()).isEqualTo(1);
-                    assertTrue(splits.get(0).convertToRawFiles().get().size() <= 10);
+                    assertThat(splits.get(0).convertToRawFiles().get().size())
+                            .isLessThanOrEqualTo(messages.size());
                 };
 
-        // test multiple threads
-        ExecutorService pool = Executors.newCachedThreadPool();
-        List<Future<?>> futures = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            futures.add(pool.submit(doCommit));
-        }
-        for (Future<?> future : futures) {
-            future.get();
+        ExecutorService pool = Executors.newFixedThreadPool(commitThreadNum);
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+            for (int thread = 0; thread < commitThreadNum; thread++) {
+                int threadId = thread;
+                futures.add(
+                        pool.submit(
+                                () -> {
+                                    for (int round = 0; round < commitsPerThread; round++) {
+                                        int messageIndex = (threadId + round) % messages.size();
+                                        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                                            commit.commit(messages.get(messageIndex));
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(
+                                                    String.format(
+                                                            "Failed to commit message %s in thread %s round %s.",
+                                                            messageIndex, threadId, round),
+                                                    e);
+                                        }
+                                    }
+                                }));
+            }
+            for (Future<?> future : futures) {
+                future.get();
+            }
+        } finally {
+            pool.shutdownNow();
         }
         asserter.run();
     }
@@ -1255,6 +1273,43 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
 
         // avoid unstable failure from `SimpleTableTestBase.after`.
+        Thread.sleep(1_000);
+    }
+
+    @Test
+    public void testLimitWithCloseableIterator() throws Exception {
+        RowType rowType = RowType.builder().field("id", DataTypes.INT()).build();
+        Consumer<Options> configure =
+                options -> {
+                    options.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
+                    options.set(WRITE_ONLY, true);
+                    options.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofMebiBytes(256));
+                };
+        FileStoreTable table = createUnawareBucketFileStoreTable(rowType, configure);
+
+        int rowCount = 5000;
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int i = 0; i < rowCount; i++) {
+            write.write(GenericRow.of(i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().withLimit(limit).plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger count = new AtomicInteger(0);
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                iterator.next();
+                count.incrementAndGet();
+            }
+        }
+        assertThat(count.get()).isEqualTo(limit);
+
         Thread.sleep(1_000);
     }
 

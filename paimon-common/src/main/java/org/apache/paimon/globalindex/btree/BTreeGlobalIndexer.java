@@ -32,6 +32,7 @@ import org.apache.paimon.utils.LazyField;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * The {@link GlobalIndexer} for btree index. We do not build a B-tree directly in memory, instead,
@@ -65,7 +66,6 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
     public BTreeGlobalIndexer(DataField dataField, Options options) {
         this.keySerializer = KeySerializer.create(dataField.type());
         this.options = options;
-        // todo: cacheManager can be null to disallow data cache.
         this.cacheManager =
                 new LazyField<>(
                         () ->
@@ -92,7 +92,10 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
 
     @Override
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new LazyFilteredBTreeReader(files, keySerializer, fileReader, cacheManager.get());
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            ExecutorService executor) {
+        return new LazyFilteredBTreeReader(
+                files, keySerializer, fileReader, cacheManager.get(), executor);
     }
 }

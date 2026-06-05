@@ -172,7 +172,15 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       val fileFormat = buildFileFormat(ctx.fileFormatClause())
       val pattern = Option(ctx.patternClause()).map(p => unquoteString(p.STRING().getText))
       val force = Option(ctx.forceClause()).exists(_.booleanValue().TRUE() != null)
-      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force)
+      val onError = Option(ctx.onErrorClause())
+        .map {
+          clause =>
+            if (clause.CONTINUE() != null) OnErrorMode.Continue
+            else if (clause.SKIP_FILE() != null) OnErrorMode.SkipFile
+            else OnErrorMode.AbortStatement
+        }
+        .getOrElse(OnErrorMode.AbortStatement)
+      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force, onError)
     }
 
   /** Create a COPY INTO LOCATION (export) logical command. */

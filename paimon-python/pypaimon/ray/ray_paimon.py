@@ -26,11 +26,25 @@ Usage::
     write_paimon(ds, "db.table", catalog_options={"warehouse": "/path"})
 """
 
-from typing import Any, Dict, List, Optional
-
-import ray.data
+import importlib
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
+
+if TYPE_CHECKING:
+    import ray.data
+
+
+def _require_ray_data():
+    try:
+        return importlib.import_module("ray.data")
+    except ModuleNotFoundError as e:
+        if e.name not in ("ray", "ray.data"):
+            raise
+        raise ImportError(
+            "PyPaimon Ray APIs require the 'ray' package. "
+            "Install it with: pip install pypaimon[ray]"
+        ) from e
 
 
 def read_paimon(
@@ -46,7 +60,7 @@ def read_paimon(
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
     **read_args,
-) -> ray.data.Dataset:
+) -> "ray.data.Dataset":
     """Read a Paimon table into a Ray Dataset.
 
     Args:
@@ -68,8 +82,11 @@ def read_paimon(
     Returns:
         A ``ray.data.Dataset`` containing the table data.
     """
+    ray_data = _require_ray_data()
+
     from pypaimon.read.datasource.ray_datasource import RayDatasource
     from pypaimon.read.datasource.split_provider import CatalogSplitProvider
+    from pypaimon.schema.data_types import PyarrowFieldParser
 
     if snapshot_id is not None and tag_name is not None:
         raise ValueError(
@@ -81,18 +98,29 @@ def read_paimon(
             "override_num_blocks must be at least 1, got {}".format(override_num_blocks)
         )
 
-    datasource = RayDatasource(
-        CatalogSplitProvider(
-            table_identifier=table_identifier,
-            catalog_options=catalog_options,
-            predicate=filter,
-            projection=projection,
-            limit=limit,
-            snapshot_id=snapshot_id,
-            tag_name=tag_name,
-        )
+    split_provider = CatalogSplitProvider(
+        table_identifier=table_identifier,
+        catalog_options=catalog_options,
+        predicate=filter,
+        projection=projection,
+        limit=limit,
+        snapshot_id=snapshot_id,
+        tag_name=tag_name,
     )
-    ds = ray.data.read_datasource(
+
+    if not split_provider.splits():
+        schema = PyarrowFieldParser.from_paimon_schema(
+            split_provider.read_type()
+        )
+        import pyarrow
+        empty_table = pyarrow.Table.from_arrays(
+            [pyarrow.array([], type=field.type) for field in schema],
+            schema=schema,
+        )
+        return ray_data.from_arrow(empty_table)
+
+    datasource = RayDatasource(split_provider)
+    ds = ray_data.read_datasource(
         datasource,
         ray_remote_args=ray_remote_args,
         concurrency=concurrency,
@@ -107,21 +135,24 @@ def read_paimon(
 
 
 def write_paimon(
-    dataset: ray.data.Dataset,
+    dataset: "ray.data.Dataset",
     table_identifier: str,
     catalog_options: Dict[str, str],
     *,
     overwrite: bool = False,
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
+    hash_fixed_precluster: str = "auto",
 ) -> None:
     """Write a Ray Dataset to a Paimon table.
 
-    For HASH_FIXED tables, rows are automatically clustered by
-    ``(partition_keys..., bucket)`` before writing so that each
-    (partition, bucket) lands in a single Ray task. This avoids the
-    small-file storm that Ray's default round-robin distribution would
-    otherwise produce. No user configuration is required.
+    HASH_FIXED rows are assigned to the correct bucket by the Paimon
+    writer. Optional pre-clustering is only a file-count optimization.
+    The legacy ``map_groups`` pre-clustering mode materializes each
+    ``(partition_keys..., bucket)`` group on one Ray node and should
+    only be used when every group fits in memory. HASH_DYNAMIC and
+    CROSS_PARTITION primary-key Ray writes are rejected because Ray
+    write tasks create independent Paimon writers.
 
     Args:
         dataset: The Ray Dataset to write.
@@ -130,7 +161,14 @@ def write_paimon(
         overwrite: If ``True``, overwrite existing data in the table.
         concurrency: Optional max number of Ray write tasks to run concurrently.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in write tasks.
+        hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
+            and ``"off"`` write append-only HASH_FIXED tables directly
+            and reject HASH_FIXED primary-key tables. ``"map_groups"``
+            preserves the legacy small-file optimization and its single
+            group memory bound for HASH_FIXED primary-key tables.
     """
+    _require_ray_data()
+
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.ray.shuffle import maybe_apply_repartition
     from pypaimon.write.ray_datasink import PaimonDatasink
@@ -138,7 +176,7 @@ def write_paimon(
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    dataset = maybe_apply_repartition(dataset, table)
+    dataset = maybe_apply_repartition(dataset, table, hash_fixed_precluster)
 
     datasink = PaimonDatasink(table, overwrite=overwrite)
 

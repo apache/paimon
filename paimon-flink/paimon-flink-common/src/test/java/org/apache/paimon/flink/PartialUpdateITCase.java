@@ -337,7 +337,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS T_P ("
                         + "j INT, k INT, a INT, b INT, c STRING, PRIMARY KEY (j,k) NOT ENFORCED)"
                         + " WITH ('merge-engine'='partial-update', 'changelog-producer' = 'lookup', "
-                        + "'fields.a.sequence-group'='j', 'fields.b.sequence-group'='c');");
+                        + "'fields.a.sequence-group'='b,c');");
         batchSql("INSERT INTO T_P VALUES (1, 1, 1, 1, '1')");
         assertThat(sql("SELECT k, c FROM T_P")).containsExactlyInAnyOrder(Row.of(1, "1"));
     }

@@ -191,6 +191,9 @@ class RESTTokenFileIO(FileIO):
     def write_blob(self, path: str, data, **kwargs):
         return self.file_io().write_blob(path, data, **kwargs)
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        return self.file_io().write_row(path, data, fields, zstd_level, **kwargs)
+
     @property
     def uri_reader_factory(self):
         if self._uri_reader_factory_cache is None:
