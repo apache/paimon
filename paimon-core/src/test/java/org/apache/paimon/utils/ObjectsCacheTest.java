@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.ObjectsCache.Filters;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ObjectsCache}. */
