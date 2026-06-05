@@ -41,6 +41,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -86,6 +87,13 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
         this.options = context.options();
         this.atomicRenameEnabled = options.get(CatalogOptions.FILE_IO_ATOMIC_RENAME_ENABLED);
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        // Default to true for instances serialized by older versions without this field;
+        // defaultReadObject only overwrites fields actually present in the stream.
+        this.atomicRenameEnabled = true;
+        in.defaultReadObject();
     }
 
     public Configuration hadoopConf() {
