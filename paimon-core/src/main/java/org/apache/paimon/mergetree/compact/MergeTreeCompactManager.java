@@ -244,7 +244,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
-        taskFuture = executor.submit(task);
+        submitTask(executor, task);
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
             metricsReporter.increaseCompactionsTotalCount();

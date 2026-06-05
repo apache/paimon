@@ -20,22 +20,35 @@ package org.apache.paimon.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
+import javax.annotation.Nullable;
+
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /** Base implementation of {@link CompactManager} which runs compaction in a separate thread. */
 public abstract class CompactFutureManager implements CompactManager {
 
     protected Future<CompactResult> taskFuture;
+    @Nullable protected CompactTask currentTask;
+
+    /** Submit a task to the executor and remember it for cleanup on cancel. */
+    protected final void submitTask(ExecutorService executor, CompactTask task) {
+        this.currentTask = task;
+        this.taskFuture = executor.submit(task);
+    }
 
     @Override
     public void cancelCompaction() {
-        // TODO this method may leave behind orphan files if compaction is actually finished
-        //  but some CPU work still needs to be done
         if (taskFuture != null && !taskFuture.isCancelled()) {
             taskFuture.cancel(true);
+            CompactTask task = currentTask;
+            currentTask = null;
+            if (task != null) {
+                task.discardInflightOutputs();
+            }
         }
     }
 
@@ -52,9 +65,14 @@ public abstract class CompactFutureManager implements CompactManager {
                 try {
                     result = obtainCompactResult();
                 } catch (CancellationException e) {
+                    CompactTask task = currentTask;
+                    if (task != null) {
+                        task.discardInflightOutputs();
+                    }
                     return Optional.empty();
                 } finally {
                     taskFuture = null;
+                    currentTask = null;
                 }
                 return Optional.of(result);
             }

@@ -115,6 +115,9 @@ public abstract class CompactTask implements Callable<CompactResult> {
      */
     protected abstract CompactResult doCompact() throws Exception;
 
+    /** Delete any files this task has already written but not returned. */
+    public void discardInflightOutputs() {}
+
     private long collectRewriteSize(List<DataFileMeta> files) {
         return files.stream().mapToLong(DataFileMeta::fileSize).sum();
     }

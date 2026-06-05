@@ -115,15 +115,15 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             LOG.debug("Submit full compaction with these files {}", toCompact);
         }
 
-        taskFuture =
-                executor.submit(
-                        new FullCompactTask(
-                                dvMaintainer,
-                                toCompact,
-                                compactionFileSize,
-                                forceRewriteAllFiles,
-                                rewriter,
-                                metricsReporter));
+        submitTask(
+                executor,
+                new FullCompactTask(
+                        dvMaintainer,
+                        toCompact,
+                        compactionFileSize,
+                        forceRewriteAllFiles,
+                        rewriter,
+                        metricsReporter));
         recordCompactionsQueuedRequest();
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
@@ -147,10 +147,9 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 LOG.debug("Submit normal compaction with these files {}", compacting);
             }
 
-            taskFuture =
-                    executor.submit(
-                            new AutoCompactTask(
-                                    dvMaintainer, compacting, rewriter, metricsReporter));
+            submitTask(
+                    executor,
+                    new AutoCompactTask(dvMaintainer, compacting, rewriter, metricsReporter));
             recordCompactionsQueuedRequest();
         }
     }
@@ -306,6 +305,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             return dvMaintainer != null
                     && dvMaintainer.deletionVectorOf(file.fileName()).isPresent();
         }
+
+        @Override
+        public void discardInflightOutputs() {
+            rewriter.discardInflightOutputs();
+        }
     }
 
     /**
@@ -336,6 +340,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         protected CompactResult doCompact() throws Exception {
             return compact(dvMaintainer, toCompact, rewriter);
         }
+
+        @Override
+        public void discardInflightOutputs() {
+            rewriter.discardInflightOutputs();
+        }
     }
 
     private static CompactResult compact(
@@ -359,5 +368,8 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+
+        /** Delete any files this rewriter has already written but not returned. */
+        default void discardInflightOutputs() {}
     }
 }
