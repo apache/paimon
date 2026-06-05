@@ -306,14 +306,16 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
                 creation_time=Timestamp.from_epoch_millis(0),
                 delete_row_count=0, embedded_index=None, file_source=None,
                 value_stats_cols=None, external_path=None,
-                first_row_id=0, write_cols=["id", "_ROW_ID"],
+                first_row_id=0,
+                write_cols=["id", "_ROW_ID", "_SEQUENCE_NUMBER"],
             ),
         )
         manager.write("dirty-manifest.avro", [entry])
 
         entries = manager.read("dirty-manifest.avro", drop_stats=False)
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0].file.write_cols, ["id", "_ROW_ID"])
+        self.assertEqual(
+            entries[0].file.write_cols, ["id", "_ROW_ID", "_SEQUENCE_NUMBER"])
 
         read_stats = entries[0].file.value_stats
         stats_field_names = [f.name for f in read_stats.min_values.fields]
