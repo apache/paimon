@@ -2597,6 +2597,12 @@ public class CoreOptions implements Serializable {
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
+            key("vector-search.distribute.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to process distributed vector search.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4075,6 +4081,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorSearchDistributeEnabled() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

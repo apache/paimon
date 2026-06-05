@@ -42,6 +42,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -55,13 +56,15 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorRead}. */
-public class VectorReadImpl implements VectorRead {
+public class VectorReadImpl implements VectorRead, Serializable {
 
-    private final FileStoreTable table;
+    private static final long serialVersionUID = 1L;
+
+    protected final FileStoreTable table;
     private final Predicate filter;
-    private final int limit;
-    private final DataField vectorColumn;
-    private final float[] vector;
+    protected final int limit;
+    protected final DataField vectorColumn;
+    protected final float[] vector;
 
     public VectorReadImpl(
             FileStoreTable table,
@@ -120,7 +123,7 @@ public class VectorReadImpl implements VectorRead {
         return result.topK(limit);
     }
 
-    private Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
+    protected Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
         for (VectorSearchSplit split : splits) {
@@ -139,7 +142,7 @@ public class VectorReadImpl implements VectorRead {
         }
     }
 
-    private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+    protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
             GlobalIndexer globalIndexer,
             IndexPathFactory indexPathFactory,
             long rowRangeStart,
