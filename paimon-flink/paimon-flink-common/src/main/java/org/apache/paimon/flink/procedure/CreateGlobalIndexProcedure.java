@@ -43,6 +43,14 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "create_global_index";
 
+    static Options createUserOptions(FileStoreTable table, String optionString) {
+        return createUserOptions(table.options(), optionString);
+    }
+
+    static Options createUserOptions(Map<String, String> tableOptions, String optionString) {
+        return new Options(tableOptions, optionalConfigMap(optionString));
+    }
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -87,8 +95,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
 
         // Parse options
-        Map<String, String> parsedOptions = optionalConfigMap(options);
-        Options userOptions = Options.fromMap(parsedOptions);
+        Options userOptions = createUserOptions(table, options);
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
