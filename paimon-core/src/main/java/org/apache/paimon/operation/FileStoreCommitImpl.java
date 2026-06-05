@@ -107,6 +107,7 @@ import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRo
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -1160,6 +1161,41 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         // if empty properties, just set to null
                         latest.properties(),
                         nextRowId);
+
+        return commitSnapshotImpl(newSnapshot, emptyList());
+    }
+
+    @Override
+    public boolean restoreAsLatest(Snapshot targetSnapshot) {
+        Snapshot latest =
+                checkNotNull(
+                        snapshotManager.latestSnapshot(),
+                        "Latest snapshot is null, can not restore.");
+        Pair<String, Long> baseManifestList =
+                manifestList.write(manifestList.readDataManifests(targetSnapshot));
+        Pair<String, Long> emptyDeltaManifestList = manifestList.write(emptyList());
+        Snapshot newSnapshot =
+                new Snapshot(
+                        latest.id() + 1,
+                        targetSnapshot.schemaId(),
+                        baseManifestList.getKey(),
+                        baseManifestList.getRight(),
+                        emptyDeltaManifestList.getKey(),
+                        emptyDeltaManifestList.getRight(),
+                        null,
+                        null,
+                        targetSnapshot.indexManifest(),
+                        commitUser,
+                        Long.MAX_VALUE,
+                        CommitKind.OVERWRITE,
+                        System.currentTimeMillis(),
+                        targetSnapshot.totalRecordCount(),
+                        0L,
+                        null,
+                        targetSnapshot.watermark(),
+                        targetSnapshot.statistics(),
+                        targetSnapshot.properties(),
+                        targetSnapshot.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }

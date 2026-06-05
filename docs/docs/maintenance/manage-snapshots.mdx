@@ -353,6 +353,25 @@ CALL sys.rollback(table => 'database_name.table_name', snapshot => snasphot_id);
 
 </Tabs>
 
+## Restore Snapshot as Latest
+
+Restore a table to the state of a specific snapshot ID by creating a new latest snapshot. Unlike rollback, this operation
+does not delete snapshots or tags whose snapshot id is larger than the restored snapshot.
+
+<Tabs groupId="restore-as-latest">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Run the following command:
+
+```sql
+CALL sys.restore_as_latest(`table` => 'database_name.table_name', snapshot_id => <snapshot-id>);
+```
+
+</TabItem>
+
+</Tabs>
+
 ## Remove Orphan Files
 
 Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred

@@ -74,6 +74,9 @@ public interface FileStoreCommit extends AutoCloseable {
     /** Compact the manifest entries only. */
     void compactManifest();
 
+    /** Restore the target snapshot as the latest snapshot. */
+    boolean restoreAsLatest(Snapshot targetSnapshot);
+
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);
 
