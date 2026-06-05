@@ -36,8 +36,9 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.schema.schema import Schema
-from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 
 _EMPTY_ROW = GenericRow([], [])
 _EMPTY_STATS = SimpleStats(min_values=_EMPTY_ROW, max_values=_EMPTY_ROW, null_counts=[])
@@ -285,6 +286,12 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
     def test_read_write_cols_with_system_field(self):
         manager = self._make_manager()
 
+        id_field = DataField(0, 'id', AtomicType('INT', nullable=True))
+        min_row = GenericRow([1], [id_field])
+        max_row = GenericRow([10], [id_field])
+        value_stats = SimpleStats(
+            min_values=min_row, max_values=max_row, null_counts=[2])
+
         entry = ManifestEntry(
             kind=0,
             partition=_EMPTY_ROW,
@@ -293,7 +300,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             file=DataFileMeta(
                 file_name="data-dirty.parquet", file_size=1024, row_count=50,
                 min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
-                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                key_stats=_EMPTY_STATS, value_stats=value_stats,
                 min_sequence_number=1, max_sequence_number=50,
                 schema_id=0, level=0, extra_files=[],
                 creation_time=Timestamp.from_epoch_millis(0),
@@ -307,9 +314,15 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         entries = manager.read("dirty-manifest.avro", drop_stats=False)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].file.write_cols, ["id", "_ROW_ID"])
-        stats_field_names = [f.name for f in entries[0].file.value_stats.min_values.fields]
+
+        read_stats = entries[0].file.value_stats
+        stats_field_names = [f.name for f in read_stats.min_values.fields]
         self.assertIn("id", stats_field_names)
         self.assertNotIn("_ROW_ID", stats_field_names)
+
+        self.assertEqual(read_stats.min_values.get_field(0), 1)
+        self.assertEqual(read_stats.max_values.get_field(0), 10)
+        self.assertEqual(read_stats.null_counts, [2])
 
 
 class ManifestListManagerTest(_ManifestManagerSetup):
