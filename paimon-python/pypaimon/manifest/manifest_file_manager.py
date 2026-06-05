@@ -190,7 +190,8 @@ class ManifestFileManager:
                     fields = schema_fields
                 else:
                     read_fields = file_dict['_WRITE_COLS']
-                    fields = [self.table.field_dict[col] for col in read_fields]
+                    fields = [self.table.field_dict[col] for col in read_fields
+                              if col in self.table.field_dict]
             else:
                 fields = schema_fields
         elif not file_dict['_VALUE_STATS_COLS']:

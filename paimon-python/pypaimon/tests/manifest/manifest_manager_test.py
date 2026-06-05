@@ -304,8 +304,9 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         )
         manager.write("dirty-manifest.avro", [entry])
 
-        with self.assertRaises(KeyError):
-            manager.read("dirty-manifest.avro", drop_stats=False)
+        entries = manager.read("dirty-manifest.avro", drop_stats=False)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].file.write_cols, ["id", "_ROW_ID"])
 
 
 class ManifestListManagerTest(_ManifestManagerSetup):
