@@ -54,10 +54,11 @@ public class ArrowFormatWriter implements AutoCloseable {
     private final int batchSize;
     private final BufferAllocator allocator;
     @Nullable private final Long memoryUsedMaxInBytes;
+    private final boolean closeAllocatorOnClose;
     private int rowId;
 
     public ArrowFormatWriter(RowType rowType, int writeBatchSize, boolean caseSensitive) {
-        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null, null);
+        this(rowType, writeBatchSize, caseSensitive, new RootAllocator(), null, null, true);
     }
 
     public ArrowFormatWriter(
@@ -71,7 +72,8 @@ public class ArrowFormatWriter implements AutoCloseable {
                 caseSensitive,
                 new RootAllocator(),
                 memoryUsedMaxInBytes,
-                null);
+                null,
+                true);
     }
 
     public ArrowFormatWriter(
@@ -80,7 +82,7 @@ public class ArrowFormatWriter implements AutoCloseable {
             boolean caseSensitive,
             BufferAllocator allocator,
             @Nullable Long memoryUsedMaxInBytes) {
-        this(rowType, writeBatchSize, caseSensitive, allocator, memoryUsedMaxInBytes, null);
+        this(rowType, writeBatchSize, caseSensitive, allocator, memoryUsedMaxInBytes, null, true);
     }
 
     public ArrowFormatWriter(
@@ -95,7 +97,8 @@ public class ArrowFormatWriter implements AutoCloseable {
                 caseSensitive,
                 new RootAllocator(),
                 memoryUsedMaxInBytes,
-                shreddingSchemas);
+                shreddingSchemas,
+                true);
     }
 
     public ArrowFormatWriter(
@@ -112,8 +115,27 @@ public class ArrowFormatWriter implements AutoCloseable {
                 allocator,
                 memoryUsedMaxInBytes,
                 shreddingSchemas,
+                true);
+    }
+
+    private ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas,
+            boolean closeAllocatorOnClose) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                shreddingSchemas,
                 ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR,
-                ArrowFieldWriterFactoryVisitor.INSTANCE);
+                ArrowFieldWriterFactoryVisitor.INSTANCE,
+                closeAllocatorOnClose);
     }
 
     public ArrowFormatWriter(
@@ -125,7 +147,30 @@ public class ArrowFormatWriter implements AutoCloseable {
             @Nullable RowType shreddingSchemas,
             ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
             ArrowFieldWriterFactoryVisitor fieldWriterFactory) {
+        this(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                shreddingSchemas,
+                fieldTypeVisitor,
+                fieldWriterFactory,
+                true);
+    }
+
+    private ArrowFormatWriter(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes,
+            @Nullable RowType shreddingSchemas,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor fieldTypeVisitor,
+            ArrowFieldWriterFactoryVisitor fieldWriterFactory,
+            boolean closeAllocatorOnClose) {
         this.allocator = allocator;
+        this.closeAllocatorOnClose = closeAllocatorOnClose;
 
         RowType outputRowType = replaceWithShreddingType(rowType, shreddingSchemas);
         vectorSchemaRoot =
@@ -154,6 +199,22 @@ public class ArrowFormatWriter implements AutoCloseable {
 
         this.batchSize = writeBatchSize;
         this.memoryUsedMaxInBytes = memoryUsedMaxInBytes;
+    }
+
+    public static ArrowFormatWriter forBorrowedAllocator(
+            RowType rowType,
+            int writeBatchSize,
+            boolean caseSensitive,
+            BufferAllocator allocator,
+            @Nullable Long memoryUsedMaxInBytes) {
+        return new ArrowFormatWriter(
+                rowType,
+                writeBatchSize,
+                caseSensitive,
+                allocator,
+                memoryUsedMaxInBytes,
+                null,
+                false);
     }
 
     public void flush() {
@@ -221,7 +282,9 @@ public class ArrowFormatWriter implements AutoCloseable {
     @Override
     public void close() {
         vectorSchemaRoot.close();
-        allocator.close();
+        if (closeAllocatorOnClose) {
+            allocator.close();
+        }
     }
 
     public int getBatchSize() {
