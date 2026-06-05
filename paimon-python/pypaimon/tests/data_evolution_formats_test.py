@@ -641,6 +641,48 @@ class DataEvolutionFormatsTest(unittest.TestCase):
                 f"Expected abort to delete {file_meta.file_name}",
             )
 
+    def test_vector_close_failure_after_prepare_raises(self):
+        from unittest.mock import patch
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('embed', pa.list_(pa.float32(), 3)),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'vector.file.format': 'parquet',
+        })
+        self.catalog.create_table('default.fmt_vector_close_failure', schema, False)
+        table = self.catalog.get_table('default.fmt_vector_close_failure')
+
+        writer = table.new_batch_write_builder().new_write()
+        writer.write_arrow(pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int64()),
+            'embed': pa.FixedSizeListArray.from_arrays(
+                pa.array([0.1, 0.2, 0.3,
+                          0.4, 0.5, 0.6,
+                          0.7, 0.8, 0.9], type=pa.float32()), 3),
+        }))
+        commit_messages = writer.prepare_commit()
+
+        all_files = [nf for msg in commit_messages for nf in msg.new_files]
+        for file_meta in all_files:
+            self.assertTrue(table.file_io.exists(self._file_path(file_meta)))
+
+        data_writer = next(iter(writer.file_store_write.data_writers.values()))
+        with patch.object(
+                data_writer, '_close_current_writers',
+                side_effect=RuntimeError("Close error")):
+            with self.assertRaisesRegex(RuntimeError, "Close error"):
+                writer.close()
+
+        for file_meta in all_files:
+            self.assertFalse(
+                table.file_io.exists(self._file_path(file_meta)),
+                f"Expected abort to delete {file_meta.file_name}",
+            )
+
     @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
     @unittest.skipUnless(
         __import__('importlib').util.find_spec('vortex') is not None,

@@ -143,6 +143,7 @@ class DataVectorWriter(DataWriter):
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
+            raise
         finally:
             self.closed = True
             self.pending_normal_data = None
