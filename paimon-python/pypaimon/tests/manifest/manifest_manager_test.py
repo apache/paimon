@@ -307,6 +307,9 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         entries = manager.read("dirty-manifest.avro", drop_stats=False)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].file.write_cols, ["id", "_ROW_ID"])
+        stats_field_names = [f.name for f in entries[0].file.value_stats.min_values.fields]
+        self.assertIn("id", stats_field_names)
+        self.assertNotIn("_ROW_ID", stats_field_names)
 
 
 class ManifestListManagerTest(_ManifestManagerSetup):
