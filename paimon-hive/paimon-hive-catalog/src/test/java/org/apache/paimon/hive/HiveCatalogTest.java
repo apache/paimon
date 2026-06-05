@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -279,6 +280,37 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
+    }
+
+    @Test
+    public void testDropTableWhenTablePathMissing() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "new_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING()),
+                                new DataField(2, "col2", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+        catalog.createTable(identifier, schema, false);
+
+        HiveCatalog hiveCatalog = (HiveCatalog) catalog;
+        Path path = hiveCatalog.getTableLocation(identifier);
+        hiveCatalog.fileIO().deleteDirectoryQuietly(path);
+
+        assertThatThrownBy(() -> hiveCatalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        assertThat(hiveCatalog.listTables(databaseName)).contains(tableName);
+
+        hiveCatalog.dropTable(identifier, false);
+        assertThat(hiveCatalog.listTables(databaseName)).doesNotContain(tableName);
     }
 
     @Test
