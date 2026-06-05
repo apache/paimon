@@ -282,7 +282,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             "test-manifest.avro", manifest_entry_filter=lambda e: e.bucket == 0)
         self.assertEqual(len(result_filtered), 2)
 
-    def test_read_write_cols_with_system_field_raises_key_error(self):
+    def test_read_write_cols_with_system_field(self):
         manager = self._make_manager()
 
         entry = ManifestEntry(
