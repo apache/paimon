@@ -44,7 +44,11 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.FixedSizeBinaryVector;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.TimeMicroVector;
+import org.apache.arrow.vector.TimeNanoVector;
+import org.apache.arrow.vector.TimeSecVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -398,6 +402,57 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testArrowBundleRecordsWithTimeAndFixedBinaryVectors() {
+        // Arrow batches from external producers may use these vector types even though Paimon's
+        // Arrow writer currently defaults to TimeMilliVector and VarBinaryVector.
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "time_sec", DataTypes.TIME(0)),
+                        new DataField(1, "time_micro", DataTypes.TIME(6)),
+                        new DataField(2, "time_nano", DataTypes.TIME(9)),
+                        new DataField(3, "fixed_binary", DataTypes.BINARY(3)));
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            TimeSecVector timeSecVector = new TimeSecVector("time_sec", allocator);
+            timeSecVector.allocateNew(1);
+            timeSecVector.setSafe(0, 12);
+            timeSecVector.setValueCount(1);
+
+            TimeMicroVector timeMicroVector = new TimeMicroVector("time_micro", allocator);
+            timeMicroVector.allocateNew(1);
+            timeMicroVector.setSafe(0, 12345678L);
+            timeMicroVector.setValueCount(1);
+
+            TimeNanoVector timeNanoVector = new TimeNanoVector("time_nano", allocator);
+            timeNanoVector.allocateNew(1);
+            timeNanoVector.setSafe(0, 12345678901L);
+            timeNanoVector.setValueCount(1);
+
+            byte[] binary = new byte[] {1, 2, 3};
+            FixedSizeBinaryVector fixedBinaryVector =
+                    new FixedSizeBinaryVector("fixed_binary", allocator, binary.length);
+            fixedBinaryVector.allocateNew(1);
+            fixedBinaryVector.setSafe(0, binary);
+            fixedBinaryVector.setValueCount(1);
+
+            List<FieldVector> vectors =
+                    Arrays.asList(
+                            timeSecVector, timeMicroVector, timeNanoVector, fixedBinaryVector);
+            try (VectorSchemaRoot vectorSchemaRoot = new VectorSchemaRoot(vectors)) {
+                vectorSchemaRoot.setRowCount(1);
+
+                Iterator<InternalRow> iterator =
+                        new ArrowBundleRecords(vectorSchemaRoot, rowType, true).iterator();
+                InternalRow row = iterator.next();
+                assertThat(row.getInt(0)).isEqualTo(12000);
+                assertThat(row.getInt(1)).isEqualTo(12345);
+                assertThat(row.getInt(2)).isEqualTo(12345);
+                assertThat(row.getBinary(3)).containsExactly(binary);
+            }
         }
     }
 
