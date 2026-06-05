@@ -191,8 +191,9 @@ class ManifestFileManager:
                 else:
                     read_fields = file_dict['_WRITE_COLS']
                     # writeCols may contain metadata fields (e.g. _ROW_ID, _SEQUENCE_NUMBER)
-                    fields = [self.table.field_dict[col] for col in read_fields
-                              if col in self.table.field_dict]
+                    data_field_dict = {f.name: f for f in schema_fields}
+                    fields = [data_field_dict[col] for col in read_fields
+                              if col in data_field_dict]
             else:
                 fields = schema_fields
         elif not file_dict['_VALUE_STATS_COLS']:
