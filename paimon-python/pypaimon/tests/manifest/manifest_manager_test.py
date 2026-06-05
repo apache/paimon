@@ -282,6 +282,31 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             "test-manifest.avro", manifest_entry_filter=lambda e: e.bucket == 0)
         self.assertEqual(len(result_filtered), 2)
 
+    def test_read_write_cols_with_system_field_raises_key_error(self):
+        manager = self._make_manager()
+
+        entry = ManifestEntry(
+            kind=0,
+            partition=_EMPTY_ROW,
+            bucket=0,
+            total_buckets=1,
+            file=DataFileMeta(
+                file_name="data-dirty.parquet", file_size=1024, row_count=50,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                min_sequence_number=1, max_sequence_number=50,
+                schema_id=0, level=0, extra_files=[],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=None, file_source=None,
+                value_stats_cols=None, external_path=None,
+                first_row_id=0, write_cols=["id", "_ROW_ID"],
+            ),
+        )
+        manager.write("dirty-manifest.avro", [entry])
+
+        with self.assertRaises(KeyError):
+            manager.read("dirty-manifest.avro", drop_stats=False)
+
 
 class ManifestListManagerTest(_ManifestManagerSetup):
     """Tests for ManifestListManager."""
