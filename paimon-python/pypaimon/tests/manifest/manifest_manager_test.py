@@ -317,8 +317,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
         read_stats = entries[0].file.value_stats
         stats_field_names = [f.name for f in read_stats.min_values.fields]
-        self.assertIn("id", stats_field_names)
-        self.assertNotIn("_ROW_ID", stats_field_names)
+        self.assertEqual(stats_field_names, ["id"])
 
         self.assertEqual(read_stats.min_values.get_field(0), 1)
         self.assertEqual(read_stats.max_values.get_field(0), 10)
