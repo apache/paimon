@@ -199,12 +199,17 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
 
     _validate_source_has_target_cols(
         source_ds, matched_specs + not_matched_specs,
+        extra_valid_cols=set(source_on_cols) if is_self_merge else None,
     )
 
     if has_condition:
         from pypaimon.ray.merge_condition import extract_columns
         source_names = set(_source_schema_or_raise(source_ds).names)
+        if is_self_merge:
+            source_names |= set(source_on_cols)
         target_names = set(full_target_field_names)
+        if is_self_merge:
+            target_names |= set(target_on_cols)
         for c in list(when_matched) + list(when_not_matched):
             if c.condition is not None:
                 for ref in extract_columns(c.condition):
@@ -596,8 +601,11 @@ def _validate_source_on_cols(source_ds, on: Sequence[str]) -> None:
 def _validate_source_has_target_cols(
     source_ds,
     specs: List[_NormalizedClause],
+    extra_valid_cols: Optional[set] = None,
 ) -> None:
     names = set(_source_schema_or_raise(source_ds).names)
+    if extra_valid_cols:
+        names |= extra_valid_cols
     needed = set()
     for clause in specs:
         for val in clause.spec.values():

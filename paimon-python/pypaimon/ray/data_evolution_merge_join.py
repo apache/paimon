@@ -41,6 +41,63 @@ def _map_kwargs(
     return kwargs
 
 
+def _build_matched_transform(
+    clauses: List[_NormalizedClause],
+    on_map: Dict[str, str],
+    on_pairs: List[Tuple[str, str]],
+    update_cols: List[str],
+    row_id_name: str,
+    update_schema: pa.Schema,
+):
+    prepared_clauses = []
+    for clause in clauses:
+        rewritten = None
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import (
+                remap_source_on_keys, rewrite_condition,
+            )
+            rewritten = remap_source_on_keys(
+                rewrite_condition(clause.condition), on_map,
+            )
+        prepared_clauses.append((clause.spec, rewritten))
+
+    _filter_batch = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
+
+    def _transform(batch: pa.Table) -> pa.Table:
+        remaining = batch
+        parts = []
+        for spec, rewritten in prepared_clauses:
+            if remaining.num_rows == 0:
+                break
+            if rewritten is not None:
+                matched = _filter_batch(
+                    remaining, rewritten, _pre_rewritten=True,
+                )
+            else:
+                matched = remaining
+            if matched.num_rows == 0:
+                continue
+            parts.append(vectorized_matched_transform(
+                matched, spec, on_pairs,
+                update_cols, row_id_name,
+                update_schema,
+            ))
+            if rewritten is not None and matched.num_rows < remaining.num_rows:
+                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                remaining = _filter_batch(
+                    remaining, not_cond, _pre_rewritten=True,
+                )
+            else:
+                remaining = remaining.slice(0, 0)
+        if not parts:
+            return update_schema.empty_table()
+        return pa.concat_tables(parts)
+
+    return _transform
+
+
 def build_self_merge_update_ds(
     *,
     target_identifier: str,
@@ -104,58 +161,14 @@ def build_self_merge_update_ds(
         _add_source_aliases, **_map_kwargs(ray_remote_args),
     )
 
-    captured_update_cols = list(update_cols)
-    captured_row_id_name = row_id_name
-    captured_on_pairs = [(row_id_name, row_id_name)]
-    captured_schema = update_schema
-
-    on_map = {row_id_name: row_id_name}
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((clause.spec, rewritten))
-
-    _filter_batch = None
-    if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows == 0:
-                continue
-            parts.append(vectorized_matched_transform(
-                matched, spec, captured_on_pairs,
-                captured_update_cols, captured_row_id_name,
-                captured_schema,
-            ))
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return captured_schema.empty_table()
-        return pa.concat_tables(parts)
-
+    _transform = _build_matched_transform(
+        clauses,
+        on_map={row_id_name: row_id_name},
+        on_pairs=[(row_id_name, row_id_name)],
+        update_cols=list(update_cols),
+        row_id_name=row_id_name,
+        update_schema=update_schema,
+    )
     return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
 
@@ -206,58 +219,14 @@ def build_matched_update_ds(
         right_on=tuple(f"s.{c}" for c in source_on),
     )
 
-    captured_update_cols = list(update_cols)
-    captured_row_id_name = row_id_name
-    captured_on_pairs = list(zip(source_on, target_on))
-    captured_schema = update_schema
-
-    on_map = dict(zip(source_on, target_on))
-    prepared_clauses = []
-    for clause in clauses:
-        rewritten = None
-        if clause.condition is not None:
-            from pypaimon.ray.merge_condition import (
-                remap_source_on_keys, rewrite_condition,
-            )
-            rewritten = remap_source_on_keys(
-                rewrite_condition(clause.condition), on_map,
-            )
-        prepared_clauses.append((clause.spec, rewritten))
-
-    _filter_batch = None
-    if any(r is not None for _, r in prepared_clauses):
-        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
-
-    def _transform(batch: pa.Table) -> pa.Table:
-        remaining = batch
-        parts = []
-        for spec, rewritten in prepared_clauses:
-            if remaining.num_rows == 0:
-                break
-            if rewritten is not None:
-                matched = _filter_batch(
-                    remaining, rewritten, _pre_rewritten=True,
-                )
-            else:
-                matched = remaining
-            if matched.num_rows == 0:
-                continue
-            parts.append(vectorized_matched_transform(
-                matched, spec, captured_on_pairs,
-                captured_update_cols, captured_row_id_name,
-                captured_schema,
-            ))
-            if rewritten is not None and matched.num_rows < remaining.num_rows:
-                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
-                remaining = _filter_batch(
-                    remaining, not_cond, _pre_rewritten=True,
-                )
-            else:
-                remaining = remaining.slice(0, 0)
-        if not parts:
-            return captured_schema.empty_table()
-        return pa.concat_tables(parts)
-
+    _transform = _build_matched_transform(
+        clauses,
+        on_map=dict(zip(source_on, target_on)),
+        on_pairs=list(zip(source_on, target_on)),
+        update_cols=list(update_cols),
+        row_id_name=row_id_name,
+        update_schema=update_schema,
+    )
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
 
