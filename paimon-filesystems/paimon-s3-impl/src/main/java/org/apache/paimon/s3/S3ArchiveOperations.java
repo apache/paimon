@@ -183,6 +183,7 @@ class S3ArchiveOperations {
     }
 
     interface CopyObjectRequestBuilderFactory {
-        CopyObjectRequest.Builder create(String sourceKey, String destinationKey, HeadObjectResponse metadata);
+        CopyObjectRequest.Builder create(
+                String sourceKey, String destinationKey, HeadObjectResponse metadata);
     }
 }
