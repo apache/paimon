@@ -189,7 +189,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
 
     if is_self_merge:
         source_ds = None
-        source_col_names = set(settable_field_names) | set(source_on_cols)
+        source_col_names = set(full_target_field_names) | set(source_on_cols)
     else:
         source_snapshot_id = None
         if isinstance(source, str):
@@ -277,7 +277,7 @@ def _build_datasets(
             update_ds = build_self_merge_update_ds(
                 target_identifier=target,
                 clauses=matched_specs,
-                target_field_names=ctx.settable_field_names,
+                target_field_names=ctx.full_target_field_names,
                 target_pa_schema=ctx.update_pa_schema,
                 update_cols=update_cols_union,
                 catalog_options=ctx.catalog_options,
