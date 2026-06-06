@@ -319,7 +319,7 @@ public class SnapshotManager implements Serializable {
     }
 
     /**
-     * Returns a {@link Snapshot} whoes commit time is later than or equal to given timestamp mills.
+     * Returns a {@link Snapshot} whose commit time is later than or equal to given timestamp mills.
      * If there is no such a snapshot, returns null.
      */
     public @Nullable Snapshot laterOrEqualTimeMills(long timestampMills) {

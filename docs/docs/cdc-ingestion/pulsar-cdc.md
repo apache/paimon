@@ -228,7 +228,7 @@ Only tables with primary keys will be synchronized.
 This action will build a single combined sink for all tables. For each Pulsar topic's table to be synchronized, if the
 corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived
 from all specified Pulsar topic's tables. If the Paimon table already exists and its schema is different from that parsed
-from Pulsar record, this action will try to preform schema evolution.
+from Pulsar record, this action will try to perform schema evolution.
 
 Example
 
@@ -312,7 +312,7 @@ There are some useful options to build Flink Pulsar Source, but they are not pro
         <tr>
           <td>pulsar.startCursor.fromMessageId</td>
           <td>EARLIEST</td>
-          <td>Sting</td>
+          <td>String</td>
           <td>Using a unique identifier of a single message to seek the start position. The common format is a triple 
               '&ltlong&gtledgerId,&ltlong&gtentryId,&ltint&gtpartitionIndex'. Specially, you can set it to 
               EARLIEST (-1, -1, -1) or LATEST (Long.MAX_VALUE, Long.MAX_VALUE, -1).

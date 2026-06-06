@@ -110,7 +110,7 @@ the query results:
 */
 ```
 
-**Schema compatabilty and Partition evolution:**
+**Schema compatibility and Partition evolution:**
 
 There is a fundamental difference between Paimon and Iceberg regarding the starting fieldId. Paimon uses fieldId 0, while Iceberg uses fieldId 1. If we create an Iceberg table using a Paimon schema directly, it will shift all fieldIds by +1, causing field disorder. However, it is possible to update the schema after table creation and start the schema from fieldId 0.
 

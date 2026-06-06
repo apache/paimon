@@ -95,7 +95,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
     }
   }
 
-  test("Paimon V1 Function: select with build-in function") {
+  test("Paimon V1 Function: select with built-in function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
              |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
@@ -144,18 +144,18 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   }
 
   test("Paimon V1 Function: unsupported operation") {
-    // create a build-in function
+    // create a built-in function
     assert(intercept[Exception] {
       sql(s"""
              |CREATE FUNCTION sys.max_pt AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
-    }.getMessage.contains("Can't create build-in function"))
+    }.getMessage.contains("Can't create built-in function"))
 
-    // drop a build-in function
+    // drop a built-in function
     assert(intercept[Exception] {
       sql("DROP FUNCTION sys.max_pt")
-    }.getMessage.contains("Can't drop build-in function"))
+    }.getMessage.contains("Can't drop built-in function"))
   }
 
   test("Paimon V1 Function: user defined aggregate function") {
