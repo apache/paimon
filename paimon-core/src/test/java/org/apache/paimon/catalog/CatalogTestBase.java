@@ -2136,7 +2136,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalStateException.class,
-                                "Column type col1[DOUBLE] cannot be converted to DATE without loosing information."));
+                                "Column type col1[DOUBLE] cannot be converted to DATE without losing information."));
 
         // Alter table update a column type throws ColumnNotExistException when column does not
         // exist

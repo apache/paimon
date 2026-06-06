@@ -273,7 +273,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (f BOOLEAN)"))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage(
-                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without loosing information.");
+                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without losing information.");
     }
 
     @Test
@@ -1605,13 +1605,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
                 .hasStackTraceContaining(
-                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+                        "Column type v[INT] cannot be converted to SMALLINT without losing information");
         sql("ALTER TABLE T MODIFY v BIGINT");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
                 .hasStackTraceContaining(
-                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+                        "Column type v[BIGINT] cannot be converted to INT without losing information");
         // disable explicit type casting
         sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("ALTER TABLE T MODIFY v INT");

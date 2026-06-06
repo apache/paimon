@@ -23,6 +23,7 @@ import pyarrow.compute as pc
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.reader.deduplicate_merge_function import \
     DeduplicateMergeFunction
+from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.table.row.key_value import KeyValue
 from pypaimon.write.writer.data_writer import DataWriter
 
@@ -40,9 +41,10 @@ class KeyValueDataWriter(DataWriter):
     """
 
     def __init__(self, table, partition, bucket, max_seq_number,
-                 options=None, write_cols=None, merge_function=None):
+                 options=None, write_cols=None, merge_function=None,
+                 changelog_producer=ChangelogProducer.NONE):
         super().__init__(table, partition, bucket, max_seq_number,
-                         options, write_cols)
+                         options, write_cols, changelog_producer)
         # Defaults to deduplicate so direct callers (tests / future code
         # paths that don't go through FileStoreWrite) don't accidentally
         # skip the merge step entirely.

@@ -176,15 +176,17 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             commit._build_commit_entries([msg])
 
-    def test_build_entries_rejects_data_increment_changelog_files(self, *_):
+    def test_build_entries_ignores_data_increment_changelog_files(self, *_):
+        # changelog_files are committed to the changelog manifest via
+        # _collect_changelog_entries, not as delta entries, so _build_commit_entries
+        # accepts such a message and produces no delta entry for them.
         commit = self._create_commit()
         msg = CommitMessage(
             partition=('2024-01-15',),
             bucket=0,
             data_increment=DataIncrement(changelog_files=[_make_file('c.parquet')]),
         )
-        with self.assertRaises(NotImplementedError):
-            commit._build_commit_entries([msg])
+        self.assertEqual([], commit._build_commit_entries([msg]))
 
     def test_build_entries_rejects_compact_increment_changelog_files(self, *_):
         commit = self._create_commit()

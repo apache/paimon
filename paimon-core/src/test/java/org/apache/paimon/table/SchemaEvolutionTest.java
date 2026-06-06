@@ -563,7 +563,7 @@ public class SchemaEvolutionTest {
                                                         "f0", DataTypes.STRING()))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
-                        "Column type f0[BIGINT] cannot be converted to STRING without loosing information.");
+                        "Column type f0[BIGINT] cannot be converted to STRING without losing information.");
         schemaManager.commitChanges(
                 Collections.singletonList(
                         SchemaChange.setOption("disable-explicit-type-casting", "false")));

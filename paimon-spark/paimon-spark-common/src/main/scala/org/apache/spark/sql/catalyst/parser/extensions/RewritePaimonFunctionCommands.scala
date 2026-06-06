@@ -68,7 +68,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
             ifExists,
             replace) =>
         if (isPaimonBuildInFunction(funcIdent)) {
-          throw new UnsupportedOperationException(s"Can't create build-in function: $funcIdent")
+          throw new UnsupportedOperationException(s"Can't create built-in function: $funcIdent")
         }
         val v1Function = CatalogFunction(funcIdent, className, resources)
         CreatePaimonV1FunctionCommand(v1FunctionCatalog, v1Function, ifExists, replace)
@@ -77,7 +77,7 @@ case class RewritePaimonFunctionCommands(spark: SparkSession)
             CatalogAndFunctionIdentifier(v1FunctionCatalog: SupportV1Function, funcIdent, false),
             ifExists) =>
         if (isPaimonBuildInFunction(funcIdent)) {
-          throw new UnsupportedOperationException(s"Can't drop build-in function: $funcIdent")
+          throw new UnsupportedOperationException(s"Can't drop built-in function: $funcIdent")
         }
         // The function may be v1 function or not, anyway it can be safely deleted here.
         DropPaimonV1FunctionCommand(v1FunctionCatalog, funcIdent, ifExists)
