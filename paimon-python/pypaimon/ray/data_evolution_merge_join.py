@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pyarrow as pa
 
 from pypaimon.ray.data_evolution_merge_transform import (
+    SourceColumnRef,
     _NormalizedClause,
     build_update_schema,
     vectorized_insert_transform,
@@ -40,6 +41,108 @@ def _map_kwargs(
     return kwargs
 
 
+def build_self_merge_update_ds(
+    *,
+    target_identifier: str,
+    clauses: List[_NormalizedClause],
+    target_field_names: Sequence[str],
+    target_pa_schema: pa.Schema,
+    update_cols: Sequence[str],
+    catalog_options: Dict[str, str],
+    resolve_target_projection,
+    snapshot_id: Optional[int] = None,
+    ray_remote_args: Optional[Dict[str, Any]] = None,
+) -> Tuple:
+    if len(clauses) != 1:
+        raise ValueError(
+            f"Self-merge currently supports exactly 1 WHEN MATCHED clause, "
+            f"got {len(clauses)}"
+        )
+
+    from pypaimon.ray.ray_paimon import read_paimon
+    from pypaimon.table.special_fields import SpecialFields
+
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = set(resolve_target_projection(
+        clauses, [row_id_name], update_cols, target_field_names,
+    ))
+    for clause in clauses:
+        for value in clause.spec.values():
+            if isinstance(value, SourceColumnRef):
+                needed_cols.add(value.column)
+    target_set = set(target_field_names)
+    for clause in clauses:
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import extract_columns
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in target_set:
+                    needed_cols.add(col)
+    projection = [row_id_name] + [
+        c for c in target_field_names if c in needed_cols
+    ]
+
+    target_ds = read_paimon(
+        target_identifier, catalog_options,
+        projection=projection, snapshot_id=snapshot_id,
+    )
+    update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
+
+    orig_names = target_ds.schema().names
+    target_renamed = target_ds.rename_columns(
+        {c: f"t.{c}" for c in orig_names}
+    )
+
+    def _add_source_aliases(batch: pa.Table) -> pa.Table:
+        columns = list(batch.columns)
+        names = list(batch.schema.names)
+        for orig in orig_names:
+            if orig == row_id_name:
+                continue
+            t_col_name = f"t.{orig}"
+            if t_col_name in names:
+                idx = names.index(t_col_name)
+                columns.append(columns[idx])
+                names.append(f"s.{orig}")
+        return pa.table(columns, names=names)
+
+    aliased = target_renamed.map_batches(
+        _add_source_aliases, **_map_kwargs(ray_remote_args),
+    )
+    spec = clauses[0].spec
+    condition = clauses[0].condition
+    captured_row_id_name = row_id_name
+    captured_on_pairs = [(row_id_name, row_id_name)]
+    captured_schema = update_schema
+
+    captured_apply = None
+    captured_rewritten = None
+    if condition is not None:
+        from pypaimon.ray.merge_condition import (
+            apply_condition, remap_source_on_keys, rewrite_condition,
+        )
+        on_map = {row_id_name: row_id_name}
+        captured_rewritten = remap_source_on_keys(
+            rewrite_condition(condition), on_map,
+        )
+        captured_apply = apply_condition
+
+    def _transform(batch: pa.Table) -> pa.Table:
+        if captured_apply is not None:
+            batch = captured_apply(
+                batch, captured_rewritten, captured_schema,
+            )
+            if batch.num_rows == 0:
+                return batch
+        return vectorized_matched_transform(
+            batch, spec, captured_on_pairs,
+            list(update_cols), captured_row_id_name,
+            captured_schema,
+        )
+
+    return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
+
+
 def build_matched_update_ds(
     *,
     target_identifier: str,
@@ -56,6 +159,11 @@ def build_matched_update_ds(
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
+    if len(clauses) != 1:
+        raise ValueError(
+            f"build_matched_update_ds expected 1 clause, got {len(clauses)}"
+        )
+
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
 
@@ -309,6 +417,12 @@ def build_not_matched_insert_ds(
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ):
+    if len(clauses) != 1:
+        raise ValueError(
+            f"build_not_matched_insert_ds expected 1 clause, "
+            f"got {len(clauses)}"
+        )
+
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.ray.shuffle import _coerce_large_string_types
 
