@@ -21,6 +21,10 @@ from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 
 from pypaimon.data.timestamp import Timestamp
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
+from pypaimon.index.index_file_meta import IndexFileMeta
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -73,6 +77,38 @@ def _build_data_file_meta(file_name: str = "data-1.parquet") -> DataFileMeta:
         write_cols=["id", "name"],
         file_path="/abs/path/data-1.parquet",
     )
+
+
+def _build_index_manifest_entry(
+    file_name: str = "index-1.gidx",
+    with_dv_ranges: bool = False,
+) -> IndexManifestEntry:
+    part_fields = [_key_field(0, "dt", "STRING")]
+    partition = GenericRow(["2024-01-01"], part_fields)
+    dv_ranges = None
+    if with_dv_ranges:
+        dv_ranges = {
+            "data-1.parquet": DeletionVectorMeta(
+                data_file_name="data-1.parquet", offset=16, length=128, cardinality=5
+            ),
+        }
+    index_file = IndexFileMeta(
+        index_type="GLOBAL_INDEX",
+        file_name=file_name,
+        file_size=512,
+        row_count=20,
+        dv_ranges=dv_ranges,
+        external_path="oss://bucket/index/" + file_name,
+        global_index_meta=GlobalIndexMeta(
+            row_range_start=0,
+            row_range_end=20,
+            index_field_id=3,
+            extra_field_ids=[4, 5],
+            index_meta=b"\x00\x01global-index-meta",
+        ),
+    )
+    # kind=1 (DELETE) mirrors build_index_delete_msgs.
+    return IndexManifestEntry(kind=1, partition=partition, bucket=0, index_file=index_file)
 
 
 class DataFileMetaSerdeTest(unittest.TestCase):
@@ -204,6 +240,59 @@ class CommitMessageSerializerTest(unittest.TestCase):
         rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
 
         self.assertEqual((ts,), rebuilt.partition)
+
+    def test_roundtrip_for_index_deletes_only_message(self):
+        # A global-index update can build a message whose ONLY content is
+        # index_deletes; the serializer must not drop it.
+        entry = _build_index_manifest_entry(with_dv_ranges=True)
+        message = CommitMessage(
+            partition=("2024-01-01",),
+            bucket=0,
+            index_deletes=[entry],
+        )
+        self.assertFalse(message.is_empty())
+
+        rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
+
+        # The deletions survive the round-trip.
+        self.assertFalse(rebuilt.is_empty())
+        self.assertEqual(1, len(rebuilt.index_deletes))
+        rebuilt_entry = rebuilt.index_deletes[0]
+        self.assertEqual(entry.kind, rebuilt_entry.kind)
+        self.assertEqual(entry.bucket, rebuilt_entry.bucket)
+        self.assertEqual(entry.partition.values, rebuilt_entry.partition.values)
+        self.assertEqual(
+            [f.to_dict() for f in entry.partition.fields],
+            [f.to_dict() for f in rebuilt_entry.partition.fields],
+        )
+
+        original_file = entry.index_file
+        rebuilt_file = rebuilt_entry.index_file
+        self.assertEqual(original_file.index_type, rebuilt_file.index_type)
+        self.assertEqual(original_file.file_name, rebuilt_file.file_name)
+        self.assertEqual(original_file.file_size, rebuilt_file.file_size)
+        self.assertEqual(original_file.row_count, rebuilt_file.row_count)
+        self.assertEqual(original_file.external_path, rebuilt_file.external_path)
+
+        # IndexFileMeta.__eq__ only compares scalar identity fields, so assert
+        # the richer payloads explicitly to catch silent global_index/dv loss.
+        self.assertEqual(original_file.global_index_meta, rebuilt_file.global_index_meta)
+        self.assertEqual(
+            original_file.global_index_meta.index_meta,
+            rebuilt_file.global_index_meta.index_meta,
+        )
+        self.assertEqual(original_file.dv_ranges, rebuilt_file.dv_ranges)
+
+    def test_roundtrip_preserves_index_file_without_dv_or_global_index(self):
+        entry = _build_index_manifest_entry(with_dv_ranges=False)
+        entry.index_file.global_index_meta = None
+        message = CommitMessage(partition=("2024-01-01",), bucket=0, index_deletes=[entry])
+
+        rebuilt = CommitMessageSerializer.deserialize(CommitMessageSerializer.serialize(message))
+
+        rebuilt_file = rebuilt.index_deletes[0].index_file
+        self.assertIsNone(rebuilt_file.dv_ranges)
+        self.assertIsNone(rebuilt_file.global_index_meta)
 
     def test_serialize_list_round_trip(self):
         messages = [

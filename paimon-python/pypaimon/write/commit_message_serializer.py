@@ -19,8 +19,12 @@
 import json
 from typing import Any, Dict, List
 
+from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.index.deletion_vector_meta import DeletionVectorMeta
 from pypaimon.index.index_file_meta import IndexFileMeta
-from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, decode_value,
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.schema.data_file_meta import (DataFileMeta, _generic_row_from_dict,
+                                                     _generic_row_to_dict, decode_value,
                                                      encode_value)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.compact_increment import CompactIncrement
@@ -36,11 +40,11 @@ class CommitMessageSerializer:
     from Ray workers back to the driver.
 
     Every message round-trips (partition, bucket, total_buckets, data_increment,
-    compact_increment), with each increment carrying its own new / deleted /
-    changelog file lists plus index file deltas. Today the index slots are
-    populated only by tables that opt into them; the serializer round-trips
-    them either way so adding deletion vectors / global index later does
-    not need a new payload version.
+    compact_increment, check_from_snapshot, index_deletes), with each increment
+    carrying its own new / deleted / changelog file lists plus index file deltas.
+    index_deletes (the index manifest entries removed by a global-index update)
+    is round-tripped too, so a message whose only content is index_deletes does
+    not silently lose its deletions when shipped through this serializer.
     """
 
     # Wire format version; bump on incompatible payload changes.
@@ -65,6 +69,7 @@ class CommitMessageSerializer:
             "data_increment": cls._data_increment_to_dict(message.data_increment),
             "compact_increment": cls._compact_increment_to_dict(message.compact_increment),
             "check_from_snapshot": message.check_from_snapshot,
+            "index_deletes": [cls._index_manifest_entry_to_dict(e) for e in message.index_deletes],
         }
 
     @classmethod
@@ -82,6 +87,8 @@ class CommitMessageSerializer:
             data_increment=cls._data_increment_from_dict(data.get("data_increment")),
             compact_increment=cls._compact_increment_from_dict(data.get("compact_increment")),
             check_from_snapshot=data.get("check_from_snapshot", -1),
+            index_deletes=[cls._index_manifest_entry_from_dict(e)
+                           for e in (data.get("index_deletes") or [])],
         )
 
     @classmethod
@@ -138,12 +145,31 @@ class CommitMessageSerializer:
             deleted_index_files=[_index_file_from_dict(i) for i in data.get("deleted_index_files") or []],
         )
 
+    # ---- Index manifest entry helpers --------------------------------------
 
-# IndexFileMeta has richer payloads (deletion vector ranges, global index
-# meta) that aren't relevant to the basic compaction path yet — round-trip
-# only the scalar identity fields here. Phase 6/7 (deletion vectors,
-# changelog producer) will extend this to cover dv_ranges and
-# global_index_meta as the rewriter starts producing them.
+    @classmethod
+    def _index_manifest_entry_to_dict(cls, entry: IndexManifestEntry) -> Dict[str, Any]:
+        return {
+            "kind": entry.kind,
+            "partition": _generic_row_to_dict(entry.partition),
+            "bucket": entry.bucket,
+            "index_file": _index_file_to_dict(entry.index_file),
+        }
+
+    @classmethod
+    def _index_manifest_entry_from_dict(cls, data: Dict[str, Any]) -> IndexManifestEntry:
+        return IndexManifestEntry(
+            kind=data["kind"],
+            partition=_generic_row_from_dict(data.get("partition")),
+            bucket=data["bucket"],
+            index_file=_index_file_from_dict(data["index_file"]),
+        )
+
+
+# IndexFileMeta carries the scalar identity fields plus two richer payloads:
+# dv_ranges (deletion-vector index) and global_index_meta (global index). All
+# are round-tripped so a message carrying global-index deletes (or, later,
+# deletion vectors) does not lose them when shipped through this serializer.
 def _index_file_to_dict(idx: IndexFileMeta) -> Dict[str, Any]:
     return {
         "index_type": idx.index_type,
@@ -151,6 +177,8 @@ def _index_file_to_dict(idx: IndexFileMeta) -> Dict[str, Any]:
         "file_size": idx.file_size,
         "row_count": idx.row_count,
         "external_path": idx.external_path,
+        "dv_ranges": _dv_ranges_to_list(idx.dv_ranges),
+        "global_index_meta": _global_index_meta_to_dict(idx.global_index_meta),
     }
 
 
@@ -161,4 +189,63 @@ def _index_file_from_dict(data: Dict[str, Any]) -> IndexFileMeta:
         file_size=data["file_size"],
         row_count=data["row_count"],
         external_path=data.get("external_path"),
+        dv_ranges=_dv_ranges_from_list(data.get("dv_ranges")),
+        global_index_meta=_global_index_meta_from_dict(data.get("global_index_meta")),
+    )
+
+
+def _dv_ranges_to_list(dv_ranges):
+    # In memory dv_ranges is keyed by data_file_name; the key is redundant with
+    # DeletionVectorMeta.data_file_name, so serialize as a flat list and rebuild
+    # the dict on the way back.
+    if not dv_ranges:
+        return None
+    return [
+        {
+            "data_file_name": dv.data_file_name,
+            "offset": dv.offset,
+            "length": dv.length,
+            "cardinality": dv.cardinality,
+        }
+        for dv in dv_ranges.values()
+    ]
+
+
+def _dv_ranges_from_list(data):
+    if not data:
+        return None
+    ranges = {}
+    for d in data:
+        dv = DeletionVectorMeta(
+            data_file_name=d["data_file_name"],
+            offset=d["offset"],
+            length=d["length"],
+            cardinality=d.get("cardinality"),
+        )
+        ranges[dv.data_file_name] = dv
+    return ranges
+
+
+def _global_index_meta_to_dict(meta):
+    if meta is None:
+        return None
+    return {
+        "row_range_start": meta.row_range_start,
+        "row_range_end": meta.row_range_end,
+        "index_field_id": meta.index_field_id,
+        "extra_field_ids": meta.extra_field_ids,
+        # index_meta is raw bytes; encode_value tags it for JSON round-trip.
+        "index_meta": encode_value(meta.index_meta),
+    }
+
+
+def _global_index_meta_from_dict(data):
+    if data is None:
+        return None
+    return GlobalIndexMeta(
+        row_range_start=data["row_range_start"],
+        row_range_end=data["row_range_end"],
+        index_field_id=data["index_field_id"],
+        extra_field_ids=data.get("extra_field_ids"),
+        index_meta=decode_value(data.get("index_meta")),
     )
