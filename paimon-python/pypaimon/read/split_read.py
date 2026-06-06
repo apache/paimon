@@ -217,14 +217,27 @@ class SplitRead(ABC):
         nested_path_by_name = self._nested_path_by_name()
         has_nested = nested_path_by_name is not None
 
-        # Cover both the merge-internal aliases (``_KEY_id``) and the
-        # bare user-facing PK name (``id``) the file actually stores.
-        name_to_field: Dict[str, DataField] = {f.name: f for f in self.read_fields}
-        _, _trimmed_lookup_fields = self._get_trimmed_fields(
-            self._get_read_data_fields(), self._get_all_data_fields()
-        )
-        for f in _trimmed_lookup_fields:
-            name_to_field.setdefault(f.name, f)
+        # Field-id based per-file read (non-nested): select the file's OWN
+        # physical fields by field id and read them under the file's original
+        # names/types. A normalize step in DataFileBatchReader then aligns the
+        # batch to the latest read schema by field id (not by name), so a
+        # rename follows the id and a dropped-then-readded name cannot revive
+        # stale data. Nested-projection reads stay on the legacy name path.
+        file_read_fields = None if has_nested else self._file_read_fields(file)
+        target_fields = None if has_nested else self._target_read_fields()
+        if file_read_fields is not None:
+            read_file_fields = [f.name for f in file_read_fields]
+            name_to_field: Dict[str, DataField] = {
+                f.name: f for f in file_read_fields}
+        else:
+            # Cover both the merge-internal aliases (``_KEY_id``) and the
+            # bare user-facing PK name (``id``) the file actually stores.
+            name_to_field = {f.name: f for f in self.read_fields}
+            _, _trimmed_lookup_fields = self._get_trimmed_fields(
+                self._get_read_data_fields(), self._get_all_data_fields()
+            )
+            for f in _trimmed_lookup_fields:
+                name_to_field.setdefault(f.name, f)
 
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -342,7 +355,9 @@ class SplitRead(ABC):
                 row_tracking_enabled,
                 system_fields,
                 file_io=self.table.file_io,
-                row_id_offsets=row_indices)
+                row_id_offsets=row_indices,
+                file_data_fields=file_read_fields,
+                target_data_fields=target_fields)
         else:
             reader = DataFileBatchReader(
                 format_reader,
@@ -355,7 +370,9 @@ class SplitRead(ABC):
                 row_tracking_enabled,
                 system_fields,
                 file_io=self.table.file_io,
-                row_id_offsets=row_indices)
+                row_id_offsets=row_indices,
+                file_data_fields=file_read_fields,
+                target_data_fields=target_fields)
 
         # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
         if row_ranges is not None and row_indices is None:
@@ -401,16 +418,54 @@ class SplitRead(ABC):
         return self.schema_id_2_fields[key]
 
     @abstractmethod
+    def _all_data_fields_from(self, fields: List[DataField]) -> List[DataField]:
+        """Apply this split-read's data-field shaping (row-tracking / kv
+        wrapping) to the given base ``fields``. Called both for the latest
+        table schema and for an older file schema."""
+
     def _get_all_data_fields(self):
-        """Get all data fields"""
+        return self._all_data_fields_from(self.table.fields)
 
     def _get_read_data_fields(self):
-        read_data_fields = []
+        return self._read_data_fields_from(self._get_all_data_fields())
+
+    def _read_data_fields_from(self, all_data_fields):
         read_field_ids = {field.id for field in self.read_fields}
-        for data_field in self._get_all_data_fields():
-            if data_field.id in read_field_ids:
-                read_data_fields.append(data_field)
-        return read_data_fields
+        return [f for f in all_data_fields if f.id in read_field_ids]
+
+    def _final_data_fields_from(self, all_data_fields: List[DataField]) -> List[DataField]:
+        """The per-position target fields a batch must end up as: trimmed for
+        kv (``_KEY_*``) duplicates and stripped of partition columns. The
+        DataField analogue of ``_get_final_read_data_fields()``. Called with
+        the latest-schema fields it yields the read target (latest names +
+        types); called with a file's fields it yields what to physically read
+        from that file (the file's own names + types)."""
+        _, trimmed = self._get_trimmed_fields(
+            self._read_data_fields_from(all_data_fields), all_data_fields)
+        partition_keys = self.table.partition_keys
+        if not partition_keys:
+            return list(trimmed)
+        return [f for f in trimmed if f.name not in partition_keys]
+
+    def _target_read_fields(self) -> Optional[List[DataField]]:
+        """Latest-schema target fields (names + types) that a normalized batch
+        must align to, in order. None for nested-projection reads (kept on the
+        legacy name-based path)."""
+        if self._nested_path_by_name() is not None:
+            return None
+        return self._final_data_fields_from(self._get_all_data_fields())
+
+    def _file_read_fields(self, file: DataFileMeta) -> Optional[List[DataField]]:
+        """The fields to physically read from ``file``, in the file's own
+        names/types, selected by field id against the read set. None for
+        nested-projection reads."""
+        if self._nested_path_by_name() is not None:
+            return None
+        file_schema = self.table.schema_manager.get_schema(file.schema_id)
+        if file_schema is None:
+            return None
+        return self._final_data_fields_from(
+            self._all_data_fields_from(file_schema.fields))
 
     def _create_key_value_fields(self, value_field: List[DataField]):
         all_fields: List[DataField] = self.table.fields
@@ -629,10 +684,10 @@ class RawFileSplitRead(SplitRead):
                 reader = LimitedRecordBatchReader(reader, self.limit)
         return reader
 
-    def _get_all_data_fields(self):
+    def _all_data_fields_from(self, fields):
         if self.row_tracking_enabled:
-            return SpecialFields.row_type_with_row_tracking(self.table.fields)
-        return self.table.fields
+            return SpecialFields.row_type_with_row_tracking(fields)
+        return fields
 
 
 class MergeFileSplitRead(SplitRead):
@@ -760,8 +815,8 @@ class MergeFileSplitRead(SplitRead):
             reader = LimitedRecordReader(reader, self.limit)
         return reader
 
-    def _get_all_data_fields(self):
-        return self._create_key_value_fields(self.table.fields)
+    def _all_data_fields_from(self, fields):
+        return self._create_key_value_fields(fields)
 
 
 class DataEvolutionSplitRead(SplitRead):
@@ -1114,5 +1169,5 @@ class DataEvolutionSplitRead(SplitRead):
         field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
         return field_ids
 
-    def _get_all_data_fields(self):
-        return SpecialFields.row_type_with_row_tracking(self.table.fields)
+    def _all_data_fields_from(self, fields):
+        return SpecialFields.row_type_with_row_tracking(fields)

@@ -40,7 +40,9 @@ class DataFileBatchReader(RecordBatchReader):
                  row_tracking_enabled: bool,
                  system_fields: dict,
                  file_io: Optional[FileIO] = None,
-                 row_id_offsets: Optional[List[int]] = None):
+                 row_id_offsets: Optional[List[int]] = None,
+                 file_data_fields: Optional[List[DataField]] = None,
+                 target_data_fields: Optional[List[DataField]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -53,6 +55,57 @@ class DataFileBatchReader(RecordBatchReader):
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
         self.file_io = file_io
+        # Per-file field-id normalization: map the physically-read columns
+        # (the file's own field order/names) onto the latest read target by
+        # field id, padding missing ids with NULL. ``None`` when there is no
+        # evolution to reconcile (identity) -- the common path stays zero-copy.
+        self._normalize_positions, self._normalize_names = \
+            self._build_normalize_plan(file_data_fields, target_data_fields)
+
+    @staticmethod
+    def _build_normalize_plan(file_data_fields, target_data_fields):
+        """Build a per-file field-id alignment plan.
+
+        Returns ``(positions, names)`` where ``positions[i]`` is the column
+        index in the physically-read batch carrying ``target_data_fields[i]``
+        (matched by field id), or -1 if the file does not contain that id (pad
+        NULL). ``names[i]`` is the latest target name. Returns ``(None, None)``
+        when the plan is the identity (no evolution), so the caller skips
+        normalization and stays zero-copy.
+        """
+        if file_data_fields is None or target_data_fields is None:
+            return None, None
+        file_id_to_pos = {f.id: i for i, f in enumerate(file_data_fields)}
+        positions = []
+        names = []
+        # Identity only when every target maps to the same physical position
+        # AND already carries the same name -- a rename keeps the position but
+        # changes the name, which still requires a relabel pass.
+        identity = len(file_data_fields) == len(target_data_fields)
+        for i, target in enumerate(target_data_fields):
+            pos = file_id_to_pos.get(target.id, -1)
+            positions.append(pos)
+            names.append(target.name)
+            if pos != i or (pos >= 0 and file_data_fields[pos].name != target.name):
+                identity = False
+        if identity:
+            return None, None
+        return positions, names
+
+    def _normalize_batch(self, record_batch: RecordBatch) -> RecordBatch:
+        """Reorder/pad the physically-read batch onto the latest read target by
+        field id, and relabel columns to the latest names. Missing ids become
+        all-NULL columns; types are reconciled later by _align_batch_to_read_schema."""
+        if self._normalize_positions is None:
+            return record_batch
+        num_rows = record_batch.num_rows
+        arrays = []
+        for pos in self._normalize_positions:
+            if pos < 0:
+                arrays.append(pa.nulls(num_rows))
+            else:
+                arrays.append(record_batch.column(pos))
+        return pa.RecordBatch.from_arrays(arrays, names=self._normalize_names)
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -61,6 +114,7 @@ class DataFileBatchReader(RecordBatchReader):
             record_batch = self.format_reader.read_arrow_batch()
         if record_batch is None:
             return None
+        record_batch = self._normalize_batch(record_batch)
 
         if self.partition_info is None and self.index_mapping is None:
             # A file written under an older schema (e.g. before an INT -> BIGINT
