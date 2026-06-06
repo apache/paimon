@@ -23,6 +23,7 @@ import org.apache.paimon.fs.StorageType;
 import com.aliyun.oss.OSSException;
 import com.aliyun.oss.internal.OSSHeaders;
 import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.RestoreObjectRequest;
 import com.aliyun.oss.model.RestoreTier;
 import com.aliyun.oss.model.StorageClass;
@@ -79,14 +80,24 @@ class OSSArchiveOperationsTest {
 
     @Test
     void testCopyObjectRequest() {
+        ObjectMetadata sourceMetadata = new ObjectMetadata();
+        sourceMetadata.setContentType("application/octet-stream");
+        sourceMetadata.setCacheControl("no-cache");
+        sourceMetadata.addUserMetadata("owner", "paimon");
+
         CopyObjectRequest request =
                 OSSArchiveOperations.copyObjectRequest(
-                        "bucket", "partition/data.orc", StorageClass.Archive);
+                        "bucket", "partition/data.orc", sourceMetadata, StorageClass.Archive);
 
         assertThat(request.getSourceBucketName()).isEqualTo("bucket");
         assertThat(request.getSourceKey()).isEqualTo("partition/data.orc");
         assertThat(request.getDestinationBucketName()).isEqualTo("bucket");
         assertThat(request.getDestinationKey()).isEqualTo("partition/data.orc");
+        assertThat(request.getNewObjectMetadata().getContentType())
+                .isEqualTo("application/octet-stream");
+        assertThat(request.getNewObjectMetadata().getCacheControl()).isEqualTo("no-cache");
+        assertThat(request.getNewObjectMetadata().getUserMetadata())
+                .containsEntry("owner", "paimon");
         assertThat(request.getNewObjectMetadata().getRawMetadata())
                 .containsEntry(OSSHeaders.OSS_STORAGE_CLASS, StorageClass.Archive);
     }

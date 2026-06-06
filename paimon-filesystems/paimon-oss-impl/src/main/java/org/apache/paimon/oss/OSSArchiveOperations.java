@@ -37,6 +37,8 @@ import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -86,13 +88,45 @@ class OSSArchiveOperations {
     }
 
     static CopyObjectRequest copyObjectRequest(
-            String bucket, String key, StorageClass storageClass) {
-        ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setHeader(OSSHeaders.OSS_STORAGE_CLASS, storageClass);
-
+            String bucket, String key, ObjectMetadata sourceMetadata, StorageClass storageClass) {
         CopyObjectRequest request = new CopyObjectRequest(bucket, key, bucket, key);
-        request.setNewObjectMetadata(metadata);
+        request.setNewObjectMetadata(objectMetadata(sourceMetadata, storageClass));
         return request;
+    }
+
+    static ObjectMetadata objectMetadata(ObjectMetadata sourceMetadata, StorageClass storageClass) {
+        ObjectMetadata metadata = new ObjectMetadata();
+        if (sourceMetadata != null) {
+            if (sourceMetadata.getContentType() != null) {
+                metadata.setContentType(sourceMetadata.getContentType());
+            }
+            if (sourceMetadata.getContentEncoding() != null) {
+                metadata.setContentEncoding(sourceMetadata.getContentEncoding());
+            }
+            if (sourceMetadata.getCacheControl() != null) {
+                metadata.setCacheControl(sourceMetadata.getCacheControl());
+            }
+            if (sourceMetadata.getContentDisposition() != null) {
+                metadata.setContentDisposition(sourceMetadata.getContentDisposition());
+            }
+            if (sourceMetadata.getServerSideEncryption() != null) {
+                metadata.setServerSideEncryption(sourceMetadata.getServerSideEncryption());
+            }
+            if (sourceMetadata.getServerSideEncryptionKeyId() != null) {
+                metadata.setServerSideEncryptionKeyId(
+                        sourceMetadata.getServerSideEncryptionKeyId());
+            }
+            if (sourceMetadata.getServerSideDataEncryption() != null) {
+                metadata.setServerSideDataEncryption(sourceMetadata.getServerSideDataEncryption());
+            }
+
+            Map<String, String> userMetadata = sourceMetadata.getUserMetadata();
+            if (userMetadata != null && !userMetadata.isEmpty()) {
+                metadata.setUserMetadata(new HashMap<>(userMetadata));
+            }
+        }
+        metadata.setHeader(OSSHeaders.OSS_STORAGE_CLASS, storageClass);
+        return metadata;
     }
 
     static RestoreObjectRequest restoreObjectRequest(String bucket, String key, int days) {
@@ -113,7 +147,10 @@ class OSSArchiveOperations {
         String key = pathToKey(fileSystem, path);
 
         try {
-            ossClient(fileSystem).copyObject(copyObjectRequest(bucket, key, storageClass));
+            OSSClient client = ossClient(fileSystem);
+            client.copyObject(
+                    copyObjectRequest(
+                            bucket, key, client.getObjectMetadata(bucket, key), storageClass));
         } catch (OSSException e) {
             throw new IOException(failureMessage(operation, path, storageClass), e);
         } catch (ClientException e) {
