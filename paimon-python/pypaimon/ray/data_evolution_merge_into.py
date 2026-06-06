@@ -93,12 +93,15 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         raise ValueError(
             "At least one of when_matched or when_not_matched must be non-empty."
         )
-    if len(when_matched) > 1 or len(when_not_matched) > 1:
-        raise NotImplementedError(
-            "merge_into currently supports a single WhenMatched and a single "
-            "WhenNotMatched clause; multi-clause fall-through will be added "
-            "in a follow-up PR."
-        )
+    for label, clauses in [("when_matched", when_matched),
+                           ("when_not_matched", when_not_matched)]:
+        for i, clause in enumerate(clauses[:-1]):
+            if clause.condition is None:
+                raise ValueError(
+                    f"Only the last {label} clause may omit its condition. "
+                    f"Clause at index {i} has no condition, making subsequent "
+                    f"clauses unreachable."
+                )
     target_on_cols, source_on_cols = _normalize_on(on)
 
     from pypaimon.catalog.catalog_factory import CatalogFactory

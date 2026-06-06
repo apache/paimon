@@ -386,6 +386,13 @@ columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
   Use `lit()` for literals starting with `s.` or `t.`.
 - `condition`: an optional SQL-style boolean expression. Use `s.<col>` and
   `t.<col>` to reference source and target columns.
+- Multiple clauses are evaluated in order; the first matching condition wins:
+  ```python
+  when_matched=[
+      WhenMatched(update="*", condition="s.ts > t.ts"),
+      WhenMatched(update="*"),  # fallback for unmatched rows
+  ]
+  ```
 
 **Parameters:**
 - `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a
