@@ -1926,6 +1926,84 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['old', 'young', 'senior'])
         self.assertEqual(out['age'], [10, 20, 30])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_blob_source_condition(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        tbl_name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        self.catalog.create_table(tbl_name, s, False)
+
+        self._write(
+            tbl_name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'picture': [None, None],
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        result = merge_into(
+            target=tbl_name,
+            source=tbl_name,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched(
+                    update={'name': lit('updated')},
+                    condition='s.picture IS NULL',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        out = self._read_sorted(tbl_name)
+        self.assertEqual(out['name'], ['updated', 'updated'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_blob_target_condition_rejected(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        tbl_name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        s = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        self.catalog.create_table(tbl_name, s, False)
+
+        self._write(
+            tbl_name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['a'],
+                    'picture': [None],
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            merge_into(
+                target=tbl_name,
+                source=tbl_name,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[
+                    WhenMatched(
+                        update={'name': lit('x')},
+                        condition='t.picture IS NOT NULL',
+                    ),
+                ],
+            )
+        self.assertIn('blob', str(ctx.exception).lower())
+
 
 class TargetProjectionTest(unittest.TestCase):
 
