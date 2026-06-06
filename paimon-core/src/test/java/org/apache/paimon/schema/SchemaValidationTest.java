@@ -729,4 +729,29 @@ class SchemaValidationTest {
                 .hasMessageContaining(
                         "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
     }
+
+    @Test
+    public void testFullCompactionDeltaCommitsWithLookupChangelogProducer() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key())
+                .hasMessageContaining("lookup")
+                .hasMessageContaining("full-compaction");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.clear();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.clear();
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
 }
