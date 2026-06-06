@@ -180,33 +180,37 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             _NormalizedClause(spec=spec, condition=c.condition)
         )
 
-    source_snapshot_id = None
-    if isinstance(source, str):
-        source_snapshot = (
-            catalog.get_table(source)
-            .snapshot_manager()
-            .get_latest_snapshot()
-        )
-        if source_snapshot is not None:
-            source_snapshot_id = source_snapshot.id
-
-    source_ds = _normalize_source(
-        source, catalog_options, source_snapshot_id=source_snapshot_id,
-    )
     is_self_merge = _is_self_merge(target, source, target_on_cols, source_on_cols)
-    if not is_self_merge:
-        _validate_source_on_cols(source_ds, source_on_cols)
+    if is_self_merge and not_matched_specs:
+        raise ValueError(
+            "Self-merge (source == target with ON _ROW_ID) does not "
+            "support WHEN NOT MATCHED clauses."
+        )
 
+    if is_self_merge:
+        source_ds = None
+        source_col_names = set(full_target_field_names) | set(source_on_cols)
+    else:
+        source_snapshot_id = None
+        if isinstance(source, str):
+            source_snapshot = (
+                catalog.get_table(source)
+                .snapshot_manager()
+                .get_latest_snapshot()
+            )
+            if source_snapshot is not None:
+                source_snapshot_id = source_snapshot.id
+        source_ds = _normalize_source(
+            source, catalog_options, source_snapshot_id=source_snapshot_id,
+        )
+        _validate_source_on_cols(source_ds, source_on_cols)
+        source_col_names = set(_source_schema_or_raise(source_ds).names)
     _validate_source_has_target_cols(
-        source_ds, matched_specs + not_matched_specs,
-        extra_valid_cols=set(source_on_cols) if is_self_merge else None,
+        source_col_names, matched_specs + not_matched_specs,
     )
 
     if has_condition:
         from pypaimon.ray.merge_condition import extract_columns
-        source_names = set(_source_schema_or_raise(source_ds).names)
-        if is_self_merge:
-            source_names |= set(source_on_cols)
         target_names = set(full_target_field_names)
         if is_self_merge:
             target_names |= set(target_on_cols)
@@ -214,7 +218,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             if c.condition is not None:
                 for ref in extract_columns(c.condition):
                     prefix, col = ref.split(".", 1)
-                    if prefix == "s" and col not in source_names:
+                    if prefix == "s" and col not in source_col_names:
                         raise ValueError(
                             f"condition references unknown source "
                             f"column '{col}'"
@@ -268,11 +272,6 @@ def _build_datasets(
     update_cols_union: List[str] = []
 
     if ctx.is_self_merge:
-        if not_matched_specs:
-            raise ValueError(
-                "Self-merge (source == target with ON _ROW_ID) does not "
-                "support WHEN NOT MATCHED clauses."
-            )
         if matched_specs and base_snapshot is not None:
             update_cols_union = _union_update_cols(matched_specs)
             update_ds = build_self_merge_update_ds(
@@ -599,19 +598,15 @@ def _validate_source_on_cols(source_ds, on: Sequence[str]) -> None:
 
 
 def _validate_source_has_target_cols(
-    source_ds,
+    source_col_names: set,
     specs: List[_NormalizedClause],
-    extra_valid_cols: Optional[set] = None,
 ) -> None:
-    names = set(_source_schema_or_raise(source_ds).names)
-    if extra_valid_cols:
-        names |= extra_valid_cols
     needed = set()
     for clause in specs:
         for val in clause.spec.values():
             if isinstance(val, SourceColumnRef):
                 needed.add(val.column)
-    missing = sorted(needed - names)
+    missing = sorted(needed - source_col_names)
     if missing:
         raise ValueError(
             f"source is missing columns {missing} referenced by SET spec"
