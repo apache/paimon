@@ -53,12 +53,6 @@ def build_self_merge_update_ds(
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
-    if len(clauses) != 1:
-        raise ValueError(
-            f"Self-merge currently supports exactly 1 WHEN MATCHED clause, "
-            f"got {len(clauses)}"
-        )
-
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
 
@@ -109,36 +103,58 @@ def build_self_merge_update_ds(
     aliased = target_renamed.map_batches(
         _add_source_aliases, **_map_kwargs(ray_remote_args),
     )
-    spec = clauses[0].spec
-    condition = clauses[0].condition
+
+    captured_update_cols = list(update_cols)
     captured_row_id_name = row_id_name
     captured_on_pairs = [(row_id_name, row_id_name)]
     captured_schema = update_schema
 
-    captured_apply = None
-    captured_rewritten = None
-    if condition is not None:
-        from pypaimon.ray.merge_condition import (
-            apply_condition, remap_source_on_keys, rewrite_condition,
-        )
-        on_map = {row_id_name: row_id_name}
-        captured_rewritten = remap_source_on_keys(
-            rewrite_condition(condition), on_map,
-        )
-        captured_apply = apply_condition
+    on_map = {row_id_name: row_id_name}
+    prepared_clauses = []
+    for clause in clauses:
+        rewritten = None
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import (
+                remap_source_on_keys, rewrite_condition,
+            )
+            rewritten = remap_source_on_keys(
+                rewrite_condition(clause.condition), on_map,
+            )
+        prepared_clauses.append((clause.spec, rewritten))
+
+    _filter_batch = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
-        if captured_apply is not None:
-            batch = captured_apply(
-                batch, captured_rewritten, captured_schema,
-            )
-            if batch.num_rows == 0:
-                return batch
-        return vectorized_matched_transform(
-            batch, spec, captured_on_pairs,
-            list(update_cols), captured_row_id_name,
-            captured_schema,
-        )
+        remaining = batch
+        parts = []
+        for spec, rewritten in prepared_clauses:
+            if remaining.num_rows == 0:
+                break
+            if rewritten is not None:
+                matched = _filter_batch(
+                    remaining, rewritten, _pre_rewritten=True,
+                )
+            else:
+                matched = remaining
+            if matched.num_rows == 0:
+                continue
+            parts.append(vectorized_matched_transform(
+                matched, spec, captured_on_pairs,
+                captured_update_cols, captured_row_id_name,
+                captured_schema,
+            ))
+            if rewritten is not None and matched.num_rows < remaining.num_rows:
+                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                remaining = _filter_batch(
+                    remaining, not_cond, _pre_rewritten=True,
+                )
+            else:
+                remaining = remaining.slice(0, 0)
+        if not parts:
+            return captured_schema.empty_table()
+        return pa.concat_tables(parts)
 
     return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -159,11 +175,6 @@ def build_matched_update_ds(
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
-    if len(clauses) != 1:
-        raise ValueError(
-            f"build_matched_update_ds expected 1 clause, got {len(clauses)}"
-        )
-
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.table.special_fields import SpecialFields
 
@@ -417,12 +428,6 @@ def build_not_matched_insert_ds(
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ):
-    if len(clauses) != 1:
-        raise ValueError(
-            f"build_not_matched_insert_ds expected 1 clause, "
-            f"got {len(clauses)}"
-        )
-
     from pypaimon.ray.ray_paimon import read_paimon
     from pypaimon.ray.shuffle import _coerce_large_string_types
 
