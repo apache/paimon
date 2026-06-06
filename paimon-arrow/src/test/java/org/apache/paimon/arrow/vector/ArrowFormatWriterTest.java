@@ -463,6 +463,35 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testWriterClosesExternalAllocatorByDefault() {
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        try {
+            ArrowFormatWriter writer =
+                    new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true, allocator, null);
+            writer.close();
+            assertThat(allocator.closeCount()).isEqualTo(1);
+        } finally {
+            if (allocator.closeCount() == 0) {
+                allocator.close();
+            }
+        }
+    }
+
+    @Test
+    public void testWriterWithBorrowedAllocatorDoesNotCloseAllocator() {
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        try {
+            ArrowFormatWriter writer =
+                    ArrowFormatWriter.forBorrowedAllocator(
+                            PRIMITIVE_TYPE, 4096, true, allocator, null);
+            writer.close();
+            assertThat(allocator.closeCount()).isZero();
+        } finally {
+            allocator.close();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteWithExternalAllocator(boolean allocationFailed) {
@@ -767,6 +796,21 @@ public class ArrowFormatWriterTest {
                             .accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
             ArrowType.Timestamp tsType = (ArrowType.Timestamp) tsFieldType.getType();
             assertThat(tsType.getTimezone()).isNull();
+        }
+    }
+
+    private static class CloseCountingRootAllocator extends RootAllocator {
+
+        private int closeCount;
+
+        @Override
+        public void close() {
+            closeCount++;
+            super.close();
+        }
+
+        int closeCount() {
+            return closeCount;
         }
     }
 }
