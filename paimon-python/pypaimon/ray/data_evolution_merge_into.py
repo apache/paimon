@@ -189,7 +189,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
 
     if is_self_merge:
         source_ds = None
-        source_col_names = set(full_target_field_names) | set(source_on_cols)
+        source_col_names = set(settable_field_names) | set(source_on_cols)
     else:
         source_snapshot_id = None
         if isinstance(source, str):
