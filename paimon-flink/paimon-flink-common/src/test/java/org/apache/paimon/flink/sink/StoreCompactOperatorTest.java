@@ -24,6 +24,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
+import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.WriteRestore;
@@ -44,6 +46,7 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
@@ -87,6 +90,69 @@ public class StoreCompactOperatorTest extends TableTestBase {
         harness.setup(serializer);
         harness.initializeEmptyState();
         harness.open();
+
+        harness.processElement(new StreamRecord<>(data(0)));
+        harness.processElement(new StreamRecord<>(data(0)));
+        harness.processElement(new StreamRecord<>(data(1)));
+        harness.processElement(new StreamRecord<>(data(1)));
+        harness.processElement(new StreamRecord<>(data(2)));
+
+        StoreCompactOperator operator = (StoreCompactOperator) harness.getOperator();
+        assertThat(operator.compactionWaitingSet())
+                .containsExactlyInAnyOrder(
+                        Pair.of(BinaryRow.EMPTY_ROW, 0),
+                        Pair.of(BinaryRow.EMPTY_ROW, 1),
+                        Pair.of(BinaryRow.EMPTY_ROW, 2));
+        assertThat(compactRememberStoreWrite.compactTime).isEqualTo(0);
+        operator.prepareCommit(true, 1);
+        assertThat(operator.compactionWaitingSet()).isEmpty();
+        assertThat(compactRememberStoreWrite.compactTime).isEqualTo(3);
+    }
+
+    @Test
+    public void testCoordinatorProvider() throws Exception {
+        createTableDefault();
+
+        StoreCompactOperator.CoordinatedFactory operatorFactory =
+                new StoreCompactOperator.CoordinatedFactory(
+                        getTableDefault(),
+                        (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
+                                new CompactRememberStoreWrite(true),
+                        "10086",
+                        false);
+
+        assertThat(operatorFactory.getCoordinatorProvider("compact", new OperatorID()))
+                .isInstanceOf(WriteOperatorCoordinator.Provider.class);
+        assertThat(operatorFactory.getStreamOperatorClass(getClass().getClassLoader()))
+                .isEqualTo(StoreCompactOperator.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testCompactWithCoordinator(boolean streamingMode) throws Exception {
+        createTableDefault();
+
+        CompactRememberStoreWrite compactRememberStoreWrite =
+                new CompactRememberStoreWrite(streamingMode);
+        StoreCompactOperator.CoordinatedFactory operatorFactory =
+                new StoreCompactOperator.CoordinatedFactory(
+                        getTableDefault(),
+                        (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
+                                compactRememberStoreWrite,
+                        "10086",
+                        !streamingMode);
+
+        TypeSerializer<Committable> serializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        OneInputStreamOperatorTestHarness<RowData, Committable> harness =
+                new OneInputStreamOperatorTestHarness<>(operatorFactory);
+        harness.setup(serializer);
+        harness.initializeEmptyState();
+        harness.open();
+
+        // the coordinated factory must wire a CoordinatedWriteRestore into the write
+        assertThat(compactRememberStoreWrite.capturedWriteRestore)
+                .isInstanceOf(CoordinatedWriteRestore.class);
 
         harness.processElement(new StreamRecord<>(data(0)));
         harness.processElement(new StreamRecord<>(data(0)));
@@ -239,13 +305,16 @@ public class StoreCompactOperatorTest extends TableTestBase {
 
         private final boolean streamingMode;
         private int compactTime = 0;
+        private @Nullable WriteRestore capturedWriteRestore;
 
         public CompactRememberStoreWrite(boolean streamingMode) {
             this.streamingMode = streamingMode;
         }
 
         @Override
-        public void setWriteRestore(WriteRestore writeRestore) {}
+        public void setWriteRestore(WriteRestore writeRestore) {
+            this.capturedWriteRestore = writeRestore;
+        }
 
         @Override
         public SinkRecord write(InternalRow rowData) {

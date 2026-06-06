@@ -29,6 +29,7 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
@@ -38,6 +39,7 @@ import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
+import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -81,6 +83,7 @@ public class LocalTableQuery implements TableQuery {
 
     private final RowType rowType;
     private final RowType partitionType;
+    private final FileIO fileIO;
 
     @Nullable private Filter<InternalRow> cacheRowFilter;
 
@@ -97,6 +100,7 @@ public class LocalTableQuery implements TableQuery {
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
         this.rowType = table.schema().logicalRowType();
         this.partitionType = table.schema().logicalPartitionType();
+        this.fileIO = table.fileIO();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
@@ -165,6 +169,28 @@ public class LocalTableQuery implements TableQuery {
                         lookupStoreFactory,
                         bfGenerator(options),
                         lookupFileCache);
+
+        // Optimization - download lookup files if already persisted to object store
+        // We download these files if three conditions are met
+        // 1) lookup.remote-file.enabled is true - files are persisted in the first place
+        // 2) deletion-vectors.enabled is false - SSTables only contain row positions, not values,
+        // when DVs are enabled
+        // 3) The client is accessing the full data row, as opposed to a projection
+        //    - The persisted remote SSTable files are created during compaction and hold the entire
+        // data row value
+        //    - We could deserialize and project in memory, but we'll have to read much more data,
+        // not as clear of a win
+        boolean fullValueRead = readerFactoryBuilder.readValueType().equals(rowType);
+        if (this.options.lookupRemoteFileEnabled()
+                && !this.options.deletionVectorsEnabled()
+                && fullValueRead) {
+            // Calling the constructor tells `lookupLevels` to load remote files
+            new RemoteLookupFileManager<>(
+                    fileIO,
+                    factory.pathFactory(),
+                    lookupLevels,
+                    this.options.lookupRemoteLevelThreshold());
+        }
 
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }

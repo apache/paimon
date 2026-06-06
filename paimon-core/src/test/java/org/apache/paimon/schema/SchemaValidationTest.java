@@ -471,6 +471,55 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testSnapshotSequenceOrderingHappyPath() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsNonWriteOnly() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(CoreOptions.WRITE_ONLY.key());
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsSequenceField() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.SEQUENCE_FIELD.key(), "f2");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining("sequence.field");
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingRejectsNonPkTable() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("primary-key");
+    }
+
+    @Test
     public void testFileFormatPerLevelRejectsIncompatibleSchema() {
         List<DataField> fields =
                 Arrays.asList(
@@ -679,5 +728,30 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
                         "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true");
+    }
+
+    @Test
+    public void testFullCompactionDeltaCommitsWithLookupChangelogProducer() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key())
+                .hasMessageContaining("lookup")
+                .hasMessageContaining("full-compaction");
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.clear();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+
+        options.clear();
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
 }

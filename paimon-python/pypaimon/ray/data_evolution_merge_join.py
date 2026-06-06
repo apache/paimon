@@ -87,43 +87,57 @@ def build_matched_update_ds(
         right_on=tuple(f"s.{c}" for c in source_on),
     )
 
-    # MVP supports a single matched clause; future fan-out (conditions, multi-
-    # clause fall-through) must thread every clause's spec through the
-    # transform — guard so silent first-only behaviour can't sneak in.
-    assert len(clauses) == 1, (
-        f"build_matched_update_ds expected 1 clause, got {len(clauses)}"
-    )
-    spec = clauses[0].spec
-    condition = clauses[0].condition
     captured_update_cols = list(update_cols)
     captured_row_id_name = row_id_name
     captured_on_pairs = list(zip(source_on, target_on))
     captured_schema = update_schema
 
-    captured_apply = None
-    captured_rewritten = None
-    if condition is not None:
-        from pypaimon.ray.merge_condition import (
-            apply_condition, remap_source_on_keys, rewrite_condition,
-        )
-        on_map = dict(zip(source_on, target_on))
-        captured_rewritten = remap_source_on_keys(
-            rewrite_condition(condition), on_map,
-        )
-        captured_apply = apply_condition
+    on_map = dict(zip(source_on, target_on))
+    prepared_clauses = []
+    for clause in clauses:
+        rewritten = None
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import (
+                remap_source_on_keys, rewrite_condition,
+            )
+            rewritten = remap_source_on_keys(
+                rewrite_condition(clause.condition), on_map,
+            )
+        prepared_clauses.append((clause.spec, rewritten))
+
+    _filter_batch = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch
 
     def _transform(batch: pa.Table) -> pa.Table:
-        if captured_apply is not None:
-            batch = captured_apply(
-                batch, captured_rewritten, captured_schema,
-            )
-            if batch.num_rows == 0:
-                return batch
-        return vectorized_matched_transform(
-            batch, spec, captured_on_pairs,
-            captured_update_cols, captured_row_id_name,
-            captured_schema,
-        )
+        remaining = batch
+        parts = []
+        for spec, rewritten in prepared_clauses:
+            if remaining.num_rows == 0:
+                break
+            if rewritten is not None:
+                matched = _filter_batch(
+                    remaining, rewritten, _pre_rewritten=True,
+                )
+            else:
+                matched = remaining
+            if matched.num_rows == 0:
+                continue
+            parts.append(vectorized_matched_transform(
+                matched, spec, captured_on_pairs,
+                captured_update_cols, captured_row_id_name,
+                captured_schema,
+            ))
+            if rewritten is not None and matched.num_rows < remaining.num_rows:
+                not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                remaining = _filter_batch(
+                    remaining, not_cond, _pre_rewritten=True,
+                )
+            else:
+                remaining = remaining.slice(0, 0)
+        if not parts:
+            return captured_schema.empty_table()
+        return pa.concat_tables(parts)
 
     return joined.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
@@ -324,32 +338,47 @@ def build_not_matched_insert_ds(
             right_on=tuple(f"t.{c}" for c in target_on),
         )
 
-    # MVP supports a single not-matched clause; see build_matched_update_ds
-    # for why we assert instead of silently dropping the rest.
-    assert len(clauses) == 1, (
-        f"build_not_matched_insert_ds expected 1 clause, got {len(clauses)}"
-    )
-    spec = clauses[0].spec
-    condition = clauses[0].condition
-    captured_apply = None
-    captured_rewritten = None
-    if condition is not None:
-        from pypaimon.ray.merge_condition import apply_condition, rewrite_condition
-        captured_rewritten = rewrite_condition(condition)
-        captured_apply = apply_condition
+    prepared_clauses = []
+    for clause in clauses:
+        rewritten = None
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import rewrite_condition
+            rewritten = rewrite_condition(clause.condition)
+        prepared_clauses.append((clause.spec, rewritten))
+
+    _filter_batch_nm = None
+    if any(r is not None for _, r in prepared_clauses):
+        from pypaimon.ray.merge_condition import filter_batch as _filter_batch_nm
 
     def _transform(batch: pa.Table) -> pa.Table:
-        if captured_apply is not None:
-            batch = captured_apply(
-                batch, captured_rewritten, out_schema,
-            )
-            if batch.num_rows == 0:
-                return _coerce_large_string_types(batch)
-        return _coerce_large_string_types(
-            vectorized_insert_transform(
-                batch, spec, captured_field_names, out_schema
-            )
-        )
+        remaining = batch
+        parts = []
+        for spec, rewritten in prepared_clauses:
+            if remaining.num_rows == 0:
+                break
+            if rewritten is not None:
+                matched = _filter_batch_nm(
+                    remaining, rewritten, _pre_rewritten=True,
+                )
+                if matched.num_rows > 0:
+                    parts.append(vectorized_insert_transform(
+                        matched, spec, captured_field_names, out_schema
+                    ))
+                if matched.num_rows < remaining.num_rows:
+                    not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
+                    remaining = _filter_batch_nm(
+                        remaining, not_cond, _pre_rewritten=True,
+                    )
+                else:
+                    remaining = remaining.slice(0, 0)
+            else:
+                parts.append(vectorized_insert_transform(
+                    remaining, spec, captured_field_names, out_schema
+                ))
+                remaining = remaining.slice(0, 0)
+        if not parts:
+            return _coerce_large_string_types(out_schema.empty_table())
+        return _coerce_large_string_types(pa.concat_tables(parts))
 
     return unmatched.map_batches(
         _transform, **_map_kwargs(ray_remote_args)

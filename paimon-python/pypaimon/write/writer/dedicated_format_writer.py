@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -51,8 +51,10 @@ class DedicatedFormatWriter(DataWriter):
     CHECK_ROLLING_RECORD_CNT = 1000
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None):
-        super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols)
+                 write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None,
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
+        super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols,
+                         changelog_producer=changelog_producer)
 
         # Determine blob columns from table schema
         self.blob_column_names = self._get_blob_columns_from_schema()

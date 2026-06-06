@@ -93,12 +93,15 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         raise ValueError(
             "At least one of when_matched or when_not_matched must be non-empty."
         )
-    if len(when_matched) > 1 or len(when_not_matched) > 1:
-        raise NotImplementedError(
-            "merge_into currently supports a single WhenMatched and a single "
-            "WhenNotMatched clause; multi-clause fall-through will be added "
-            "in a follow-up PR."
-        )
+    for label, clauses in [("when_matched", when_matched),
+                           ("when_not_matched", when_not_matched)]:
+        for i, clause in enumerate(clauses[:-1]):
+            if clause.condition is None:
+                raise ValueError(
+                    f"Only the last {label} clause may omit its condition. "
+                    f"Clause at index {i} has no condition, making subsequent "
+                    f"clauses unreachable."
+                )
     target_on_cols, source_on_cols = _normalize_on(on)
 
     from pypaimon.catalog.catalog_factory import CatalogFactory
@@ -123,11 +126,6 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         c for c in full_target_field_names if c not in blob_cols
     ]
     on_map = dict(zip(target_on_cols, source_on_cols))
-    if when_matched and table.partition_keys:
-        raise ValueError(
-            "merge_into does not support matched clauses on partitioned "
-            "tables; cross-partition row movement is not implemented."
-        )
     matched_specs = [
         _NormalizedClause(
             spec=_normalize_set_spec(
@@ -137,6 +135,16 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         )
         for c in when_matched
     ]
+    if matched_specs and table.partition_keys:
+        partition_set = set(table.partition_keys)
+        for clause in matched_specs:
+            modified_partition_cols = partition_set & set(clause.spec.keys())
+            if modified_partition_cols:
+                raise ValueError(
+                    f"merge_into does not support updating partition columns "
+                    f"{sorted(modified_partition_cols)}; cross-partition row "
+                    f"movement is not implemented."
+                )
     has_condition = any(
         c.condition is not None
         for c in list(when_matched) + list(when_not_matched)
