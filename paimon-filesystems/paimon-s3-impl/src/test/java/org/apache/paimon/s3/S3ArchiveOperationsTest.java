@@ -22,12 +22,17 @@ import org.apache.paimon.fs.StorageType;
 
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.RestoreObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.StorageClass;
+import software.amazon.awssdk.services.s3.model.TaggingDirective;
 import software.amazon.awssdk.services.s3.model.Tier;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -85,6 +90,33 @@ class S3ArchiveOperationsTest {
         assertThat(request.key()).isEqualTo("partition/data.orc");
         assertThat(request.restoreRequest().days()).isEqualTo(7);
         assertThat(request.restoreRequest().glacierJobParameters().tier()).isEqualTo(Tier.STANDARD);
+    }
+
+    @Test
+    void testCopyObjectRequest() {
+        AtomicReference<String> source = new AtomicReference<>();
+        AtomicReference<String> destination = new AtomicReference<>();
+
+        CopyObjectRequest request =
+                S3ArchiveOperations.copyObjectRequest(
+                        (sourceKey, destinationKey, metadata) -> {
+                            source.set(sourceKey);
+                            destination.set(destinationKey);
+                            return CopyObjectRequest.builder()
+                                    .sourceKey(sourceKey)
+                                    .destinationKey(destinationKey);
+                        },
+                        "partition/data.orc",
+                        HeadObjectResponse.builder().build(),
+                        StorageClass.GLACIER);
+
+        assertThat(source).hasValue("partition/data.orc");
+        assertThat(destination).hasValue("partition/data.orc");
+        assertThat(request.sourceKey()).isEqualTo("partition/data.orc");
+        assertThat(request.destinationKey()).isEqualTo("partition/data.orc");
+        assertThat(request.storageClass()).isEqualTo(StorageClass.GLACIER);
+        assertThat(request.metadataDirective()).isEqualTo(MetadataDirective.COPY);
+        assertThat(request.taggingDirective()).isEqualTo(TaggingDirective.COPY);
     }
 
     @Test

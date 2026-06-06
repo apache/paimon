@@ -21,11 +21,11 @@ package org.apache.paimon.s3;
 import org.apache.paimon.fs.StorageType;
 
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
-
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.GlacierJobParameters;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.ObjectAlreadyInActiveTierErrorException;
 import software.amazon.awssdk.services.s3.model.ObjectNotInActiveTierErrorException;
@@ -96,21 +96,17 @@ class S3ArchiveOperations {
             throws IOException {
         String key = fileSystem.pathToKey(path);
         CopyObjectRequest request =
-                fileSystem
-                        .getRequestFactory()
-                        .newCopyObjectRequestBuilder(key, key, fileSystem.getObjectMetadata(path))
-                        .storageClass(storageClass)
-                        .metadataDirective(MetadataDirective.COPY)
-                        .taggingDirective(TaggingDirective.COPY)
-                        .build();
+                copyObjectRequest(
+                        fileSystem.getRequestFactory()::newCopyObjectRequestBuilder,
+                        key,
+                        fileSystem.getObjectMetadata(path),
+                        storageClass);
 
         try {
             s3Client(fileSystem).copyObject(request);
         } catch (ObjectNotInActiveTierErrorException e) {
             throw new IOException(
-                    "S3 object "
-                            + path
-                            + " is not in active tier. Restore it before unarchiving.",
+                    "S3 object " + path + " is not in active tier. Restore it before unarchiving.",
                     e);
         } catch (S3Exception e) {
             throw new IOException(
@@ -123,9 +119,22 @@ class S3ArchiveOperations {
         }
     }
 
+    static CopyObjectRequest copyObjectRequest(
+            CopyObjectRequestBuilderFactory factory,
+            String key,
+            HeadObjectResponse metadata,
+            StorageClass storageClass) {
+        return factory.create(key, key, metadata)
+                .storageClass(storageClass)
+                .metadataDirective(MetadataDirective.COPY)
+                .taggingDirective(TaggingDirective.COPY)
+                .build();
+    }
+
     static void restoreArchive(S3AFileSystem fileSystem, org.apache.hadoop.fs.Path path, int days)
             throws IOException {
-        RestoreObjectRequest request = restoreObjectRequest(fileSystem.getBucket(), fileSystem.pathToKey(path), days);
+        RestoreObjectRequest request =
+                restoreObjectRequest(fileSystem.getBucket(), fileSystem.pathToKey(path), days);
 
         try {
             s3Client(fileSystem).restoreObject(request);
@@ -171,5 +180,9 @@ class S3ArchiveOperations {
         } catch (InvocationTargetException e) {
             throw new IOException("Failed to get S3 client from S3AFileSystem.", e);
         }
+    }
+
+    interface CopyObjectRequestBuilderFactory {
+        CopyObjectRequest.Builder create(String sourceKey, String destinationKey, HeadObjectResponse metadata);
     }
 }
