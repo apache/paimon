@@ -85,7 +85,8 @@ class OSSArchiveOperations {
         return (int) days;
     }
 
-    static CopyObjectRequest copyObjectRequest(String bucket, String key, StorageClass storageClass) {
+    static CopyObjectRequest copyObjectRequest(
+            String bucket, String key, StorageClass storageClass) {
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setHeader(OSSHeaders.OSS_STORAGE_CLASS, storageClass);
 
@@ -120,7 +121,8 @@ class OSSArchiveOperations {
         }
     }
 
-    static void restoreArchive(AliyunOSSFileSystem fileSystem, org.apache.hadoop.fs.Path path, int days)
+    static void restoreArchive(
+            AliyunOSSFileSystem fileSystem, org.apache.hadoop.fs.Path path, int days)
             throws IOException {
         String bucket = bucket(fileSystem);
         String key = pathToKey(fileSystem, path);

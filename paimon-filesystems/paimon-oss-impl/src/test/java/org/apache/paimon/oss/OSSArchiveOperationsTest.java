@@ -56,7 +56,8 @@ class OSSArchiveOperationsTest {
         assertThatThrownBy(() -> OSSArchiveOperations.unarchiveStorageClass(StorageType.ARCHIVE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported OSS unarchive storage type");
-        assertThatThrownBy(() -> OSSArchiveOperations.unarchiveStorageClass(StorageType.COLD_ARCHIVE))
+        assertThatThrownBy(
+                        () -> OSSArchiveOperations.unarchiveStorageClass(StorageType.COLD_ARCHIVE))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported OSS unarchive storage type");
     }
