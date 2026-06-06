@@ -233,6 +233,9 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     full_pa_schema = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields
     )
+    # update_pa_schema strips blob (only non-blob cols are written by the
+    # update path); insert_pa_schema is the full table schema so the writer
+    # gets every column (blob columns end up null).
     update_pa_schema = pa.schema(
         [full_pa_schema.field(c) for c in settable_field_names]
     )
