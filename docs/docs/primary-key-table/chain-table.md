@@ -44,7 +44,11 @@ data respectively. When writing, you specify the branch to write full or increme
 automatically chooses the appropriate strategy based on the read mode, such as full, incremental, or hybrid.
 
 To enable chain table, you must config `chain-table.enabled` to true in the table options when creating the
-table, and the snapshot and delta branch need to be created as well. Consider an example via Spark SQL:
+table, and the snapshot and delta branch need to be created as well.
+
+{{< tabs "chain-table-setup" >}}
+
+{{< tab "Spark SQL" >}}
 
 ```sql
 CREATE TABLE default.t (
@@ -81,10 +85,51 @@ ALTER TABLE `default`.`t$branch_delta` SET tblproperties
      'scan.fallback-delta-branch' = 'delta');
 ```
 
+{{< /tab >}}
+
+{{< tab "Flink SQL" >}}
+
+```sql
+CREATE TABLE default.t (
+    `t1` STRING,
+    `t2` STRING,
+    `t3` STRING,
+    `dt` STRING
+) PARTITIONED BY (`dt`) WITH (
+  'chain-table.enabled' = 'true',
+  'primary-key' = 'dt,t1',
+  'sequence.field' = 't2',
+  'bucket-key' = 't1',
+  'bucket' = '2',
+  'partition.timestamp-pattern' = '$dt', 
+  'partition.timestamp-formatter' = 'yyyyMMdd'
+);
+
+CALL sys.create_branch('default.t', 'snapshot');
+
+CALL sys.create_branch('default.t', 'delta');
+
+ALTER TABLE default.t SET (
+    'scan.fallback-snapshot-branch' = 'snapshot', 
+    'scan.fallback-delta-branch' = 'delta');
+ 
+ALTER TABLE `default`.`t$branch_snapshot` SET (
+    'scan.fallback-snapshot-branch' = 'snapshot',
+    'scan.fallback-delta-branch' = 'delta');
+
+ALTER TABLE `default`.`t$branch_delta` SET (
+    'scan.fallback-snapshot-branch' = 'snapshot',
+    'scan.fallback-delta-branch' = 'delta');
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
 - Chain table should ensure that the schema of each branch is consistent.
-- Only spark support now, flink will be supported later.
+- Both Spark and Flink batch read/write are supported. Flink streaming read/write is not supported.
 - Chain compact is not supported for now, and it will be supported later.
 - Deletion vector is not supported for chain table.
 
