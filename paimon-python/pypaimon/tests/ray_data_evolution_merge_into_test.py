@@ -577,7 +577,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         self.assertEqual(self._snapshot_id(target), before)
 
-    def test_partitioned_matched_update_rejected(self):
+    def test_matched_on_partitioned_table(self):
         pt_schema = pa.schema([
             ('pt', pa.string()),
             ('id', pa.int32()),
@@ -589,25 +589,56 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         )
         self.catalog.create_table(name, s, False)
 
+        table = self.catalog.get_table(name)
+        wb = table.new_batch_write_builder()
+        writer = wb.new_write()
+        writer.write_arrow(pa.Table.from_pydict(
+            {
+                'pt': ['a', 'a'],
+                'id': pa.array([1, 2], type=pa.int32()),
+                'name': ['old_1', 'old_2'],
+            },
+            schema=pt_schema,
+        ))
+        wb.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
         source = pa.Table.from_pydict(
             {
                 'pt': ['a'],
                 'id': pa.array([1], type=pa.int32()),
-                'name': ['x'],
+                'name': ['new_1'],
             },
             schema=pt_schema,
         )
 
+        # Non-partition column update should succeed
+        merge_into(
+            target=name,
+            source=source,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update={'name': source_col('name')})],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['name'], ['new_1', 'old_2'])
+        self.assertEqual(out['pt'], ['a', 'a'])
+
+        # Partition column update should be rejected
         with self.assertRaises(ValueError) as ctx:
             merge_into(
                 target=name,
                 source=source,
                 catalog_options=self.catalog_options,
                 on=['id'],
-                when_matched=[WhenMatched(update='*')],
+                when_matched=[WhenMatched(update={'pt': source_col('pt')})],
                 num_partitions=_TEST_NUM_PARTITIONS,
             )
-        self.assertIn('partitioned', str(ctx.exception))
+        self.assertIn('partition', str(ctx.exception))
 
     def test_partitioned_insert_allowed(self):
         pt_schema = pa.schema([
