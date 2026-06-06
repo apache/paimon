@@ -192,7 +192,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
                 .isNotNull()
                 .extracting(r -> r.getInt(2))
                 .isEqualTo(200);
-        // same trimmed key ("a") in a different partition must resolve through the partition arg
+        // same trimmed key ("a") in a different partition resolves through the partition arg
         assertThat(query.lookup(row(2), 0, GenericRow.of(BinaryString.fromString("a"))))
                 .isNotNull()
                 .extracting(r -> r.getInt(2))
