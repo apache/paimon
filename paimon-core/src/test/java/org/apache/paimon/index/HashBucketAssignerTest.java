@@ -542,14 +542,12 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         2,
                         Duration.ofSeconds(10));
 
-        // First assignment at threshold should trigger refresh
-        assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // 3 rows, triggers refresh
+        // First assignment triggers refresh.
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0);
 
-        // Immediate subsequent assignments should NOT trigger refresh (within interval)
+        // Subsequent assignments within the interval do not trigger another refresh.
         assertThat(assigner.assign(row(1), 10)).isEqualTo(0);
         assertThat(assigner.assign(row(1), 11)).isEqualTo(0);
-
-        // All assignments should succeed without issues
         assertThat(assigner.assign(row(1), 12)).isEqualTo(0);
     }
 

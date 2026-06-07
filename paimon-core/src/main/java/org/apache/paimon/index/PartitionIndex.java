@@ -70,6 +70,7 @@ public class PartitionIndex {
 
     private volatile CompletableFuture<Void> refreshFuture;
 
+    // null = never refreshed; the first refresh is not throttled by min-refresh-interval.
     private Instant lastRefreshTime;
 
     public PartitionIndex(
@@ -87,7 +88,7 @@ public class PartitionIndex {
         this.accessed = true;
         this.indexFileHandler = indexFileHandler;
         this.partition = partition;
-        this.lastRefreshTime = Instant.now();
+        this.lastRefreshTime = null;
     }
 
     public int assign(
@@ -210,7 +211,7 @@ public class PartitionIndex {
     }
 
     private boolean isReachedTheMinRefreshInterval(final Duration duration) {
-        return Instant.now().isAfter(lastRefreshTime.plus(duration));
+        return lastRefreshTime == null || Instant.now().isAfter(lastRefreshTime.plus(duration));
     }
 
     /**
