@@ -118,7 +118,7 @@ public class PartitionIndex {
             if (shouldRefreshWhenBucketNearFull(
                             number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)
                     && isReachedTheMinRefreshInterval(minRefreshInterval)) {
-                refreshBucketsFromDisk();
+                refreshBucketsFromDisk(bucketFilter);
             }
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
@@ -226,7 +226,7 @@ public class PartitionIndex {
         }
     }
 
-    private void refreshBucketsFromDisk() {
+    private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
         // Only start refresh if not already in progress
         if (refreshFuture == null || refreshFuture.isDone()) {
             if (LOG.isDebugEnabled()) {
@@ -252,9 +252,16 @@ public class PartitionIndex {
 
                                             // Use parallel stream to scan multiple files
                                             // concurrently
-                                            // This reduces latency when dealing with many buckets
+                                            // This reduces latency when dealing with many buckets.
+                                            // Apply bucketFilter so we only surface buckets owned
+                                            // by this assigner; otherwise multiple assigners would
+                                            // race for buckets they do not own.
                                             Map<Integer, Long> tempBucketInfo =
                                                     files.parallelStream()
+                                                            .filter(
+                                                                    file ->
+                                                                            bucketFilter.test(
+                                                                                    file.bucket()))
                                                             .filter(
                                                                     file ->
                                                                             file.indexFile()

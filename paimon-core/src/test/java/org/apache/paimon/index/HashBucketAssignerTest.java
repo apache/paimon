@@ -370,31 +370,47 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Test that bucket refresh is triggered when a bucket approaches target capacity, and that
-     * buckets newly added on disk become discoverable by subsequent assignments. Without the fix
-     * the async refresh would never run and bucket 1 (added after the assigner loaded its initial
-     * state) would never be observable through {@link HashBucketAssigner#assign}.
+     * Test that bucket refresh is triggered when a bucket approaches target capacity, that
+     * buckets newly added on disk become discoverable by subsequent assignments, AND that the
+     * refresh respects assigner ownership (only buckets owned by this assigner are surfaced).
+     *
+     * <p>Setup uses two assigners: assigner 0 owns even buckets (0, 2, ...), assigner 1 owns
+     * odd buckets (1, 3, ...). Without the fix:
+     *
+     * <ul>
+     *   <li>The async refresh would never run, so bucket 2 (added after load) would stay
+     *       invisible.
+     *   <li>Even if the refresh ran, it would surface bucket 1 (owned by assigner 1) into
+     *       assigner 0's in-memory map, breaking the ownership invariant.
+     * </ul>
      */
     @Test
     public void testRefreshTriggeredWhenBucketNearFull() throws IOException {
-        // Initial on-disk state seen by the assigner at load time: only bucket 0 with 2 rows.
+        // Initial on-disk state seen by assigner 0 at load time: only bucket 0 (its own) with
+        // 2 rows. Bucket 1 also exists on disk but is owned by assigner 1.
         commit.commit(
                 0,
-                Collections.singletonList(
+                Arrays.asList(
                         createCommitMessage(
                                 row(1),
                                 0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 2})),
+                        createCommitMessage(
+                                row(1),
                                 1,
-                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {1, 3}))));
 
+        // numChannels=2, numAssigners=2, assignId=0 -> assigner 0 owns even buckets only.
         // targetBucketRowNumber=5, threshold=2 -> refresh triggers when a bucket reaches 3 rows.
         HashBucketAssigner assigner =
                 new HashBucketAssigner(
                         table.snapshotManager(),
                         commitUser,
                         fileHandler,
-                        1,
-                        1,
+                        2,
+                        2,
                         0,
                         5,
                         -1,
@@ -402,32 +418,44 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         Duration.ofMillis(1));
 
         // After the assigner has loaded, simulate another writer (or compaction) committing a
-        // new bucket. The assigner's in-memory nonFullBucketInformation does not know about it.
+        // new even bucket (2) that this assigner does not yet know about. We also commit
+        // additional rows to bucket 1 (owned by assigner 1) to make sure the refresh has
+        // something to filter out.
         commit.commit(
                 1,
-                Collections.singletonList(
+                Arrays.asList(
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                2,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 6})),
                         createCommitMessage(
                                 row(1),
                                 1,
-                                1,
-                                fileHandler.hashIndex(row(1), 1).write(new int[] {2, 3}))));
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {5}))));
 
-        // Push bucket 0 to its near-full threshold (3 rows). This must schedule the async refresh
-        // before returning; otherwise bucket 1 stays invisible.
+        // Push bucket 0 to its near-full threshold (3 rows). This must schedule the async
+        // refresh before returning; otherwise bucket 2 stays invisible.
         assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // 3 rows
 
-        // Poll until the async refresh has surfaced bucket 1: keep assigning fresh hashes and
-        // expect at least one of them to land on bucket 1 within the timeout. Without the fix
-        // the loop exhausts the timeout because bucket 1 never enters the in-memory map.
+        // Poll until the async refresh has surfaced bucket 2. Keep assigning even hashes
+        // (which belong to assigner 0) and expect at least one of them to land on bucket 2
+        // within the timeout. The same loop also asserts ownership: assigner 0 must NEVER
+        // return bucket 1, even though bucket 1 has space on disk.
         long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
         int hash = 100;
-        boolean bucket1Seen = false;
+        boolean bucket2Seen = false;
         while (System.nanoTime() < deadline) {
-            int assigned = assigner.assign(row(1), hash++);
-            if (assigned == 1) {
-                bucket1Seen = true;
+            int assigned = assigner.assign(row(1), hash);
+            assertThat(assigned)
+                    .as("assigner 0 must only return buckets it owns (even ones)")
+                    .isEven();
+            if (assigned == 2) {
+                bucket2Seen = true;
                 break;
             }
+            hash += 2;
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -435,8 +463,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 break;
             }
         }
-        assertThat(bucket1Seen)
-                .as("bucket 1 should become assignable after the async refresh runs")
+        assertThat(bucket2Seen)
+                .as("bucket 2 should become assignable after the async refresh runs")
                 .isTrue();
     }
 
