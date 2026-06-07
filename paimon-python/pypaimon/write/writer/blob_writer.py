@@ -183,8 +183,9 @@ class BlobWriter(AppendOnlyDataWriter):
             value_null_counts = [0]
 
         if self.options.data_evolution_enabled(False):
+            # Row-tracking commit stamps files with min_sequence_number == 0 to the snapshot id.
             min_seq = 0
-            max_seq = row_count - 1
+            max_seq = 0
         else:
             min_seq = self.sequence_generator.current - row_count
             max_seq = self.sequence_generator.current - 1

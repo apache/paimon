@@ -212,7 +212,7 @@ class ConflictDetection:
                 existing_index.add((
                     base.partition, base.bucket,
                     base.file.first_row_id, base.file.row_count))
-                if not self._is_blob_file(base.file.file_name):
+                if not DataFileMeta.is_blob_file(base.file.file_name):
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
 
@@ -222,7 +222,7 @@ class ConflictDetection:
         }
 
         for entry in files_to_check:
-            if self._is_blob_file(entry.file.file_name):
+            if DataFileMeta.is_blob_file(entry.file.file_name):
                 base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
@@ -263,7 +263,7 @@ class ConflictDetection:
         for group in merged_groups:
             data_files = [
                 entry for entry in group
-                if not self._is_blob_file(entry.file.file_name)
+                if not DataFileMeta.is_blob_file(entry.file.file_name)
             ]
             if not range_helper.are_all_ranges_same(data_files):
                 file_descriptions = [
@@ -280,10 +280,6 @@ class ConflictDetection:
                     + str(file_descriptions))
 
         return None
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        return DataFileMeta.is_blob_file(file_name)
 
     def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
         if not self.data_evolution_enabled:
