@@ -2328,7 +2328,10 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         commit.commit(commit_messages)
         writer.close()
 
-        print(f"✅ Successfully committed {len(commit_messages)} commit messages with {num_blobs} batches of large blobs")
+        print(
+            f"✅ Successfully committed {len(commit_messages)} commit messages "
+            f"with {num_blobs} batches of large blobs"
+        )
 
         # Read data back
         read_builder = table.new_read_builder()
