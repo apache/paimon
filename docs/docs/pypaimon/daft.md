@@ -30,7 +30,13 @@ under the License.
 This requires `daft` to be installed:
 
 ```bash
-pip install pypaimon[daft]
+pip install 'pypaimon[daft]'
+```
+
+To execute Daft plans on Ray, install both extras:
+
+```bash
+pip install 'pypaimon[daft,ray]'
 ```
 
 `pypaimon.daft` exposes a top-level `read_paimon` / `write_paimon` API that
@@ -165,11 +171,58 @@ write_paimon(
 )
 ```
 
+For unpartitioned tables, overwrite replaces the table contents. For
+partitioned tables, overwrite follows Paimon's dynamic partition overwrite
+semantics by default: only partitions present in the input DataFrame are
+replaced, and existing partitions not present in the input are kept.
+
 **Parameters:**
 - `df`: the Daft DataFrame to write.
 - `table_identifier`: full table name, e.g. `"db_name.table_name"`.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`.
 - `mode`: write mode — `"append"` (default) or `"overwrite"`.
+
+## Running Daft on Ray
+
+`pypaimon.daft` works with Daft's Ray runner. Configure the runner before the
+first Daft execution in the process:
+
+```python
+import daft
+import ray
+from daft import runners
+from pypaimon.daft import read_paimon, write_paimon
+
+ray.init()  # use address="auto" to connect to an existing Ray cluster
+runners.set_runner_ray()
+
+df = daft.from_pydict({
+    "id": [1, 2, 3],
+    "name": ["alice", "bob", "charlie"],
+    "dt": ["2024-01-01", "2024-01-01", "2024-01-02"],
+})
+
+write_paimon(
+    df,
+    "database_name.table_name",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+)
+
+result = (
+    read_paimon(
+        "database_name.table_name",
+        catalog_options={"warehouse": "/path/to/warehouse"},
+    )
+    .where(daft.col("dt") == "2024-01-01")
+    .select("id", "name")
+)
+
+result.show()
+```
+
+Use `pypaimon.daft` when your application is written with Daft DataFrames and
+you want Daft to schedule the execution on Ray. Use `pypaimon.ray` instead when
+your application directly reads or writes Ray Datasets.
 
 ## Catalog Abstraction
 
