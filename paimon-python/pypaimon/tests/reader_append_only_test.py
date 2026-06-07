@@ -1023,3 +1023,96 @@ class AoReaderTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
+
+
+class IsInPartitionScanPlanTest(unittest.TestCase):
+    """Reproduces slow scan plan when using is_in() on partition key with many
+    values. All manifest entries are fully deserialized before partition
+    filtering — the early_entry_filter only checks bucket, not partition.
+    Java's createEntryRowFilter() tests partition on raw InternalRow before
+    full deserialization; Python lacks this optimization."""
+
+    NUM_PARTITIONS = 5000
+    IN_SIZE = 2000
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = tempfile.mkdtemp()
+        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
+        cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
+        cls.catalog.create_database('default', True)
+
+        cls.pa_schema = pa.schema([
+            ('pk', pa.int32()),
+            ('val', pa.string()),
+            ('pt', pa.string()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            cls.pa_schema, partition_keys=['pt'])
+        cls.catalog.create_table('default.is_in_bench', schema, False)
+        table = cls.catalog.get_table('default.is_in_bench')
+
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        for i in range(cls.NUM_PARTITIONS):
+            w.write_arrow(pa.Table.from_pydict(
+                {'pk': [i], 'val': [f'v_{i}'], 'pt': [f'pt_{i}']},
+                schema=cls.pa_schema,
+            ))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
+
+    def test_is_in_scans_all_entries_before_filtering(self):
+        table = self.catalog.get_table('default.is_in_bench')
+        rb = table.new_read_builder()
+        builder = rb.new_predicate_builder()
+
+        in_values = [f'pt_{i}' for i in range(self.IN_SIZE)]
+        pred = builder.is_in('pt', in_values)
+
+        rb_filtered = table.new_read_builder().with_filter(pred)
+        splits = rb_filtered.new_scan().plan().splits()
+        self.assertEqual(len(splits), self.IN_SIZE)
+
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from io import BytesIO
+        import fastavro
+
+        entry_counts = {'total': 0, 'constructed': 0}
+        original_read = ManifestFileManager.read
+
+        def counting_read(self_mgr, manifest_file_name,
+                          manifest_entry_filter=None,
+                          drop_stats=True, early_entry_filter=None):
+            manifest_path = (
+                f"{self_mgr.manifest_path}/{manifest_file_name}")
+            with self_mgr.file_io.new_input_stream(
+                    manifest_path) as stream:
+                buf = BytesIO(stream.read())
+                reader = fastavro.reader(buf)
+                for _ in reader:
+                    entry_counts['total'] += 1
+            entry_counts['constructed'] = entry_counts['total']
+            return original_read(
+                self_mgr, manifest_file_name,
+                manifest_entry_filter, drop_stats, early_entry_filter)
+
+        ManifestFileManager.read = counting_read
+        try:
+            rb2 = table.new_read_builder().with_filter(pred)
+            rb2.new_scan().plan()
+        finally:
+            ManifestFileManager.read = original_read
+
+        self.assertEqual(entry_counts['total'], self.NUM_PARTITIONS)
+        self.assertEqual(entry_counts['constructed'], self.NUM_PARTITIONS)
+        wasted = entry_counts['constructed'] - self.IN_SIZE
+        self.assertGreater(wasted, 0,
+                           f"Expected wasted construction: all "
+                           f"{self.NUM_PARTITIONS} entries are fully "
+                           f"deserialized but only {self.IN_SIZE} match")
