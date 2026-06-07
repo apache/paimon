@@ -127,14 +127,14 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
 
-    def test_no_conflict_when_dedicated_file_range_is_covered(self):
+    def test_no_conflict_when_blob_file_range_is_covered(self):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
         delta = [_make_entry("p1.blob", kind=0, first_row_id=20, row_count=10)]
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=200))
 
-    def test_conflict_when_dedicated_file_range_is_not_covered(self):
+    def test_conflict_when_blob_file_range_is_not_covered(self):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
         delta = [_make_entry("p1.blob", kind=0, first_row_id=95, row_count=10)]

@@ -216,10 +216,14 @@ class ConflictDetection:
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
 
+        existing_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in existing_ranges.items()
+        }
+
         for entry in files_to_check:
             if self._is_dedicated_storage_file(entry.file.file_name):
-                base_ranges = Range.sort_and_merge_overlap(
-                    existing_ranges.get((entry.partition, entry.bucket), []), True, True)
+                base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
 

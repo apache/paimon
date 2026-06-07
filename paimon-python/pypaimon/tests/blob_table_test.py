@@ -1168,13 +1168,22 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         write_builder.new_commit().commit(writer.prepare_commit())
         writer.close()
 
+        row_id_builder = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits())
+        row_ids_by_id = {
+            row['id']: row['_ROW_ID']
+            for row in row_id_result.select(['id', '_ROW_ID']).to_pylist()
+        }
+
         update_builder = table.new_batch_write_builder()
         table_update = update_builder.new_update().with_update_type(['blob_data'])
         payload = b'x' * 2048
+        update_ids = [1, 2, 3, 4, 5]
         update_data = pa.Table.from_pydict({
-            '_ROW_ID': pa.array([0, 1, 2, 3, 4], type=pa.int64()),
+            '_ROW_ID': pa.array([row_ids_by_id[id_] for id_ in update_ids], type=pa.int64()),
             'blob_data': pa.array(
-                [payload + suffix for suffix in [b'0', b'1', b'2', b'3', b'4']],
+                [payload + str(id_ - 1).encode() for id_ in update_ids],
                 type=pa.large_binary(),
             ),
         })
