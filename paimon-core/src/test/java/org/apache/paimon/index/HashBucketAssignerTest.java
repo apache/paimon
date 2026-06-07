@@ -434,9 +434,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 2,
                                 fileHandler.hashIndex(row(1), 1).write(new int[] {5}))));
 
-        // Push bucket 0 to its near-full threshold (3 rows). This must schedule the async
-        // refresh before returning; otherwise bucket 2 stays invisible.
-        assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // 3 rows
+        // Fresh hashes avoid the hash2Bucket fast path and push bucket 0 past the threshold.
+        assertThat(assigner.assign(row(1), 50)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 52)).isEqualTo(0);
 
         // Poll until the async refresh has surfaced bucket 2. Keep assigning even hashes
         // (which belong to assigner 0) and expect at least one of them to land on bucket 2
