@@ -367,11 +367,15 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
+        partition_filter = None
+        if self.scan_stats is None:
+            partition_filter = self.partition_key_predicate
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
+            partition_filter=partition_filter,
         )
 
     def _build_early_bucket_filter(self):

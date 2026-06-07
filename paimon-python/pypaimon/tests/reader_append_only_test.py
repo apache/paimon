@@ -996,7 +996,7 @@ class AoReaderTest(unittest.TestCase):
 
         schema = Schema.from_pyarrow_schema(
             pa.schema([('pk', pa.int32()), ('val', pa.string()),
-                        ('pt', pa.string())]),
+                       ('pt', pa.string())]),
             partition_keys=['pt'])
         self.catalog.create_table(
             'default.test_is_in_partition_bench', schema, False)
@@ -1023,19 +1023,23 @@ class AoReaderTest(unittest.TestCase):
             pred).new_scan().plan().splits()
         self.assertEqual(len(splits), in_size)
 
-        entry_counts = {'total': 0}
+        entry_counts = {'avro_total': 0, 'constructed': 0}
         original_read = ManifestFileManager.read
 
         def counting_read(self_mgr, manifest_file_name,
                           manifest_entry_filter=None,
-                          drop_stats=True, early_entry_filter=None):
+                          drop_stats=True, early_entry_filter=None,
+                          partition_filter=None):
             path = f"{self_mgr.manifest_path}/{manifest_file_name}"
             with self_mgr.file_io.new_input_stream(path) as s:
                 for _ in fastavro.reader(BytesIO(s.read())):
-                    entry_counts['total'] += 1
-            return original_read(
+                    entry_counts['avro_total'] += 1
+            result = original_read(
                 self_mgr, manifest_file_name,
-                manifest_entry_filter, drop_stats, early_entry_filter)
+                manifest_entry_filter, drop_stats,
+                early_entry_filter, partition_filter)
+            entry_counts['constructed'] += len(result)
+            return result
 
         ManifestFileManager.read = counting_read
         try:
@@ -1044,7 +1048,8 @@ class AoReaderTest(unittest.TestCase):
         finally:
             ManifestFileManager.read = original_read
 
-        self.assertEqual(entry_counts['total'], num_partitions)
+        self.assertEqual(entry_counts['avro_total'], num_partitions)
+        self.assertEqual(entry_counts['constructed'], in_size)
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
