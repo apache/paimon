@@ -226,6 +226,8 @@ class DataVectorWriter(DataWriter):
         stats_columns = self.normal_columns if metadata_stats_enabled else []
         value_stats = self._collect_value_stats(data, stats_columns)
 
+        min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
+
         return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
@@ -234,8 +236,8 @@ class DataVectorWriter(DataWriter):
             max_key=GenericRow([], []),
             key_stats=SimpleStats.empty_stats(),
             value_stats=value_stats,
-            min_sequence_number=-1,
-            max_sequence_number=-1,
+            min_sequence_number=min_seq,
+            max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],

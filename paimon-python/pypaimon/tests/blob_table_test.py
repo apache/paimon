@@ -3804,6 +3804,134 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         table = self.catalog.get_table('test_db.nested_blob_name_no_error')
         self.assertIsNotNone(table)
 
+    def test_blob_table_partial_update_non_blob_column(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        }
+        s = Schema.from_pyarrow_schema(pa_schema, options=opts)
+        table_name = 'test_db.blob_de_seq'
+        self.catalog.create_table(table_name, s, False)
+
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {'id': [1, 2], 'name': ['a', 'b'], 'picture': [None, None]},
+            schema=pa_schema,
+        ))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder()
+        rb = rb.with_projection(['name', '_ROW_ID'])
+        splits = rb.new_scan().plan().splits()
+        source = rb.new_read().to_arrow(splits)
+
+        update_data = pa.table({
+            '_ROW_ID': source.column('_ROW_ID'),
+            'name': pa.array(['updated', 'updated'], type=pa.string()),
+        })
+        updater = TableUpdateByRowId(
+            table, '_test_', BATCH_COMMIT_IDENTIFIER,
+        )
+        msgs = updater.update_columns(update_data, ['name'])
+        table.new_batch_write_builder().new_commit().commit(msgs)
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(result['name'], ['updated', 'updated'])
+
+    def test_blob_table_partial_update_non_blob_column_with_rolling_files(self):
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+        from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'target-file-size': '1KB',
+        }
+        s = Schema.from_pyarrow_schema(pa_schema, options=opts)
+        table_name = 'test_db.blob_de_seq_rolling'
+        self.catalog.create_table(table_name, s, False)
+
+        write_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        table = self.catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write().with_write_type(['id', 'name'])
+        for start in (0, 1000):
+            ids = list(range(start, start + 1000))
+            w.write_arrow(pa.Table.from_pydict(
+                {
+                    'id': ids,
+                    'name': [f'name_{i}_' + 'x' * 2048 for i in ids],
+                },
+                schema=write_schema,
+            ))
+        commit_messages = w.prepare_commit()
+        normal_files = [
+            f for msg in commit_messages for f in msg.new_files
+            if not DataFileMeta.is_blob_file(f.file_name)
+            and not DataFileMeta.is_vector_file(f.file_name)
+        ]
+        self.assertGreaterEqual(len(normal_files), 2)
+        for file in normal_files:
+            self.assertEqual(file.min_sequence_number, 0)
+            self.assertEqual(file.max_sequence_number, file.row_count - 1)
+        wb.new_commit().commit(commit_messages)
+        w.close()
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder().with_projection(['id', 'name', '_ROW_ID'])
+        splits = rb.new_scan().plan().splits()
+        source = rb.new_read().to_arrow(splits).sort_by('id')
+
+        update_data = pa.table({
+            '_ROW_ID': source.column('_ROW_ID'),
+            'name': pa.array(['updated'] * source.num_rows, type=pa.string()),
+        })
+        updater = TableUpdateByRowId(
+            table, '_test_', BATCH_COMMIT_IDENTIFIER,
+        )
+        msgs = updater.update_columns(update_data, ['name'])
+        update_normal_files = [
+            f for msg in msgs for f in msg.new_files
+            if not DataFileMeta.is_blob_file(f.file_name)
+            and not DataFileMeta.is_vector_file(f.file_name)
+        ]
+        self.assertGreaterEqual(len(update_normal_files), 2)
+        for file in update_normal_files:
+            self.assertEqual(file.min_sequence_number, 0)
+            self.assertEqual(file.max_sequence_number, file.row_count - 1)
+        table.new_batch_write_builder().new_commit().commit(msgs)
+
+        table = self.catalog.get_table(table_name)
+        rb = table.new_read_builder().with_projection(['id', 'name'])
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(result['id'], list(range(2000)))
+        self.assertEqual(result['name'], ['updated'] * 2000)
+
 
 class GetBlobTest(unittest.TestCase):
 

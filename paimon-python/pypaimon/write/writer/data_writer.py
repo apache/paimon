@@ -164,6 +164,16 @@ class DataWriter(ABC):
     def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
         """Merge existing data with new data. Must be implemented by subclasses."""
 
+    def _append_file_sequence_range(self, row_count: int) -> Tuple[int, int]:
+        if row_count <= 0:
+            raise ValueError("row_count must be positive")
+
+        if self.options.data_evolution_enabled(False):
+            # Row-tracking commit stamps this sentinel range with the snapshot id.
+            return 0, row_count - 1
+
+        return -1, -1
+
     def _check_and_roll_if_needed(self):
         while self.pending_data is not None:
             current_size = self.pending_data.nbytes
