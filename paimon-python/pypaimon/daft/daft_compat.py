@@ -54,6 +54,11 @@ def file_range_position_field() -> str:
     return "position" if _parse_daft_version() >= (0, 7, 15) else "offset"
 
 
+def file_range_size_field() -> str:
+    """Return Daft File's physical size field name."""
+    return "size" if _parse_daft_version() >= (0, 7, 15) else "length"
+
+
 def require_file_range_reads(feature: str = "BLOB columns") -> None:
     """Raise if Daft is too old for File range metadata support."""
     if not has_file_range_reads():

@@ -24,7 +24,7 @@ import struct
 
 import pyarrow as pa
 
-from pypaimon.daft.daft_compat import file_range_position_field
+from pypaimon.daft.daft_compat import file_range_position_field, file_range_size_field
 
 
 FILE_PHYSICAL_TYPE = pa.struct(
@@ -32,7 +32,7 @@ FILE_PHYSICAL_TYPE = pa.struct(
         pa.field("url", pa.large_utf8()),
         pa.field("io_config", pa.large_binary()),
         pa.field(file_range_position_field(), pa.int64()),
-        pa.field("length", pa.int64()),
+        pa.field(file_range_size_field(), pa.int64()),
     ]
 )
 
@@ -85,5 +85,5 @@ def blob_column_to_file_array(column: pa.Array) -> pa.Array:
             pa.array(offsets, type=pa.int64()),
             pa.array(lengths, type=pa.int64()),
         ],
-        names=["url", "io_config", file_range_position_field(), "length"],
+        names=["url", "io_config", file_range_position_field(), file_range_size_field()],
     )

@@ -484,7 +484,8 @@ class TestBlobType:
             assert isinstance(ref.path, str)
             assert ".blob" in ref.path
             assert getattr(ref, file_range_position_field()) is not None
-            assert ref.length is not None
+            file_size = ref.size() if callable(getattr(ref, "size", None)) else ref.length
+            assert file_size is not None
 
 
 # ---------------------------------------------------------------------------
