@@ -49,6 +49,11 @@ def has_file_range_reads() -> bool:
     return _parse_daft_version() >= (0, 7, 11)
 
 
+def file_range_position_field() -> str:
+    """Return Daft File's physical position field name."""
+    return "position" if _parse_daft_version() >= (0, 7, 15) else "offset"
+
+
 def require_file_range_reads(feature: str = "BLOB columns") -> None:
     """Raise if Daft is too old for File offset/length support (requires >= 0.7.11)."""
     if not has_file_range_reads():
