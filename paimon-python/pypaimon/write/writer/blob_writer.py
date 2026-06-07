@@ -182,8 +182,12 @@ class BlobWriter(AppendOnlyDataWriter):
             max_value_stats = [None]
             value_null_counts = [0]
 
-        min_seq = self.sequence_generator.current - row_count
-        max_seq = self.sequence_generator.current - 1
+        if self.options.data_evolution_enabled(False):
+            min_seq = 0
+            max_seq = row_count - 1
+        else:
+            min_seq = self.sequence_generator.current - row_count
+            max_seq = self.sequence_generator.current - 1
         self.sequence_generator.start = self.sequence_generator.current
 
         self.committed_files.append(DataFileMeta.create(

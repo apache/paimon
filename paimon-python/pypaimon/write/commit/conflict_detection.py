@@ -206,13 +206,23 @@ class ConflictDetection:
             return None
 
         existing_index = set()
+        existing_ranges = {}
         for base in base_entries:
             if base.file.first_row_id is not None:
                 existing_index.add((
                     base.partition, base.bucket,
                     base.file.first_row_id, base.file.row_count))
+                if not self._is_dedicated_storage_file(base.file.file_name):
+                    existing_ranges.setdefault((base.partition, base.bucket), []).append(
+                        base.file.row_id_range())
 
         for entry in files_to_check:
+            if self._is_dedicated_storage_file(entry.file.file_name):
+                base_ranges = Range.sort_and_merge_overlap(
+                    existing_ranges.get((entry.partition, entry.bucket), []), True, True)
+                if not entry.file.row_id_range().exclude(base_ranges):
+                    continue
+
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
@@ -249,7 +259,7 @@ class ConflictDetection:
         for group in merged_groups:
             data_files = [
                 entry for entry in group
-                if not DataFileMeta.is_blob_file(entry.file.file_name)
+                if not self._is_dedicated_storage_file(entry.file.file_name)
             ]
             if not range_helper.are_all_ranges_same(data_files):
                 file_descriptions = [
@@ -266,6 +276,10 @@ class ConflictDetection:
                     + str(file_descriptions))
 
         return None
+
+    @staticmethod
+    def _is_dedicated_storage_file(file_name: str) -> bool:
+        return DataFileMeta.is_blob_file(file_name) or DataFileMeta.is_vector_file(file_name)
 
     def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
         if not self.data_evolution_enabled:

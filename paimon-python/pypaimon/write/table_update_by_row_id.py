@@ -375,9 +375,7 @@ class TableUpdateByRowId:
                 new_files.extend(blob_writer.prepare_commit())
 
             if new_files:
-                for file in new_files:
-                    file.first_row_id = first_row_id
-                    file.write_cols = file.write_cols or column_names
+                self._assign_update_file_metadata(new_files, first_row_id, column_names)
                 self.commit_messages.append(
                     CommitMessage(
                         partition=partition_tuple,
@@ -391,3 +389,17 @@ class TableUpdateByRowId:
                 file_store_write.close()
             for blob_writer in blob_writers:
                 blob_writer.close()
+
+    @staticmethod
+    def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
+                                     column_names: List[str]):
+        blob_starts = {}
+        for file in new_files:
+            file.write_cols = file.write_cols or column_names
+            if DataFileMeta.is_blob_file(file.file_name):
+                blob_column = file.write_cols[0]
+                blob_start = blob_starts.get(blob_column, first_row_id)
+                file.first_row_id = blob_start
+                blob_starts[blob_column] = blob_start + file.row_count
+            else:
+                file.first_row_id = first_row_id
