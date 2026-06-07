@@ -1446,6 +1446,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
         </tr>
         <tr>
+            <td><h5>sort-compact.skip-overwrite-conflict-detection</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip overwrite conflict detection during sort compact commit. Default is false (detection enabled). If set to true, sort compact will not check for concurrent writes between the read snapshot and the commit snapshot. WARNING: Skipping this detection allows concurrent writes to the overwritten partition(s) to remain alongside the sorted compaction output, because the DELETE list is pinned to the read snapshot and does not include files added after it. Readers may then see a mix of sorted and unsorted files, so global sort order is no longer guaranteed.</td>
+        </tr>
+        <tr>
             <td><h5>sort-compaction.local-sample.magnification</h5></td>
             <td style="word-wrap: break-word;">1000</td>
             <td>Integer</td>
