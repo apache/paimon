@@ -986,7 +986,7 @@ class AoReaderTest(unittest.TestCase):
 
             print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")
 
-    def test_is_in_partition_deserializes_all_entries(self):
+    def test_is_in_with_partitions(self):
         from pypaimon.manifest.manifest_file_manager import ManifestFileManager
         from io import BytesIO
         import fastavro
