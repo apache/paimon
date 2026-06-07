@@ -26,6 +26,7 @@ import pyarrow as pa
 from pypaimon.ray.data_evolution_merge_join import (
     build_matched_update_ds,
     build_not_matched_insert_ds,
+    build_self_merge_update_ds,
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
@@ -53,6 +54,7 @@ class _PrepareCtx:
     update_pa_schema: pa.Schema
     full_pa_schema: pa.Schema
     catalog_options: Dict[str, str]
+    is_self_merge: bool = False
 
 
 def merge_into(
@@ -183,33 +185,45 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             _NormalizedClause(spec=spec, condition=c.condition)
         )
 
-    source_snapshot_id = None
-    if isinstance(source, str):
-        source_snapshot = (
-            catalog.get_table(source)
-            .snapshot_manager()
-            .get_latest_snapshot()
+    is_self_merge = _is_self_merge(target, source, target_on_cols, source_on_cols)
+    if is_self_merge and not_matched_specs:
+        raise ValueError(
+            "Self-merge (source == target with ON _ROW_ID) does not "
+            "support WHEN NOT MATCHED clauses."
         )
-        if source_snapshot is not None:
-            source_snapshot_id = source_snapshot.id
 
-    source_ds = _normalize_source(
-        source, catalog_options, source_snapshot_id=source_snapshot_id,
-    )
-    _validate_source_on_cols(source_ds, source_on_cols)
+    if is_self_merge:
+        source_ds = None
+        source_col_names = set(full_target_field_names) | set(source_on_cols)
+    else:
+        source_snapshot_id = None
+        if isinstance(source, str):
+            source_snapshot = (
+                catalog.get_table(source)
+                .snapshot_manager()
+                .get_latest_snapshot()
+            )
+            if source_snapshot is not None:
+                source_snapshot_id = source_snapshot.id
+        source_ds = _normalize_source(
+            source, catalog_options, source_snapshot_id=source_snapshot_id,
+        )
+        _validate_source_on_cols(source_ds, source_on_cols)
+        source_col_names = set(_source_schema_or_raise(source_ds).names)
     _validate_source_has_target_cols(
-        source_ds, matched_specs + not_matched_specs,
+        source_col_names, matched_specs + not_matched_specs,
     )
 
     if has_condition:
         from pypaimon.ray.merge_condition import extract_columns
-        source_names = set(_source_schema_or_raise(source_ds).names)
         target_names = set(full_target_field_names)
+        if is_self_merge:
+            target_names |= set(target_on_cols)
         for c in list(when_matched) + list(when_not_matched):
             if c.condition is not None:
                 for ref in extract_columns(c.condition):
                     prefix, col = ref.split(".", 1)
-                    if prefix == "s" and col not in source_names:
+                    if prefix == "s" and col not in source_col_names:
                         raise ValueError(
                             f"condition references unknown source "
                             f"column '{col}'"
@@ -238,8 +252,18 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         update_pa_schema=update_pa_schema,
         full_pa_schema=full_pa_schema,
         catalog_options=catalog_options,
+        is_self_merge=is_self_merge,
     )
     return table, source_ds, matched_specs, not_matched_specs, ctx
+
+
+def _is_self_merge(target, source, target_on_cols, source_on_cols) -> bool:
+    from pypaimon.table.special_fields import SpecialFields
+    row_id_name = SpecialFields.ROW_ID.name
+    return (isinstance(source, str)
+            and source == target
+            and target_on_cols == [row_id_name]
+            and source_on_cols == [row_id_name])
 
 
 def _build_datasets(
@@ -254,6 +278,22 @@ def _build_datasets(
     update_ds = None
     insert_ds = None
     update_cols_union: List[str] = []
+
+    if ctx.is_self_merge:
+        if matched_specs and base_snapshot is not None:
+            update_cols_union = _union_update_cols(matched_specs)
+            update_ds = build_self_merge_update_ds(
+                target_identifier=target,
+                clauses=matched_specs,
+                target_field_names=ctx.full_target_field_names,
+                target_pa_schema=ctx.update_pa_schema,
+                update_cols=update_cols_union,
+                catalog_options=ctx.catalog_options,
+                resolve_target_projection=_resolve_target_projection,
+                snapshot_id=base_snapshot_id,
+                ray_remote_args=ray_remote_args,
+            )
+        return update_ds, insert_ds, update_cols_union
 
     # Mirror Spark: matched/not-matched run as two independent joins
     # (inner / left_anti). One unified left_outer join would force
@@ -566,16 +606,15 @@ def _validate_source_on_cols(source_ds, on: Sequence[str]) -> None:
 
 
 def _validate_source_has_target_cols(
-    source_ds,
+    source_col_names: set,
     specs: List[_NormalizedClause],
 ) -> None:
-    names = set(_source_schema_or_raise(source_ds).names)
     needed = set()
     for clause in specs:
         for val in clause.spec.values():
             if isinstance(val, SourceColumnRef):
                 needed.add(val.column)
-    missing = sorted(needed - names)
+    missing = sorted(needed - source_col_names)
     if missing:
         raise ValueError(
             f"source is missing columns {missing} referenced by SET spec"
