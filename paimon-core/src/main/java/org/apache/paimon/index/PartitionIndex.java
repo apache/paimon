@@ -105,38 +105,28 @@ public class PartitionIndex {
         }
 
         // 2. find bucket from existing buckets
-        boolean shouldRefresh = false;
         Iterator<Map.Entry<Integer, Long>> iterator =
                 nonFullBucketInformation.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Integer, Long> entry = iterator.next();
             Integer bucket = entry.getKey();
             Long number = entry.getValue();
+            // Trigger an async refresh as soon as we see a bucket at/over the near-full
+            // threshold, regardless of whether we end up assigning to it or removing it.
+            // The refresh is non-blocking and respects the minimum refresh interval, so
+            // subsequent assignments can see buckets freed by compaction.
+            if (shouldRefreshWhenBucketNearFull(
+                            number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)
+                    && isReachedTheMinRefreshInterval(minRefreshInterval)) {
+                refreshBucketsFromDisk();
+            }
             if (number < targetBucketRowNumber) {
-                // Check if this bucket is approaching capacity
-                if (!shouldRefresh
-                        && shouldRefreshWhenBucketNearFull(
-                                number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)) {
-                    shouldRefresh = true;
-                }
                 entry.setValue(number + 1);
                 hash2Bucket.put(hash, (short) bucket.intValue());
                 return bucket;
             } else {
                 iterator.remove();
             }
-        }
-
-        // Check if we should refresh bucket information from disk before creating new bucket
-        if (shouldRefresh && isReachedTheMinRefreshInterval(minRefreshInterval)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Refresh conditions met for partition {}. "
-                                + "Bucket approaching capacity, threshold: {}",
-                        partition,
-                        minEmptyBucketsBeforeAsyncCheck);
-            }
-            refreshBucketsFromDisk();
         }
 
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;

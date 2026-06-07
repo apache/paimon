@@ -370,46 +370,25 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Test that bucket refresh is triggered when a bucket approaches target capacity. This test
-     * verifies the new refresh logic that detects when buckets are near full and asynchronously
-     * scans disk for buckets freed by compaction.
+     * Test that bucket refresh is triggered when a bucket approaches target capacity, and that
+     * buckets newly added on disk become discoverable by subsequent assignments. Without the fix
+     * the async refresh would never run and bucket 1 (added after the assigner loaded its initial
+     * state) would never be observable through {@link HashBucketAssigner#assign}.
      */
     @Test
     public void testRefreshTriggeredWhenBucketNearFull() throws IOException {
-        // Create assigner with targetBucketRowNumber=5 and threshold=2
-        // This means refresh should trigger when bucket reaches 3 rows (5-2)
-        HashBucketAssigner assigner =
-                new HashBucketAssigner(
-                        table.snapshotManager(),
-                        commitUser,
-                        fileHandler,
-                        1, // numChannels
-                        1, // numAssigners
-                        0, // assignId
-                        5, // targetBucketRowNumber
-                        -1, // maxBucketsNum (unlimited)
-                        2, // minEmptyBucketsBeforeAsyncCheck (threshold)
-                        Duration.ofMillis(100)); // minRefreshInterval
-
-        // First, create some index files on disk that simulate buckets with available space
-        // Bucket 0: 2 rows (has space available)
-        // Bucket 1: 3 rows (has space available)
+        // Initial on-disk state seen by the assigner at load time: only bucket 0 with 2 rows.
         commit.commit(
                 0,
-                Arrays.asList(
+                Collections.singletonList(
                         createCommitMessage(
                                 row(1),
                                 0,
-                                2,
-                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
-                        createCommitMessage(
-                                row(1),
                                 1,
-                                2,
-                                fileHandler.hashIndex(row(1), 1).write(new int[] {2, 3, 4}))));
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
 
-        // Create a new assigner that will load the index from disk
-        assigner =
+        // targetBucketRowNumber=5, threshold=2 -> refresh triggers when a bucket reaches 3 rows.
+        HashBucketAssigner assigner =
                 new HashBucketAssigner(
                         table.snapshotManager(),
                         commitUser,
@@ -417,25 +396,48 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         1,
                         1,
                         0,
-                        5, // targetBucketRowNumber
+                        5,
                         -1,
-                        2, // threshold: refresh when bucket reaches 3 rows (5-2)
-                        Duration.ofMillis(100));
+                        2,
+                        Duration.ofMillis(1));
 
-        // Assign to bucket 0 (currently has 2 rows in memory)
-        assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // now 3 rows
-        // At 3 rows (>= threshold of 3), refresh should be triggered
+        // After the assigner has loaded, simulate another writer (or compaction) committing a
+        // new bucket. The assigner's in-memory nonFullBucketInformation does not know about it.
+        commit.commit(
+                1,
+                Collections.singletonList(
+                        createCommitMessage(
+                                row(1),
+                                1,
+                                1,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {2, 3}))));
 
-        // Wait a bit to allow async refresh to complete
-        try {
-            Thread.sleep(200);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        // Push bucket 0 to its near-full threshold (3 rows). This must schedule the async refresh
+        // before returning; otherwise bucket 1 stays invisible.
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // 3 rows
+
+        // Poll until the async refresh has surfaced bucket 1: keep assigning fresh hashes and
+        // expect at least one of them to land on bucket 1 within the timeout. Without the fix
+        // the loop exhausts the timeout because bucket 1 never enters the in-memory map.
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        int hash = 100;
+        boolean bucket1Seen = false;
+        while (System.nanoTime() < deadline) {
+            int assigned = assigner.assign(row(1), hash++);
+            if (assigned == 1) {
+                bucket1Seen = true;
+                break;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-
-        // After refresh, bucket 1 should be available in nonFullBucketInformation
-        // Next assignment should potentially use bucket 1
-        assertThat(assigner.assign(row(1), 5)).isIn(0, 1);
+        assertThat(bucket1Seen)
+                .as("bucket 1 should become assignable after the async refresh runs")
+                .isTrue();
     }
 
     /**
@@ -606,20 +608,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
      */
     @Test
     public void testRefreshDiscoversFreedBucketsAfterCompaction() throws IOException {
-        HashBucketAssigner assigner =
-                new HashBucketAssigner(
-                        table.snapshotManager(),
-                        commitUser,
-                        fileHandler,
-                        1,
-                        1,
-                        0,
-                        5, // targetBucketRowNumber
-                        -1,
-                        2, // threshold
-                        Duration.ofMillis(100));
-
-        // Initial state: bucket 0 is full (5 rows), bucket 1 has space
+        // Initial state: bucket 0 is full (5 rows), bucket 1 has space.
         commit.commit(
                 0,
                 Arrays.asList(
@@ -629,15 +618,14 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 2,
                                 fileHandler
                                         .hashIndex(row(1), 0)
-                                        .write(new int[] {0, 1, 2, 3, 4})), // Full bucket
+                                        .write(new int[] {0, 1, 2, 3, 4})),
                         createCommitMessage(
                                 row(1),
                                 1,
                                 2,
                                 fileHandler.hashIndex(row(1), 1).write(new int[] {5, 6}))));
 
-        // Recreate assigner - should load bucket 1 (has space), but not bucket 0 (full)
-        assigner =
+        HashBucketAssigner assigner =
                 new HashBucketAssigner(
                         table.snapshotManager(),
                         commitUser,
@@ -648,9 +636,10 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         5,
                         -1,
                         2,
-                        Duration.ofMillis(100));
+                        Duration.ofMillis(1));
 
-        // Simulate compaction: bucket 0 now has only 2 rows (freed by compaction)
+        // Simulate compaction: bucket 0 now has only 2 rows (freed by compaction). The assigner
+        // does not learn about this until it refreshes from disk.
         commit.commit(
                 1,
                 Collections.singletonList(
@@ -660,20 +649,30 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 2,
                                 fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
 
-        // Assign to bucket 1 until it approaches threshold, triggering refresh
-        assertThat(assigner.assign(row(1), 5)).isEqualTo(1); // 3 rows now
-        // At 3 rows, refresh should be triggered
+        // Push bucket 1 to its near-full threshold (3 rows >= 5-2). This must schedule the
+        // async refresh before returning; otherwise the freed bucket 0 stays invisible.
+        assertThat(assigner.assign(row(1), 5)).isEqualTo(1);
 
-        // Wait for async refresh to discover freed bucket 0
-        try {
-            Thread.sleep(300);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        // Poll until bucket 0 (freed by compaction) becomes assignable again. Without the fix
+        // the refresh never runs and the loop exhausts the timeout.
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        int hash = 100;
+        boolean freedBucketRediscovered = false;
+        while (System.nanoTime() < deadline) {
+            int assigned = assigner.assign(row(1), hash++);
+            if (assigned == 0) {
+                freedBucketRediscovered = true;
+                break;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-
-        // After refresh, bucket 0 should be rediscovered as available
-        // Next assignments could use either bucket 0 or bucket 1
-        int bucket = assigner.assign(row(1), 100);
-        assertThat(bucket).isIn(0, 1);
+        assertThat(freedBucketRediscovered)
+                .as("bucket 0 freed by compaction should become assignable after refresh")
+                .isTrue();
     }
 }
