@@ -279,7 +279,7 @@ class ConflictDetection:
 
     @staticmethod
     def _is_dedicated_storage_file(file_name: str) -> bool:
-        return DataFileMeta.is_blob_file(file_name) or DataFileMeta.is_vector_file(file_name)
+        return DataFileMeta.is_blob_file(file_name)
 
     def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
         if not self.data_evolution_enabled:
