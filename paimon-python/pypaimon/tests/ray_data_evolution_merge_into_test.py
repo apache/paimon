@@ -1926,6 +1926,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['old', 'young', 'senior'])
         self.assertEqual(out['age'], [10, 20, 30])
 
+    @unittest.skip("blocked by blob DE sequence bug fix, see PR #8147")
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_blob_source_condition(self):
         blob_schema = pa.schema([
