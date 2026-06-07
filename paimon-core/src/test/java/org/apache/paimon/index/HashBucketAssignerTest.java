@@ -370,18 +370,17 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Test that bucket refresh is triggered when a bucket approaches target capacity, that
-     * buckets newly added on disk become discoverable by subsequent assignments, AND that the
-     * refresh respects assigner ownership (only buckets owned by this assigner are surfaced).
+     * Test that bucket refresh is triggered when a bucket approaches target capacity, that buckets
+     * newly added on disk become discoverable by subsequent assignments, AND that the refresh
+     * respects assigner ownership (only buckets owned by this assigner are surfaced).
      *
-     * <p>Setup uses two assigners: assigner 0 owns even buckets (0, 2, ...), assigner 1 owns
-     * odd buckets (1, 3, ...). Without the fix:
+     * <p>Setup uses two assigners: assigner 0 owns even buckets (0, 2, ...), assigner 1 owns odd
+     * buckets (1, 3, ...). Without the fix:
      *
      * <ul>
-     *   <li>The async refresh would never run, so bucket 2 (added after load) would stay
-     *       invisible.
-     *   <li>Even if the refresh ran, it would surface bucket 1 (owned by assigner 1) into
-     *       assigner 0's in-memory map, breaking the ownership invariant.
+     *   <li>The async refresh would never run, so bucket 2 (added after load) would stay invisible.
+     *   <li>Even if the refresh ran, it would surface bucket 1 (owned by assigner 1) into assigner
+     *       0's in-memory map, breaking the ownership invariant.
      * </ul>
      */
     @Test
@@ -644,9 +643,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 row(1),
                                 0,
                                 2,
-                                fileHandler
-                                        .hashIndex(row(1), 0)
-                                        .write(new int[] {0, 1, 2, 3, 4})),
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1, 2, 3, 4})),
                         createCommitMessage(
                                 row(1),
                                 1,
