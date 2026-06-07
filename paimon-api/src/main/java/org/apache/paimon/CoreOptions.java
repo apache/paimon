@@ -544,7 +544,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "The legacy partition name is using `toString` fpr all types. If false, using "
+                            "The legacy partition name is using `toString` for all types. If false, using "
                                     + "cast to string for all types.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
@@ -2320,6 +2320,13 @@ public class CoreOptions implements Serializable {
                                     + "to be updated, so that the overhead of collecting touched file IDs "
                                     + "outweighs the benefit of pruning untouched files.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST =
+            key("data-evolution.merge-into.source-persist")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to persist source when process merge into action on data evolution table.");
+
     public static final ConfigOption<Boolean> BLOB_COMPACTION_ENABLED =
             key("blob-compaction.enabled")
                     .booleanType()
@@ -2589,6 +2596,12 @@ public class CoreOptions implements Serializable {
                                             "Target size of a vector-store file."
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
+
+    public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
+            key("vector-search.distribute.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to process distributed vector search.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -3847,6 +3860,10 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING);
     }
 
+    public boolean dataEvolutionMergeIntoSourcePersist() {
+        return options.get(DATA_EVOLUTION_MERGE_INTO_SOURCE_PERSIST);
+    }
+
     public boolean blobCompactionEnabled() {
         return options.get(BLOB_COMPACTION_ENABLED);
     }
@@ -4064,6 +4081,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorSearchDistributeEnabled() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

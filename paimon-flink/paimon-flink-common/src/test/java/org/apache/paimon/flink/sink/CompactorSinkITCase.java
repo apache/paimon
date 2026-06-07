@@ -49,6 +49,8 @@ import org.apache.flink.table.data.RowData;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -80,8 +82,9 @@ public class CompactorSinkITCase extends AbstractTestBase {
         commitUser = UUID.randomUUID().toString();
     }
 
-    @Test
-    public void testCompact() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testCompact(boolean writeCoordinatorEnabled) throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
@@ -119,7 +122,14 @@ public class CompactorSinkITCase extends AbstractTestBase {
                                         getSpecifiedPartitions(),
                                         table.coreOptions().partitionDefaultName()))
                         .build();
-        new CompactorSinkBuilder(table, true).withInput(source).build();
+        FileStoreTable sinkTable =
+                writeCoordinatorEnabled
+                        ? table.copy(
+                                Collections.singletonMap(
+                                        FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED.key(),
+                                        "true"))
+                        : table;
+        new CompactorSinkBuilder(sinkTable, true).withInput(source).build();
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());

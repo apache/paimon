@@ -477,6 +477,12 @@ under the License.
             <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merge-into.source-persist</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
             <td><h5>data-file.external-paths</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1107,7 +1113,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>partition.legacy-name</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>The legacy partition name is using `toString` fpr all types. If false, using cast to string for all types.</td>
+            <td>The legacy partition name is using `toString` for all types. If false, using cast to string for all types.</td>
         </tr>
         <tr>
             <td><h5>partition.mark-done-action</h5></td>
@@ -1643,6 +1649,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Specifies column names that should be stored as vector type. This is used when you want to treat a ARRAY column as a VECTOR.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-search.distribute.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to process distributed vector search.</td>
         </tr>
         <tr>
             <td><h5>vector.file.format</h5></td>

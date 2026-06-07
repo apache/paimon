@@ -47,6 +47,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -89,6 +90,16 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
     @Override
     public String description() {
         return "Create global index files for a given column.";
+    }
+
+    static Options createUserOptions(FileStoreTable table, String optionString) {
+        return createUserOptions(table.options(), optionString);
+    }
+
+    static Options createUserOptions(Map<String, String> tableOptions, String optionString) {
+        HashMap<String, String> parsedOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(parsedOptions, optionString);
+        return new Options(tableOptions, parsedOptions);
     }
 
     @Override
@@ -139,9 +150,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 rowType.project(Collections.singletonList(column));
                         RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
 
-                        HashMap<String, String> parsedOptions = new HashMap<>();
-                        ProcedureUtils.putAllOptions(parsedOptions, optionString);
-                        Options userOptions = Options.fromMap(parsedOptions);
+                        Options userOptions = createUserOptions(table, optionString);
 
                         GlobalIndexTopologyBuilder topoBuilder =
                                 GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);

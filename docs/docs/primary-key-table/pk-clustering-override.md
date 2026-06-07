@@ -97,4 +97,4 @@ values, so queries like `WHERE id = 12345` remain efficient.
 
 - Merge engine: `partial-update` or `aggregation`.
 - Changelog producer: `lookup` or `full-compaction`.
-- Configue: `sequence.fields` or `record-level.expire-time`.
+- Configure: `sequence.fields` or `record-level.expire-time`.

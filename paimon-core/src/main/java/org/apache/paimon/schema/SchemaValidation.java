@@ -63,6 +63,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
+import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
@@ -93,7 +94,7 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Validation utils for {@link TableSchema}. */
+/** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
@@ -156,6 +157,21 @@ public class SchemaValidation {
                             STREAMING_READ_OVERWRITE.key(),
                             ChangelogProducer.FULL_COMPACTION,
                             ChangelogProducer.LOOKUP));
+        }
+
+        if (options.fullCompactionDeltaCommits() != null
+                && changelogProducer == ChangelogProducer.LOOKUP) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "'%s' is incompatible with '%s'='%s'. "
+                                    + "Use '%s'='%s' to get periodic full compaction with changelog generation, "
+                                    + "or remove '%s'.",
+                            FULL_COMPACTION_DELTA_COMMITS.key(),
+                            CHANGELOG_PRODUCER.key(),
+                            ChangelogProducer.LOOKUP,
+                            CHANGELOG_PRODUCER.key(),
+                            ChangelogProducer.FULL_COMPACTION,
+                            FULL_COMPACTION_DELTA_COMMITS.key()));
         }
 
         checkArgument(

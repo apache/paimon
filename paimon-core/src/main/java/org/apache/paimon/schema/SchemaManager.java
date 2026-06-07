@@ -510,7 +510,7 @@ public class SchemaManager implements Serializable {
                                             && CastExecutors.resolve(sourceRootType, targetRootType)
                                                     != null,
                                     String.format(
-                                            "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                            "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
                             return new DataField(
                                     field.id(),
