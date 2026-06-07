@@ -217,5 +217,6 @@ def test_daft_on_ray_read_write_e2e():
         capture_output=True,
         env=env,
         text=True,
+        timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
