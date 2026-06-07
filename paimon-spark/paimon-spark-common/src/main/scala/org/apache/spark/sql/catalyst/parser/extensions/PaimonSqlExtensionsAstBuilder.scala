@@ -190,7 +190,46 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
     val fileFormat = buildFileFormat(ctx.fileFormatClause())
     val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
-    logical.CopyIntoLocationCommand(targetPath, table, fileFormat, overwrite)
+    logical.CopyIntoLocationCommand(
+      targetPath,
+      logical.CopyIntoLocationSource.TableName(table),
+      fileFormat,
+      overwrite)
+  }
+
+  /** Create a COPY INTO LOCATION FROM (query) (export) logical command. */
+  override def visitCopyIntoLocationFromQuery(
+      ctx: CopyIntoLocationFromQueryContext): logical.CopyIntoLocationCommand = withOrigin(ctx) {
+    val targetPath = unquoteString(ctx.targetPath.getText)
+    val query = extractParenBlockInner(ctx.query)
+    val fileFormat = buildFileFormat(ctx.fileFormatClause())
+    val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
+    logical.CopyIntoLocationCommand(
+      targetPath,
+      logical.CopyIntoLocationSource.Query(query),
+      fileFormat,
+      overwrite)
+  }
+
+  /**
+   * Extract the raw subquery text inside a [[ParenBlockContext]], i.e. the `SELECT ...` between the
+   * outer parentheses of `FROM (SELECT ...)`. The text is taken verbatim from the original input
+   * stream (not unquoted) so that the inline query is later re-parsed exactly as the user wrote it.
+   */
+  private def extractParenBlockInner(ctx: ParenBlockContext): String = {
+    val open = ctx.getStart.getStartIndex // '('
+    val close = ctx.getStop.getStopIndex // ')'
+    val inner =
+      if (close - 1 < open + 1) {
+        ""
+      } else {
+        ctx.getStart.getInputStream.getText(Interval.of(open + 1, close - 1)).trim
+      }
+    if (inner.isEmpty) {
+      throw new IllegalArgumentException(
+        "COPY INTO <location> FROM (<query>) requires a non-empty query")
+    }
+    inner
   }
 
   private def buildFileFormat(ctx: FileFormatClauseContext): CopyFileFormat = {

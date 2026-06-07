@@ -24,6 +24,8 @@ import org.apache.paimon.spark.function.FunctionResources._
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 
+import java.io.File
+
 abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBase {
 
   test("Paimon V1 Function: create or replace function") {
@@ -264,6 +266,35 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
                |DROP FUNCTION udf_add2
                |""".stripMargin)
       }.getMessage.contains("udf_add2 is a built-in/temporary function"))
+    }
+  }
+
+  test("Paimon V1 Function: COPY INTO location FROM (SELECT udf(...))") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, b INT)")
+        sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+
+        withTempDir {
+          dir =>
+            val exportPath = new File(dir, "udf_export").getAbsolutePath
+            // The inline query references a Paimon v1 function. This only resolves if the query is
+            // parsed through the session (Paimon) parser, which applies the v1 function rewrite.
+            val result = sql(s"""
+                                |COPY INTO '$exportPath'
+                                |FROM (SELECT udf_add2(a, b) AS c FROM t)
+                                |FILE_FORMAT = (TYPE = CSV)
+                                |""".stripMargin)
+            checkAnswer(result.selectExpr("rows_written"), Row(2L))
+            checkAnswer(
+              spark.read.csv(exportPath).selectExpr("CAST(_c0 AS INT)"),
+              Seq(Row(3), Row(7)))
+        }
+      }
     }
   }
 }

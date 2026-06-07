@@ -86,6 +86,18 @@ statement
       overwriteClause?                                                                      #copyIntoLocation
     | CREATE TABLE (IF NOT EXISTS)? target=multipartIdentifier
         LIKE source=multipartIdentifier ( . )*?                                             #createTableLike
+    | COPY INTO targetPath=STRING
+      FROM query=parenBlock
+      fileFormatClause
+      overwriteClause?                                                                      #copyIntoLocationFromQuery
+  ;
+
+// A parenthesized block with balanced parentheses, used to capture an inline subquery verbatim,
+// e.g. the (SELECT ...) in `COPY INTO <location> FROM (SELECT ...)`. A recursive rule is required
+// (rather than '(' .*? ')') so that nested parentheses such as `WHERE x IN (1, 2)` are matched
+// correctly. The raw subquery text is later extracted from the token stream by the AST builder.
+parenBlock
+  : '(' ( parenBlock | ~('(' | ')') )* ')'
   ;
 
 callArgument
