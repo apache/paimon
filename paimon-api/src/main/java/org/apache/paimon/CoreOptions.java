@@ -1215,10 +1215,11 @@ public class CoreOptions implements Serializable {
                             "Whether to skip overwrite conflict detection during sort compact commit. "
                                     + "Default is false (detection enabled). If set to true, sort compact will not check "
                                     + "for concurrent writes between the read snapshot and the commit snapshot. "
-                                    + "WARNING: Skipping this detection may cause sort compact to silently overwrite "
-                                    + "data written by concurrent jobs, leading to data loss and semantic errors "
-                                    + "(e.g., the sort order may be broken because unsorted data from concurrent writes "
-                                    + "replaces the sorted compaction output).");
+                                    + "WARNING: Skipping this detection allows concurrent writes to the overwritten "
+                                    + "partition(s) to remain alongside the sorted compaction output, because the "
+                                    + "DELETE list is pinned to the read snapshot and does not include files added "
+                                    + "after it. Readers may then see a mix of sorted and unsorted files, so global "
+                                    + "sort order is no longer guaranteed.");
 
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
