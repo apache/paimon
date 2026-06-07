@@ -23,6 +23,7 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** test for {@link BitSliceIndexBitmapFileIndex}. */
 public class BitSliceIndexBitmapFileIndexTest {
@@ -249,5 +251,84 @@ public class BitSliceIndexBitmapFileIndexTest {
                 .isEqualTo(RoaringBitmap32.bitmapOf());
         assertThat(((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, 1)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
+    }
+
+    @Test
+    public void testReaderPredicatePruningWithLongMinValue() {
+        BigIntType bigIntType = new BigIntType();
+        FieldRef fieldRef = new FieldRef(0, "", bigIntType);
+        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(bigIntType);
+        FileIndexWriter writer = bsiFileIndex.createWriter();
+
+        // Use values that include negative numbers but NOT Long.MIN_VALUE itself
+        // (since the writer cannot handle it). This isolates the reader-side bug.
+        // Data: [-100, -1, null, 0, 1, 50]
+        Object[] arr = {-100L, -1L, null, 0L, 1L, 50L};
+
+        for (Object o : arr) {
+            writer.write(o);
+        }
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bsiFileIndex.createReader(stream, 0, bytes.length);
+
+        // All non-null row ids: {0, 1, 3, 4, 5}
+
+        // x > Long.MIN_VALUE: every int64 value > Long.MIN_VALUE (since no row IS Long.MIN_VALUE),
+        // so result should be ALL non-null rows = {0, 1, 3, 4, 5}
+        RoaringBitmap32 gtResult =
+                ((BitmapIndexResult) reader.visitGreaterThan(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(gtResult)
+                .as("x > Long.MIN_VALUE should return all non-null rows")
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5));
+
+        // x >= Long.MIN_VALUE: same — all non-null rows satisfy this
+        RoaringBitmap32 gteResult =
+                ((BitmapIndexResult) reader.visitGreaterOrEqual(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(gteResult)
+                .as("x >= Long.MIN_VALUE should return all non-null rows")
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5));
+
+        // x < Long.MIN_VALUE: no int64 value is less than Long.MIN_VALUE, so result should be
+        // empty
+        RoaringBitmap32 ltResult =
+                ((BitmapIndexResult) reader.visitLessThan(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(ltResult)
+                .as("x < Long.MIN_VALUE should return empty")
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // x <= Long.MIN_VALUE: no row has Long.MIN_VALUE, so result should be empty
+        RoaringBitmap32 lteResult =
+                ((BitmapIndexResult) reader.visitLessOrEqual(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(lteResult)
+                .as("x <= Long.MIN_VALUE should return empty (no row has that value)")
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // x == Long.MIN_VALUE: no row has Long.MIN_VALUE, so result should be empty
+        RoaringBitmap32 eqResult =
+                ((BitmapIndexResult) reader.visitEqual(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(eqResult)
+                .as("x == Long.MIN_VALUE should return empty")
+                .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        // x != Long.MIN_VALUE: all non-null rows (no row has Long.MIN_VALUE)
+        RoaringBitmap32 neqResult =
+                ((BitmapIndexResult) reader.visitNotEqual(fieldRef, Long.MIN_VALUE)).get();
+        assertThat(neqResult)
+                .as("x != Long.MIN_VALUE should return all non-null rows")
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 3, 4, 5));
+    }
+
+    @Test
+    public void testWriterCannotHandleLongMinValue() {
+        BigIntType bigIntType = new BigIntType();
+        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(bigIntType);
+        FileIndexWriter writer = bsiFileIndex.createWriter();
+        writer.write(Long.MIN_VALUE);
+
+        assertThatThrownBy(writer::serializedBytes)
+                .isInstanceOf(RuntimeException.class)
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("values should be non-negative");
     }
 }
