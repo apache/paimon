@@ -320,8 +320,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                         Long value = valueMapper.apply(literal);
                         if (value == Long.MIN_VALUE) {
                             // Everything is greater than Long.MIN_VALUE (writer cannot store it)
-                            return RoaringBitmap32.or(
-                                    positive.isNotNull(), negative.isNotNull());
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
                         } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lt(Math.abs(value)));
@@ -338,8 +337,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                         Long value = valueMapper.apply(literal);
                         if (value == Long.MIN_VALUE) {
                             // All non-null rows satisfy x >= Long.MIN_VALUE
-                            return RoaringBitmap32.or(
-                                    positive.isNotNull(), negative.isNotNull());
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
                         } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lte(Math.abs(value)));
