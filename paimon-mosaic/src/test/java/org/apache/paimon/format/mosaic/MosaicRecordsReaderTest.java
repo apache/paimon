@@ -26,15 +26,18 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test for {@link MosaicRecordsReader}. */
 class MosaicRecordsReaderTest {
@@ -119,10 +122,72 @@ class MosaicRecordsReaderTest {
         assertThat(inputStream.closeCount()).isEqualTo(1);
     }
 
+    @Test
+    void testCloseContinuesWhenReaderCloseThrows() throws IOException {
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        MosaicReader reader = createReader();
+        RuntimeException failure = new RuntimeException("reader close failed");
+        doThrow(failure).when(reader).close();
+
+        MosaicRecordsReader recordsReader =
+                createRecordsReader(inputFileAdapter, allocator, reader);
+
+        assertThatThrownBy(recordsReader::close).isSameAs(failure);
+
+        verify(reader).close();
+        assertThat(allocator.closeCount()).isEqualTo(1);
+        assertThat(inputStream.closeCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testCloseAddsSuppressedExceptionsFromLaterResources() throws IOException {
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        RuntimeException allocatorFailure = new RuntimeException("allocator close failed");
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator(allocatorFailure);
+        MosaicReader reader = createReader();
+        RuntimeException readerFailure = new RuntimeException("reader close failed");
+        doThrow(readerFailure).when(reader).close();
+
+        MosaicRecordsReader recordsReader =
+                createRecordsReader(inputFileAdapter, allocator, reader);
+
+        assertThatThrownBy(recordsReader::close)
+                .isSameAs(readerFailure)
+                .satisfies(t -> assertThat(t.getSuppressed()).containsExactly(allocatorFailure));
+
+        verify(reader).close();
+        assertThat(allocator.closeCount()).isEqualTo(1);
+        assertThat(inputStream.closeCount()).isEqualTo(1);
+    }
+
     private static MosaicInputFileAdapter createInputFileAdapter(
             CloseCountingSeekableInputStream inputStream) throws IOException {
         return new MosaicInputFileAdapter(
                 new CloseCountingFileIO(inputStream), new Path("file:/tmp/mosaic-reader-test"));
+    }
+
+    private static MosaicRecordsReader createRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            CloseCountingRootAllocator allocator,
+            MosaicReader reader) {
+        return new MosaicRecordsReader(
+                inputFileAdapter,
+                0,
+                rowType(),
+                rowType(),
+                null,
+                new Path("file:/tmp/mosaic-reader-test"),
+                allocator,
+                (inputFile, fileSize, bufferAllocator) -> reader);
+    }
+
+    private static MosaicReader createReader() {
+        MosaicReader reader = mock(MosaicReader.class);
+        when(reader.getSchema()).thenReturn(new Schema(Collections.emptyList()));
+        return reader;
     }
 
     private static RowType rowType() {
@@ -177,11 +242,23 @@ class MosaicRecordsReaderTest {
 
     private static class CloseCountingRootAllocator extends RootAllocator {
 
+        private final RuntimeException closeFailure;
         private int closeCount;
+
+        private CloseCountingRootAllocator() {
+            this(null);
+        }
+
+        private CloseCountingRootAllocator(RuntimeException closeFailure) {
+            this.closeFailure = closeFailure;
+        }
 
         @Override
         public void close() {
             closeCount++;
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
             super.close();
         }
 
