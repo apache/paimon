@@ -483,7 +483,11 @@ class TestBlobType:
             assert isinstance(ref, daft.File)
             assert isinstance(ref.path, str)
             assert ".blob" in ref.path
-            assert ref.offset is not None
+            # Daft 0.7.15 renamed File.offset to File.position.
+            position = getattr(ref, "position", None)
+            if position is None:
+                position = ref.offset
+            assert position is not None
             assert ref.length is not None
 
 
