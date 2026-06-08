@@ -233,14 +233,56 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
     @Override
     public void close() throws IOException {
-        releaseCurrentVsr();
-        reader.close();
-        allocator.close();
-        inputFileAdapter.close();
+        Throwable throwable = null;
+
+        try {
+            releaseCurrentVsr();
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
+        try {
+            reader.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            allocator.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            inputFileAdapter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        if (throwable != null) {
+            rethrow(throwable);
+        }
     }
 
-    private static void addSuppressed(Throwable throwable, Throwable suppressed) {
+    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
         throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void rethrow(Throwable throwable) throws IOException {
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
     }
 
     private static RuntimeException rethrowUnchecked(Throwable throwable) {
