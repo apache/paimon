@@ -252,6 +252,7 @@ class DedicatedFormatWriter(DataWriter):
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
+            raise
         finally:
             self.closed = True
             self.pending_normal_data = None
@@ -264,7 +265,13 @@ class DedicatedFormatWriter(DataWriter):
             self.vector_writer.abort()
         if self._external_storage_writer:
             self._external_storage_writer.abort()
+        committed_non_blob_files = [
+            file_meta for file_meta in self.committed_files
+            if not DataFileMeta.is_blob_file(file_meta.file_name)
+        ]
+        self._delete_committed_files(committed_non_blob_files)
         self.pending_normal_data = None
+        self.pending_data = None
         self.committed_files.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
@@ -370,6 +377,7 @@ class DedicatedFormatWriter(DataWriter):
         normal_meta = None
         if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
             normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+            self.committed_files.append(normal_meta)
 
         blob_metas = []
         for blob_column in self.blob_file_column_names:
@@ -377,18 +385,15 @@ class DedicatedFormatWriter(DataWriter):
             if normal_meta is not None:
                 self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
+        self.committed_files.extend(blob_metas)
 
         vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
-            self.vector_writer.committed_files.clear()
             if vector_metas and normal_meta is not None:
                 self._validate_consistency(normal_meta, vector_metas, 'vector')
-
-        if normal_meta is not None:
-            self.committed_files.append(normal_meta)
-        self.committed_files.extend(blob_metas)
-        self.committed_files.extend(vector_metas)
+            self.committed_files.extend(vector_metas)
+            self.vector_writer.committed_files.clear()
 
         self.pending_normal_data = None
 

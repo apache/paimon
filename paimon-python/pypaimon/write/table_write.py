@@ -135,6 +135,9 @@ class TableWrite:
     def close(self):
         self.file_store_write.close()
 
+    def abort(self):
+        self.file_store_write.abort()
+
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if data_schema == self.table_pyarrow_schema:
             return

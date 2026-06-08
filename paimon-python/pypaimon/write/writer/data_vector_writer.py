@@ -143,6 +143,7 @@ class DataVectorWriter(DataWriter):
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
+            raise
         finally:
             self.closed = True
             self.pending_normal_data = None
@@ -151,7 +152,7 @@ class DataVectorWriter(DataWriter):
         if self.vector_writer is not None:
             self.vector_writer.abort()
         self.pending_normal_data = None
-        self.committed_files.clear()
+        super().abort()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
         normal_data = (
@@ -187,11 +188,11 @@ class DataVectorWriter(DataWriter):
 
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
-            self.vector_writer.committed_files.clear()
             if vector_metas:
                 if normal_meta is not None:
                     self._validate_consistency(normal_meta, vector_metas)
                 self.committed_files.extend(vector_metas)
+            self.vector_writer.committed_files.clear()
 
         self.pending_normal_data = None
 

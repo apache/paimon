@@ -138,8 +138,15 @@ class DataWriter(ABC):
         Abort all writers and clean up resources. This method should be called when an error occurs
         during writing. It deletes any files that were written and cleans up resources.
         """
-        # Delete any files that were written (data + changelog)
-        for file_meta in self.committed_files + self.committed_changelog_files:
+        self._delete_committed_files(self.committed_files + self.committed_changelog_files)
+
+        # Clean up resources
+        self.pending_data = None
+        self.committed_files.clear()
+        self.committed_changelog_files.clear()
+
+    def _delete_committed_files(self, file_metas: List[DataFileMeta]):
+        for file_meta in file_metas:
             try:
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
@@ -150,11 +157,6 @@ class DataWriter(ABC):
                 logger = logging.getLogger(__name__)
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
-
-        # Clean up resources
-        self.pending_data = None
-        self.committed_files.clear()
-        self.committed_changelog_files.clear()
 
     @abstractmethod
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
