@@ -59,7 +59,16 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
 
     @Override
     public void serialize(InternalRow row, DataOutputView target) throws IOException {
-        binarySerializer.serialize(toBinaryRow(row), target);
+        try {
+            binarySerializer.serialize(toBinaryRow(row), target);
+        } finally {
+            // Must use finally here: toBinaryRow() may inflate RowHelper's internal buffer
+            // for large records (e.g. 100MB+). The serialization can exit via EOFException
+            // thrown by SimpleCollectingOutputView.nextSegment() when the sort buffer is
+            // full, which is caught by BinaryInMemorySortBuffer.write() as a normal signal.
+            // Without finally, the bloated buffer would never be released on that path.
+            rowHelper.resetIfTooLarge();
+        }
     }
 
     @Override
@@ -132,7 +141,13 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     @Override
     public int serializeToPages(InternalRow row, AbstractPagedOutputView target)
             throws IOException {
-        return binarySerializer.serializeToPages(toBinaryRow(row), target);
+        try {
+            return binarySerializer.serializeToPages(toBinaryRow(row), target);
+        } finally {
+            // Same as serialize(): must use finally because EOFException may bypass normal
+            // return when the sort buffer is full.
+            rowHelper.resetIfTooLarge();
+        }
     }
 
     @Override
