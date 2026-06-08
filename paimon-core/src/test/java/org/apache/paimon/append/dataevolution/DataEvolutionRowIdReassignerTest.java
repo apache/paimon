@@ -386,6 +386,46 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
+    public void testDropUnsafeGlobalIndexEntryWhenRangeCannotBeRewrittenByMetadataOnly()
+            throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        createBTreeIndexWithoutSplittingByContiguousRowRange(table);
+        Snapshot before = table.snapshotManager().latestSnapshot();
+
+        assertThat(globalIndexRanges(table))
+                .containsExactly(
+                        new Range(0, 4),
+                        new Range(0, 4),
+                        new Range(0, 4),
+                        new Range(1, 3),
+                        new Range(1, 3));
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-drop-unsafe-sparse-index-range-entry");
+
+        assertThat(result.reassigned).isTrue();
+        assertThat(result.skipReason).isNull();
+        assertThat(result.previousSnapshotId).isEqualTo(before.id());
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.firstAssignedRowId).isEqualTo(5L);
+        assertThat(result.nextRowId).isEqualTo(10L);
+        assertThat(result.fileCount).isEqualTo(5L);
+        assertThat(result.rowCount).isEqualTo(5L);
+        assertThat(result.indexFileCount).isEqualTo(0L);
+
+        Map<String, List<Long>> rowIdsByPartition = rowIdsByPartition(table);
+        assertThat(rowIdsByPartition).hasSize(2);
+        assertThat(rowIdsByPartition).containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L));
+        assertThat(rowIdsByPartition).containsEntry("pt=b/", Arrays.asList(8L, 9L));
+        assertThat(globalIndexRanges(table)).isEmpty();
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(table.rowType().getFieldIndex("id"), 4);
+        assertThat(readPayloads(table, predicate)).containsExactly("v4");
+    }
+
+    @Test
     public void testReassignManyOutOfOrderPartitionEntries() throws Exception {
         verifyReassignOutOfOrderPartitionEntries(LARGE_ENTRY_COUNT, LARGE_MANIFEST_FILE_COUNT);
     }
@@ -866,6 +906,16 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     private void createBTreeIndex(FileStoreTable table) throws Exception {
+        createBTreeIndex(table, true);
+    }
+
+    private void createBTreeIndexWithoutSplittingByContiguousRowRange(FileStoreTable table)
+            throws Exception {
+        createBTreeIndex(table, false);
+    }
+
+    private void createBTreeIndex(FileStoreTable table, boolean splitByContiguousRowRange)
+            throws Exception {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("id");
         List<DataSplit> dataSplits =
                 builder.scan()
@@ -875,7 +925,11 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                         new IllegalStateException(
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : BTreeGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)) {
+        List<DataSplit> splits =
+                splitByContiguousRowRange
+                        ? BTreeGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)
+                        : dataSplits;
+        for (DataSplit dataSplit : splits) {
             commitMessages.addAll(builder.build(dataSplit, ioManager));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

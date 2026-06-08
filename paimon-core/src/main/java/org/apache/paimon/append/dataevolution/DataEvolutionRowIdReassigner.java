@@ -665,8 +665,18 @@ public class DataEvolutionRowIdReassigner {
                 continue;
             }
 
+            Range newRange;
+            try {
+                newRange = mappingIndex.map(globalIndex.rowRange());
+            } catch (RuntimeException e) {
+                LOG.warn(
+                        "Drop global index file '{}' from table {} during row-id reassignment because its row range cannot be rewritten safely: {}.",
+                        indexFile.fileName(),
+                        table.name(),
+                        e.getMessage());
+                continue;
+            }
             globalIndexFileCount++;
-            Range newRange = mappingIndex.map(globalIndex.rowRange());
             GlobalIndexMeta newGlobalIndex =
                     new GlobalIndexMeta(
                             newRange.from,
