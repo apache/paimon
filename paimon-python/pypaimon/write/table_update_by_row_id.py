@@ -19,6 +19,7 @@ import bisect
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -309,6 +310,9 @@ class TableUpdateByRowId:
         for col_name in column_names:
             update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
+            if update_col.type != original_col.type:
+                update_col = self._coerce_column(
+                    update_col, original_col.type)
             if self._is_blob_column(col_name):
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
@@ -317,14 +321,53 @@ class TableUpdateByRowId:
                     for i in range(original_data.num_rows)
                 ]
             else:
-                # replace_with_mask fills mask=True positions with update values in order
-                merged_columns[col_name] = pc.replace_with_mask(
-                    original_col, mask, update_col.cast(original_col.type)
-                )
+                try:
+                    merged_columns[col_name] = pc.replace_with_mask(
+                        original_col, mask, update_col)
+                except pa.lib.ArrowNotImplementedError:
+                    n = original_data.num_rows
+                    combined = pa.concat_arrays(
+                        [original_col, update_col])
+                    offset = len(original_col)
+                    indices = np.arange(n, dtype=np.int64)
+                    for orig_pos, upd_idx in update_positions.items():
+                        indices[orig_pos] = offset + upd_idx
+                    merged_columns[col_name] = combined.take(
+                        pa.array(indices))
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
         return merged_table, blob_columns
+
+    @staticmethod
+    def _coerce_column(col: pa.Array, target_type: pa.DataType) -> pa.Array:
+        try:
+            return col.cast(target_type)
+        except (pa.lib.ArrowNotImplementedError,
+                pa.lib.ArrowInvalid,
+                pa.lib.ArrowTypeError):
+            pass
+        pylist = col.to_pylist()
+        if pa.types.is_map(target_type):
+            converted = []
+            for row in pylist:
+                if row is None:
+                    converted.append(None)
+                elif isinstance(row, dict):
+                    if pa.types.is_struct(col.type) and any(
+                            v is None for v in row.values()):
+                        raise ValueError(
+                            "Cannot coerce schema-less dict input with null "
+                            "values to map type. PyArrow represents both "
+                            "missing dict keys and explicit null map values "
+                            "as None; pass an explicit map-typed array or "
+                            "list-of-pairs instead.")
+                    converted.append(list(row.items()))
+                else:
+                    converted.append(
+                        [tuple(pair) for pair in row])
+            pylist = converted
+        return pa.array(pylist, type=target_type)
 
     def _is_blob_column(self, column_name: str) -> bool:
         for table_field in self.table.fields:
