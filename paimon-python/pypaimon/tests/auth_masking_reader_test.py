@@ -25,6 +25,7 @@ from pypaimon.read.reader.auth_masking_reader import (
     AuthFilterReader,
     AuthMaskingReader,
     ColumnProjectReader,
+    RecordReaderToBatchAdapter,
 )
 
 
@@ -42,6 +43,104 @@ class _FakeBatchReader:
 
     def close(self):
         pass
+
+
+class _FakeRecordIterator:
+    """Simulates RecordIterator[InternalRow] from a RecordReader."""
+    def __init__(self, rows):
+        self._rows = iter(rows)
+
+    def next(self):
+        return next(self._rows, None)
+
+
+class _FakeOffsetRow:
+    """Simulates OffsetRow returned by RecordReader.read_batch()."""
+    def __init__(self, row_tuple, arity):
+        self.row_tuple = row_tuple
+        self.offset = 0
+        self.arity = arity
+
+
+class _FakeRecordReader:
+    """Simulates a RecordReader (non-batch) like MergeFileSplitRead returns."""
+    def __init__(self, batches_of_rows):
+        self._batches = iter(batches_of_rows)
+        self.closed = False
+
+    def read_batch(self):
+        batch = next(self._batches, None)
+        if batch is None:
+            return None
+        return _FakeRecordIterator(batch)
+
+    def close(self):
+        self.closed = True
+
+
+class TestRecordReaderToBatchAdapter(unittest.TestCase):
+
+    def test_converts_rows_to_record_batch(self):
+        rows = [
+            _FakeOffsetRow((1, "alice"), 2),
+            _FakeOffsetRow((2, "bob"), 2),
+        ]
+        inner = _FakeRecordReader([[rows[0], rows[1]]])
+        schema = pa.schema([("id", pa.int64()), ("name", pa.string())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+
+        batch = adapter.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.num_rows, 2)
+        self.assertEqual(batch.column("id").to_pylist(), [1, 2])
+        self.assertEqual(batch.column("name").to_pylist(), ["alice", "bob"])
+
+        # Second call returns None (exhausted)
+        self.assertIsNone(adapter.read_arrow_batch())
+
+    def test_multiple_inner_batches(self):
+        batch1 = [_FakeOffsetRow((10,), 1)]
+        batch2 = [_FakeOffsetRow((20,), 1), _FakeOffsetRow((30,), 1)]
+        inner = _FakeRecordReader([batch1, batch2])
+        schema = pa.schema([("val", pa.int64())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+
+        batch = adapter.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertEqual(batch.column("val").to_pylist(), [10, 20, 30])
+
+    def test_empty_reader(self):
+        inner = _FakeRecordReader([])
+        schema = pa.schema([("x", pa.int64())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+        self.assertIsNone(adapter.read_arrow_batch())
+
+    def test_close_delegates(self):
+        inner = _FakeRecordReader([])
+        schema = pa.schema([("x", pa.int64())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+        adapter.close()
+        self.assertTrue(inner.closed)
+
+    def test_works_with_auth_filter_reader(self):
+        """Integration: adapter output can be wrapped by AuthFilterReader."""
+        rows = [
+            _FakeOffsetRow((1, "eng"), 2),
+            _FakeOffsetRow((2, "sales"), 2),
+            _FakeOffsetRow((3, "eng"), 2),
+        ]
+        inner = _FakeRecordReader([[rows[0], rows[1], rows[2]]])
+        schema = pa.schema([("id", pa.int64()), ("dept", pa.string())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+
+        def filter_fn(batch):
+            import pyarrow.compute as pc
+            return pc.equal(batch.column("dept"), "eng")
+
+        filtered = AuthFilterReader(adapter, filter_fn)
+        batch = filtered.read_arrow_batch()
+        self.assertEqual(batch.num_rows, 2)
+        self.assertEqual(batch.column("id").to_pylist(), [1, 3])
 
 
 class TestAuthMaskingReaderTransforms(unittest.TestCase):

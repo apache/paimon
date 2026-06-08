@@ -230,6 +230,21 @@ class TestQueryAuthSplit(unittest.TestCase):
         self.assertIs(qs.auth_result, auth)
 
 
+class TestQueryAuthSplitRawConvertible(unittest.TestCase):
+
+    def test_raw_convertible_proxy_true(self):
+        inner = _FakeSplit()
+        inner.raw_convertible = True
+        auth_split = QueryAuthSplit(inner, None)
+        self.assertTrue(auth_split.raw_convertible)
+
+    def test_raw_convertible_proxy_false(self):
+        inner = _FakeSplit()
+        inner.raw_convertible = False
+        auth_split = QueryAuthSplit(inner, None)
+        self.assertFalse(auth_split.raw_convertible)
+
+
 class TestCoreOptionsQueryAuth(unittest.TestCase):
 
     def test_disabled_by_default(self):

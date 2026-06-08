@@ -145,8 +145,7 @@ class CatalogSplitProvider(SplitProvider):
     def _ensure_planned(self):
         if self._splits_cached is not None and self._read_type_cached is not None:
             return
-        from pypaimon.read.read_builder import ReadBuilder
-        rb = ReadBuilder(self._ensure_table())
+        rb = self._ensure_table().new_read_builder()
         if self._predicate is not None:
             rb = rb.with_filter(self._predicate)
         if self._projection is not None:

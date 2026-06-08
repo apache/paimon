@@ -344,7 +344,7 @@ class TableRead:
         """
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = self._create_split_read(split).create_reader()
+        reader = self._create_reader_for_split(split)
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
@@ -672,6 +672,11 @@ class TableRead:
             effective_read_type = read_fields + extra_fields
 
         reader = self._create_split_read_with_read_type(split, effective_read_type).create_reader()
+
+        if not isinstance(reader, RecordBatchReader):
+            from pypaimon.read.reader.auth_masking_reader import RecordReaderToBatchAdapter
+            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            reader = RecordReaderToBatchAdapter(reader, schema)
 
         filter_fn = auth_result.extract_row_filter()
         if filter_fn:

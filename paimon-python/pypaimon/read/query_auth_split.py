@@ -49,6 +49,10 @@ class QueryAuthSplit(Split):
     def bucket(self) -> int:
         return self._split.bucket
 
+    @property
+    def raw_convertible(self) -> bool:
+        return self._split.raw_convertible
+
     def merged_row_count(self):
         if self._auth_result.filter:
             return None

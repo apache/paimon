@@ -121,7 +121,8 @@ class StreamReadBuilder:
             predicate=self._predicate,
             poll_interval_ms=self._poll_interval_ms,
             bucket_filter=self._bucket_filter,
-            consumer_id=self._consumer_id
+            consumer_id=self._consumer_id,
+            query_auth=self._query_auth
         )
 
     def new_read(self) -> TableRead:

@@ -29,6 +29,43 @@ from pypaimon.common.predicate_json_parser import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
 
+class RecordReaderToBatchAdapter(RecordBatchReader):
+
+    def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536):
+        self._inner = inner
+        self._schema = schema
+        self._chunk_size = chunk_size
+        self._exhausted = False
+
+    def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
+        if self._exhausted:
+            return None
+        row_tuples = []
+        while len(row_tuples) < self._chunk_size:
+            row_iterator = self._inner.read_batch()
+            if row_iterator is None:
+                self._exhausted = True
+                break
+            row = row_iterator.next()
+            while row is not None:
+                row_tuples.append(
+                    row.row_tuple[row.offset:row.offset + row.arity])
+                if len(row_tuples) >= self._chunk_size:
+                    break
+                row = row_iterator.next()
+        if not row_tuples:
+            return None
+        columns_data = list(zip(*row_tuples))
+        pydict = {
+            name: list(col)
+            for name, col in zip(self._schema.names, columns_data)
+        }
+        return pa.RecordBatch.from_pydict(pydict, schema=self._schema)
+
+    def close(self):
+        self._inner.close()
+
+
 class AuthFilterReader(RecordBatchReader):
 
     def __init__(self, inner_reader: RecordBatchReader, filter_fn: Callable[[pa.RecordBatch], pa.Array]):
