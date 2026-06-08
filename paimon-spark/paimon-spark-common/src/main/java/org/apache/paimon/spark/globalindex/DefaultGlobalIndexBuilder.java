@@ -122,7 +122,13 @@ public class DefaultGlobalIndexBuilder implements Serializable {
 
     private List<ResultEntry> writePaimonRows(
             CloseableIterator<InternalRow> rows, LongCounter rowCounter) throws IOException {
-        GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexFields, options);
+        GlobalIndexWriter indexWriter =
+                createIndexWriter(
+                        table,
+                        indexType,
+                        indexFields.get(0),
+                        indexFields.subList(1, indexFields.size()),
+                        options);
         boolean multiColumn = indexFields.size() > 1;
 
         try {

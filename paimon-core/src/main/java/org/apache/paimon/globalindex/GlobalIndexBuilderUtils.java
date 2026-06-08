@@ -140,9 +140,14 @@ public class GlobalIndexBuilderUtils {
     }
 
     public static GlobalIndexWriter createIndexWriter(
-            FileStoreTable table, String indexType, List<DataField> fields, Options options)
+            FileStoreTable table,
+            String indexType,
+            DataField dataField,
+            List<DataField> extraFields,
+            Options options)
             throws IOException {
-        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, fields, options);
+        GlobalIndexer globalIndexer =
+                GlobalIndexer.create(indexType, dataField, extraFields, options);
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
     }
 

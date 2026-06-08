@@ -95,7 +95,10 @@ public class VectorReadImpl implements VectorRead, Serializable {
             List<DataField> fields = firstMeta.getIndexedFields(table.rowType());
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)
-                            .create(fields, table.coreOptions().toConfiguration());
+                            .create(
+                                    fields.get(0),
+                                    fields.subList(1, fields.size()),
+                                    table.coreOptions().toConfiguration());
         } else {
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)

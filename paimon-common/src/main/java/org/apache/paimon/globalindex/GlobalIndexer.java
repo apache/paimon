@@ -42,8 +42,9 @@ public interface GlobalIndexer {
         return globalIndexerFactory.create(dataField, options);
     }
 
-    static GlobalIndexer create(String type, List<DataField> fields, Options options) {
+    static GlobalIndexer create(
+            String type, DataField dataField, List<DataField> extraFields, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(fields, options);
+        return globalIndexerFactory.create(dataField, extraFields, options);
     }
 }
