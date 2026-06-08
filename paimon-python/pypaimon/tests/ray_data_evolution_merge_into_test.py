@@ -550,7 +550,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             target_rows,
             join_type='inner',
             num_partitions=num_partitions,
-            on=('id',),
+            on=['id'],
         )
 
         def compute_feature(batch):
