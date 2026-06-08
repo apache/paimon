@@ -401,8 +401,8 @@ class TableUpdateByRowId:
             if DataFileMeta.is_blob_file(file.file_name):
                 if len(file.write_cols) != 1:
                     raise RuntimeError(
-                        f"Blob update file {file.file_name} should contain exactly one write column, "
-                        f"got {file.write_cols}")
+                        f"Blob update file {file.file_name} should contain "
+                        f"exactly one write column, got {file.write_cols}")
                 blob_column = file.write_cols[0]
                 blob_start = blob_starts.get(blob_column, first_row_id)
                 next_blob_start = blob_start + file.row_count
