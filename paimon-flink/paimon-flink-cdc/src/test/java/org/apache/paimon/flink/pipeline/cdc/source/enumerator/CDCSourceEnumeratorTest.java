@@ -464,6 +464,47 @@ public class CDCSourceEnumeratorTest
         assertThat(assignedSplit.getSchemaId()).isEqualTo(2L);
     }
 
+    @Test
+    public void testRestoreBootstrapsSchemaWhenSchemaIdIsUnchanged() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE, TABLE + 0);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        CDCCheckpoint checkpoint =
+                new CDCCheckpoint(
+                        Collections.emptyList(),
+                        Collections.singletonMap(identifier, new TableProgress(2L, 1L)));
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        MockScan scan = new MockScan(results);
+        final TestingSplitEnumeratorContext<TableAwareFileStoreSourceSplit> context =
+                getSplitEnumeratorContext(1);
+        CDCSourceEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setTable(TABLE + 0)
+                        .setCheckpoint(checkpoint)
+                        .build();
+        enumerator.setScan(identifier, fileStoreTable, scan);
+        enumerator.start();
+
+        DataSplit split = createDataSplit(2, 0, Collections.emptyList());
+        results.put(2L, new DataFilePlan(Collections.singletonList(split)));
+        context.triggerAllActions();
+
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<
+                        Integer,
+                        TestingSplitEnumeratorContext.SplitAssignmentState<
+                                TableAwareFileStoreSourceSplit>>
+                assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        TableAwareFileStoreSourceSplit assignedSplit =
+                assignments.get(0).getAssignedSplits().get(0);
+        assertThat(assignedSplit.getLastSchemaId()).isNull();
+        assertThat(assignedSplit.getSchemaId()).isEqualTo(1L);
+    }
+
     private class Builder {
         protected SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context;
         protected Collection<TableAwareFileStoreSourceSplit> initialSplits =

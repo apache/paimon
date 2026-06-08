@@ -58,6 +58,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -277,7 +278,8 @@ public class CDCSourceEnumerator
         FileStoreTable table = tableStatusMap.get(tableAwarePlan.identifier).table;
         List<TableAwareFileStoreSourceSplit> splits = new ArrayList<>();
         for (Split split : plan.splits()) {
-            Long lastSchemaId = tableStatusMap.get(tableAwarePlan.identifier).schemaId;
+            TableStatus tableStatus = tableStatusMap.get(tableAwarePlan.identifier);
+            Long lastSchemaId = tableStatus.schemaId;
             TableAwareFileStoreSourceSplit tableAwareFileStoreSourceSplit =
                     toTableAwareSplit(
                             splitIdGenerator.getNextId(),
@@ -285,8 +287,20 @@ public class CDCSourceEnumerator
                             table,
                             tableAwarePlan.identifier,
                             lastSchemaId);
-            tableStatusMap.get(tableAwarePlan.identifier).schemaId =
-                    tableAwareFileStoreSourceSplit.getSchemaId();
+            Long consumedLastSchemaId =
+                    tableStatus.consumeLastSchemaId(
+                            lastSchemaId, tableAwareFileStoreSourceSplit.getSchemaId());
+            if (!Objects.equals(consumedLastSchemaId, lastSchemaId)) {
+                tableAwareFileStoreSourceSplit =
+                        new TableAwareFileStoreSourceSplit(
+                                tableAwareFileStoreSourceSplit.splitId(),
+                                tableAwareFileStoreSourceSplit.split(),
+                                tableAwareFileStoreSourceSplit.recordsToSkip(),
+                                tableAwareFileStoreSourceSplit.getIdentifier(),
+                                consumedLastSchemaId,
+                                tableAwareFileStoreSourceSplit.getSchemaId());
+            }
+            tableStatus.schemaId = tableAwareFileStoreSourceSplit.getSchemaId();
             splits.add(tableAwareFileStoreSourceSplit);
         }
 
@@ -403,6 +417,7 @@ public class CDCSourceEnumerator
             current.schemaId = previous.schemaId;
             current.subtaskId = previous.subtaskId;
             current.nextSnapshotId = previous.nextSnapshotId;
+            current.schemaRestored = previous.schemaRestored;
             current.scan.restore(previous.nextSnapshotId);
         }
         tableStatusMap.put(identifier, current);
@@ -426,6 +441,7 @@ public class CDCSourceEnumerator
         private Long schemaId;
         private Integer subtaskId;
         private Long nextSnapshotId;
+        private boolean schemaRestored;
 
         private TableStatus(SplitEnumeratorContext<?> context, FileStoreTable table) {
             this.table = table;
@@ -445,7 +461,18 @@ public class CDCSourceEnumerator
             this.subtaskId = null;
             this.nextSnapshotId = nextSnapshotId;
             this.schemaId = schemaId;
+            this.schemaRestored = schemaId != null;
             this.scan.restore(nextSnapshotId);
+        }
+
+        private @Nullable Long consumeLastSchemaId(
+                @Nullable Long lastSchemaId, long currentSchemaId) {
+            if (schemaRestored && Objects.equals(lastSchemaId, currentSchemaId)) {
+                schemaRestored = false;
+                return null;
+            }
+            schemaRestored = false;
+            return lastSchemaId;
         }
 
         @Nullable
