@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.pipeline.cdc.CDCOptions;
 import org.apache.paimon.flink.pipeline.cdc.source.TableAwareFileStoreSourceSplit;
+import org.apache.paimon.flink.pipeline.cdc.source.enumerator.CDCCheckpoint.TableProgress;
 import org.apache.paimon.flink.source.FileSplitEnumeratorTestBase;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
@@ -400,6 +401,69 @@ public class CDCSourceEnumeratorTest
         assertThat(checkpoint.getSplits()).containsExactly(splits.get(1));
     }
 
+    @Test
+    public void testRestoreKeepsLastSchemaIdForNewSplits() throws Exception {
+        Identifier identifier = Identifier.create(DATABASE, TABLE + 0);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        TreeMap<Long, TableScan.Plan> firstResults = new TreeMap<>();
+        MockScan firstScan = new MockScan(firstResults);
+        final TestingSplitEnumeratorContext<TableAwareFileStoreSourceSplit> firstContext =
+                getSplitEnumeratorContext(1);
+        CDCSourceEnumerator firstEnumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(firstContext)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setTable(TABLE + 0)
+                        .setScan(firstScan)
+                        .setSchemaIdFromSnapshot(true)
+                        .build();
+        firstEnumerator.start();
+
+        DataSplit firstSplit = createDataSplit(1, 0, Collections.emptyList());
+        firstResults.put(1L, new DataFilePlan(Collections.singletonList(firstSplit)));
+        firstContext.triggerAllActions();
+        firstEnumerator.handleSplitRequest(0, "test-host");
+
+        CDCCheckpoint checkpoint = firstEnumerator.snapshotState(1L);
+        assertThat(checkpoint.getTableProgressMap())
+                .containsEntry(identifier, new TableProgress(2L, 1L));
+        assertThat(checkpoint.getSplits()).isEmpty();
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        MockScan scan = new MockScan(results);
+        final TestingSplitEnumeratorContext<TableAwareFileStoreSourceSplit> context =
+                getSplitEnumeratorContext(1);
+        CDCSourceEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setTable(TABLE + 0)
+                        .setCheckpoint(checkpoint)
+                        .setSchemaIdFromSnapshot(true)
+                        .build();
+        enumerator.setScan(identifier, fileStoreTable, scan);
+        enumerator.start();
+
+        DataSplit split = createDataSplit(2, 0, Collections.emptyList());
+        results.put(3L, new DataFilePlan(Collections.singletonList(split)));
+        context.triggerAllActions();
+
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<
+                        Integer,
+                        TestingSplitEnumeratorContext.SplitAssignmentState<
+                                TableAwareFileStoreSourceSplit>>
+                assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        TableAwareFileStoreSourceSplit assignedSplit =
+                assignments.get(0).getAssignedSplits().get(0);
+        assertThat(assignedSplit.getLastSchemaId()).isEqualTo(1L);
+        assertThat(assignedSplit.getSchemaId()).isEqualTo(2L);
+    }
+
     private class Builder {
         protected SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context;
         protected Collection<TableAwareFileStoreSourceSplit> initialSplits =
@@ -410,6 +474,9 @@ public class CDCSourceEnumeratorTest
         protected boolean unawareBucket = false;
 
         protected int splitMaxPerTask = 10;
+        protected CDCCheckpoint checkpoint;
+        protected boolean schemaIdFromSnapshot = false;
+        protected String table;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<TableAwareFileStoreSourceSplit> context) {
@@ -442,17 +509,39 @@ public class CDCSourceEnumeratorTest
             return this;
         }
 
+        public Builder setCheckpoint(CDCCheckpoint checkpoint) {
+            this.checkpoint = checkpoint;
+            return this;
+        }
+
+        public Builder setSchemaIdFromSnapshot(boolean schemaIdFromSnapshot) {
+            this.schemaIdFromSnapshot = schemaIdFromSnapshot;
+            return this;
+        }
+
+        public Builder setTable(String table) {
+            this.table = table;
+            return this;
+        }
+
         public CDCSourceEnumerator build() {
             Options options = new Options();
             options.setString("warehouse", warehouseFolder.toAbsolutePath().toString());
             options.set(CoreOptions.SCAN_MAX_SPLITS_PER_TASK, splitMaxPerTask);
             Configuration cdcConfig = new Configuration();
             cdcConfig.set(toCDCOption(CDCOptions.DATABASE), DATABASE);
-
-            Map<Identifier, Long> nextSnapshotIdMap = new HashMap<>();
-            for (TableAwareFileStoreSourceSplit split : initialSplits) {
-                nextSnapshotIdMap.put(split.getIdentifier(), 1L);
+            if (table != null) {
+                cdcConfig.set(toCDCOption(CDCOptions.TABLE), table);
             }
+
+            Map<Identifier, TableProgress> tableProgressMap = new HashMap<>();
+            for (TableAwareFileStoreSourceSplit split : initialSplits) {
+                tableProgressMap.put(split.getIdentifier(), new TableProgress(1L, null));
+            }
+            CDCCheckpoint checkpoint =
+                    this.checkpoint == null
+                            ? new CDCCheckpoint(initialSplits, tableProgressMap)
+                            : this.checkpoint;
 
             TestCDCSourceEnumerator enumerator;
             try {
@@ -463,17 +552,25 @@ public class CDCSourceEnumeratorTest
                                 discoveryInterval,
                                 CatalogContext.create(options),
                                 cdcConfig,
-                                new CDCCheckpoint(initialSplits, nextSnapshotIdMap));
+                                checkpoint,
+                                schemaIdFromSnapshot);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
             if (scan != null) {
                 try {
-                    for (String tableName : catalog.listTables(DATABASE)) {
-                        FileStoreTable table =
-                                (FileStoreTable)
-                                        catalog.getTable(Identifier.create(DATABASE, tableName));
-                        enumerator.setScan(Identifier.create(DATABASE, tableName), table, scan);
+                    if (table != null) {
+                        Identifier identifier = Identifier.create(DATABASE, table);
+                        FileStoreTable fileStoreTable =
+                                (FileStoreTable) catalog.getTable(identifier);
+                        enumerator.setScan(identifier, fileStoreTable, scan);
+                    } else {
+                        for (String tableName : catalog.listTables(DATABASE)) {
+                            Identifier identifier = Identifier.create(DATABASE, tableName);
+                            FileStoreTable fileStoreTable =
+                                    (FileStoreTable) catalog.getTable(identifier);
+                            enumerator.setScan(identifier, fileStoreTable, scan);
+                        }
                     }
                 } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
@@ -511,9 +608,13 @@ public class CDCSourceEnumeratorTest
                 long discoveryInterval,
                 CatalogContext catalogContext,
                 Configuration cdcConfig,
-                @Nullable CDCCheckpoint checkpoint) {
+                @Nullable CDCCheckpoint checkpoint,
+                boolean schemaIdFromSnapshot) {
             super(context, flinkConfig, discoveryInterval, catalogContext, cdcConfig, checkpoint);
+            this.schemaIdFromSnapshot = schemaIdFromSnapshot;
         }
+
+        private final boolean schemaIdFromSnapshot;
 
         @Override
         protected TableAwareFileStoreSourceSplit toTableAwareSplit(
@@ -523,8 +624,9 @@ public class CDCSourceEnumeratorTest
                 Identifier identifier,
                 @Nullable Long lastSchemaId) {
             Preconditions.checkState(split instanceof DataSplit);
+            long schemaId = schemaIdFromSnapshot ? ((DataSplit) split).snapshotId() : 1L;
             return new TableAwareFileStoreSourceSplit(
-                    splitId, split, 0, identifier, lastSchemaId, 1L);
+                    splitId, split, 0, identifier, lastSchemaId, schemaId);
         }
     }
 }
