@@ -375,9 +375,8 @@ class TableUpdateByRowId:
                 new_files.extend(blob_writer.prepare_commit())
 
             if new_files:
-                for file in new_files:
-                    file.first_row_id = first_row_id
-                    file.write_cols = file.write_cols or column_names
+                self._assign_update_file_metadata(
+                    new_files, first_row_id, column_names, original_data.num_rows)
                 self.commit_messages.append(
                     CommitMessage(
                         partition=partition_tuple,
@@ -391,3 +390,41 @@ class TableUpdateByRowId:
                 file_store_write.close()
             for blob_writer in blob_writers:
                 blob_writer.close()
+
+    @staticmethod
+    def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
+                                     column_names: List[str], expected_row_count: int):
+        blob_end = first_row_id + expected_row_count
+        blob_starts = {}
+        # BlobWriter.prepare_commit preserves write/rolling order, which is required
+        # for assigning continuous row-id ranges to rolled blob files.
+        for file in new_files:
+            file.write_cols = file.write_cols or column_names
+            if DataFileMeta.is_blob_file(file.file_name):
+                if len(file.write_cols) != 1:
+                    raise RuntimeError(
+                        f"Blob update file {file.file_name} should contain "
+                        f"exactly one write column, got {file.write_cols}")
+                blob_column = file.write_cols[0]
+                blob_start = blob_starts.get(blob_column, first_row_id)
+                next_blob_start = blob_start + file.row_count
+                if next_blob_start > blob_end:
+                    raise RuntimeError(
+                        f"Blob update file {file.file_name} row-id range "
+                        f"[{blob_start}, {next_blob_start - 1}] exceeds target range "
+                        f"[{first_row_id}, {blob_end - 1}]")
+                file.first_row_id = blob_start
+                # Only update-by-row-id blob delta files use the 0/0 sentinel;
+                # regular blob writes keep their per-row sequence range.
+                file.min_sequence_number = 0
+                file.max_sequence_number = 0
+                blob_starts[blob_column] = next_blob_start
+            else:
+                file.first_row_id = first_row_id
+
+        for blob_column, next_blob_start in blob_starts.items():
+            if next_blob_start != blob_end:
+                raise RuntimeError(
+                    f"Blob update column {blob_column} covers row ids "
+                    f"[{first_row_id}, {next_blob_start - 1}], expected "
+                    f"[{first_row_id}, {blob_end - 1}]")

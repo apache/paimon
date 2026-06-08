@@ -213,7 +213,7 @@ class BlobWriter(AppendOnlyDataWriter):
         ))
 
     def prepare_commit(self):
-        """Prepare commit, ensuring all data is written."""
+        """Prepare commit, preserving blob files in write/rolling order."""
         # Close current file if open.
         if self.current_writer is not None:
             self.close_current_writer()

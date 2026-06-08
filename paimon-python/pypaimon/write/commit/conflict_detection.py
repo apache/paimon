@@ -206,13 +206,27 @@ class ConflictDetection:
             return None
 
         existing_index = set()
+        existing_ranges = {}
         for base in base_entries:
             if base.file.first_row_id is not None:
                 existing_index.add((
                     base.partition, base.bucket,
                     base.file.first_row_id, base.file.row_count))
+                if not DataFileMeta.is_blob_file(base.file.file_name):
+                    existing_ranges.setdefault((base.partition, base.bucket), []).append(
+                        base.file.row_id_range())
+
+        existing_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in existing_ranges.items()
+        }
 
         for entry in files_to_check:
+            if DataFileMeta.is_blob_file(entry.file.file_name):
+                base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
+                if not entry.file.row_id_range().exclude(base_ranges):
+                    continue
+
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
             if key not in existing_index:
