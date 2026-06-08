@@ -60,6 +60,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private final BufferAllocator allocator;
     private final int numRowGroups;
     private final RowType dataSchemaRowType;
+    private final int projectedFieldCount;
+    private final boolean allProjectedColumnsMissing;
     @Nullable private final List<Predicate> predicates;
 
     private int currentRowGroup;
@@ -96,12 +98,14 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
+        this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
         this.allocator = allocator;
 
         MosaicReader createdReader = null;
         int createdNumRowGroups;
         ArrowBatchReader createdArrowBatchReader;
+        boolean createdAllProjectedColumnsMissing = false;
         try {
             createdReader = nativeReaderOpener.open(inputFileAdapter, fileSize, allocator);
 
@@ -117,6 +121,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
                     existingColumns.add(name);
                 }
             }
+            createdAllProjectedColumnsMissing = existingColumns.isEmpty();
             if (!existingColumns.isEmpty()) {
                 createdReader.project(existingColumns.toArray(new String[0]));
             }
@@ -130,6 +135,7 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
         this.reader = createdReader;
         this.numRowGroups = createdNumRowGroups;
+        this.allProjectedColumnsMissing = createdAllProjectedColumnsMissing;
         this.currentRowGroup = 0;
         this.arrowBatchReader = createdArrowBatchReader;
     }
@@ -146,6 +152,11 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             }
 
             releaseCurrentVsr();
+
+            if (allProjectedColumnsMissing) {
+                currentRowGroup++;
+                return allNullIterator(numRows);
+            }
 
             VectorSchemaRoot vsr = reader.readRowGroup(currentRowGroup, allocator);
             currentRowGroup++;
@@ -181,6 +192,37 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             };
         }
         return null;
+    }
+
+    private FileRecordIterator<InternalRow> allNullIterator(int numRows) {
+        GenericRow row = new GenericRow(projectedFieldCount);
+        return new FileRecordIterator<InternalRow>() {
+            private int position;
+
+            @Override
+            public long returnedPosition() {
+                return returnedPosition;
+            }
+
+            @Override
+            public Path filePath() {
+                return filePath;
+            }
+
+            @Nullable
+            @Override
+            public InternalRow next() {
+                if (position < numRows) {
+                    position++;
+                    returnedPosition++;
+                    return row;
+                }
+                return null;
+            }
+
+            @Override
+            public void releaseBatch() {}
+        };
     }
 
     private boolean matchesRowGroup(int rowGroupIndex, long rowCount) {
