@@ -536,13 +536,13 @@ a Blob column `payload`, and a non-Blob feature column `feature` to update.
 import ray
 from pypaimon.ray import read_paimon, merge_into, WhenMatched, source_col
 
-catalog_options = {"warehouse": "s3://my-bucket/warehouse"}
+catalog_options = {"warehouse": "/path/to/warehouse"}
 target = "db.item_features"
 num_partitions = 1024
 
 # Keys selected by an upstream job. This can also come from another Paimon table,
 # Parquet files, or any Ray Dataset.
-records_to_process = ray.data.read_parquet("s3://my-bucket/records-to-process/")
+records_to_process = ray.data.read_parquet("/path/to/records-to-process/")
 
 # Read only the columns needed for this job.
 target_rows = read_paimon(
