@@ -29,6 +29,8 @@ import org.apache.paimon.io.ReplayableBundleRecords;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -86,6 +88,8 @@ public class ProjectedFileWriterTest {
         assertThat(writer.arrowBundleWriteCount).isEqualTo(1);
         assertThat(writer.firstPassRows).containsExactly("1,3", "4,6");
         assertThat(writer.secondPassRows).containsExactly("1,3", "4,6");
+        assertThat(writer.arrowRootFieldNames).containsExactly("f0", "f2");
+        assertThat(writer.arrowRootRows).containsExactly("1,3", "4,6");
     }
 
     @Test
@@ -129,6 +133,8 @@ public class ProjectedFileWriterTest {
         private final boolean iterateBundleTwice;
         private final List<String> firstPassRows = new ArrayList<>();
         private final List<String> secondPassRows = new ArrayList<>();
+        private final List<String> arrowRootFieldNames = new ArrayList<>();
+        private final List<String> arrowRootRows = new ArrayList<>();
         private int bundleWriteCount;
         private int projectableBundleWriteCount;
         private int arrowBundleWriteCount;
@@ -156,6 +162,7 @@ public class ProjectedFileWriterTest {
             }
             if (bundle instanceof ArrowBundleRecords) {
                 arrowBundleWriteCount++;
+                captureArrowRoot((ArrowBundleRecords) bundle);
             }
             for (InternalRow row : bundle) {
                 firstPassRows.add(format(row));
@@ -191,6 +198,19 @@ public class ProjectedFileWriterTest {
 
         private String format(InternalRow row) {
             return row.getInt(0) + "," + row.getInt(1);
+        }
+
+        private void captureArrowRoot(ArrowBundleRecords bundle) {
+            VectorSchemaRoot root = bundle.getVectorSchemaRoot();
+            for (int i = 0; i < root.getSchema().getFields().size(); i++) {
+                arrowRootFieldNames.add(root.getSchema().getFields().get(i).getName());
+            }
+
+            IntVector first = (IntVector) root.getVector(0);
+            IntVector second = (IntVector) root.getVector(1);
+            for (int i = 0; i < root.getRowCount(); i++) {
+                arrowRootRows.add(first.get(i) + "," + second.get(i));
+            }
         }
     }
 
