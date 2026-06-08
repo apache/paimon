@@ -405,9 +405,9 @@ class SchemaValidationTest {
                         "file-index.range-bitmap.columns");
 
         for (String key : keys) {
-            // valid: all referenced columns exist
+            // valid: all referenced columns exist and types are supported
             Map<String, String> okOptions = new HashMap<>();
-            okOptions.put(key, "f0,f3");
+            okOptions.put(key, "f0");
             assertThatCode(() -> validateTableSchemaExec(okOptions))
                     .as("valid key=%s", key)
                     .doesNotThrowAnyException();
@@ -468,6 +468,87 @@ class SchemaValidationTest {
         options.put(BUCKET.key(), String.valueOf(-1));
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("f1"), options, ""));
+    }
+
+    @Test
+    public void testFileIndexUnsupportedDataType() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "arr", DataTypes.ARRAY(DataTypes.STRING())),
+                        new DataField(3, "f3", DataTypes.STRING()));
+
+        // bloom-filter on ARRAY should fail
+        Map<String, String> bloomOptions = new HashMap<>();
+        bloomOptions.put("file-index.bloom-filter.columns", "arr");
+        bloomOptions.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("f1"),
+                                                bloomOptions,
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not supported by 'bloom-filter' index");
+
+        // bitmap on ARRAY should fail
+        Map<String, String> bitmapOptions = new HashMap<>();
+        bitmapOptions.put("file-index.bitmap.columns", "arr");
+        bitmapOptions.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("f1"),
+                                                bitmapOptions,
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not supported by 'bitmap' index");
+
+        // bsi on STRING should fail
+        Map<String, String> bsiOptions = new HashMap<>();
+        bsiOptions.put("file-index.bsi.columns", "f3");
+        bsiOptions.put(BUCKET.key(), String.valueOf(-1));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("f1"),
+                                                bsiOptions,
+                                                "")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not supported by 'bsi' index");
+
+        // bloom-filter on INT should pass
+        Map<String, String> okOptions = new HashMap<>();
+        okOptions.put("file-index.bloom-filter.columns", "f0");
+        okOptions.put(BUCKET.key(), String.valueOf(-1));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("f1"),
+                                                okOptions,
+                                                "")))
+                .doesNotThrowAnyException();
     }
 
     @Test

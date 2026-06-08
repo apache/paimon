@@ -24,6 +24,8 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexerFactory;
+import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -642,6 +644,22 @@ public class SchemaValidation {
                                 + "Only CHAR/VARCHAR/STRING is supported.",
                         columnName,
                         keyType);
+            }
+
+            for (String indexType : entry.getValue().keySet()) {
+                FileIndexerFactory factory = FileIndexerFactoryUtils.load(indexType);
+                DataType dataType =
+                        column.isNestedColumn()
+                                ? ((MapType) field.type()).getValueType()
+                                : field.type();
+                try {
+                    factory.validate(dataType);
+                } catch (UnsupportedOperationException e) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Column '%s' with type '%s' is not supported by '%s' index. %s",
+                                    columnName, dataType.asSQLString(), indexType, e.getMessage()));
+                }
             }
         }
     }

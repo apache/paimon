@@ -98,6 +98,9 @@ Content of bloom filter index is simple:
 This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
 (like varchar, binary, etc.) using xx hash, hash numeric type by [specified number hash](http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
 
+BloomFilter only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, FloatType, DoubleType,
+DateType, TimeType, TimestampType, LocalZonedTimestampType, CharType, VarCharType, BinaryType, VarBinaryType.
+
 ## Index: Bitmap
 
 * `file-index.bitmap.columns`: specify the columns that need bitmap index.
