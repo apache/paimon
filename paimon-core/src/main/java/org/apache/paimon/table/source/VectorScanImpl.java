@@ -82,7 +82,18 @@ public class VectorScanImpl implements VectorScan {
                         return false;
                     }
                     int fieldId = globalIndex.indexFieldId();
-                    return vectorColumn.id() == fieldId || filterFieldIds.contains(fieldId);
+                    if (vectorColumn.id() == fieldId || filterFieldIds.contains(fieldId)) {
+                        return true;
+                    }
+                    int[] extras = globalIndex.extraFieldIds();
+                    if (extras != null) {
+                        for (int extra : extras) {
+                            if (filterFieldIds.contains(extra)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
                 };
 
         List<IndexFileMeta> allIndexFiles =

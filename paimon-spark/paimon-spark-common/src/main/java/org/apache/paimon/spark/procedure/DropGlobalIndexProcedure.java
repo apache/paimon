@@ -46,6 +46,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -107,6 +108,13 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
 
         LOG.info("Starting to drop index for table " + tableIdent + " WHERE: " + finalWhere);
 
+        List<String> indexColumns =
+                Arrays.stream(column.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
+
         return modifyPaimonTable(
                 tableIdent,
                 t -> {
@@ -117,11 +125,17 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         FileStoreTable table = (FileStoreTable) t;
 
                         RowType rowType = table.rowType();
-                        checkArgument(
-                                rowType.containsField(column),
-                                "Column '%s' does not exist in table '%s'.",
-                                column,
-                                tableIdent);
+                        for (String col : indexColumns) {
+                            checkArgument(
+                                    rowType.containsField(col),
+                                    "Column '%s' does not exist in table '%s'.",
+                                    col,
+                                    tableIdent);
+                        }
+                        List<Integer> indexFieldIds =
+                                indexColumns.stream()
+                                        .map(col -> rowType.getField(col).id())
+                                        .collect(Collectors.toList());
                         DataSourceV2Relation relation = createRelation(tableIdent);
                         PartitionPredicate partitionPredicate =
                                 SparkProcedureUtils.convertToPartitionPredicate(
@@ -144,9 +158,9 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                         entry.indexFile().indexType().equals(indexType)
                                                 && entry.indexFile().globalIndexMeta() != null
                                                 && entry.indexFile()
-                                                                .globalIndexMeta()
-                                                                .indexFieldId()
-                                                        == rowType.getField(column).id()
+                                                        .globalIndexMeta()
+                                                        .getIndexedFieldIds()
+                                                        .equals(indexFieldIds)
                                                 && (partitionPredicate == null
                                                         || partitionPredicate.test(
                                                                 entry.partition()));
@@ -192,8 +206,8 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                     } catch (Exception e) {
                         throw new RuntimeException(
                                 String.format(
-                                        "Failed to drop %s index for column '%s' on table '%s'.",
-                                        indexType, column, tableIdent),
+                                        "Failed to drop %s index for columns '%s' on table '%s'.",
+                                        indexType, indexColumns, tableIdent),
                                 e);
                     }
                 });

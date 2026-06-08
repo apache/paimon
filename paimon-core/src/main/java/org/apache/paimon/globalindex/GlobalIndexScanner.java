@@ -107,18 +107,27 @@ public class GlobalIndexScanner implements Closeable {
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fId -> {
                     IndexMetaFileGroup group = indexMetas.get(fId);
-                    if (group == null) {
-                        List<IndexMetaFileGroup> extraGroups = extraIndexMetas.get(fId);
-                        if (extraGroups == null || extraGroups.isEmpty()) {
-                            return Collections.emptyList();
-                        }
-                        group = extraGroups.get(0);
+                    if (group != null) {
+                        List<DataField> fields =
+                                group.fieldIds.stream()
+                                        .map(rowType::getField)
+                                        .collect(Collectors.toList());
+                        return createReaders(indexFileReader, group.metas, fields);
                     }
-                    List<DataField> fields =
-                            group.fieldIds.stream()
-                                    .map(rowType::getField)
-                                    .collect(Collectors.toList());
-                    return createReaders(indexFileReader, group.metas, fields);
+                    List<IndexMetaFileGroup> extraGroups = extraIndexMetas.get(fId);
+                    if (extraGroups == null || extraGroups.isEmpty()) {
+                        return Collections.emptyList();
+                    }
+                    // Union readers from all groups that share this extra column
+                    List<GlobalIndexReader> allReaders = new ArrayList<>();
+                    for (IndexMetaFileGroup g : extraGroups) {
+                        List<DataField> fields =
+                                g.fieldIds.stream()
+                                        .map(rowType::getField)
+                                        .collect(Collectors.toList());
+                        allReaders.addAll(createReaders(indexFileReader, g.metas, fields));
+                    }
+                    return allReaders;
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
