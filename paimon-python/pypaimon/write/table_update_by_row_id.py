@@ -19,6 +19,7 @@ import bisect
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -310,22 +311,8 @@ class TableUpdateByRowId:
             update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
             if update_col.type != original_col.type:
-                try:
-                    update_col = update_col.cast(original_col.type)
-                except (pa.lib.ArrowNotImplementedError,
-                        pa.lib.ArrowInvalid,
-                        pa.lib.ArrowTypeError):
-                    pylist = update_col.to_pylist()
-                    if pa.types.is_map(original_col.type):
-                        pylist = [
-                            list(row.items())
-                            if isinstance(row, dict)
-                            else [tuple(pair) for pair in row]
-                            if row is not None else None
-                            for row in pylist
-                        ]
-                    update_col = pa.array(
-                        pylist, type=original_col.type)
+                update_col = self._coerce_column(
+                    update_col, original_col.type)
             if self._is_blob_column(col_name):
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
@@ -342,16 +329,39 @@ class TableUpdateByRowId:
                     combined = pa.concat_arrays(
                         [original_col, update_col])
                     offset = len(original_col)
-                    indices = [
-                        offset + update_positions[i]
-                        if i in update_positions else i
-                        for i in range(n)]
+                    indices = np.arange(n, dtype=np.int64)
+                    for orig_pos, upd_idx in update_positions.items():
+                        indices[orig_pos] = offset + upd_idx
                     merged_columns[col_name] = combined.take(
                         pa.array(indices))
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
         return merged_table, blob_columns
+
+    @staticmethod
+    def _coerce_column(col: pa.Array, target_type: pa.DataType) -> pa.Array:
+        try:
+            return col.cast(target_type)
+        except (pa.lib.ArrowNotImplementedError,
+                pa.lib.ArrowInvalid,
+                pa.lib.ArrowTypeError):
+            pass
+        pylist = col.to_pylist()
+        if pa.types.is_map(target_type):
+            converted = []
+            for row in pylist:
+                if row is None:
+                    converted.append(None)
+                elif isinstance(row, dict):
+                    converted.append(
+                        [(k, v) for k, v in row.items()
+                         if v is not None])
+                else:
+                    converted.append(
+                        [tuple(pair) for pair in row])
+            pylist = converted
+        return pa.array(pylist, type=target_type)
 
     def _is_blob_column(self, column_name: str) -> bool:
         for table_field in self.table.fields:
