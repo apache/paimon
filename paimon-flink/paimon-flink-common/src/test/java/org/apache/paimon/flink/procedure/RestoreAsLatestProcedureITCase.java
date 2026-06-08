@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -29,6 +32,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,14 +58,24 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
                 .containsExactly(Row.of(3L, 1L, 4L));
 
         assertEquals(4, snapshotManager.latestSnapshotId());
+        assertRestoreDelta(table, 4, 0, 2, -2L);
         assertTrue(snapshotManager.snapshotExists(2));
         assertTrue(snapshotManager.snapshotExists(3));
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
 
-        commitRow(table, 4, "d");
+        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 3)"))
+                .containsExactly(Row.of(4L, 3L, 5L));
+
         assertEquals(5, snapshotManager.latestSnapshotId());
+        assertRestoreDelta(table, 5, 2, 0, 2L);
         assertThat(sql("SELECT * FROM T"))
-                .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(4, "d"));
+                .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(2, "b"), Row.of(3, "c"));
+
+        commitRow(table, 4, "d");
+        assertEquals(6, snapshotManager.latestSnapshotId());
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "a"), Row.of(2, "b"), Row.of(3, "c"), Row.of(4, "d"));
     }
 
     @Test
@@ -81,9 +96,26 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
                 .containsExactly(Row.of(3L, 1L, 4L));
 
         assertEquals(4, snapshotManager.latestSnapshotId());
+        assertRestoreDelta(table, 4, 0, 2, -2L);
         assertTrue(snapshotManager.snapshotExists(2));
         assertTrue(snapshotManager.snapshotExists(3));
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
+    }
+
+    private void assertRestoreDelta(
+            FileStoreTable table,
+            long snapshotId,
+            long expectedNumAddedFiles,
+            long expectedNumDeletedFiles,
+            long expectedDeltaRecordCount) {
+        Snapshot snapshot = table.snapshot(snapshotId);
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        List<ManifestFileMeta> deltaManifests = manifestList.readDeltaManifests(snapshot);
+
+        assertThat(deltaManifests).hasSize(1);
+        assertThat(deltaManifests.get(0).numAddedFiles()).isEqualTo(expectedNumAddedFiles);
+        assertThat(deltaManifests.get(0).numDeletedFiles()).isEqualTo(expectedNumDeletedFiles);
+        assertThat(snapshot.deltaRecordCount()).isEqualTo(expectedDeltaRecordCount);
     }
 
     private void commitRow(FileStoreTable table, int id, String name) throws Exception {

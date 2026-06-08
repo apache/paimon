@@ -1171,17 +1171,61 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
                         "Latest snapshot is null, can not restore.");
+
+        Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
+        FileEntry.mergeEntries(
+                manifestFile,
+                manifestList.readDataManifests(latest),
+                latestEntries,
+                options.scanManifestParallelism());
+
+        latestEntries.entrySet().removeIf(entry -> entry.getValue().kind() != FileKind.ADD);
+
+        Map<FileEntry.Identifier, ManifestEntry> targetEntries = new HashMap<>();
+        FileEntry.mergeEntries(
+                manifestFile,
+                manifestList.readDataManifests(targetSnapshot),
+                targetEntries,
+                options.scanManifestParallelism());
+        targetEntries.entrySet().removeIf(entry -> entry.getValue().kind() != FileKind.ADD);
+
+        List<ManifestEntry> deltaFiles = new ArrayList<>();
+        for (Map.Entry<FileEntry.Identifier, ManifestEntry> entry : latestEntries.entrySet()) {
+            if (!targetEntries.containsKey(entry.getKey())) {
+                ManifestEntry manifestEntry = entry.getValue();
+                deltaFiles.add(
+                        ManifestEntry.create(
+                                FileKind.DELETE,
+                                manifestEntry.partition(),
+                                manifestEntry.bucket(),
+                                manifestEntry.totalBuckets(),
+                                manifestEntry.file()));
+            }
+        }
+        for (Map.Entry<FileEntry.Identifier, ManifestEntry> entry : targetEntries.entrySet()) {
+            if (!latestEntries.containsKey(entry.getKey())) {
+                ManifestEntry manifestEntry = entry.getValue();
+                deltaFiles.add(
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                manifestEntry.partition(),
+                                manifestEntry.bucket(),
+                                manifestEntry.totalBuckets(),
+                                manifestEntry.file()));
+            }
+        }
+
         Pair<String, Long> baseManifestList =
-                manifestList.write(manifestList.readDataManifests(targetSnapshot));
-        Pair<String, Long> emptyDeltaManifestList = manifestList.write(emptyList());
+                manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
+        Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
                         targetSnapshot.schemaId(),
                         baseManifestList.getKey(),
                         baseManifestList.getRight(),
-                        emptyDeltaManifestList.getKey(),
-                        emptyDeltaManifestList.getRight(),
+                        deltaManifestList.getKey(),
+                        deltaManifestList.getRight(),
                         null,
                         null,
                         targetSnapshot.indexManifest(),
@@ -1190,14 +1234,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         CommitKind.OVERWRITE,
                         System.currentTimeMillis(),
                         targetSnapshot.totalRecordCount(),
-                        0L,
+                        recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles),
                         null,
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
                         targetSnapshot.properties(),
                         targetSnapshot.nextRowId());
 
-        return commitSnapshotImpl(newSnapshot, emptyList());
+        return commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
     }
 
     public void compactManifest() {
