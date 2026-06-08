@@ -21,6 +21,10 @@ name: Check File Size
 on:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check-file-size:
     runs-on: ubuntu-latest
