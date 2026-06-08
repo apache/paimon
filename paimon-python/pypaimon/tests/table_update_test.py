@@ -570,6 +570,40 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         # Rows 3 & 4 must remain at seed values
         self.assertEqual([40, 45], ages[3:])
 
+    def test_update_list_and_map_columns(self):
+        list_map_schema = pa.schema([
+            ('id', pa.int32()),
+            ('tags', pa.list_(pa.string())),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])
+        table = self._create_table(pa_schema=list_map_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'tags': [['a', 'b'], ['c'], ['d', 'e']],
+            'meta': [[('k1', 'v1')], [('k2', 'v2')], [('k3', 'v3')]],
+        }, schema=list_map_schema))
+
+        rb = table.new_read_builder().with_projection(
+            ['id', '_ROW_ID'])
+        rid_result = rb.new_read().to_arrow(
+            rb.new_scan().plan().splits()).sort_by('id')
+        row_ids = rid_result['_ROW_ID'].to_pylist()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                type=pa.int64()),
+            'tags': [['x', 'y'], ['z']],
+            'meta': [[('k1', 'new1')], [('k3', 'new3')]],
+        }), ['tags', 'meta'])
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [['x', 'y'], ['c'], ['z']],
+            result['tags'].to_pylist())
+        self.assertEqual(
+            [[('k1', 'new1')], [('k2', 'v2')], [('k3', 'new3')]],
+            result['meta'].to_pylist())
+
 
 # ======================================================================
 # Mode-specific mixins (add the ``update_by_arrow_with_row_id`` primitive)
