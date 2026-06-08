@@ -396,6 +396,8 @@ class TableUpdateByRowId:
                                      column_names: List[str], expected_row_count: int):
         blob_end = first_row_id + expected_row_count
         blob_starts = {}
+        # BlobWriter.prepare_commit preserves write/rolling order, which is required
+        # for assigning continuous row-id ranges to rolled blob files.
         for file in new_files:
             file.write_cols = file.write_cols or column_names
             if DataFileMeta.is_blob_file(file.file_name):
