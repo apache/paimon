@@ -18,10 +18,12 @@
 
 package org.apache.paimon.format.mosaic;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.mosaic.MosaicReader;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -34,8 +36,11 @@ import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -163,6 +168,24 @@ class MosaicRecordsReaderTest {
         assertThat(inputStream.closeCount()).isEqualTo(1);
     }
 
+    @Test
+    void testAllProjectedColumnsMissingSkipsRowGroupRead() throws IOException {
+        CloseCountingSeekableInputStream inputStream = new CloseCountingSeekableInputStream();
+        MosaicInputFileAdapter inputFileAdapter = createInputFileAdapter(inputStream);
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        MosaicReader reader = createReader();
+        when(reader.numRowGroups()).thenReturn(1);
+        when(reader.rowGroupNumRows(0)).thenReturn(3);
+
+        MosaicRecordsReader recordsReader =
+                createRecordsReader(inputFileAdapter, allocator, reader);
+
+        assertThat(readerBatchSize(recordsReader)).isEqualTo(3);
+        verify(reader, never()).readRowGroup(anyInt(), any());
+
+        recordsReader.close();
+    }
+
     private static MosaicInputFileAdapter createInputFileAdapter(
             CloseCountingSeekableInputStream inputStream) throws IOException {
         return new MosaicInputFileAdapter(
@@ -188,6 +211,22 @@ class MosaicRecordsReaderTest {
         MosaicReader reader = mock(MosaicReader.class);
         when(reader.getSchema()).thenReturn(new Schema(Collections.emptyList()));
         return reader;
+    }
+
+    private static int readerBatchSize(MosaicRecordsReader recordsReader) throws IOException {
+        int count = 0;
+        while (true) {
+            FileRecordIterator<InternalRow> batch = recordsReader.readBatch();
+            if (batch == null) {
+                return count;
+            }
+            InternalRow row;
+            while ((row = batch.next()) != null) {
+                assertThat(row.isNullAt(0)).isTrue();
+                count++;
+            }
+            batch.releaseBatch();
+        }
     }
 
     private static RowType rowType() {
