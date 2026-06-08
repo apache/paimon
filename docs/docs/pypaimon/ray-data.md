@@ -409,6 +409,9 @@ columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
 counts the rows actually updated (after condition filtering). `num_unchanged`
 is `0` in the current implementation.
 
+For an end-to-end feature update workflow on Blob tables, see
+[Distributed Feature Backfill with Ray](../learn-paimon/scenario-guide#distributed-feature-backfill-with-ray).
+
 **Notes:**
 - Partition key columns cannot be updated by matched clauses. If the target
   table is partitioned, `merge_into` raises an error when `when_matched` is
