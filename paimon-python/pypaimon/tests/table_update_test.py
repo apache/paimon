@@ -623,6 +623,18 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             [[('a', '1')], [('k2', 'dict_val')], [('b', '2')]],
             result3['meta'].to_pylist())
 
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+            'meta': [[('a', None)]],
+        }, schema=pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])), ['meta'])
+        result4 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('a', None)], [('k2', 'dict_val')], [('b', '2')]],
+            result4['meta'].to_pylist())
+
 
 # ======================================================================
 # Mode-specific mixins (add the ``update_by_arrow_with_row_id`` primitive)
