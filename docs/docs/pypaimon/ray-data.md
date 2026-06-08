@@ -35,7 +35,7 @@ already resolved a `(read_builder, splits)` pair or constructed a
 `table_write` via the regular pypaimon API.
 
 If your application uses Daft DataFrames and only needs Ray as Daft's execution
-backend, see [Running Daft on Ray](./daft.md#running-daft-on-ray).
+backend, see [Running Daft on Ray](./daft#running-daft-on-ray).
 
 ## Read
 
