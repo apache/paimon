@@ -461,6 +461,30 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testCopyWithPrimaryKeyInOptions() throws Exception {
+        // Table created with primary-key in options — normalizePrimaryKeys strips it from the
+        // options map and stores it in the dedicated primaryKeys field. When the same value
+        // reappears in dynamicOptions (e.g. Spark 4.x merging Table.properties() into scan
+        // options), the immutability check should recognize it hasn't actually changed.
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("primary-key", "f0,f1");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        assertThatCode(() -> table.copy(Collections.singletonMap("primary-key", "f0,f1")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
         SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);

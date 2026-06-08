@@ -337,7 +337,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         dynamicOptions.forEach(
                 (k, newValue) -> {
                     String oldValue = oldOptions.get(k);
-                    if (!Objects.equals(oldValue, newValue)) {
+                    if (!Objects.equals(oldValue, newValue)
+                            && !SchemaManager.isUnchangedNormalizedKey(
+                                    k, oldValue, newValue, tableSchema)) {
                         SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });

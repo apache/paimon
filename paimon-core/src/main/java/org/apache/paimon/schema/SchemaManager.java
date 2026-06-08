@@ -321,14 +321,18 @@ public class SchemaManager implements Serializable {
         for (SchemaChange change : changes) {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
-                if (hasSnapshots.get()) {
-                    checkAlterTableOption(
-                            oldOptions,
-                            setOption.key(),
-                            oldOptions.get(setOption.key()),
-                            setOption.value());
+                String oldValue = oldOptions.get(setOption.key());
+                String newValue = setOption.value();
+                boolean unchanged =
+                        Objects.equals(oldValue, newValue)
+                                || isUnchangedNormalizedKey(
+                                        setOption.key(), oldValue, newValue, oldTableSchema);
+                if (hasSnapshots.get() && !unchanged) {
+                    checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
-                newOptions.put(setOption.key(), setOption.value());
+                if (!unchanged) {
+                    newOptions.put(setOption.key(), setOption.value());
+                }
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
                 if (hasSnapshots.get()) {
@@ -1249,6 +1253,32 @@ public class SchemaManager implements Serializable {
         for (Long id : toBeDeleted) {
             fileIO.delete(toSchemaPath(id), false);
         }
+    }
+
+    /**
+     * Checks whether a key whose old value is null actually hasn't changed. This handles keys like
+     * 'primary-key' and 'partition' that are stripped from options during schema normalization and
+     * stored in dedicated schema fields instead.
+     */
+    public static boolean isUnchangedNormalizedKey(
+            String key, @Nullable String oldValue, String newValue, TableSchema tableSchema) {
+        if (oldValue != null) {
+            return false;
+        }
+        if (CoreOptions.PRIMARY_KEY.key().equals(key)) {
+            return normalizeKeyList(newValue).equals(tableSchema.primaryKeys());
+        }
+        if (CoreOptions.PARTITION.key().equals(key)) {
+            return normalizeKeyList(newValue).equals(tableSchema.partitionKeys());
+        }
+        return false;
+    }
+
+    private static List<String> normalizeKeyList(String value) {
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 
     public static void checkAlterTableOption(
