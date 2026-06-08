@@ -613,15 +613,30 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             [[('k1', 'new1')], [('k2', 'dict_val')], [('k3', 'new3')]],
             result2['meta'].to_pylist())
 
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                    type=pa.int64()),
+                'meta': [{'a': '1'}, {'b': '2'}],
+            }), ['meta'])
+
         self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
                                 type=pa.int64()),
-            'meta': [{'a': '1'}, {'b': '2'}],
+            'meta': pa.array(
+                [[('a', '1')], [('b', '2')]],
+                type=pa.map_(pa.string(), pa.string())),
         }), ['meta'])
         result3 = self._read_all(table).sort_by('id')
         self.assertEqual(
             [[('a', '1')], [('k2', 'dict_val')], [('b', '2')]],
             result3['meta'].to_pylist())
+
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+                'meta': [{'a': None}],
+            }), ['meta'])
 
         self._do_update(table, pa.Table.from_pydict({
             '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),

@@ -354,10 +354,15 @@ class TableUpdateByRowId:
                 if row is None:
                     converted.append(None)
                 elif isinstance(row, dict):
-                    # Drop Arrow struct padding for missing dict keys.
-                    converted.append(
-                        [(k, v) for k, v in row.items()
-                         if v is not None])
+                    if pa.types.is_struct(col.type) and any(
+                            v is None for v in row.values()):
+                        raise ValueError(
+                            "Cannot coerce schema-less dict input with null "
+                            "values to map type. PyArrow represents both "
+                            "missing dict keys and explicit null map values "
+                            "as None; pass an explicit map-typed array or "
+                            "list-of-pairs instead.")
+                    converted.append(list(row.items()))
                 else:
                     converted.append(
                         [tuple(pair) for pair in row])
