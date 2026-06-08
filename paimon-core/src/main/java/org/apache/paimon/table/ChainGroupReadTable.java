@@ -285,8 +285,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
-                                            partitionProjector.chainPartitionForCompare(a),
-                                            partitionProjector.chainPartitionForCompare(b)));
+                                            partitionProjector.extractChainPartition(a),
+                                            partitionProjector.extractChainPartition(b)));
 
                     // Build a targeted snapshot-anchor predicate:
                     //   group fields exact-match  AND  chain < maxChainInGroup
@@ -308,15 +308,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     // List snapshot partitions for this group, sorted by chain dimension.
                     List<BinaryRow> snapshotPartitionsInGroup =
                             newChainPartitionListingScan(true, snapshotAnchorPredicate)
-                                    .listPartitions().stream()
-                                    .sorted(
-                                            (a, b) ->
-                                                    chainPartitionComparator.compare(
-                                                            partitionProjector
-                                                                    .chainPartitionForCompare(a),
-                                                            partitionProjector
-                                                                    .chainPartitionForCompare(b)))
-                                    .collect(Collectors.toList());
+                                    .listPartitions();
 
                     // Find delta → snapshot mapping (for each delta partition, find the nearest
                     // earlier
