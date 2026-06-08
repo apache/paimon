@@ -318,7 +318,9 @@ class TableUpdateByRowId:
                     pylist = update_col.to_pylist()
                     if pa.types.is_map(original_col.type):
                         pylist = [
-                            [tuple(pair) for pair in row]
+                            list(row.items())
+                            if isinstance(row, dict)
+                            else [tuple(pair) for pair in row]
                             if row is not None else None
                             for row in pylist
                         ]
