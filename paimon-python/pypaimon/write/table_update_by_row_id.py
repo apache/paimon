@@ -412,6 +412,10 @@ class TableUpdateByRowId:
                         f"[{blob_start}, {next_blob_start - 1}] exceeds target range "
                         f"[{first_row_id}, {blob_end - 1}]")
                 file.first_row_id = blob_start
+                # Only update-by-row-id blob delta files use the 0/0 sentinel;
+                # regular blob writes keep their per-row sequence range.
+                file.min_sequence_number = 0
+                file.max_sequence_number = 0
                 blob_starts[blob_column] = next_blob_start
             else:
                 file.first_row_id = first_row_id
