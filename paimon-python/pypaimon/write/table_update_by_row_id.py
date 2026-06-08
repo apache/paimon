@@ -309,6 +309,21 @@ class TableUpdateByRowId:
         for col_name in column_names:
             update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
+            if update_col.type != original_col.type:
+                try:
+                    update_col = update_col.cast(original_col.type)
+                except (pa.lib.ArrowNotImplementedError,
+                        pa.lib.ArrowInvalid,
+                        pa.lib.ArrowTypeError):
+                    pylist = update_col.to_pylist()
+                    if pa.types.is_map(original_col.type):
+                        pylist = [
+                            [tuple(pair) for pair in row]
+                            if row is not None else None
+                            for row in pylist
+                        ]
+                    update_col = pa.array(
+                        pylist, type=original_col.type)
             if self._is_blob_column(col_name):
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
@@ -317,10 +332,20 @@ class TableUpdateByRowId:
                     for i in range(original_data.num_rows)
                 ]
             else:
-                # replace_with_mask fills mask=True positions with update values in order
-                merged_columns[col_name] = pc.replace_with_mask(
-                    original_col, mask, update_col.cast(original_col.type)
-                )
+                try:
+                    merged_columns[col_name] = pc.replace_with_mask(
+                        original_col, mask, update_col)
+                except pa.lib.ArrowNotImplementedError:
+                    n = original_data.num_rows
+                    chunks = []
+                    for i in range(n):
+                        if i in update_positions:
+                            chunks.append(update_col.slice(
+                                update_positions[i], 1))
+                        else:
+                            chunks.append(original_col.slice(i, 1))
+                    merged_columns[col_name] = pa.concat_arrays(
+                        chunks)
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
