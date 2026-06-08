@@ -461,6 +461,72 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testCopyWithPrimaryKeyInOptions() throws Exception {
+        // Table created with primary-key in options — normalizePrimaryKeys strips it from the
+        // options map and stores it in the dedicated primaryKeys field. When the same value
+        // reappears in dynamicOptions (e.g. Spark 4.x merging Table.properties() into scan
+        // options), the immutability check should recognize it hasn't actually changed.
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("primary-key", "f0,f1");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        FileStoreTable copied = table.copy(Collections.singletonMap("primary-key", "f0,f1"));
+        assertThatCode(() -> copied.schema().toSchema()).doesNotThrowAnyException();
+        assertThat(copied.schema().options()).doesNotContainKey("primary-key");
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", null, null, copied.schema()))
+                .isFalse();
+    }
+
+    @Test
+    public void testAlterUnchangedNormalizedOptionsOnNonEmptyTable() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("primary-key", "f0,f1");
+        tableOptions.put("partition", "f0");
+        tableOptions.put("bucket", "1");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        TableSchema latest =
+                manager.commitChanges(
+                        SchemaChange.setOption("primary-key", "f0,f1"),
+                        SchemaChange.setOption("partition", "f0"));
+        assertThat(latest.primaryKeys()).containsExactly("f0", "f1");
+        assertThat(latest.partitionKeys()).containsExactly("f0");
+        assertThat(latest.options()).doesNotContainKeys("primary-key", "partition");
+        assertThatCode(latest::toSchema).doesNotThrowAnyException();
+    }
+
+    @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
         SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
