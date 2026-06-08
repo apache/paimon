@@ -354,6 +354,7 @@ class TableUpdateByRowId:
                 if row is None:
                     converted.append(None)
                 elif isinstance(row, dict):
+                    # Drop Arrow struct padding for missing dict keys.
                     converted.append(
                         [(k, v) for k, v in row.items()
                          if v is not None])
