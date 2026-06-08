@@ -39,7 +39,7 @@ public class RowHelper implements Serializable {
     /**
      * Threshold in bytes for releasing the internal reuse buffer. When big records are written, the
      * BinaryRowWriter's internal segment can grow very large via grow(). The {@link
-     * #resetIfTooLarge()} method checks this threshold and releases the bloated
+     * #resetIfTooLarge(BinaryRow)} method checks this threshold and releases the bloated
      * reuseRow/reuseWriter to avoid holding onto oversized buffers indefinitely.
      */
     private static final int REUSE_RELEASE_THRESHOLD = 4 * 1024 * 1024; // 4MB
@@ -90,15 +90,22 @@ public class RowHelper implements Serializable {
     }
 
     /**
-     * Release the internal reuse buffer if the segment exceeds the threshold AND the last written
-     * record is small. This hysteresis avoids thrashing when records are consistently large, while
-     * still reclaiming memory when the workload transitions back to small records.
+     * Release the internal reuse buffer if the given row is the reuse row produced by this helper,
+     * the backing segment exceeds the threshold, and the current record is small. The identity
+     * check ({@code currentRow == reuseRow}) ensures we only act when the caller actually used this
+     * helper's buffer — if the input was already a {@link BinaryRow}, {@code toBinaryRow()} returns
+     * it directly and the helper state is stale, so we must skip cleanup.
+     *
+     * <p>The hysteresis ({@code currentRow.getSizeInBytes() < threshold}) avoids thrashing when
+     * records are consistently large, while still reclaiming memory when the workload transitions
+     * back to small records.
      */
-    public void resetIfTooLarge() {
-        if (reuseWriter != null
+    public void resetIfTooLarge(BinaryRow currentRow) {
+        if (currentRow == reuseRow
+                && reuseWriter != null
                 && reuseWriter.getSegments() != null
                 && reuseWriter.getSegments().size() > REUSE_RELEASE_THRESHOLD
-                && reuseRow.getSizeInBytes() < REUSE_RELEASE_THRESHOLD) {
+                && currentRow.getSizeInBytes() < REUSE_RELEASE_THRESHOLD) {
             reuseRow = null;
             reuseWriter = null;
         }
