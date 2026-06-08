@@ -511,8 +511,28 @@ class TableRead:
         splits: List[Split],
         streaming: bool = False,
         prefetch_concurrency: int = 1,
+        *,
+        shuffle: bool = False,
+        seed: int = 0,
+        buffer_size: int = 1000,
+        max_buffer_input_splits: int = 10,
     ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data to PyTorch Dataset."""
+        if shuffle:
+            if not streaming:
+                raise ValueError("shuffle=True only supports streaming=True")
+            if prefetch_concurrency > 1:
+                raise ValueError("shuffle=True does not support prefetch_concurrency > 1")
+            from pypaimon.read.datasource.torch_dataset import TorchShuffledIterDataset
+            dataset = TorchShuffledIterDataset(
+                self,
+                splits,
+                seed=seed,
+                buffer_size=buffer_size,
+                max_buffer_input_splits=max_buffer_input_splits,
+            )
+            return dataset
+
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
             dataset = TorchIterDataset(self, splits, prefetch_concurrency)
