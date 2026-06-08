@@ -337,15 +337,15 @@ class TableUpdateByRowId:
                         original_col, mask, update_col)
                 except pa.lib.ArrowNotImplementedError:
                     n = original_data.num_rows
-                    chunks = []
-                    for i in range(n):
-                        if i in update_positions:
-                            chunks.append(update_col.slice(
-                                update_positions[i], 1))
-                        else:
-                            chunks.append(original_col.slice(i, 1))
-                    merged_columns[col_name] = pa.concat_arrays(
-                        chunks)
+                    combined = pa.concat_arrays(
+                        [original_col, update_col])
+                    offset = len(original_col)
+                    indices = [
+                        offset + update_positions[i]
+                        if i in update_positions else i
+                        for i in range(n)]
+                    merged_columns[col_name] = combined.take(
+                        pa.array(indices))
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
