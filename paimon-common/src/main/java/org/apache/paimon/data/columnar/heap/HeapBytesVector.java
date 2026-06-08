@@ -80,7 +80,8 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
 
     @Override
     public void putByteArray(int elementNum, byte[] sourceBuf, int start, int length) {
-        reserveBytes(bytesAppended + length);
+        long requiredCapacity = (long) bytesAppended + length;
+        reserveBytes(requiredCapacity);
         System.arraycopy(sourceBuf, start, buffer, bytesAppended, length);
         this.start[elementNum] = bytesAppended;
         this.length[elementNum] = length;
@@ -96,7 +97,8 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
 
     @Override
     public void fill(byte[] value) {
-        reserveBytes(start.length * value.length);
+        long requiredCapacity = (long) start.length * value.length;
+        reserveBytes(requiredCapacity);
         for (int i = 0; i < start.length; i++) {
             System.arraycopy(value, 0, buffer, i * value.length, value.length);
         }
@@ -106,19 +108,35 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
         Arrays.fill(this.length, value.length);
     }
 
-    private void reserveBytes(int newCapacity) {
-        if (newCapacity > buffer.length) {
-            int newBytesCapacity = newCapacity * 2;
-            try {
-                buffer = Arrays.copyOf(buffer, newBytesCapacity);
-            } catch (NegativeArraySizeException e) {
-                throw new RuntimeException(
-                        String.format(
-                                "The new claimed capacity %s is too large, will overflow the INTEGER.MAX after multiply by 2. "
-                                        + "Try reduce `read.batch-size` to avoid this exception.",
-                                newCapacity),
-                        e);
-            }
+    /** The maximum size of array to allocate. Some VMs reserve header words in an array. */
+    static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
+
+    private void reserveBytes(long requiredCapacity) {
+        if (requiredCapacity > buffer.length) {
+            buffer = Arrays.copyOf(buffer, calculateNewBytesCapacity(requiredCapacity));
+        }
+    }
+
+    /**
+     * Calculate the new buffer capacity for the given required capacity. Visible for testing.
+     *
+     * <p>The strategy is: double the required capacity for amortized growth when safe. If doubling
+     * would exceed {@link #MAX_ARRAY_SIZE}, fall back to the exact required capacity. Throws if the
+     * required capacity itself exceeds {@link #MAX_ARRAY_SIZE}.
+     */
+    static int calculateNewBytesCapacity(long requiredCapacity) {
+        if (requiredCapacity > MAX_ARRAY_SIZE) {
+            throw new RuntimeException(
+                    String.format(
+                            "The required byte buffer capacity %d exceeds the maximum array size %d. "
+                                    + "Try reducing `read.batch-size` to avoid this exception.",
+                            requiredCapacity, MAX_ARRAY_SIZE));
+        }
+        int intCapacity = (int) requiredCapacity;
+        if (intCapacity <= (MAX_ARRAY_SIZE >> 1)) {
+            return intCapacity << 1;
+        } else {
+            return intCapacity;
         }
     }
 
