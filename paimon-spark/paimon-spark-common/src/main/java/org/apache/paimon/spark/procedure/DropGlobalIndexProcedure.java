@@ -207,7 +207,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         throw new RuntimeException(
                                 String.format(
                                         "Failed to drop %s index for columns '%s' on table '%s'.",
-                                        indexType, indexColumns, tableIdent),
+                                        indexType, String.join(",", indexColumns), tableIdent),
                                 e);
                     }
                 });

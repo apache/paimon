@@ -102,6 +102,7 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 indexColumns.stream()
                         .map(col -> rowType.getField(col).id())
                         .collect(Collectors.toList());
+        final String columnsDesc = String.join(",", indexColumns);
 
         // Parse partition predicate
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
@@ -138,12 +139,12 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 "Found {} {} global index files to delete for columns '{}' on table '{}'",
                 waitToDelete.size(),
                 indexTypeLower,
-                indexColumns,
+                columnsDesc,
                 table.name());
 
         if (waitToDelete.isEmpty()) {
             return new String[] {
-                "No " + indexTypeLower + " global index found for columns '" + indexColumns + "'"
+                "No " + indexTypeLower + " global index found for columns '" + columnsDesc + "'"
             };
         }
 
@@ -181,7 +182,7 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 "Successfully dropped {} {} global index files for columns '{}' on table '{}'",
                 waitToDelete.size(),
                 indexTypeLower,
-                indexColumns,
+                columnsDesc,
                 table.name());
 
         return new String[] {
@@ -190,7 +191,7 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                     + " "
                     + indexTypeLower
                     + " global index files for columns '"
-                    + indexColumns
+                    + columnsDesc
                     + "' on table '"
                     + table.name()
                     + "'"
