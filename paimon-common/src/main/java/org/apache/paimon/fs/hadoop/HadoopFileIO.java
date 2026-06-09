@@ -41,7 +41,6 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
 
 import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -61,7 +60,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     private org.apache.paimon.options.Options options;
 
-    private boolean atomicRenameEnabled = true;
+    private Boolean atomicRenameEnabled;
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
@@ -87,13 +86,6 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
         this.options = context.options();
         this.atomicRenameEnabled = options.get(CatalogOptions.FILE_IO_ATOMIC_RENAME_ENABLED);
-    }
-
-    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        // Default to true for instances serialized by older versions without this field;
-        // defaultReadObject only overwrites fields actually present in the stream.
-        this.atomicRenameEnabled = true;
-        in.defaultReadObject();
     }
 
     public Configuration hadoopConf() {
@@ -190,7 +182,7 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     @Override
     public void overwriteFileUtf8(Path path, String content) throws IOException {
-        if (atomicRenameEnabled) {
+        if (atomicRenameEnabled()) {
             boolean success = tryAtomicOverwriteViaRename(path, content);
             if (!success) {
                 FileIO.super.overwriteFileUtf8(path, content);
@@ -198,6 +190,13 @@ public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
         } else {
             FileIO.super.overwriteFileUtf8(path, content);
         }
+    }
+
+    private boolean atomicRenameEnabled() {
+        // The field is null for instances created without configure() and, importantly, for
+        // instances deserialized from older versions that did not have this field. In both
+        // cases we default to true to preserve the legacy HDFS atomic overwrite behavior.
+        return atomicRenameEnabled == null || atomicRenameEnabled;
     }
 
     private org.apache.hadoop.fs.Path path(Path path) {
