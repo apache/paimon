@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
@@ -39,11 +40,51 @@ import scala.collection.mutable
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
   extends WriteHelper {
 
+  import DataEvolutionPaimonWriter._
+
   // File rolling will never be performed
   override val table: FileStoreTable =
     paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
 
   def writePartialFields(data: DataFrame, columnNames: Seq[String]): Seq[CommitMessage] = {
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
+    dataSplits.foreach(
+      split =>
+        split
+          .dataFiles()
+          .asScala
+          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
+          .foreach(
+            file =>
+              firstRowIdToPartitionMap
+                .put(
+                  file.firstRowId(),
+                  // BinaryRow stores data in transient memory segments and relies on Java
+                  // serialization hooks to restore them. Store bytes in Spark closures and
+                  // broadcasts so Kryo does not serialize BinaryRow internals directly.
+                  (SerializationUtils.serializeBinaryRow(split.partition()), file.rowCount())
+                )))
+    writePartialFields(data, columnNames, firstRowIdToPartitionMap)
+  }
+
+  def writePartialFieldsForRanges(
+      data: DataFrame,
+      columnNames: Seq[String],
+      fileRanges: Seq[FileRange]): Seq[CommitMessage] = {
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
+    fileRanges.foreach {
+      range =>
+        firstRowIdToPartitionMap.put(
+          range.firstRowId,
+          (SerializationUtils.serializeBinaryRow(range.partition), range.rowCount))
+    }
+    writePartialFields(data, columnNames, firstRowIdToPartitionMap)
+  }
+
+  private def writePartialFields(
+      data: DataFrame,
+      columnNames: Seq[String],
+      firstRowIdToPartitionMap: mutable.HashMap[Long, (Array[Byte], Long)]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
     assert(data.columns.length == columnNames.size + 2)
@@ -62,23 +103,6 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
           CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key() + "') can be updated.")
     }
 
-    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
-    dataSplits.foreach(
-      split =>
-        split
-          .dataFiles()
-          .asScala
-          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
-          .foreach(
-            file =>
-              firstRowIdToPartitionMap
-                .put(
-                  file.firstRowId(),
-                  // BinaryRow stores data in transient memory segments and relies on Java
-                  // serialization hooks to restore them. Store bytes in Spark closures and
-                  // broadcasts so Kryo does not serialize BinaryRow internals directly.
-                  (SerializationUtils.serializeBinaryRow(split.partition()), file.rowCount())
-                )))
     val firstRowIdToPartitionMapBroadcast =
       sparkSession.sparkContext.broadcast(firstRowIdToPartitionMap)
     val writeBuilder = table.newBatchWriteBuilder()
@@ -102,4 +126,9 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       }
     WriteTaskResult.merge(written.collect())
   }
+}
+
+object DataEvolutionPaimonWriter {
+
+  case class FileRange(partition: BinaryRow, firstRowId: Long, rowCount: Long)
 }
