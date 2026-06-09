@@ -28,7 +28,7 @@ import ray
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import (
-    WhenMatched, WhenNotMatched, merge_into,
+    WhenMatched, WhenNotMatched, merge_into, read_paimon,
     source_col, target_col, lit,
 )
 
@@ -515,6 +515,76 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         )
         self.assertEqual({'payload'}, _blob_col_names(fake_table))
+
+    def test_blob_table_feature_update(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+            ('feature', pa.int32()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'payload': [b'aa', b'bbb', b'cccc'],
+                    'feature': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        num_partitions = _TEST_NUM_PARTITIONS
+        records_to_process = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': pa.array([1, 3], type=pa.int32()),
+        }))
+        target_rows = read_paimon(
+            name,
+            self.catalog_options,
+            projection=['id', 'payload'],
+        )
+        selected = records_to_process.join(
+            target_rows,
+            join_type='inner',
+            num_partitions=num_partitions,
+            on=['id'],
+        )
+
+        def compute_feature(batch):
+            payloads = batch['payload'].to_pylist()
+            return pa.Table.from_pydict({
+                'id': batch['id'],
+                'new_feature': pa.array(
+                    [len(v) if v is not None else 0 for v in payloads],
+                    type=pa.int32(),
+                ),
+            })
+
+        updates = selected.map_batches(compute_feature, batch_format='pyarrow')
+        metrics = merge_into(
+            target=name,
+            source=updates,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched(update={'feature': source_col('new_feature')})
+            ],
+            num_partitions=num_partitions,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['feature'], [2, 20, 4])
+        self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
+        self.assertEqual(metrics, {
+            'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
+        })
 
     def test_combined_writes_single_snapshot(self):
         target = self._create_table()

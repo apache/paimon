@@ -525,6 +525,65 @@ and merges them at read time. This is ideal for:
 - Iterative ML feature engineering — add, update, or refine features as your model evolves.
 - Reducing I/O cost and storage overhead for frequent partial column updates.
 
+#### Distributed Feature Backfill with Ray
+
+For pipelines that derive features from large payloads, keep the payload in Blob columns and update only the derived
+feature columns. Ray can read the records to process, run distributed computation, and call PyPaimon's Ray `merge_into`
+to write feature values back to the data-evolution table. The example assumes the target table has a key column `id`,
+a Blob column `payload`, and a non-Blob feature column `feature` to update.
+
+```python
+import ray
+from pypaimon.ray import read_paimon, merge_into, WhenMatched, source_col
+
+catalog_options = {"warehouse": "/path/to/warehouse"}
+target = "db.item_features"
+num_partitions = 1024
+
+# Keys selected by an upstream job. This can also come from another Paimon table,
+# Parquet files, or any Ray Dataset.
+records_to_process = ray.data.read_parquet("/path/to/records-to-process/")
+
+# Read only the columns needed for this job.
+target_rows = read_paimon(
+    target,
+    catalog_options=catalog_options,
+    projection=["id", "payload"],
+)
+
+selected = records_to_process.join(
+    target_rows,
+    join_type="inner",
+    num_partitions=num_partitions,
+    on=["id"],
+)
+
+def compute_feature(batch):
+    # Call your model service here. This example only keeps the shape simple.
+    payloads = batch["payload"].to_pylist()
+    return {
+        "id": batch["id"].to_pylist(),
+        "new_feature": [len(v) if v is not None else 0 for v in payloads],
+    }
+
+updates = selected.map_batches(compute_feature, batch_format="pyarrow")
+
+merge_into(
+    target=target,
+    source=updates,
+    catalog_options=catalog_options,
+    on=["id"],
+    when_matched=[
+        WhenMatched(update={"feature": source_col("new_feature")})
+    ],
+    num_partitions=num_partitions,
+)
+```
+
+`merge_into` rewrites only the matched non-Blob columns. Existing Blob files stay unchanged, so the source dataset does
+not need to carry Blob columns when it only updates feature fields. For very large key lists, tune Ray resources and
+`num_partitions`; selecting target rows is still a distributed join.
+
 ### Scenario 11: Python AI Pipeline (PyPaimon)
 
 **When:** You are building ML training or inference pipelines in Python and need to read/write Paimon tables natively
