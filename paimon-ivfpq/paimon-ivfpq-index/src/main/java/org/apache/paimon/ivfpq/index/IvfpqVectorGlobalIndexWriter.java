@@ -77,9 +77,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
     private long logicalRowId;
 
     public IvfpqVectorGlobalIndexWriter(
-            GlobalIndexFileWriter fileWriter,
-            DataType fieldType,
-            IvfpqVectorIndexOptions options) {
+            GlobalIndexFileWriter fileWriter, DataType fieldType, IvfpqVectorIndexOptions options) {
         this.fileWriter = fileWriter;
         this.options = options;
         this.dim = options.dimension();
@@ -237,8 +235,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
 
             // Phase 1: Train
             long phaseStart = System.currentTimeMillis();
-            LOG.info(
-                    "IVF-PQ train phase started (sample_ratio={})", options.trainSampleRatio());
+            LOG.info("IVF-PQ train phase started (sample_ratio={})", options.trainSampleRatio());
             trainFromTempFile(writer);
             LOG.info("IVF-PQ train phase done in {} ms", System.currentTimeMillis() - phaseStart);
 
@@ -354,9 +351,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
                 if (percent / 10 > lastLoggedPercent / 10) {
                     LOG.info(
                             "IVF-PQ add progress: {}/{} vectors ({}%)",
-                            count - remaining,
-                            count,
-                            percent);
+                            count - remaining, count, percent);
                     lastLoggedPercent = percent;
                 }
             }

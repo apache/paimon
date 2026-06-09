@@ -96,7 +96,8 @@ public class IvfpqIndexMeta implements Serializable {
     public static IvfpqIndexMeta deserialize(byte[] data) throws IOException {
         Map<String, String> map = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
         if (!map.containsKey(KEY_DIMENSION)) {
-            throw new IOException("Missing required key in IVF-PQ index metadata: " + KEY_DIMENSION);
+            throw new IOException(
+                    "Missing required key in IVF-PQ index metadata: " + KEY_DIMENSION);
         }
         if (!map.containsKey(KEY_METRIC)) {
             throw new IOException("Missing required key in IVF-PQ index metadata: " + KEY_METRIC);
