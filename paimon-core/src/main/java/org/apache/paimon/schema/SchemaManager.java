@@ -43,7 +43,6 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
@@ -104,6 +103,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -478,7 +478,7 @@ public class SchemaManager implements Serializable {
                             .ifPresent(
                                     f ->
                                             ColumnDirectiveUtils.removeDroppedDirectiveOptions(
-                                                    dropName, f.type().getTypeRoot(), newOptions));
+                                                    dropName, f.type(), newOptions));
                 }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
@@ -977,7 +977,7 @@ public class SchemaManager implements Serializable {
         }
         String fieldName = fieldNames[0];
         for (DataField field : fields) {
-            if (field.name().equals(fieldName) && field.type().is(DataTypeRoot.BLOB)) {
+            if (field.name().equals(fieldName) && isBlobFileField(field.type())) {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
@@ -1007,8 +1007,8 @@ public class SchemaManager implements Serializable {
             if (!field.name().equals(fieldName)) {
                 continue;
             }
-            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
-            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            boolean wasBlob = isBlobFileField(field.type());
+            boolean willBeBlob = isBlobFileField(newType);
             if (wasBlob || willBeBlob) {
                 throw new UnsupportedOperationException(
                         String.format(

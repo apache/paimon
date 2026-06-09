@@ -20,16 +20,13 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BlobConsumer;
-import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.Set;
-
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
 /** Context for blob file. */
 public class BlobFileContext {
@@ -40,7 +37,6 @@ public class BlobFileContext {
     private final boolean writeNullOnFetchFailure;
 
     private @Nullable BlobConsumer blobConsumer;
-    private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     private BlobFileContext(
             Set<String> blobDescriptorFields,
@@ -55,15 +51,14 @@ public class BlobFileContext {
 
     @Nullable
     public static BlobFileContext create(RowType rowType, CoreOptions options) {
-        if (rowType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (rowType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
             return null;
         }
         Set<String> descriptorFields = options.blobDescriptorField();
         Set<String> inlineFields = options.blobInlineField();
         boolean requireBlobFile = false;
         for (DataField field : rowType.getFields()) {
-            DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB && !inlineFields.contains(field.name())) {
+            if (BlobType.isBlobFileField(field.type()) && !inlineFields.contains(field.name())) {
                 requireBlobFile = true;
                 break;
             }
@@ -83,14 +78,8 @@ public class BlobFileContext {
         return this;
     }
 
-    public BlobFileContext withBlobFetchMetricReporter(
-            BlobFetchMetricReporter blobFetchMetricReporter) {
-        this.blobFetchMetricReporter = blobFetchMetricReporter;
-        return this;
-    }
-
     public BlobFileContext withWriteType(RowType writeType) {
-        if (writeType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (writeType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
             return null;
         }
         return this;
@@ -115,9 +104,5 @@ public class BlobFileContext {
 
     public boolean writeNullOnFetchFailure() {
         return writeNullOnFetchFailure;
-    }
-
-    public BlobFetchMetricReporter blobFetchMetricReporter() {
-        return blobFetchMetricReporter;
     }
 }

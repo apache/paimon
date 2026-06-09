@@ -37,6 +37,7 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -499,10 +500,10 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                     throw new IllegalStateException(
                             "Column not found in target table: " + flinkColumn.getName());
                 }
-                if (targetField.type().getTypeRoot() == DataTypeRoot.BLOB
+                if (BlobType.isBlobFileField(targetField.type())
                         && !updatableBlobFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update raw-data BLOB column '"
+                            "Should not append/update raw-data BLOB or ARRAY<BLOB> column '"
                                     + flinkColumn.getName()
                                     + "' through MERGE INTO. "
                                     + "Only descriptor-based BLOB columns (configured via '"

@@ -278,9 +278,11 @@ public class FileStoreSourceSplitReader
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
+        @Nullable private final RowType rowType;
         private final Set<Integer> blobFields;
 
         private FileStoreRecordIterator(@Nullable RowType rowType) {
+            this.rowType = rowType;
             this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndex(rowType);
         }
 
@@ -318,8 +320,8 @@ public class FileStoreSourceSplitReader
 
             recordAndPosition.setNext(
                     blobFields.isEmpty()
-                            ? new FlinkRowData(row)
-                            : new FlinkRowDataWithBlob(row, blobFields, blobAsDescriptor));
+                            ? new FlinkRowData(row, rowType)
+                            : new FlinkRowDataWithBlob(row, rowType, blobFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();

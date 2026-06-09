@@ -71,7 +71,9 @@ public class BlobFormatWriterTest {
             BlobFileMeta fileMeta = new BlobFileMeta(in, fileSize, null);
             assertThat(fileMeta.recordNumber()).isEqualTo(2);
 
-            BlobFormatReader reader = new BlobFormatReader(fileIO, filePath, fileMeta, in, 1, 0);
+            BlobFormatReader reader =
+                    new BlobFormatReader(
+                            fileIO, filePath, fileMeta, in, 1, 0, DataTypes.BLOB(), false);
             FileRecordIterator<InternalRow> iterator = reader.readBatch();
             assertBlobPayload(iterator.next().getBlob(0), firstPayload);
             assertBlobPayload(iterator.next().getBlob(0), secondPayload);

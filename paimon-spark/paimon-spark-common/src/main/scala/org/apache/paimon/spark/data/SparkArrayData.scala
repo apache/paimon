@@ -20,7 +20,7 @@ package org.apache.paimon.spark.data
 
 import org.apache.paimon.data.InternalArray
 import org.apache.paimon.spark.DataConverter
-import org.apache.paimon.types.{ArrayType => PaimonArrayType, BigIntType, DataType => PaimonDataType, DataTypeChecks, RowType}
+import org.apache.paimon.types.{ArrayType => PaimonArrayType, BigIntType, BlobType, DataType => PaimonDataType, DataTypeChecks, RowType}
 import org.apache.paimon.utils.InternalRowUtils
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -91,7 +91,15 @@ abstract class AbstractSparkArrayData extends SparkArrayData {
   override def getUTF8String(ordinal: Int): UTF8String =
     DataConverter.fromPaimon(paimonArray.getString(ordinal))
 
-  override def getBinary(ordinal: Int): Array[Byte] = paimonArray.getBinary(ordinal)
+  override def getBinary(ordinal: Int): Array[Byte] = elementType match {
+    case _: BlobType =>
+      if (paimonArray.isNullAt(ordinal)) {
+        null
+      } else {
+        paimonArray.getBlob(ordinal).toData
+      }
+    case _ => paimonArray.getBinary(ordinal)
+  }
 
   override def getInterval(ordinal: Int): CalendarInterval =
     throw new UnsupportedOperationException()

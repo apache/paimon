@@ -19,11 +19,16 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.DecimalData;
@@ -36,15 +41,23 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.types.variant.BinaryVariant;
 import org.apache.flink.types.variant.Variant;
 
+import javax.annotation.Nullable;
+
 import static org.apache.paimon.flink.FlinkRowWrapper.fromFlinkRowKind;
 
 /** Convert to Flink row data. */
 public class FlinkRowData implements RowData {
 
     protected InternalRow row;
+    @Nullable protected final RowType rowType;
 
     public FlinkRowData(InternalRow row) {
+        this(row, null);
+    }
+
+    public FlinkRowData(InternalRow row, @Nullable RowType rowType) {
         this.row = row;
+        this.rowType = rowType;
     }
 
     public FlinkRowData replace(InternalRow row) {
@@ -134,7 +147,7 @@ public class FlinkRowData implements RowData {
 
     @Override
     public ArrayData getArray(int pos) {
-        return new FlinkArrayData(row.getArray(pos));
+        return new FlinkArrayData(row.getArray(pos), arrayElementType(typeAt(pos)));
     }
 
     @Override
@@ -144,7 +157,10 @@ public class FlinkRowData implements RowData {
 
     @Override
     public RowData getRow(int pos, int numFields) {
-        return new FlinkRowData(row.getRow(pos, numFields));
+        DataType type = typeAt(pos);
+        return new FlinkRowData(
+                row.getRow(pos, numFields),
+                type != null && type.getTypeRoot() == DataTypeRoot.ROW ? (RowType) type : null);
     }
 
     public Variant getVariant(int pos) {
@@ -152,12 +168,30 @@ public class FlinkRowData implements RowData {
         return new BinaryVariant(variant.value(), variant.metadata());
     }
 
+    @Nullable
+    private DataType typeAt(int pos) {
+        return rowType == null ? null : rowType.getTypeAt(pos);
+    }
+
+    @Nullable
+    private static DataType arrayElementType(@Nullable DataType type) {
+        return type != null && type.getTypeRoot() == DataTypeRoot.ARRAY
+                ? ((ArrayType) type).getElementType()
+                : null;
+    }
+
     private static class FlinkArrayData implements ArrayData {
 
         private final InternalArray array;
+        @Nullable private final DataType elementType;
 
         private FlinkArrayData(InternalArray array) {
+            this(array, null);
+        }
+
+        private FlinkArrayData(InternalArray array, @Nullable DataType elementType) {
             this.array = array;
+            this.elementType = elementType;
         }
 
         @Override
@@ -232,12 +266,19 @@ public class FlinkRowData implements RowData {
 
         @Override
         public byte[] getBinary(int pos) {
+            if (elementType != null && elementType.getTypeRoot() == DataTypeRoot.BLOB) {
+                if (array.isNullAt(pos)) {
+                    return null;
+                }
+                Blob blob = array.getBlob(pos);
+                return blob == null ? null : blob.toData();
+            }
             return array.getBinary(pos);
         }
 
         @Override
         public ArrayData getArray(int pos) {
-            return new FlinkArrayData(array.getArray(pos));
+            return new FlinkArrayData(array.getArray(pos), arrayElementType(elementType));
         }
 
         @Override
@@ -247,7 +288,11 @@ public class FlinkRowData implements RowData {
 
         @Override
         public RowData getRow(int pos, int numFields) {
-            return new FlinkRowData(array.getRow(pos, numFields));
+            return new FlinkRowData(
+                    array.getRow(pos, numFields),
+                    elementType != null && elementType.getTypeRoot() == DataTypeRoot.ROW
+                            ? (RowType) elementType
+                            : null);
         }
 
         @Override
