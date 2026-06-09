@@ -69,6 +69,12 @@ under the License.
             <td>Controls the threshold of small manifest file.</td>
         </tr>
         <tr>
+            <td><h5>cache.manifest.soft-values</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true (default), manifest cache entries are held with soft references and may be reclaimed by the GC under memory pressure. This can trigger a cache-thrash spiral where reclaimed entries are refetched, spiking heap and forcing further reclamation. Set to false to hold entries with strong references, breaking the spiral; the cache then stays bounded by weight up to 'cache.manifest.max-memory' (size the total heap memory to at least roughly twice that value).</td>
+        </tr>
+        <tr>
             <td><h5>cache.partition.max-num</h5></td>
             <td style="word-wrap: break-word;">0</td>
             <td>Long</td>

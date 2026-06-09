@@ -27,7 +27,9 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Filter;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -59,6 +61,7 @@ public class TableWriteCoordinator {
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
     private final int pageSize;
+    private final boolean prefetchManifests;
     private final Cache<CoordinationKey, byte[]> pagedCoordination;
 
     private volatile Snapshot snapshot;
@@ -78,6 +81,10 @@ public class TableWriteCoordinator {
                                 .toConfiguration()
                                 .get(FlinkConnectorOptions.SINK_WRITER_COORDINATOR_PAGE_SIZE)
                                 .getBytes();
+        this.prefetchManifests =
+                table.coreOptions()
+                        .toConfiguration()
+                        .get(FlinkConnectorOptions.SINK_WRITER_COORDINATOR_PREFETCH_MANIFESTS);
         this.pagedCoordination =
                 Caffeine.newBuilder()
                         .executor(Runnable::run)
@@ -93,6 +100,16 @@ public class TableWriteCoordinator {
         }
         this.snapshot = latestSnapshot.get();
         this.scan.withSnapshot(snapshot);
+        if (prefetchManifests) {
+            // Eagerly read all data manifests of the current snapshot once to warm the
+            // table's SegmentsCache (the byte-level manifest cache attached to the table
+            // inside the Job Manager). This reuses the same threaded `plan()` read path
+            // that per-task `scan` requests use, so subsequent concurrent requests hit
+            // warm bytes instead of each performing a cold manifest read.
+            scan.withPartitionFilter(PartitionPredicate.ALWAYS_TRUE)
+                    .withBucketFilter(Filter.alwaysTrue())
+                    .plan();
+        }
     }
 
     public synchronized PagedCoordinationResponse scan(PagedCoordinationRequest request)
