@@ -209,8 +209,8 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(ArrayType arrayType) {
-            throw new UnsupportedOperationException(
-                    "Mosaic file format does not support type ARRAY");
+            arrayType.getElementType().accept(this);
+            return null;
         }
 
         @Override
@@ -227,7 +227,9 @@ public class MosaicFileFormat extends FileFormat {
 
         @Override
         public Void visit(MapType mapType) {
-            throw new UnsupportedOperationException("Mosaic file format does not support type MAP");
+            mapType.getKeyType().accept(this);
+            mapType.getValueType().accept(this);
+            return null;
         }
 
         @Override
