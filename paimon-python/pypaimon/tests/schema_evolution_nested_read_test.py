@@ -22,11 +22,10 @@ Two layers are covered:
 * Whole-column evolution of a top-level struct/array/map column
   (add / drop / rename / projection) -- aligned by the column's field id.
 * Sub-field evolution INSIDE a struct (add/rename/update-type/drop a nested
-  field via a dotted ``field_names`` path) -- this is NOT implemented:
-  ``schema_manager`` only operates on the top-level ``field_names[-1]``.
-  ``SchemaEvolutionNestedGapTest`` locks in the current behaviour with
-  explicit assertions so the gap is documented and any future fix is
-  noticed.
+  field via a dotted ``field_names`` path), including sub-fields of a ROW
+  nested in an ARRAY/MAP. Sub-fields are aligned by field id, so a rename
+  follows the data, an added sub-field reads NULL for old rows, a dropped one
+  is not revived, and a type change is cast at read time.
 """
 
 import os
@@ -37,7 +36,12 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.schema.data_types import AtomicType, PyarrowFieldParser
+from pypaimon.casting.data_type_casts import supports_cast
+from pypaimon.schema.data_types import (AtomicInteger, AtomicType, DataField,
+                                        PyarrowFieldParser, RowType,
+                                        collect_field_ids,
+                                        current_highest_field_id,
+                                        reassign_field_id)
 from pypaimon.schema.schema_change import SchemaChange
 
 
@@ -240,18 +244,12 @@ class SchemaEvolutionNestedReadTest(_NestedBase):
             {'id': 2, 'mv2': {'latest_version': 200, 'latest_value': 'b'}, 'val': 'y'}])
 
 
-class SchemaEvolutionNestedGapTest(_NestedBase):
-    """Sub-field-level evolution inside a struct is NOT implemented.
+class SchemaEvolutionNestedSubfieldTest(_NestedBase):
+    """Sub-field evolution inside a struct, aligned by field id."""
 
-    schema_manager handles only the top-level ``field_names[-1]``; a dotted
-    path like ``['mv', 'latest_value']`` never recurses into the RowType.
-    These tests assert the current behaviour (silent top-level mutation, or
-    ColumnNotExistException) so the gap is documented.
-    """
-
-    def _create_struct_table(self, name):
+    def _create_struct_table(self, name, primary_keys=None, bucket='-1'):
         s0 = pa.schema([('id', pa.int64()), ('mv', _MV_PA), ('val', pa.string())])
-        table = self._create(name, s0)
+        table = self._create(name, s0, primary_keys=primary_keys, bucket=bucket)
         self._write(table, pa.Table.from_pylist([
             {'id': 1, 'mv': {'latest_version': 100, 'latest_value': 'a'}, 'val': 'x'},
         ], schema=s0))
@@ -268,49 +266,198 @@ class SchemaEvolutionNestedGapTest(_NestedBase):
             'default.{}'.format(table_name)).table_schema
         return [f.name for f in schema.fields]
 
-    # -- C7: add nested sub-field -> silently adds a TOP-LEVEL column ----
-
-    def test_nested_add_subfield_mutates_top_level(self):
-        # GAP: add_column(['mv','new_inner']) does NOT add new_inner inside
-        # mv; it silently appends a top-level column 'new_inner' instead.
-        self._create_struct_table('gap_add')
+    def test_add_subfield_goes_inside_struct_and_pads_null(self):
+        table = self._create_struct_table('nsub_add')
         self.catalog.alter_table(
-            'default.gap_add',
-            [SchemaChange.add_column(['mv', 'new_inner'], AtomicType('INT'))],
-            False)
-        # mv's sub-fields are unchanged; a stray top-level column appeared.
-        self.assertEqual(self._mv_subfield_names('gap_add'),
-                         ['latest_version', 'latest_value'])
-        self.assertIn('new_inner', self._top_level_names('gap_add'))
+            'default.nsub_add',
+            [SchemaChange.add_column(['mv', 'score'], AtomicType('INT'))], False)
+        # The sub-field lands inside mv, not as a stray top-level column.
+        self.assertEqual(self._mv_subfield_names('nsub_add'),
+                         ['latest_version', 'latest_value', 'score'])
+        self.assertNotIn('score', self._top_level_names('nsub_add'))
 
-    # -- C8/C9/C10: rename / update-type / drop nested sub-field ---------
+        table = self.catalog.get_table('default.nsub_add')
+        s1 = pa.schema([
+            ('id', pa.int64()),
+            ('mv', pa.struct([('latest_version', pa.int64()),
+                              ('latest_value', pa.string()),
+                              ('score', pa.int32())])),
+            ('val', pa.string())])
+        self._write(table, pa.Table.from_pylist([
+            {'id': 2, 'mv': {'latest_version': 200, 'latest_value': 'b', 'score': 7},
+             'val': 'y'}], schema=s1))
+        rows = self._read_sorted(table)
+        # Old row reads NULL for the added sub-field; new row carries it.
+        self.assertEqual(rows[0]['mv'],
+                         {'latest_version': 100, 'latest_value': 'a', 'score': None})
+        self.assertEqual(rows[1]['mv'],
+                         {'latest_version': 200, 'latest_value': 'b', 'score': 7})
 
-    def test_nested_rename_subfield_raises(self):
-        # GAP: field_names[-1]='latest_value' is looked up at the TOP level,
-        # where it does not exist -> ColumnNotExistException (wrapped).
-        self._create_struct_table('gap_rename')
+    def test_rename_subfield_follows_field_id(self):
+        table = self._create_struct_table('nsub_rename')
+        self.catalog.alter_table(
+            'default.nsub_rename',
+            [SchemaChange.rename_column(['mv', 'latest_value'], 'lv')], False)
+        self.assertEqual(self._mv_subfield_names('nsub_rename'),
+                         ['latest_version', 'lv'])
+        table = self.catalog.get_table('default.nsub_rename')
+        rows = self._read_sorted(table)
+        # Old data follows the renamed sub-field by id, not by name.
+        self.assertEqual(rows[0]['mv'], {'latest_version': 100, 'lv': 'a'})
+
+    def test_update_subfield_type_casts(self):
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('v', pa.int32()), ('s', pa.string())]))])
+        table = self._create('nsub_type', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'v': 10, 's': 'a'}}], schema=s0))
+        self.catalog.alter_table(
+            'default.nsub_type',
+            [SchemaChange.update_column_type(['mv', 'v'], AtomicType('BIGINT'))], False)
+        table = self.catalog.get_table('default.nsub_type')
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        arrow = rb.new_read().to_arrow(splits)
+        self.assertEqual(arrow.schema.field('mv').type.field('v').type, pa.int64())
+        self.assertEqual(arrow.to_pylist()[0]['mv'], {'v': 10, 's': 'a'})
+
+    def test_drop_subfield_not_revived(self):
+        table = self._create_struct_table('nsub_drop')
+        self.catalog.alter_table(
+            'default.nsub_drop',
+            [SchemaChange.drop_column(['mv', 'latest_value'])], False)
+        self.assertEqual(self._mv_subfield_names('nsub_drop'), ['latest_version'])
+        table = self.catalog.get_table('default.nsub_drop')
+        rows = self._read_sorted(table)
+        # The dropped sub-field's old data is gone, not revived under its id.
+        self.assertEqual(rows[0]['mv'], {'latest_version': 100})
+
+    def test_drop_all_subfields_rejected(self):
+        self._create_struct_table('nsub_dropall')
+        self.catalog.alter_table(
+            'default.nsub_dropall',
+            [SchemaChange.drop_column(['mv', 'latest_value'])], False)
+        with self.assertRaises(RuntimeError):
+            self.catalog.alter_table(
+                'default.nsub_dropall',
+                [SchemaChange.drop_column(['mv', 'latest_version'])], False)
+
+    def test_unsupported_subfield_cast_rejected(self):
+        self._create_struct_table('nsub_badcast')
         with self.assertRaises(RuntimeError) as cm:
             self.catalog.alter_table(
-                'default.gap_rename',
-                [SchemaChange.rename_column(['mv', 'latest_value'], 'lv')], False)
-        self.assertIn('latest_value', str(cm.exception))
-
-    def test_nested_update_subfield_type_raises(self):
-        self._create_struct_table('gap_update')
-        with self.assertRaises(RuntimeError) as cm:
-            self.catalog.alter_table(
-                'default.gap_update',
+                'default.nsub_badcast',
                 [SchemaChange.update_column_type(
-                    ['mv', 'latest_version'], AtomicType('BIGINT'))], False)
-        self.assertIn('latest_version', str(cm.exception))
+                    ['mv', 'latest_version'], AtomicType('DATE'))], False)
+        self.assertIn('cannot be converted', str(cm.exception))
 
-    def test_nested_drop_subfield_raises(self):
-        self._create_struct_table('gap_drop')
-        with self.assertRaises(RuntimeError) as cm:
-            self.catalog.alter_table(
-                'default.gap_drop',
-                [SchemaChange.drop_column(['mv', 'latest_value'])], False)
-        self.assertIn('latest_value', str(cm.exception))
+    def test_pk_nested_subfield_evolution_merge(self):
+        s0 = pa.schema([('id', pa.int64()), ('mv', _MV_PA)])
+        table = self._create('nsub_pk', s0, primary_keys=['id'], bucket='1')
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'latest_version': 1, 'latest_value': 'a'}}], schema=s0))
+        self.catalog.alter_table(
+            'default.nsub_pk',
+            [SchemaChange.add_column(['mv', 'score'], AtomicType('INT'))], False)
+        table = self.catalog.get_table('default.nsub_pk')
+        s1 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('latest_version', pa.int64()),
+                                          ('latest_value', pa.string()),
+                                          ('score', pa.int32())]))])
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'latest_version': 2, 'latest_value': 'b', 'score': 9}}],
+            schema=s1))
+        rows = self._read_sorted(table)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['mv'],
+                         {'latest_version': 2, 'latest_value': 'b', 'score': 9})
+
+
+class SchemaEvolutionNestedContainerTest(_NestedBase):
+    """Sub-field evolution of a ROW nested inside an ARRAY / MAP."""
+
+    def test_array_of_row_add_and_rename_subfield(self):
+        elem = pa.struct([('a', pa.int64()), ('b', pa.string())])
+        s0 = pa.schema([('id', pa.int64()), ('arr', pa.list_(elem))])
+        table = self._create('narr', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'arr': [{'a': 1, 'b': 'x'}, {'a': 2, 'b': 'y'}]}], schema=s0))
+        # Descend through the array element into the ROW.
+        self.catalog.alter_table('default.narr', [
+            SchemaChange.add_column(['arr', 'element', 'c'], AtomicType('INT')),
+            SchemaChange.rename_column(['arr', 'element', 'b'], 'bb'),
+        ], False)
+        table = self.catalog.get_table('default.narr')
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['arr'],
+                         [{'a': 1, 'bb': 'x', 'c': None},
+                          {'a': 2, 'bb': 'y', 'c': None}])
+
+    def test_map_of_row_add_subfield(self):
+        val = pa.struct([('a', pa.int64()), ('b', pa.string())])
+        s0 = pa.schema([('id', pa.int64()), ('m', pa.map_(pa.string(), val))])
+        table = self._create('nmap', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'm': [('k', {'a': 1, 'b': 'x'})]}], schema=s0))
+        # Descend through the map value into the ROW.
+        self.catalog.alter_table(
+            'default.nmap',
+            [SchemaChange.add_column(['m', 'value', 'c'], AtomicType('INT'))], False)
+        table = self.catalog.get_table('default.nmap')
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['m'], [('k', {'a': 1, 'b': 'x', 'c': None})])
+
+
+class NestedFieldIdModelTest(unittest.TestCase):
+    """Globally-unique nested field ids, mirrored from the engine id model."""
+
+    def test_nested_ids_are_globally_unique(self):
+        s = pa.schema([('id', pa.int64()), ('mv', _MV_PA), ('x', pa.string())])
+        fields = PyarrowFieldParser.to_paimon_schema(s)
+        ids = set()
+        for f in fields:
+            ids.add(f.id)
+            collect_field_ids(f.type, ids)
+        # id(0), mv(1), latest_version(2), latest_value(3), x(4)
+        self.assertEqual(ids, {0, 1, 2, 3, 4})
+        self.assertEqual(current_highest_field_id(fields), 4)
+
+    def test_flat_schema_ids_unchanged(self):
+        fields = PyarrowFieldParser.to_paimon_schema(
+            pa.schema([('a', pa.int64()), ('b', pa.string()), ('c', pa.int32())]))
+        self.assertEqual([f.id for f in fields], [0, 1, 2])
+
+    def test_reassign_field_id_depth_first_order(self):
+        inner = RowType(True, [DataField(0, 'c', AtomicType('INT'))])
+        mid = RowType(True, [DataField(0, 'b', inner)])
+        outer = RowType(True, [DataField(0, 'a', mid),
+                               DataField(0, 'd', AtomicType('INT'))])
+        result = reassign_field_id(outer, AtomicInteger(2))
+        ids = set()
+        collect_field_ids(result, ids)
+        self.assertEqual(ids, {3, 4, 5, 6})
+
+    def test_duplicate_field_id_raises(self):
+        bad = [
+            DataField(0, 'a', AtomicType('INT')),
+            DataField(1, 'b', RowType(True, [DataField(0, 'c', AtomicType('INT'))])),
+        ]
+        with self.assertRaises(ValueError):
+            current_highest_field_id(bad)
+
+
+class SupportsCastTest(unittest.TestCase):
+
+    def test_supported_casts(self):
+        for src, dst in [('INT', 'BIGINT'), ('FLOAT', 'DOUBLE'), ('INT', 'STRING'),
+                         ('DOUBLE', 'INT'), ('DECIMAL(10, 4)', 'DECIMAL(10, 2)')]:
+            self.assertTrue(supports_cast(AtomicType(src), AtomicType(dst)),
+                            '{} -> {}'.format(src, dst))
+
+    def test_unsupported_casts(self):
+        for src, dst in [('BIGINT', 'DATE'), ('BOOLEAN', 'DATE')]:
+            self.assertFalse(supports_cast(AtomicType(src), AtomicType(dst)),
+                             '{} -> {}'.format(src, dst))
 
 
 if __name__ == '__main__':

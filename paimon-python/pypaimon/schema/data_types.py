@@ -25,6 +25,15 @@ from typing import Any, Dict, List, Optional, Union
 import pyarrow
 from pyarrow import types
 
+# Field ids at or above this value are reserved for system fields (sequence
+# number, value kind, row id, ...). User field ids stay strictly below it, so
+# the highest-user-field-id computation can ignore anything from here up.
+SYSTEM_FIELD_ID_START = 2147483647 // 2
+
+
+def is_system_field_id(field_id: int) -> bool:
+    return field_id >= SYSTEM_FIELD_ID_START
+
 
 class AtomicInteger:
 
@@ -368,6 +377,73 @@ class RowType(DataType):
             field_strs.append("{}: {}{}".format(field.name, field.type, description))
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
+
+
+def reassign_field_id(data_type: DataType, field_id: "AtomicInteger") -> DataType:
+    """Return a copy of *data_type* with every nested field id reassigned from
+    *field_id*, depth-first with children allocated before their parent field.
+
+    Mirrors the canonical id-reassignment used when a column (possibly carrying
+    a nested ROW/ARRAY/MAP) is added, so nested subfields get globally-unique
+    ids drawn from the schema's running counter rather than struct-local ones.
+    """
+    if isinstance(data_type, RowType):
+        new_fields = []
+        for field in data_type.fields:
+            # Visit the nested type first, then allocate this field's id, so the
+            # ordering matches the rest of the engine ecosystem.
+            new_type = reassign_field_id(field.type, field_id)
+            new_id = field_id.increment_and_get()
+            new_fields.append(DataField(
+                new_id, field.name, new_type, field.description, field.default_value))
+        return RowType(data_type.nullable, new_fields)
+    if isinstance(data_type, ArrayType):
+        return ArrayType(data_type.nullable, reassign_field_id(data_type.element, field_id))
+    if isinstance(data_type, VectorType):
+        return VectorType(
+            data_type.nullable, reassign_field_id(data_type.element, field_id), data_type.length)
+    if isinstance(data_type, MultisetType):
+        return MultisetType(data_type.nullable, reassign_field_id(data_type.element, field_id))
+    if isinstance(data_type, MapType):
+        new_key = reassign_field_id(data_type.key, field_id)
+        new_value = reassign_field_id(data_type.value, field_id)
+        return MapType(data_type.nullable, new_key, new_value)
+    return data_type
+
+
+def collect_field_ids(data_type: DataType, field_ids: set):
+    """Collect all (nested) field ids reachable from *data_type* into *field_ids*,
+    raising on a duplicate id (a broken schema)."""
+    if isinstance(data_type, RowType):
+        for field in data_type.fields:
+            if field.id in field_ids:
+                raise ValueError(
+                    "Broken schema, field id {} is duplicated.".format(field.id))
+            field_ids.add(field.id)
+            collect_field_ids(field.type, field_ids)
+    elif isinstance(data_type, (ArrayType, VectorType, MultisetType)):
+        collect_field_ids(data_type.element, field_ids)
+    elif isinstance(data_type, MapType):
+        collect_field_ids(data_type.key, field_ids)
+        collect_field_ids(data_type.value, field_ids)
+
+
+def current_highest_field_id(fields: List[DataField]) -> int:
+    """Highest user field id across *fields*, recursing into nested ROW/ARRAY/MAP.
+
+    System field ids are excluded. Returns -1 for an empty/system-only schema.
+    The result is persisted as ``highestFieldId``; later schema changes seed
+    their id counter from the stored value (not from the live fields, since a
+    dropped field may have carried a higher id than any survivor).
+    """
+    field_ids = set()
+    for field in fields:
+        if field.id in field_ids:
+            raise ValueError("Broken schema, field id {} is duplicated.".format(field.id))
+        field_ids.add(field.id)
+        collect_field_ids(field.type, field_ids)
+    user_ids = [fid for fid in field_ids if not is_system_field_id(fid)]
+    return max(user_ids) if user_ids else -1
 
 
 class Keyword(Enum):
@@ -717,12 +793,21 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
-        # Convert PyArrow schema to Paimon fields
+        # Convert PyArrow schema to Paimon fields, assigning globally-unique ids:
+        # each top-level field takes the next id, then its (possibly nested) type
+        # has its subfield ids reassigned from the same running counter. A flat
+        # schema keeps the plain 0,1,2,... ids; nested subfields get ids that do
+        # not collide with top-level ones.
+        field_id = AtomicInteger(-1)
         fields = []
-        for i, pa_field in enumerate(pa_schema):
+        for pa_field in pa_schema:
             pa_field: pyarrow.Field
-            data_field = PyarrowFieldParser.to_paimon_field(i, pa_field)
-            fields.append(data_field)
+            top_id = field_id.increment_and_get()
+            data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+            data_type = reassign_field_id(data_type, field_id)
+            description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
+                if pa_field.metadata and b'description' in pa_field.metadata else None
+            fields.append(DataField(top_id, pa_field.name, data_type, description))
         return fields
 
     @staticmethod
