@@ -18,15 +18,18 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.casting.FallbackMappingRow
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.{BinaryRow, InternalRow}
+import org.apache.paimon.data.{BinaryRow, BlobPlaceholder, GenericRow, InternalRow}
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.operation.AbstractFileStoreWrite
 import org.apache.paimon.spark.SparkUtils
 import org.apache.paimon.spark.util.SparkRowUtils
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, TableWriteImpl}
 import org.apache.paimon.types.RowType
+import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
 
@@ -34,6 +37,7 @@ import org.apache.spark.sql.Row
 
 import java.util.Collections
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
@@ -41,7 +45,8 @@ case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     firstRowIdToPartitionMap: mutable.HashMap[Long, (Array[Byte], Long)],
-    catalogContext: CatalogContext)
+    catalogContext: CatalogContext,
+    rawBlobPlaceholderMarkerIndexes: Map[Int, Int])
   extends InnerTableV1DataWrite {
 
   private var currentWriter: PerFileWriter = _
@@ -53,6 +58,18 @@ case class DataEvolutionTableDataWrite(
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, catalogContext)
   }
+  private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray
+  private val rawBlobFallbackMappings = {
+    val mappings = Array.fill(writeType.getFieldCount)(-1)
+    rawBlobFallbackFields.zipWithIndex.foreach {
+      case ((fieldIndex, _), fallbackIndex) =>
+        mappings(fieldIndex) = fallbackIndex
+    }
+    mappings
+  }
+  private val rawBlobFallbackMarkerIndexes = rawBlobFallbackFields.map(_._2)
+  private val rawBlobFallbackRow = new GenericRow(rawBlobFallbackMarkerIndexes.length)
+  private val rawBlobFallbackMappingRow = new FallbackMappingRow(rawBlobFallbackMappings)
 
   def write(row: Row): Unit = {
     val firstRowId = row.getLong(firstRowIdIndex)
@@ -62,7 +79,24 @@ case class DataEvolutionTableDataWrite(
       newCurrentWriter(firstRowId)
     }
 
-    currentWriter.write(toPaimonRow(row), rowId)
+    val paimonRow = toPaimonRow(row)
+    currentWriter.write(
+      if (rawBlobPlaceholderMarkerIndexes.isEmpty) {
+        paimonRow
+      } else {
+        rawBlobFallbackMappingRow.replace(paimonRow, rawBlobPlaceholderFallbackRow(row))
+      },
+      rowId)
+  }
+
+  private def rawBlobPlaceholderFallbackRow(row: Row): InternalRow = {
+    rawBlobFallbackMarkerIndexes.zipWithIndex.foreach {
+      case (markerIndex, fallbackIndex) =>
+        rawBlobFallbackRow.setField(
+          fallbackIndex,
+          if (row.getBoolean(markerIndex)) BlobPlaceholder.INSTANCE else null)
+    }
+    rawBlobFallbackRow
   }
 
   private def newCurrentWriter(firstRowId: Long): Unit = {
@@ -89,7 +123,7 @@ case class DataEvolutionTableDataWrite(
 
   private def finishCurrentWriter(): Unit = {
     if (currentWriter != null) {
-      commitMessages.append(currentWriter.finish())
+      commitMessages ++= currentWriter.finish()
     }
     currentWriter = null
   }
@@ -126,28 +160,54 @@ case class DataEvolutionTableDataWrite(
       recordWriter.write(row)
     }
 
-    def finish(): CommitMessageImpl = {
+    def finish(): Seq[CommitMessageImpl] = {
       try {
         assert(
           numRecords == numWritten,
           s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
         val result = recordWriter.prepareCommit(false)
         val dataFiles = result.newFilesIncrement().newFiles()
-        assert(dataFiles.size() == 1, "This is a bug, PerFileWriter could only produce one file")
-        val dataFileMeta = dataFiles.get(0).assignFirstRowId(firstRowId)
-        new CommitMessageImpl(
-          partition,
-          0,
-          null,
-          new DataIncrement(
-            java.util.Arrays.asList(dataFileMeta),
-            Collections.emptyList(),
-            Collections.emptyList()),
-          CompactIncrement.emptyIncrement()
-        )
+        val dataFileMetas = assignFirstRowIds(dataFiles.asScala)
+        Seq(
+          new CommitMessageImpl(
+            partition,
+            0,
+            null,
+            new DataIncrement(
+              dataFileMetas.asJava,
+              Collections.emptyList(),
+              Collections.emptyList()),
+            CompactIncrement.emptyIncrement()
+          ))
       } finally {
         recordWriter.close()
       }
+    }
+
+    private def assignFirstRowIds(dataFiles: Seq[org.apache.paimon.io.DataFileMeta])
+        : Seq[org.apache.paimon.io.DataFileMeta] = {
+      val assigned = ListBuffer[org.apache.paimon.io.DataFileMeta]()
+      val blobFieldStarts = mutable.HashMap[String, Long]()
+      var normalFileStart = firstRowId
+      var vectorStoreStart = firstRowId
+
+      dataFiles.foreach {
+        file =>
+          if (isBlobFile(file.fileName())) {
+            val blobFieldName = file.writeCols().get(0)
+            val blobStart = blobFieldStarts.getOrElse(blobFieldName, firstRowId)
+            assigned += file.assignFirstRowId(blobStart)
+            blobFieldStarts.update(blobFieldName, blobStart + file.rowCount())
+          } else if (isVectorStoreFile(file.fileName())) {
+            assigned += file.assignFirstRowId(vectorStoreStart)
+            vectorStoreStart += file.rowCount()
+          } else {
+            assigned += file.assignFirstRowId(normalFileStart)
+            normalFileStart += file.rowCount()
+          }
+      }
+
+      assigned.toSeq
     }
   }
 }

@@ -56,6 +56,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     private final List<RecordReader<InternalRow>> groupReaders = new ArrayList<>();
     private final int blobIndex;
+    private final int fieldCount;
     private boolean returned;
 
     BlobFallbackRecordReader(
@@ -65,6 +66,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             RowType readRowType,
             int blobIndex) {
         this.blobIndex = blobIndex;
+        this.fieldCount = readRowType.getFieldCount();
 
         checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
         long firstRowId = Long.MAX_VALUE;
@@ -172,8 +174,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                     }
                 }
                 if (result == null) {
-                    throw new IllegalStateException(
-                            "Invalid state: all blob files at the same row id store a placeholder, it's a bug.");
+                    result = nullBlobRow();
                 }
                 return result;
             }
@@ -185,6 +186,10 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                 }
             }
         };
+    }
+
+    private InternalRow nullBlobRow() {
+        return new GenericRow(fieldCount);
     }
 
     private boolean isPlaceHolder(InternalRow row) {

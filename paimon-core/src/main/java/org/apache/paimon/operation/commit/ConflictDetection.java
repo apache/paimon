@@ -57,9 +57,12 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -633,26 +636,21 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        Set<FileRowIdKey> existingIndex = new HashSet<>();
+        NavigableMap<Long, Long> existingRanges = new TreeMap<>();
         for (SimpleFileEntry base : baseEntries) {
-            if (base.firstRowId() != null) {
-                existingIndex.add(
-                        new FileRowIdKey(
-                                base.partition(),
-                                base.bucket(),
-                                base.firstRowId(),
-                                base.rowCount()));
+            if (base.firstRowId() != null && !dedicatedStorageFile(base.fileName())) {
+                existingRanges.put(base.firstRowId(), base.rowCount());
             }
         }
 
         for (SimpleFileEntry entry : filesToCheck) {
-            FileRowIdKey key =
-                    new FileRowIdKey(
-                            entry.partition(),
-                            entry.bucket(),
-                            entry.firstRowId(),
-                            entry.rowCount());
-            if (!existingIndex.contains(key)) {
+            boolean exists =
+                    dedicatedStorageFile(entry.fileName())
+                            ? rowIdRangeCovered(
+                                    existingRanges, entry.firstRowId(), entry.rowCount())
+                            : rowIdRangeExists(
+                                    existingRanges, entry.firstRowId(), entry.rowCount());
+            if (!exists) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
@@ -670,38 +668,18 @@ public class ConflictDetection {
         return Optional.empty();
     }
 
-    private static class FileRowIdKey {
-        private final BinaryRow partition;
-        private final int bucket;
-        private final long firstRowId;
-        private final long rowCount;
+    private static boolean rowIdRangeCovered(
+            NavigableMap<Long, Long> ranges, long firstRowId, long rowCount) {
+        Entry<Long, Long> range = ranges.floorEntry(firstRowId);
+        return range != null
+                && range.getKey() <= firstRowId
+                && range.getKey() + range.getValue() >= firstRowId + rowCount;
+    }
 
-        FileRowIdKey(BinaryRow partition, int bucket, long firstRowId, long rowCount) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.firstRowId = firstRowId;
-            this.rowCount = rowCount;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            FileRowIdKey that = (FileRowIdKey) o;
-            return bucket == that.bucket
-                    && firstRowId == that.firstRowId
-                    && rowCount == that.rowCount
-                    && Objects.equals(partition, that.partition);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(partition, bucket, firstRowId, rowCount);
-        }
+    private static boolean rowIdRangeExists(
+            NavigableMap<Long, Long> ranges, long firstRowId, long rowCount) {
+        Long existingRowCount = ranges.get(firstRowId);
+        return existingRowCount != null && existingRowCount == rowCount;
     }
 
     private static boolean dedicatedStorageFile(String fileName) {
