@@ -326,6 +326,12 @@ public class FlinkSourceBuilder {
         TableScanUtils.streamingReadingValidate(table);
 
         if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
+            if (conf.get(CoreOptions.CHAIN_TABLE_ENABLED)) {
+                throw new UnsupportedOperationException(
+                        "Chain table streaming is not compatible with checkpoint-align mode. "
+                                + "Please disable 'source.checkpoint-align.enabled' when reading "
+                                + "a chain table in streaming mode.");
+            }
             return buildAlignedContinuousFileSource();
         } else if (conf.contains(CoreOptions.CONSUMER_ID)
                 && conf.get(CoreOptions.CONSUMER_CONSISTENCY_MODE)
