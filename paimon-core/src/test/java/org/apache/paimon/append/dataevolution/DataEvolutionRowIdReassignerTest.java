@@ -29,11 +29,13 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -55,6 +57,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -389,7 +392,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     public void testDropUnsafeGlobalIndexEntryWhenRangeCannotBeRewrittenByMetadataOnly()
             throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
-        createBTreeIndexWithoutSplittingByContiguousRowRange(table);
+        createBTreeIndex(table);
+        replaceGlobalIndexRangesWithPartitionSpanningRanges(table);
         Snapshot before = table.snapshotManager().latestSnapshot();
 
         assertThat(globalIndexRanges(table))
@@ -906,16 +910,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     private void createBTreeIndex(FileStoreTable table) throws Exception {
-        createBTreeIndex(table, true);
-    }
-
-    private void createBTreeIndexWithoutSplittingByContiguousRowRange(FileStoreTable table)
-            throws Exception {
-        createBTreeIndex(table, false);
-    }
-
-    private void createBTreeIndex(FileStoreTable table, boolean splitByContiguousRowRange)
-            throws Exception {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("id");
         List<DataSplit> dataSplits =
                 builder.scan()
@@ -925,16 +919,86 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                         new IllegalStateException(
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        List<DataSplit> splits =
-                splitByContiguousRowRange
-                        ? BTreeGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)
-                        : dataSplits;
-        for (DataSplit dataSplit : splits) {
+        for (DataSplit dataSplit : BTreeGlobalIndexBuilder.splitByContiguousRowRange(dataSplits)) {
             commitMessages.addAll(builder.build(dataSplit, ioManager));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }
+    }
+
+    private void replaceGlobalIndexRangesWithPartitionSpanningRanges(FileStoreTable table)
+            throws Exception {
+        Snapshot latest = table.snapshotManager().latestSnapshot();
+        IndexManifestFile indexManifestFile = table.store().indexManifestFileFactory().create();
+        List<IndexManifestEntry> rewritten = new ArrayList<>();
+        for (IndexManifestEntry entry : indexManifestFile.read(latest.indexManifest())) {
+            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
+            assertThat(globalIndex).isNotNull();
+
+            Range staleRowRange;
+            String partition = table.store().pathFactory().getPartitionString(entry.partition());
+            if (partition.equals("pt=a/")) {
+                staleRowRange = new Range(0, 4);
+            } else if (partition.equals("pt=b/")) {
+                staleRowRange = new Range(1, 3);
+            } else {
+                throw new IllegalStateException("Unexpected partition " + partition);
+            }
+
+            GlobalIndexMeta staleGlobalIndex =
+                    new GlobalIndexMeta(
+                            staleRowRange.from,
+                            staleRowRange.to,
+                            globalIndex.indexFieldId(),
+                            globalIndex.extraFieldIds(),
+                            globalIndex.indexMeta());
+            IndexFileMeta indexFile = entry.indexFile();
+            rewritten.add(
+                    new IndexManifestEntry(
+                            entry.kind(),
+                            entry.partition(),
+                            entry.bucket(),
+                            new IndexFileMeta(
+                                    indexFile.indexType(),
+                                    indexFile.fileName(),
+                                    indexFile.fileSize(),
+                                    indexFile.rowCount(),
+                                    indexFile.dvRanges(),
+                                    indexFile.externalPath(),
+                                    staleGlobalIndex)));
+        }
+
+        String staleIndexManifest = indexManifestFile.writeWithoutRolling(rewritten);
+        Snapshot staleSnapshot =
+                new Snapshot(
+                        latest.version(),
+                        latest.id(),
+                        latest.schemaId(),
+                        latest.baseManifestList(),
+                        latest.baseManifestListSize(),
+                        latest.deltaManifestList(),
+                        latest.deltaManifestListSize(),
+                        latest.changelogManifestList(),
+                        latest.changelogManifestListSize(),
+                        staleIndexManifest,
+                        latest.commitUser(),
+                        latest.commitIdentifier(),
+                        latest.commitKind(),
+                        latest.timeMillis(),
+                        latest.totalRecordCount(),
+                        latest.deltaRecordCount(),
+                        latest.changelogRecordCount(),
+                        latest.watermark(),
+                        latest.statistics(),
+                        latest.properties(),
+                        latest.nextRowId());
+        SnapshotManager snapshotManager = table.snapshotManager();
+        snapshotManager
+                .fileIO()
+                .overwriteFileUtf8(
+                        snapshotManager.snapshotPath(latest.id()), staleSnapshot.toJson());
+        snapshotManager.invalidateCache();
     }
 
     private List<Range> globalIndexRanges(FileStoreTable table) {
