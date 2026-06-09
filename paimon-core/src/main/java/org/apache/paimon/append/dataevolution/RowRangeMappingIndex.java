@@ -24,9 +24,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Index for row-range mappings. */
 final class RowRangeMappingIndex {
@@ -70,13 +70,14 @@ final class RowRangeMappingIndex {
         return new Mapping(oldStart, oldEnd, newStart);
     }
 
-    Range map(Range oldRange) {
+    Optional<Range> map(Range oldRange) {
         checkArgument(oldRange != null, "Old row range cannot be null.");
         checkArgument(oldRange.from <= oldRange.to, "Invalid old row range %s.", oldRange);
 
         long cursor = oldRange.from;
-        Long newFrom = null;
+        long newFrom = Long.MIN_VALUE;
         long newTo = Long.MIN_VALUE;
+        boolean mapped = false;
 
         for (int i = lowerBound(oldEnds, cursor); i < mappings.size(); i++) {
             Mapping mapping = mappings.get(i);
@@ -88,13 +89,11 @@ final class RowRangeMappingIndex {
             long segmentNewFrom = mapping.newStart + cursor - mapping.oldStart;
             long segmentNewTo = mapping.newStart + segmentTo - mapping.oldStart;
 
-            if (newFrom == null) {
+            if (!mapped) {
                 newFrom = segmentNewFrom;
-            } else {
-                checkState(
-                        newTo + 1 == segmentNewFrom,
-                        "Global index row range %s maps to non-contiguous new row range.",
-                        oldRange);
+                mapped = true;
+            } else if (newTo + 1 != segmentNewFrom) {
+                return Optional.empty();
             }
             newTo = segmentNewTo;
             cursor = segmentTo + 1;
@@ -103,11 +102,10 @@ final class RowRangeMappingIndex {
             }
         }
 
-        checkState(
-                cursor > oldRange.to && newFrom != null,
-                "Global index row range %s is not fully covered by data file row-id mappings.",
-                oldRange);
-        return new Range(newFrom, newTo);
+        if (cursor <= oldRange.to) {
+            return Optional.empty();
+        }
+        return Optional.of(new Range(newFrom, newTo));
     }
 
     private static int lowerBound(long[] sorted, long target) {

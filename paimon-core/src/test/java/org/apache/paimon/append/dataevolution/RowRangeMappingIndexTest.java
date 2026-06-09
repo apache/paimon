@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link RowRangeMappingIndex}. */
 public class RowRangeMappingIndexTest {
@@ -36,7 +35,7 @@ public class RowRangeMappingIndexTest {
                 RowRangeMappingIndex.create(
                         Arrays.asList(RowRangeMappingIndex.mapping(10, 19, 100)));
 
-        assertThat(index.map(new Range(12, 15))).isEqualTo(new Range(102, 105));
+        assertThat(index.map(new Range(12, 15))).hasValue(new Range(102, 105));
     }
 
     @Test
@@ -48,7 +47,7 @@ public class RowRangeMappingIndexTest {
                                 RowRangeMappingIndex.mapping(15, 19, 105),
                                 RowRangeMappingIndex.mapping(20, 24, 110)));
 
-        assertThat(index.map(new Range(12, 22))).isEqualTo(new Range(102, 112));
+        assertThat(index.map(new Range(12, 22))).hasValue(new Range(102, 112));
     }
 
     @Test
@@ -59,8 +58,7 @@ public class RowRangeMappingIndexTest {
                                 RowRangeMappingIndex.mapping(10, 14, 100),
                                 RowRangeMappingIndex.mapping(20, 24, 105)));
 
-        assertThatThrownBy(() -> index.map(new Range(12, 22)))
-                .hasMessageContaining("is not fully covered");
+        assertThat(index.map(new Range(12, 22))).isEmpty();
     }
 
     @Test
@@ -71,7 +69,6 @@ public class RowRangeMappingIndexTest {
                                 RowRangeMappingIndex.mapping(10, 14, 100),
                                 RowRangeMappingIndex.mapping(15, 19, 200)));
 
-        assertThatThrownBy(() -> index.map(new Range(12, 17)))
-                .hasMessageContaining("maps to non-contiguous new row range");
+        assertThat(index.map(new Range(12, 17))).isEmpty();
     }
 }
