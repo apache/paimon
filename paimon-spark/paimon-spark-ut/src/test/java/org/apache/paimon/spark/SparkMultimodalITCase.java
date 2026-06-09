@@ -131,6 +131,11 @@ public class SparkMultimodalITCase {
         assertThat(rows).hasSize(8);
         rows =
                 spark.sql(
+                                "select gid, sid, embs from my_db1.vector_test where date = '20260420' and embs is not null;")
+                        .collectAsList();
+        assertThat(rows).hasSize(8);
+        rows =
+                spark.sql(
                                 "select gid, sid,  embs from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5)  where date = '20260420'")
                         .collectAsList();
         assertThat(rows).hasSize(5);

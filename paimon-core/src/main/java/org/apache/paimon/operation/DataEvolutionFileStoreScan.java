@@ -265,6 +265,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
+        Set<Integer> excludedFileFieldIds =
+                metas.stream()
+                        .filter(
+                                entry ->
+                                        isBlobFile(entry.file().fileName())
+                                                || isVectorStoreFile(entry.file().fileName()))
+                        .flatMap(
+                                entry ->
+                                        computeFileFieldIds(scanTableSchema, entry.file()).stream())
+                        .collect(Collectors.toSet());
         // exclude blob and vector-store files, useless for predicate eval
         metas =
                 metas.stream()
@@ -339,6 +349,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
 
         long groupRowCount = metas.get(0).file().rowCount();
+        for (int j = 0; j < fieldsCount; j++) {
+            if (rowOffsets[j] == -1 && excludedFileFieldIds.contains(allFields[j])) {
+                rowOffsets[j] = -2;
+            }
+        }
         DataEvolutionRow finalMin = new DataEvolutionRow(metas.size(), rowOffsets, fieldOffsets);
         DataEvolutionRow finalMax = new DataEvolutionRow(metas.size(), rowOffsets, fieldOffsets);
         // For null-count specifically, a field absent from every file in the group means every
