@@ -32,6 +32,7 @@ import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -75,11 +76,9 @@ public class ChainTableUtils {
             List<String> partitionColumns,
             RowType partType,
             CoreOptions options,
-            RecordComparator partitionComparator,
             InternalRowPartitionComputer partitionComputer) {
         InternalRowSerializer serializer = new InternalRowSerializer(partType);
         List<BinaryRow> deltaPartitions = new ArrayList<>();
-        boolean isDailyPartition = partitionColumns.size() == 1;
         List<String> startPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(beginPartition).values());
         List<String> endPartitionValues =
@@ -89,47 +88,28 @@ public class ChainTableUtils {
                         options.partitionTimestampPattern(), options.partitionTimestampFormatter());
         LocalDateTime stratPartitionTime =
                 timeExtractor.extract(partitionColumns, startPartitionValues);
-        LocalDateTime candidateTime = stratPartitionTime;
         LocalDateTime endPartitionTime =
                 timeExtractor.extract(partitionColumns, endPartitionValues);
+        ChainPartitionStepExtractor stepExtractor =
+                new ChainPartitionStepExtractor(
+                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
+        TemporalAmount step = stepExtractor.extractMinStep();
+        LocalDateTime candidateTime = stratPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
-            if (isDailyPartition) {
-                if (candidateTime.isAfter(stratPartitionTime)) {
-                    deltaPartitions.add(
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy());
-                }
-            } else {
-                for (int hour = 0; hour <= 23; hour++) {
-                    candidateTime = candidateTime.toLocalDate().atStartOfDay().plusHours(hour);
-                    BinaryRow candidatePartition =
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy();
-                    if (partitionComparator.compare(candidatePartition, beginPartition) > 0
-                            && partitionComparator.compare(candidatePartition, endPartition) <= 0) {
-                        deltaPartitions.add(candidatePartition);
-                    }
-                }
-            }
-            candidateTime = candidateTime.toLocalDate().plusDays(1).atStartOfDay();
+            BinaryRow candidatePartition =
+                    serializer
+                            .toBinaryRow(
+                                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                                            calPartValues(
+                                                    candidateTime,
+                                                    partitionColumns,
+                                                    options.partitionTimestampPattern(),
+                                                    options.partitionTimestampFormatter()),
+                                            partType,
+                                            options.partitionDefaultName()))
+                            .copy();
+            deltaPartitions.add(candidatePartition);
+            candidateTime = candidateTime.plus(step);
         }
         return deltaPartitions;
     }
@@ -312,7 +292,6 @@ public class ChainTableUtils {
                         chainPartitionColumns,
                         chainPartType,
                         options,
-                        chainPartitionComparator,
                         chainPartitionComputer);
 
         // Combine each chain-only BinaryRow with the group part into a full partition
