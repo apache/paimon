@@ -20,15 +20,13 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.Set;
-
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
 /** Context for blob file. */
 public class BlobFileContext {
@@ -53,7 +51,7 @@ public class BlobFileContext {
 
     @Nullable
     public static BlobFileContext create(RowType rowType, CoreOptions options) {
-        if (rowType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (rowType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
             return null;
         }
         Set<String> descriptorFields = options.blobDescriptorField();
@@ -62,8 +60,7 @@ public class BlobFileContext {
         String externalStoragePath = options.blobExternalStoragePath();
         boolean requireBlobFile = false;
         for (DataField field : rowType.getFields()) {
-            DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB
+            if (BlobType.isBlobFileField(field.type())
                     && (!inlineFields.contains(field.name())
                             || externalStorageField.contains(field.name()))) {
                 requireBlobFile = true;
@@ -83,7 +80,7 @@ public class BlobFileContext {
     }
 
     public BlobFileContext withWriteType(RowType writeType) {
-        if (writeType.getFieldTypes().stream().noneMatch(t -> t.is(BLOB))) {
+        if (writeType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
             return null;
         }
         return this;

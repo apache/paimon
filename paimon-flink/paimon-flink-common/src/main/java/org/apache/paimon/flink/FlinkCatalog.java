@@ -1092,7 +1092,8 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
         List<String> blobFields = CoreOptions.blobField(options);
-        Set<String> blobTypeFields = blobTypeFields(options);
+        Set<String> blobFileFields = new HashSet<>(CoreOptions.blobField(options));
+        Set<String> blobInlineFields = blobInlineFields(options);
         if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
@@ -1125,26 +1126,31 @@ public class FlinkCatalog extends AbstractCatalog {
                                                 field.getName(),
                                                 field.getType(),
                                                 options,
-                                                blobTypeFields),
+                                                blobFileFields,
+                                                blobInlineFields),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
     }
 
-    private static Set<String> blobTypeFields(Map<String, String> options) {
-        Set<String> blobTypeFields = new HashSet<>(CoreOptions.blobField(options));
-        blobTypeFields.addAll(new CoreOptions(options).blobDescriptorField());
-        blobTypeFields.addAll(CoreOptions.blobViewField(options));
-        return blobTypeFields;
+    private static Set<String> blobInlineFields(Map<String, String> options) {
+        Set<String> blobInlineFields =
+                new HashSet<>(new CoreOptions(options).blobDescriptorField());
+        blobInlineFields.addAll(CoreOptions.blobViewField(options));
+        return blobInlineFields;
     }
 
     private static org.apache.paimon.types.DataType resolveDataType(
             String fieldName,
             org.apache.flink.table.types.logical.LogicalType logicalType,
             Map<String, String> options,
-            Set<String> blobTypeFields) {
-        if (blobTypeFields.contains(fieldName)) {
-            return toBlobType(logicalType);
+            Set<String> blobFileFields,
+            Set<String> blobInlineFields) {
+        if (blobInlineFields.contains(fieldName)) {
+            return toBlobType(logicalType, false);
+        }
+        if (blobFileFields.contains(fieldName)) {
+            return toBlobType(logicalType, true);
         }
         Set<String> vectorFields = CoreOptions.vectorField(options);
         if (vectorFields.contains(fieldName)) {

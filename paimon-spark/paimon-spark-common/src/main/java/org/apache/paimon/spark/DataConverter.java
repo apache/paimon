@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -67,6 +68,8 @@ public class DataConverter {
                 return fromPaimon((InternalMap) o, type);
             case ROW:
                 return fromPaimon((InternalRow) o, (RowType) type);
+            case BLOB:
+                return ((Blob) o).toData();
             default:
                 return o;
         }

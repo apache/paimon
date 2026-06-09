@@ -24,8 +24,8 @@ import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, 
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.types.BlobType
 import org.apache.paimon.types.DataType
-import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
@@ -52,10 +52,10 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     val options = new CoreOptions(table.schema().options())
     val updatableBlobFields = options.updatableBlobFields()
     val hasRawDataBlob = writeType.getFields.asScala.exists(
-      f => f.`type`().is(BLOB) && !updatableBlobFields.contains(f.name()))
+      f => BlobType.isBlobFileField(f.`type`()) && !updatableBlobFields.contains(f.name()))
     if (hasRawDataBlob) {
       throw new UnsupportedOperationException(
-        "DataEvolution does not support writing partial columns with raw-data BLOB type. " +
+        "DataEvolution does not support writing partial columns with raw-data BLOB or ARRAY<BLOB> type. " +
           "Only descriptor-based BLOB columns (configured via '" +
           CoreOptions.BLOB_DESCRIPTOR_FIELD.key() + "' or '" +
           CoreOptions.BLOB_VIEW_FIELD.key() + "' or '" +
