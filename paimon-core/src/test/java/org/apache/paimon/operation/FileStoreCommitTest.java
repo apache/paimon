@@ -35,6 +35,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -186,6 +187,63 @@ public class FileStoreCommitTest {
         LocalFileIO.create().delete(latest, false);
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestId);
+    }
+
+    @Test
+    public void testWriteOnlySnapshotSequenceCommitChecksRescaledBucketNumber() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.WRITE_SEQUENCE_NUMBER_INIT_MODE.key(), "snapshot");
+        options.put(CoreOptions.BUCKET.key(), "2");
+        options.put(CoreOptions.BUCKET_KEY.key(), "orderId");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first"));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 2, 0)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            0,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            null,
+                                            false,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+        }
+        assertThat(store.snapshotManager().latestSnapshot().properties())
+                .containsKey(SequenceSnapshotProperties.MAX_SEQUENCE_NUMBER);
+
+        Map<String, String> rescaledOptions = new HashMap<>(options);
+        rescaledOptions.put(CoreOptions.BUCKET.key(), "4");
+        TestAppendFileStore rescaledStore =
+                TestAppendFileStore.createAppendStore(tempDir, rescaledOptions);
+        try (FileStoreCommitImpl commit = rescaledStore.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 4, 1)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            1,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            rescaledStore.snapshotManager().latestSnapshot(),
+                                            false,
+                                            null))
+                    .hasMessageContaining("new bucket num 4")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
     }
 
     @Test
@@ -1133,6 +1191,30 @@ public class FileStoreCommitTest {
                 snapshotCommit,
                 store.options(),
                 store.options().dataEvolutionEnabled());
+    }
+
+    private ManifestEntry addFile(
+            BinaryRow partition, int bucket, int totalBuckets, long maxSequenceNumber) {
+        return ManifestEntry.create(
+                FileKind.ADD,
+                partition,
+                bucket,
+                totalBuckets,
+                DataFileMeta.forAppend(
+                        String.format("test-%d.orc", maxSequenceNumber),
+                        1,
+                        1,
+                        EMPTY_STATS,
+                        maxSequenceNumber,
+                        maxSequenceNumber,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null));
     }
 
     private FileStoreCommitImpl newCommitWithSnapshotCommit(
