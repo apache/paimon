@@ -34,6 +34,9 @@ Ray's built-in Iceberg integration. The lower-level `TableRead.to_ray()` and
 already resolved a `(read_builder, splits)` pair or constructed a
 `table_write` via the regular pypaimon API.
 
+If your application uses Daft DataFrames and only needs Ray as Daft's execution
+backend, see [Running Daft on Ray](./daft#running-daft-on-ray).
+
 ## Read
 
 ### `read_paimon` (recommended)
