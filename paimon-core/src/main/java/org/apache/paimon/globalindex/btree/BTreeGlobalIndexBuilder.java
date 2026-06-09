@@ -97,7 +97,6 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     // readRowType is composed by partition fields, indexed field and _ROW_ID field
     private RowType readRowType;
     @Nullable private Snapshot snapshot;
-    @Nullable private Long scanSnapshotId;
 
     @Nullable private PartitionPredicate partitionPredicate;
 
@@ -134,10 +133,6 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return this;
     }
 
-    public Optional<Long> scanSnapshotId() {
-        return Optional.ofNullable(scanSnapshotId);
-    }
-
     public Optional<Pair<RowRangeIndex, List<DataSplit>>> scan() {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
@@ -148,10 +143,8 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                         ? this.snapshot
                         : snapshotReader.snapshotManager().latestSnapshot();
         if (snapshot == null) {
-            scanSnapshotId = null;
             return Optional.empty();
         }
-        scanSnapshotId = snapshot.id();
         snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
         Range dataRange = new Range(0, snapshot.nextRowId() - 1);
 
@@ -171,10 +164,8 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                         ? this.snapshot
                         : snapshotReader.snapshotManager().latestSnapshot();
         if (snapshot == null) {
-            scanSnapshotId = null;
             return Optional.empty();
         }
-        scanSnapshotId = snapshot.id();
         snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
 
         Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
