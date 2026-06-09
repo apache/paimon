@@ -563,19 +563,29 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        List<Range> dataRanges = new ArrayList<>();
+        Map<Pair<BinaryRow, Integer>, List<Range>> dataRanges = new HashMap<>();
         for (SimpleFileEntry entry : baseEntries) {
             if (entry.kind() == FileKind.ADD && entry.firstRowId() != null) {
-                dataRanges.add(entry.nonNullRowIdRange());
+                dataRanges
+                        .computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()), k -> new ArrayList<>())
+                        .add(entry.nonNullRowIdRange());
             }
         }
-        RowRangeIndex rowRangeIndex = RowRangeIndex.create(dataRanges);
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> rowRangeIndexes =
+                dataRanges.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry -> RowRangeIndex.create(entry.getValue())));
 
         for (IndexManifestEntry indexEntry : indexesToCheck) {
             GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
             checkState(globalIndex != null, "Global index meta must not be null.");
             Range indexRange = globalIndex.rowRange();
-            if (!rowRangeIndex.contains(indexRange)) {
+            RowRangeIndex rowRangeIndex =
+                    rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
+            if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(

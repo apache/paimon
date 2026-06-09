@@ -335,10 +335,15 @@ class ConflictDetectionTest {
 
     private IndexManifestEntry createGlobalIndexEntry(
             String fileName, FileKind kind, BinaryRow partition, long from, long to) {
+        return createGlobalIndexEntry(fileName, kind, partition, 0, from, to);
+    }
+
+    private IndexManifestEntry createGlobalIndexEntry(
+            String fileName, FileKind kind, BinaryRow partition, int bucket, long from, long to) {
         return new IndexManifestEntry(
                 kind,
                 partition,
-                0,
+                bucket,
                 new IndexFileMeta(
                         "btree",
                         fileName,
@@ -503,10 +508,20 @@ class ConflictDetectionTest {
 
     private SimpleFileEntry createFileEntryWithRowId(
             String fileName, FileKind kind, long firstRowId, long rowCount) {
+        return createFileEntryWithRowId(fileName, kind, EMPTY_ROW, 0, firstRowId, rowCount);
+    }
+
+    private SimpleFileEntry createFileEntryWithRowId(
+            String fileName,
+            FileKind kind,
+            BinaryRow partition,
+            int bucket,
+            long firstRowId,
+            long rowCount) {
         return new SimpleFileEntry(
                 kind,
-                EMPTY_ROW,
-                0,
+                partition,
+                bucket,
                 1,
                 0,
                 fileName,
@@ -557,6 +572,39 @@ class ConflictDetectionTest {
                 .hasMessageContaining("Global index row ID existence conflict")
                 .hasMessageContaining("idx")
                 .hasMessageContaining("[0, 149]");
+    }
+
+    @Test
+    void testCheckGlobalIndexRowIdExistenceByPartitionAndBucket() {
+        ConflictDetection detection = createConflictDetection();
+        BinaryRow partition0 = BinaryRow.singleColumn(0);
+        BinaryRow partition1 = BinaryRow.singleColumn(1);
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("f1", ADD, partition1, 0, 0L, 150L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, partition0, 0, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
+
+        exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("f1", ADD, partition0, 1, 0L, 150L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, partition0, 0, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
     }
 
     @Test
