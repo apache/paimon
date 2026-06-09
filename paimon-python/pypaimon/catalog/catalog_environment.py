@@ -120,7 +120,7 @@ class CatalogEnvironment:
 
     def table_query_auth(self, options, identifier):
         if not options.query_auth_enabled or self.catalog_loader is None:
-            return lambda select: None
+            return None
 
         def auth(select):
             catalog = self.catalog_loader.load()
