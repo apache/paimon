@@ -609,14 +609,17 @@ public class SchemaManager implements Serializable {
                         applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
-        return new TableSchema(
-                oldTableSchema.id() + 1,
-                newSchema.fields(),
-                highestFieldId.get(),
-                newSchema.partitionKeys(),
-                newSchema.primaryKeys(),
-                newSchema.options(),
-                newSchema.comment());
+        TableSchema newTableSchema =
+                new TableSchema(
+                        oldTableSchema.id() + 1,
+                        newSchema.fields(),
+                        highestFieldId.get(),
+                        newSchema.partitionKeys(),
+                        newSchema.primaryKeys(),
+                        newSchema.options(),
+                        newSchema.comment());
+        SchemaValidation.validateTableSchema(newTableSchema);
+        return newTableSchema;
     }
 
     // gets the rootType at the defined depth
