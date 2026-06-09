@@ -179,7 +179,11 @@ public class SchemaManagerTest {
         options.put("fields.f3.sequence-group", "f2");
         Schema schema =
                 new Schema(
-                        rowTypeWithSequenceField.getFields(), partitionKeys, primaryKeys, options, "");
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
 
         retryArtificialException(() -> manager.createTable(schema));
 
@@ -204,7 +208,11 @@ public class SchemaManagerTest {
         options.put("fields.f3.sequence-group", "f2");
         Schema schema =
                 new Schema(
-                        rowTypeWithSequenceField.getFields(), partitionKeys, primaryKeys, options, "");
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
 
         retryArtificialException(() -> manager.createTable(schema));
         retryArtificialException(
