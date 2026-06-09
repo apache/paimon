@@ -23,15 +23,14 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
@@ -49,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** End-to-end tests for a {@link FormatTable} backed by mosaic files. */
@@ -62,26 +62,21 @@ class FormatTableMosaicReadTest {
     }
 
     @Test
-    void testReadUnpartitioned() throws Exception {
+    void testReadWriteUnpartitioned() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("a", DataTypes.STRING())
                         .field("b", DataTypes.BIGINT())
                         .field("c", DataTypes.DOUBLE())
                         .build();
+        FormatTable table = buildFormatTable(rowType, Collections.emptyList(), new HashMap<>());
 
-        Path tablePath = new Path(tempPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
-        FormatTable table =
-                buildFormatTable(
-                        fileIO, tablePath, rowType, Collections.emptyList(), new HashMap<>());
-
-        List<InternalRow> rows =
+        writeAll(
+                table,
                 Arrays.asList(
                         GenericRow.of(BinaryString.fromString("a1"), 1L, 1.1),
                         GenericRow.of(BinaryString.fromString("a2"), 2L, 2.2),
-                        GenericRow.of(BinaryString.fromString("a3"), 3L, 3.3));
-        writeMosaicFile(fileIO, new Path(tablePath, "data-0.mosaic"), rowType, rows);
+                        GenericRow.of(BinaryString.fromString("a3"), 3L, 3.3)));
 
         List<InternalRow> result = readAll(table, rowType);
 
@@ -93,48 +88,40 @@ class FormatTableMosaicReadTest {
     }
 
     @Test
-    void testReadPartitioned() throws Exception {
-        // Schema lays out the partition column last, following the FormatTable convention.
+    void testReadWritePartitioned() throws Exception {
         RowType rowType =
                 RowType.builder()
                         .field("a", DataTypes.STRING())
                         .field("b", DataTypes.BIGINT())
                         .field("dt", DataTypes.STRING())
                         .build();
-        // Data fields only — partition value comes from the directory name.
-        RowType dataRowType =
-                RowType.builder()
-                        .field("a", DataTypes.STRING())
-                        .field("b", DataTypes.BIGINT())
-                        .build();
-
-        Path tablePath = new Path(tempPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
         FormatTable table =
-                buildFormatTable(
-                        fileIO,
-                        tablePath,
-                        rowType,
-                        Collections.singletonList("dt"),
-                        new HashMap<>());
+                buildFormatTable(rowType, Collections.singletonList("dt"), new HashMap<>());
 
-        writeMosaicFile(
-                fileIO,
-                new Path(tablePath, "dt=20260608/data-0.mosaic"),
-                dataRowType,
+        writeAll(
+                table,
                 Arrays.asList(
-                        GenericRow.of(BinaryString.fromString("a1"), 1L),
-                        GenericRow.of(BinaryString.fromString("a2"), 2L)));
-        writeMosaicFile(
-                fileIO,
-                new Path(tablePath, "dt=20260609/data-0.mosaic"),
-                dataRowType,
-                Collections.singletonList(GenericRow.of(BinaryString.fromString("a3"), 3L)));
+                        GenericRow.of(
+                                BinaryString.fromString("a1"),
+                                1L,
+                                BinaryString.fromString("20260608")),
+                        GenericRow.of(
+                                BinaryString.fromString("a2"),
+                                2L,
+                                BinaryString.fromString("20260608")),
+                        GenericRow.of(
+                                BinaryString.fromString("a3"),
+                                3L,
+                                BinaryString.fromString("20260609"))));
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(table.location());
+        assertThat(fileIO.exists(new Path(tablePath, "dt=20260608"))).isTrue();
+        assertThat(fileIO.exists(new Path(tablePath, "dt=20260609"))).isTrue();
 
         List<InternalRow> result = readAll(table, rowType);
 
         assertThat(result).hasSize(3);
-        // Partition column is appended by the scan; the (a, dt) pairs are deterministic per file.
         List<String> aDt = new ArrayList<>();
         for (InternalRow row : result) {
             aDt.add(row.getString(0).toString() + "/" + row.getString(2).toString());
@@ -142,36 +129,59 @@ class FormatTableMosaicReadTest {
         assertThat(aDt).containsExactlyInAnyOrder("a1/20260608", "a2/20260608", "a3/20260609");
     }
 
-    private static FormatTable buildFormatTable(
-            LocalFileIO fileIO,
-            Path tablePath,
-            RowType rowType,
-            List<String> partitionKeys,
-            Map<String, String> options) {
+    @Test
+    void testEmptyDirectoryScansToNoSplits() throws Exception {
+        RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
+        FormatTable table = buildFormatTable(rowType, Collections.emptyList(), new HashMap<>());
+
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    void testInvalidCompressionPropagatedFromWriter() {
+        RowType rowType = RowType.builder().field("a", DataTypes.STRING()).build();
+        Map<String, String> options = new HashMap<>();
+        options.put("file.compression", "gzip");
+        FormatTable table = buildFormatTable(rowType, Collections.emptyList(), options);
+
+        assertThatThrownBy(
+                        () ->
+                                writeAll(
+                                        table,
+                                        Collections.singletonList(
+                                                GenericRow.of(BinaryString.fromString("a1")))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Mosaic format only supports zstd");
+    }
+
+    private FormatTable buildFormatTable(
+            RowType rowType, List<String> partitionKeys, Map<String, String> options) {
+        String location = new Path(tempPath.toUri()).toString();
         options.put("file.format", "mosaic");
+        // CoreOptions.path() reads from options; SQL/REST catalogs inject it,
+        // a raw Java-API caller has to do it explicitly.
+        options.put("path", location);
         return FormatTable.builder()
-                .fileIO(fileIO)
+                .fileIO(LocalFileIO.create())
                 .identifier(Identifier.create("default", "t"))
                 .rowType(rowType)
                 .partitionKeys(partitionKeys)
-                .location(tablePath.toString())
+                .location(location)
                 .format(FormatTable.Format.MOSAIC)
                 .options(options)
                 .build();
     }
 
-    private static void writeMosaicFile(
-            LocalFileIO fileIO, Path file, RowType rowType, List<InternalRow> rows)
-            throws Exception {
-        fileIO.mkdirs(file.getParent());
-        MosaicFileFormat mosaic =
-                new MosaicFileFormat(
-                        new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
-        FormatWriterFactory writerFactory = mosaic.createWriterFactory(rowType);
-        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
-                FormatWriter writer = writerFactory.create(out, "zstd")) {
+    private static void writeAll(FormatTable table, List<InternalRow> rows) throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
             for (InternalRow row : rows) {
-                writer.addElement(row);
+                write.write(row);
+            }
+            List<CommitMessage> committables = write.prepareCommit();
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(committables);
             }
         }
     }
