@@ -231,12 +231,11 @@ Tables with BLOB columns (see [Blob Storage](./blob)) can be read with Daft.
 Blob columns are returned as `daft.File` references — the actual bytes are
 **not** loaded until you explicitly read them.
 
-:::caution Use `pypaimon.daft`, not Daft's built-in connector
+:::caution Daft's built-in connector does not support blob lazy loading yet
 
-Daft's built-in `daft.read_paimon()` does **not** support blob lazy loading —
-it reads blob data eagerly during the scan phase, ignoring column pruning and
-filter pushdown for blob columns. Always use `from pypaimon.daft import
-read_paimon` for tables with BLOB columns.
+`daft.read_paimon()` currently reads blob data eagerly during the scan phase,
+ignoring column pruning and filter pushdown for blob columns.
+Use `from pypaimon.daft import read_paimon` instead for blob lazy loading.
 :::
 
 ### Lazy loading
