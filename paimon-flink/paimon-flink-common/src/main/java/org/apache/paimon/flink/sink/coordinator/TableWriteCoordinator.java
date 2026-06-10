@@ -27,9 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Filter;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -103,12 +101,16 @@ public class TableWriteCoordinator {
         if (prefetchManifests) {
             // Eagerly read all data manifests of the current snapshot once to warm the
             // table's SegmentsCache (the byte-level manifest cache attached to the table
-            // inside the Job Manager). This reuses the same threaded `plan()` read path
+            // inside the Job Manager). This uses the same threaded `plan()` read path
             // that per-task `scan` requests use, so subsequent concurrent requests hit
-            // warm bytes instead of each performing a cold manifest read.
-            scan.withPartitionFilter(PartitionPredicate.ALWAYS_TRUE)
-                    .withBucketFilter(Filter.alwaysTrue())
-                    .plan();
+            // warm bytes instead of each performing a cold manifest read. A fresh scan is
+            // used so the shared request `scan`'s bucket/partition state never narrows the
+            // warm-up.
+            FileStoreScan prefetchScan = table.store().newScan().withSnapshot(snapshot);
+            if (table.coreOptions().manifestDeleteFileDropStats()) {
+                prefetchScan.dropStats();
+            }
+            prefetchScan.plan();
         }
     }
 

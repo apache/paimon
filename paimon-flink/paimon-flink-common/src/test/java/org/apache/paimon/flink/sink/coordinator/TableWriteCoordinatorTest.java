@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.sink.coordinator;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -35,7 +37,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_EXPIRE_AFTER_ACCESS;
@@ -119,6 +124,65 @@ class TableWriteCoordinatorTest extends TableTestBase {
         ScanCoordinationResponse scan = coordinator.scan(request);
         assertThat(scan.snapshot().id()).isEqualTo(table.latestSnapshot().get().id());
         assertThat(scan.extractDataFiles().size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testPrefetchWarmsAllManifestsAfterScan() throws Exception {
+        Identifier identifier = new Identifier("db", "table");
+        // a fixed-bucket table so the data spans multiple buckets
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .option(CoreOptions.BUCKET.key(), "2")
+                        .option(CoreOptions.BUCKET_KEY.key(), "f0")
+                        .build();
+        catalog.createDatabase("db", false);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        // write each bucket in its own commit so manifests are confined to a single bucket: a scan
+        // for one bucket must skip the other bucket's manifest at the manifest-file level
+        writeWithBucketAssigner(table, row -> 0, GenericRow.of(1));
+        writeWithBucketAssigner(table, row -> 1, GenericRow.of(2));
+
+        // the scan returns the entries of both buckets, confirming the table spans more than one
+        // bucket
+        Snapshot latest = table.latestSnapshot().get();
+        List<ManifestEntry> entries = table.store().newScan().withSnapshot(latest).plan().files();
+        assertThat(entries.stream().map(ManifestEntry::bucket).collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1);
+
+        // construct the coordinator with prefetch disabled (the default) on a cold cache, so the
+        // cache its shared scan is bound to stays cold until the scan request runs
+        SegmentsCache<Path> cache = table.getManifestCache();
+        table.setManifestCache(
+                SegmentsCache.create(
+                        cache.pageSize(),
+                        cache.maxMemorySize(),
+                        cache.maxElementSize(),
+                        cache.ttl(),
+                        cache.softValues()));
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
+        assertThat(table.getManifestCache().totalCacheBytes()).isZero();
+
+        // a scan request for bucket 0 reads only the bucket-0 manifest, skipping the bucket-1
+        // manifest at the manifest-file level: the cache therefore holds only a single bucket's
+        // manifest, proving the bucket filter is active (and leaving the stale bucket state on the
+        // shared scan)
+        ScanCoordinationRequest request =
+                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+        coordinator.scan(request);
+        long filteredCacheBytes = table.getManifestCache().totalCacheBytes();
+        assertThat(filteredCacheBytes).isGreaterThan(0);
+
+        // enable prefetch via reflection (to avoid widening the coordinator's interface) and run a
+        // checkpoint refresh; the prefetch must warm the full set of manifests rather than
+        // inheriting the stale bucket state, so the cache grows beyond the single-bucket subset
+        Field prefetchManifests = TableWriteCoordinator.class.getDeclaredField("prefetchManifests");
+        prefetchManifests.setAccessible(true);
+        prefetchManifests.setBoolean(coordinator, true);
+        coordinator.checkpoint();
+        assertThat(table.getManifestCache().totalCacheBytes()).isGreaterThan(filteredCacheBytes);
     }
 
     @Test
