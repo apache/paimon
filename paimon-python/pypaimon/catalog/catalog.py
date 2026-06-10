@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
+from pypaimon.catalog.catalog_utils import validate_create_table
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
@@ -89,9 +90,14 @@ class Catalog(ABC):
     def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
         """Get paimon table identified by the given Identifier."""
 
-    @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         """Create table with schema."""
+        validate_create_table(schema)
+        return self._create_table(identifier, schema, ignore_if_exists)
+
+    @abstractmethod
+    def _create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+        """Create table with schema after common validation."""
 
     @abstractmethod
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):

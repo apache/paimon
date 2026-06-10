@@ -61,6 +61,7 @@ from pypaimon.catalog.catalog_exception import (BranchAlreadyExistException,
                                                 DefinitionNotExistException,
                                                 TagNotExistException,
                                                 TagAlreadyExistException)
+from pypaimon.catalog.catalog_utils import validate_create_table
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.api.typedef import RESTAuthParameter
@@ -975,6 +976,7 @@ class RESTCatalogServer:
                 create_table = JSON.from_json(data, CreateTableRequest)
                 if create_table.identifier.get_full_name() in self.table_metadata_store:
                     raise TableAlreadyExistException(create_table.identifier)
+                validate_create_table(create_table.schema)
                 table_metadata = self._create_table_metadata(
                     create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )

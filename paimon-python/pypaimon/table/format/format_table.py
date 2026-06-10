@@ -30,6 +30,7 @@ class Format(str, Enum):
     CSV = "csv"
     TEXT = "text"
     JSON = "json"
+    BLOB = "blob"
 
     @classmethod
     def parse(cls, file_format: str) -> "Format":

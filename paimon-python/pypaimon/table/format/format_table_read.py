@@ -21,6 +21,7 @@ import pandas
 import pyarrow
 
 from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
 
@@ -39,6 +40,99 @@ def _text_format_schema_column(table: FormatTable) -> Optional[str]:
     )
 
 
+def _append_partition_columns(
+    tbl: pyarrow.Table,
+    partition_spec: Optional[Dict[str, str]],
+    partition_key_types: Optional[Dict[str, pyarrow.DataType]],
+) -> pyarrow.Table:
+    if not partition_spec:
+        return tbl
+    for k, v in partition_spec.items():
+        if k in tbl.column_names:
+            continue
+        pa_type = (
+            partition_key_types.get(k, pyarrow.string())
+            if partition_key_types
+            else pyarrow.string()
+        )
+        arr = pyarrow.array([v] * tbl.num_rows, type=pyarrow.string())
+        if pa_type != pyarrow.string():
+            arr = arr.cast(pa_type)
+        tbl = tbl.append_column(k, arr)
+    return tbl
+
+
+def _project_table(
+    tbl: pyarrow.Table, read_fields: Optional[List[str]]
+) -> pyarrow.Table:
+    if read_fields and tbl.num_columns > 0:
+        existing = [c for c in read_fields if c in tbl.column_names]
+        if existing:
+            tbl = tbl.select(existing)
+    return tbl
+
+
+def _blob_data_fields(
+    full_fields: List[Any],
+    partition_spec: Optional[Dict[str, str]],
+) -> List[Any]:
+    partition_keys = set(partition_spec.keys()) if partition_spec else set()
+    data_fields = [
+        field for field in full_fields if field.name not in partition_keys
+    ]
+    if len(data_fields) != 1:
+        raise ValueError(
+            "BLOB format table only supports one non-partition field."
+        )
+    if getattr(data_fields[0].type, "type", "").upper() != "BLOB":
+        raise ValueError(
+            "BLOB format table only supports BLOB type as non-partition field."
+        )
+    return data_fields
+
+
+def _read_blob_file_to_arrow(
+    file_io: Any,
+    path: str,
+    partition_spec: Optional[Dict[str, str]],
+    read_fields: Optional[List[str]],
+    partition_key_types: Optional[Dict[str, pyarrow.DataType]],
+    full_fields: List[Any],
+    blob_as_descriptor: bool,
+) -> pyarrow.Table:
+    data_fields = _blob_data_fields(full_fields, partition_spec)
+    blob_field_name = data_fields[0].name
+    reader = FormatBlobReader(
+        file_io,
+        path,
+        [blob_field_name],
+        full_fields,
+        None,
+        blob_as_descriptor,
+    )
+    batches = []
+    try:
+        while True:
+            batch = reader.read_arrow_batch()
+            if batch is None:
+                break
+            batches.append(batch)
+    finally:
+        reader.close()
+
+    if batches:
+        tbl = pyarrow.Table.from_batches(batches)
+    else:
+        schema = PyarrowFieldParser.from_paimon_schema(data_fields)
+        tbl = pyarrow.Table.from_pydict(
+            {blob_field_name: []}, schema=schema
+        )
+    tbl = _append_partition_columns(
+        tbl, partition_spec, partition_key_types
+    )
+    return _project_table(tbl, read_fields)
+
+
 def _read_file_to_arrow(
     file_io: Any,
     split: FormatDataSplit,
@@ -48,8 +142,21 @@ def _read_file_to_arrow(
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
     text_column_name: Optional[str] = None,
     text_line_delimiter: str = "\n",
+    full_fields: Optional[List[Any]] = None,
+    blob_as_descriptor: bool = False,
 ) -> pyarrow.Table:
     path = split.data_path()
+    if fmt == Format.BLOB:
+        return _read_blob_file_to_arrow(
+            file_io,
+            path,
+            partition_spec,
+            read_fields,
+            partition_key_types,
+            full_fields or [],
+            blob_as_descriptor,
+        )
+
     csv_read_options = None
     if fmt == Format.CSV:
         import pyarrow.csv as csv
@@ -131,25 +238,10 @@ def _read_file_to_arrow(
     else:
         raise ValueError(f"Format {fmt} read not implemented in Python")
 
-    if partition_spec:
-        for k, v in partition_spec.items():
-            if k in tbl.column_names:
-                continue
-            pa_type = (
-                partition_key_types.get(k, pyarrow.string())
-                if partition_key_types
-                else pyarrow.string()
-            )
-            arr = pyarrow.array([v] * tbl.num_rows, type=pyarrow.string())
-            if pa_type != pyarrow.string():
-                arr = arr.cast(pa_type)
-            tbl = tbl.append_column(k, arr)
-
-    if read_fields and tbl.num_columns > 0:
-        existing = [c for c in read_fields if c in tbl.column_names]
-        if existing:
-            tbl = tbl.select(existing)
-    return tbl
+    tbl = _append_partition_columns(
+        tbl, partition_spec, partition_key_types
+    )
+    return _project_table(tbl, read_fields)
 
 
 def _partition_key_types(
@@ -195,6 +287,9 @@ class FormatTableRead:
             if fmt == Format.TEXT
             else "\n"
         )
+        blob_as_descriptor = str(
+            self.table.options().get("blob-as-descriptor", "false")
+        ).lower() == "true"
         tables = []
         nrows = 0
         for split in splits:
@@ -207,6 +302,8 @@ class FormatTableRead:
                 partition_key_types,
                 text_column_name=text_col,
                 text_line_delimiter=text_delim,
+                full_fields=self.table.fields,
+                blob_as_descriptor=blob_as_descriptor,
             )
             if t.num_rows > 0:
                 tables.append(t)
@@ -252,6 +349,9 @@ class FormatTableRead:
             if fmt == Format.TEXT
             else "\n"
         )
+        blob_as_descriptor = str(
+            self.table.options().get("blob-as-descriptor", "false")
+        ).lower() == "true"
         n_yielded = 0
         for split in splits:
             if self.limit is not None and n_yielded >= self.limit:
@@ -265,6 +365,8 @@ class FormatTableRead:
                 partition_key_types,
                 text_column_name=text_col,
                 text_line_delimiter=text_delim,
+                full_fields=self.table.fields,
+                blob_as_descriptor=blob_as_descriptor,
             )
             for batch in t.to_batches():
                 for i in range(batch.num_rows):

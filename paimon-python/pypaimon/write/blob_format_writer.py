@@ -117,22 +117,27 @@ class BlobFormatWriter:
 
         is_blob = hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB"
 
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if isinstance(col_data, str):
+            col_data = col_data.encode('utf-8')
+        if isinstance(col_data, bytearray):
+            col_data = bytes(col_data)
+
         if col_data is None:
             if not is_blob:
                 raise RuntimeError("Null values are only supported for BLOB type fields")
-            self.lengths.append(self.NULL_LENGTH)
+            row = GenericRow([None], fields, RowKind.INSERT)
+            self.add_element(row)
             return
 
         if is_blob:
-            if hasattr(col_data, 'as_py'):
-                col_data = col_data.as_py()
-            if isinstance(col_data, str):
-                col_data = col_data.encode('utf-8')
-            if isinstance(col_data, bytearray):
-                col_data = bytes(col_data)
-
             if isinstance(col_data, bytes):
                 if BlobDescriptor.is_blob_descriptor(col_data):
+                    if uri_reader_factory is None:
+                        raise RuntimeError(
+                            "uri_reader_factory is required to resolve BlobDescriptor bytes."
+                        )
                     descriptor = BlobDescriptor.deserialize(col_data)
                     uri_reader = uri_reader_factory.create(descriptor.uri)
                     blob_value = Blob.from_descriptor(uri_reader, descriptor)
