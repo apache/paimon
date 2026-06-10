@@ -152,12 +152,12 @@ select t1, t2, t3 from default.t where date = '20250811'
 ```
 you will get the following result:
 ```text
-+---+----+-----+ 
-| t1|  t2|   t3| 
-+---+----+-----+ 
-| 1 |   1|   1 |           
-| 2 |   1|   1 |               
-+---+----+-----+ 
++---+----+-----+
+| t1|  t2|   t3|
++---+----+-----+
+| 1 |   1|   1 |
+| 2 |   1|   1 |
++---+----+-----+
 ```
 
 - Incremental Query: Read the incremental partition from t$branch_delta
@@ -166,11 +166,11 @@ select t1, t2, t3 from `default`.`t$branch_delta` where date = '20250811'
 ```
 you will get the following result:
 ```text
-+---+----+-----+ 
-| t1|  t2|   t3| 
-+---+----+-----+      
-| 2 |   1|   1 |               
-+---+----+-----+ 
++---+----+-----+
+| t1|  t2|   t3|
++---+----+-----+
+| 2 |   1|   1 |
++---+----+-----+
 ```
 
 - Hybrid Query: Read both full and incremental data simultaneously.
@@ -181,13 +181,13 @@ select t1, t2, t3 from `default`.`t$branch_delta` where date = '20250811'
 ```
 you will get the following result:
 ```text
-+---+----+-----+ 
-| t1|  t2|   t3| 
-+---+----+-----+ 
-| 1 |   1|   1 |           
-| 2 |   1|   1 |  
-| 2 |   1|   1 |               
-+---+----+-----+ 
++---+----+-----+
+| t1|  t2|   t3|
++---+----+-----+
+| 1 |   1|   1 |
+| 2 |   1|   1 |
+| 2 |   1|   1 |
++---+----+-----+
 ```
 
 - Chain Table Compaction: Merge data from snapshot and delta branches into the snapshot branch.
@@ -208,12 +208,12 @@ select t1, t2, t3 from `default`.`t$branch_snapshot` where date = '20250811';
 
 you will get the following result:
 ```text
-+---+----+-----+ 
-| t1|  t2|   t3| 
-+---+----+-----+ 
-| 1 |   1|   1 | 
++---+----+-----+
+| t1|  t2|   t3|
++---+----+-----+
+| 1 |   1|   1 |
 | 2 |   1|   1 |
-+---+----+-----+ 
++---+----+-----+
 ```
 
 ## Group Partition

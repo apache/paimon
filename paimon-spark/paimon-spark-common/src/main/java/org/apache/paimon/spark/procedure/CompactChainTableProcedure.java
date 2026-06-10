@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
@@ -100,6 +101,9 @@ public class CompactChainTableProcedure extends BaseProcedure {
                 tableIdent,
                 t -> {
                     checkArgument(
+                            new CoreOptions(t.options()).isChainTable(),
+                            "compact_chain_table only supports chain table");
+                    checkArgument(
                             t instanceof FallbackReadFileStoreTable,
                             "Table %s is not a chain table",
                             tableIdent);
@@ -127,8 +131,8 @@ public class CompactChainTableProcedure extends BaseProcedure {
         String partition = SparkProcedureUtils.toWhere(partitionStr);
         FileStoreTable snapshotTable = table.wrapped();
 
-        FallbackReadFileStoreTable.FallbackReadScan scan =
-                (FallbackReadFileStoreTable.FallbackReadScan) table.newScan();
+        ChainGroupReadTable.ChainTableBatchScan scan =
+                (ChainGroupReadTable.ChainTableBatchScan) table.newScan();
         PartitionPredicate partitionPredicate =
                 SparkProcedureUtils.convertToPartitionPredicate(
                         partition, table.schema().logicalPartitionType(), spark(), relation);
@@ -137,13 +141,7 @@ public class CompactChainTableProcedure extends BaseProcedure {
         boolean partitionExists = checkPartitionExists(snapshotTable, partition, relation);
         if (partitionExists) {
             if (overwrite) {
-                scan.withPartitionFilter(
-                        SparkProcedureUtils.convertToPartitionPredicate(
-                                "NOT (" + partition + ")",
-                                table.schema().logicalPartitionType(),
-                                spark(),
-                                relation),
-                        partitionPredicate);
+                scan.skipPreloadTargetSnapshot().withPartitionFilter(partitionPredicate);
                 LOG.info("Found existing partition {}, will overwrite it.", partition);
             } else {
                 LOG.info(
