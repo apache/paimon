@@ -130,7 +130,6 @@ import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -1479,18 +1478,6 @@ public class RESTCatalogServer {
                 "owner");
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
     private MockResponse databasesApiHandler(
             String method, String data, Map<String, String> parameters) throws Exception {
         switch (method) {
@@ -2606,8 +2593,6 @@ public class RESTCatalogServer {
         }
         return fullResources;
     }
-
-
 
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
             throws Exception {
