@@ -467,6 +467,11 @@ This option requires `partition.expiration-strategy = values-time` to be configu
 It only supports primary key tables with fixed or dynamic bucket mode. Unaware bucket (append-only) tables
 and `compact_database` in `combined` mode are not supported — the option will be silently ignored in those cases.
 
+Even when this option is enabled, expired partitions may still be deleted during the compaction commit
+phase as a side effect of partition expiration triggered by committing the remaining active partitions.
+This is expected behavior — the option avoids unnecessary compaction IO on expired partitions, but does
+not prevent those partitions from being expired.
+
 :::
 
 ### For Table

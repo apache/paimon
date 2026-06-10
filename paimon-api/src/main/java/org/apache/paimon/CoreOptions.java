@@ -1278,7 +1278,11 @@ public class CoreOptions implements Serializable {
                             "Whether to skip compacting partitions that are already expired "
                                     + "according to 'partition.expiration-time'. "
                                     + "Only effective when 'partition.expiration-time' is set "
-                                    + "and 'partition.expiration-strategy' is 'values-time'.");
+                                    + "and 'partition.expiration-strategy' is 'values-time'. "
+                                    + "Note: even when this option is enabled, expired partitions "
+                                    + "may still be deleted during the compaction commit phase "
+                                    + "as a side effect of partition expiration triggered by "
+                                    + "committing the remaining active partitions.");
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
