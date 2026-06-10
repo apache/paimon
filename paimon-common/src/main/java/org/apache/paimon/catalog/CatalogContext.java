@@ -45,19 +45,22 @@ public class CatalogContext implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final Options options;
-    private final SerializableConfiguration hadoopConf;
+    @Nullable private final SerializableConfiguration hadoopConf;
     @Nullable private final FileIOLoader preferIOLoader;
     @Nullable private final FileIOLoader fallbackIOLoader;
 
     private CatalogContext(
             Options options,
             @Nullable Configuration hadoopConf,
+            boolean loadHadoopConf,
             @Nullable FileIOLoader preferIOLoader,
             @Nullable FileIOLoader fallbackIOLoader) {
         this.options = checkNotNull(options);
         this.hadoopConf =
-                new SerializableConfiguration(
-                        hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
+                hadoopConf == null && !loadHadoopConf
+                        ? null
+                        : new SerializableConfiguration(
+                                hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
         this.preferIOLoader = preferIOLoader;
         this.fallbackIOLoader = fallbackIOLoader;
     }
@@ -69,20 +72,20 @@ public class CatalogContext implements Serializable {
     }
 
     public static CatalogContext create(Options options) {
-        return new CatalogContext(options, null, null, null);
+        return new CatalogContext(options, null, true, null, null);
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
-        return new CatalogContext(options, hadoopConf, null, null);
+        return new CatalogContext(options, hadoopConf, true, null, null);
     }
 
     public static CatalogContext create(Options options, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, null, fallbackIOLoader);
+        return new CatalogContext(options, null, true, null, fallbackIOLoader);
     }
 
     public static CatalogContext create(
             Options options, FileIOLoader preferIOLoader, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, preferIOLoader, fallbackIOLoader);
+        return new CatalogContext(options, null, true, preferIOLoader, fallbackIOLoader);
     }
 
     public static CatalogContext create(
@@ -90,7 +93,18 @@ public class CatalogContext implements Serializable {
             Configuration hadoopConf,
             FileIOLoader preferIOLoader,
             FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, hadoopConf, preferIOLoader, fallbackIOLoader);
+        return new CatalogContext(options, hadoopConf, true, preferIOLoader, fallbackIOLoader);
+    }
+
+    /**
+     * Create a catalog context without initializing Hadoop configuration.
+     *
+     * <p>This should be used only by engines that provide their own {@link FileIOLoader} and do not
+     * need Paimon's Hadoop-based FileIO path.
+     */
+    public static CatalogContext createWithoutHadoop(
+            Options options, FileIOLoader preferIOLoader, FileIOLoader fallbackIOLoader) {
+        return new CatalogContext(options, null, false, preferIOLoader, fallbackIOLoader);
     }
 
     public Options options() {
@@ -99,6 +113,10 @@ public class CatalogContext implements Serializable {
 
     /** Return hadoop {@link Configuration}. */
     public Configuration hadoopConf() {
+        if (hadoopConf == null) {
+            throw new IllegalStateException(
+                    "Hadoop configuration is not available for this CatalogContext.");
+        }
         return hadoopConf.get();
     }
 
