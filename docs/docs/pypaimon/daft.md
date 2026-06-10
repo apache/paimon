@@ -292,13 +292,15 @@ is synchronous blocking I/O):
 ```python
 import asyncio
 
-def _read_blob(file: daft.File) -> str:
+def _read_blob(file: daft.File | None) -> str | None:
+    if file is None:
+        return None
     with file.open() as f:
         data = f.read()
     return f"decoded {len(data)} bytes"
 
 @daft.func(max_concurrency=8)
-async def decode_image(file: daft.File) -> str:
+async def decode_image(file: daft.File | None) -> str | None:
     return await asyncio.to_thread(_read_blob, file)
 
 result = df.with_column("info", decode_image(col("image")))
