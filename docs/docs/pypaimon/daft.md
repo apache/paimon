@@ -268,9 +268,6 @@ result = df.with_column("size", file_length(col("image")))
 result.show()
 ```
 
-Note: `col("image").length()` does not work on `File` type columns — use
-`file.length` as shown above.
-
 To read actual blob content (e.g., decode an image), use `file.open()`.
 Only filtered rows trigger I/O:
 
