@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RowHelperTest {
 
     @Test
-    void testReleasesWhenTransitionFromLargeToSmallRecord() {
+    void testReleasesWhenSpikeFollowedBySmallRecords() {
         RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING(), DataTypes.BYTES()));
 
         // Write a large record (> 4MB) to inflate the internal buffer
@@ -43,19 +43,56 @@ class RowHelperTest {
         BinaryRow reuseAfterLarge = helper.reuseRow();
         assertThat(reuseAfterLarge).isNotNull();
 
-        // Hysteresis: should NOT release when current record is large
+        // buffer ~8MB, row ~5MB → ratio ~1.6x < 4x → should NOT release
         helper.resetIfTooLarge(reuseAfterLarge);
         assertThat(helper.reuseRow()).isNotNull();
 
-        // Write a small record — buffer is still oversized from the large record
+        // Write a small record — buffer still oversized
         GenericRow smallRow = GenericRow.of(BinaryString.fromString("s"), new byte[10]);
         smallRow.setRowKind(RowKind.INSERT);
         helper.copyInto(smallRow);
-        BinaryRow reuseAfterSmall = helper.reuseRow();
 
-        // Should release now: buffer > 4MB but current record < 4MB
-        helper.resetIfTooLarge(reuseAfterSmall);
+        // buffer ~8MB, row ~50B → ratio huge > 4x, buffer > 4MB → release
+        helper.resetIfTooLarge(helper.reuseRow());
         assertThat(helper.reuseRow()).isNull();
+    }
+
+    @Test
+    void testReleasesWhenSpikeFollowedByMediumRecords() {
+        RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING(), DataTypes.BYTES()));
+
+        // Write a very large record (100MB) to inflate the buffer significantly
+        byte[] hugePayload = new byte[100 * 1024 * 1024];
+        GenericRow hugeRow = GenericRow.of(BinaryString.fromString("key"), hugePayload);
+        hugeRow.setRowKind(RowKind.INSERT);
+        helper.copyInto(hugeRow);
+        assertThat(helper.reuseRow()).isNotNull();
+
+        // Write a medium record (5MB) — buffer is ~150MB (from grow), row is ~5MB
+        // ratio ~30x > 4x, buffer > 4MB → should release
+        byte[] mediumPayload = new byte[5 * 1024 * 1024];
+        GenericRow mediumRow = GenericRow.of(BinaryString.fromString("m"), mediumPayload);
+        mediumRow.setRowKind(RowKind.INSERT);
+        helper.copyInto(mediumRow);
+
+        helper.resetIfTooLarge(helper.reuseRow());
+        assertThat(helper.reuseRow()).isNull();
+    }
+
+    @Test
+    void testRetainsWhenBufferProportionalToRecordSize() {
+        RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING(), DataTypes.BYTES()));
+
+        // Write a 5MB record — buffer grows to ~8MB via grow() (1.5x strategy)
+        byte[] payload = new byte[5 * 1024 * 1024];
+        GenericRow row = GenericRow.of(BinaryString.fromString("key"), payload);
+        row.setRowKind(RowKind.INSERT);
+        helper.copyInto(row);
+
+        // buffer ~8MB, row ~5MB → ratio ~1.6x < 4x → should NOT release
+        // even though buffer > 4MB
+        helper.resetIfTooLarge(helper.reuseRow());
+        assertThat(helper.reuseRow()).isNotNull();
     }
 
     @Test
@@ -68,7 +105,7 @@ class RowHelperTest {
         BinaryRow reuse = helper.reuseRow();
         assertThat(reuse).isNotNull();
 
-        // Small buffer should NOT be released
+        // Small buffer (< 4MB) — should NOT be released regardless of ratio
         helper.resetIfTooLarge(reuse);
         assertThat(helper.reuseRow()).isNotNull();
     }
@@ -84,8 +121,7 @@ class RowHelperTest {
         helper.copyInto(largeRow);
         assertThat(helper.reuseRow()).isNotNull();
 
-        // Simulate the BinaryRow input path: toBinaryRow() returns the input directly,
-        // not the helper's reuseRow. Pass a different BinaryRow instance.
+        // Pass a different BinaryRow — simulates toBinaryRow() returning input directly
         BinaryRow externalRow = new BinaryRow(2);
         externalRow.pointTo(MemorySegment.wrap(new byte[32]), 0, 32);
 
@@ -99,7 +135,6 @@ class RowHelperTest {
         RowHelper helper = new RowHelper(Arrays.asList(DataTypes.STRING()));
         assertThat(helper.reuseRow()).isNull();
 
-        // Should be safe — reuseRow is null, no NPE
         BinaryRow someRow = new BinaryRow(1);
         someRow.pointTo(MemorySegment.wrap(new byte[16]), 0, 16);
         helper.resetIfTooLarge(someRow);

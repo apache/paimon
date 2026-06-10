@@ -37,12 +37,18 @@ public class RowHelper implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /**
-     * Threshold in bytes for releasing the internal reuse buffer. When big records are written, the
-     * BinaryRowWriter's internal segment can grow very large via grow(). The {@link
-     * #resetIfTooLarge(BinaryRow)} method checks this threshold and releases the bloated
-     * reuseRow/reuseWriter to avoid holding onto oversized buffers indefinitely.
+     * Maximum retained reuse buffer size in bytes. Buffers exceeding this cap are eligible for
+     * release when the shrink ratio condition is also met.
      */
-    private static final int REUSE_RELEASE_THRESHOLD = 4 * 1024 * 1024; // 4MB
+    private static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
+
+    /**
+     * Shrink ratio for hysteresis. The buffer is released only when its capacity exceeds {@link
+     * #MAX_RETAINED_REUSE_BUFFER_SIZE} AND is more than {@code SHRINK_RATIO} times the current
+     * row's size. This avoids thrashing for sustained medium-to-large records while still releasing
+     * after a spike (e.g. 100MB buffer with 5MB rows → 20x > 4x → release).
+     */
+    private static final int SHRINK_RATIO = 4;
 
     private final FieldGetter[] fieldGetters;
     private final ValueSetter[] valueSetters;
@@ -91,23 +97,27 @@ public class RowHelper implements Serializable {
 
     /**
      * Release the internal reuse buffer if the given row is the reuse row produced by this helper,
-     * the backing segment exceeds the threshold, and the current record is small. The identity
-     * check ({@code currentRow == reuseRow}) ensures we only act when the caller actually used this
-     * helper's buffer — if the input was already a {@link BinaryRow}, {@code toBinaryRow()} returns
-     * it directly and the helper state is stale, so we must skip cleanup.
+     * the backing segment exceeds the maximum retained size, and the buffer is clearly oversized
+     * relative to the current record. The identity check ({@code currentRow == reuseRow}) ensures
+     * we only act when the caller actually used this helper's buffer.
      *
-     * <p>The hysteresis ({@code currentRow.getSizeInBytes() < threshold}) avoids thrashing when
-     * records are consistently large, while still reclaiming memory when the workload transitions
-     * back to small records.
+     * <p>The release condition combines a fixed cap with a relative ratio check:
+     *
+     * <ul>
+     *   <li>bufferCapacity > {@link #MAX_RETAINED_REUSE_BUFFER_SIZE} — the buffer was inflated
+     *       beyond the baseline
+     *   <li>bufferCapacity > currentRow.getSizeInBytes() * {@link #SHRINK_RATIO} — the buffer is
+     *       significantly larger than the current workload needs
+     * </ul>
      */
     public void resetIfTooLarge(BinaryRow currentRow) {
-        if (currentRow == reuseRow
-                && reuseWriter != null
-                && reuseWriter.getSegments() != null
-                && reuseWriter.getSegments().size() > REUSE_RELEASE_THRESHOLD
-                && currentRow.getSizeInBytes() < REUSE_RELEASE_THRESHOLD) {
-            reuseRow = null;
-            reuseWriter = null;
+        if (currentRow == reuseRow && reuseWriter != null && reuseWriter.getSegments() != null) {
+            int bufferCapacity = reuseWriter.getSegments().size();
+            if (bufferCapacity > MAX_RETAINED_REUSE_BUFFER_SIZE
+                    && bufferCapacity > (long) currentRow.getSizeInBytes() * SHRINK_RATIO) {
+                reuseRow = null;
+                reuseWriter = null;
+            }
         }
     }
 
