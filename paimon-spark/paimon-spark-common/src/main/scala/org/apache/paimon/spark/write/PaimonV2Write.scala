@@ -47,7 +47,13 @@ class PaimonV2Write(
   with SchemaEvolutionHelper
   with Logging {
 
-  private val writeRequirement = PaimonWriteRequirement(table)
+  private val writeRequirement = {
+    if (copyOnWriteScan.isDefined && table.coreOptions().dataEvolutionEnabled()) {
+      PaimonWriteRequirement.dataEvolutionCopyOnWrite()
+    } else {
+      PaimonWriteRequirement(table)
+    }
+  }
 
   override def requiredDistribution(): Distribution = {
     val distribution = writeRequirement.distribution

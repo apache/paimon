@@ -116,6 +116,11 @@ public class SparkTypeUtils {
         return false;
     }
 
+    public static boolean containsBlobType(RowType rowType) {
+        return rowType.getFieldTypes().stream()
+                .anyMatch(type -> type.is(org.apache.paimon.types.DataTypeRoot.BLOB));
+    }
+
     /**
      * Prune Paimon `RowType` by required Spark `StructType`, use this method instead of {@link
      * #toPaimonType(DataType)} when need to retain the field id.

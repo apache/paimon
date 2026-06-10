@@ -20,11 +20,12 @@ package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions.PartitionSinkStrategy
 import org.apache.paimon.spark.commands.BucketExpression.quote
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
-import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortOrder}
+import org.apache.spark.sql.connector.expressions.{Expression, Expressions, SortDirection, SortOrder}
 
 import scala.collection.JavaConverters._
 
@@ -69,5 +70,20 @@ object PaimonWriteRequirement {
         Distributions.clustered(clusteringExpressions)
       PaimonWriteRequirement(distribution, EMPTY_ORDERING)
     }
+  }
+
+  /**
+   * Requirement for copy-on-write DELETE / UPDATE on data-evolution tables: range-distribute and
+   * sort by `_ROW_ID` so each task receives contiguous row-id segments and the writer can emit
+   * files whose row ids derive from `firstRowId` plus position. `_ROW_ID` is preserved for both
+   * carryover and updated rows, which also keeps rows of one partition together (row id ranges
+   * never span partitions).
+   */
+  def dataEvolutionCopyOnWrite(): PaimonWriteRequirement = {
+    val ordering: Array[SortOrder] =
+      Array(
+        Expressions
+          .sort(Expressions.column(PaimonMetadataColumn.ROW_ID_COLUMN), SortDirection.ASCENDING))
+    PaimonWriteRequirement(Distributions.ordered(ordering), ordering)
   }
 }

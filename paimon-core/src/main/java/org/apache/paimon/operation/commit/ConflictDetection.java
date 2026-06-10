@@ -645,6 +645,27 @@ public class ConflictDetection {
             }
         }
 
+        // Row-id ranges removed by this same commit, keyed by partition and bucket. A
+        // copy-on-write rewrite (e.g. Spark V2 DELETE on a data-evolution table) deletes whole
+        // row-id groups and re-adds the surviving rows with their original row ids, so an added
+        // file may cover only a sub-range of a deleted group and cannot mirror an existing file
+        // exactly; it is still consistent as long as its range is fully covered by ranges
+        // deleted in this commit (concurrent rewrites of those files are caught by the regular
+        // deleted-file conflict checks).
+        Map<FileRowIdKey, List<Range>> deletedRanges = new HashMap<>();
+        for (SimpleFileEntry entry : deltaEntries) {
+            if (entry.kind() == FileKind.DELETE && entry.firstRowId() != null) {
+                deletedRanges
+                        .computeIfAbsent(
+                                new FileRowIdKey(entry.partition(), entry.bucket(), 0, 0),
+                                k -> new ArrayList<>())
+                        .add(
+                                new Range(
+                                        entry.firstRowId(),
+                                        entry.firstRowId() + entry.rowCount() - 1));
+            }
+        }
+
         for (SimpleFileEntry entry : filesToCheck) {
             FileRowIdKey key =
                     new FileRowIdKey(
@@ -652,22 +673,51 @@ public class ConflictDetection {
                             entry.bucket(),
                             entry.firstRowId(),
                             entry.rowCount());
-            if (!existingIndex.contains(key)) {
-                return Optional.of(
-                        new RuntimeException(
-                                String.format(
-                                        "Row ID existence conflict: file '%s' references "
-                                                + "firstRowId=%d, rowCount=%d in bucket %d, "
-                                                + "but no matching file exists in the current snapshot. "
-                                                + "The referenced file may have been rewritten by a "
-                                                + "concurrent compaction or removed by an overwrite.",
-                                        entry.fileName(),
-                                        entry.firstRowId(),
-                                        entry.rowCount(),
-                                        entry.bucket())));
+            if (existingIndex.contains(key)) {
+                continue;
             }
+            List<Range> deleted =
+                    deletedRanges.get(new FileRowIdKey(entry.partition(), entry.bucket(), 0, 0));
+            if (coveredByRanges(
+                    deleted, entry.firstRowId(), entry.firstRowId() + entry.rowCount() - 1)) {
+                continue;
+            }
+            return Optional.of(
+                    new RuntimeException(
+                            String.format(
+                                    "Row ID existence conflict: file '%s' references "
+                                            + "firstRowId=%d, rowCount=%d in bucket %d, "
+                                            + "but no matching file exists in the current snapshot. "
+                                            + "The referenced file may have been rewritten by a "
+                                            + "concurrent compaction or removed by an overwrite.",
+                                    entry.fileName(),
+                                    entry.firstRowId(),
+                                    entry.rowCount(),
+                                    entry.bucket())));
         }
         return Optional.empty();
+    }
+
+    /** Whether {@code [from, to]} is fully covered by the union of the given ranges. */
+    private static boolean coveredByRanges(@Nullable List<Range> ranges, long from, long to) {
+        if (ranges == null || ranges.isEmpty()) {
+            return false;
+        }
+        ranges.sort(Comparator.comparingLong(range -> range.from));
+        long cursor = from;
+        for (Range range : ranges) {
+            if (range.to < cursor) {
+                continue;
+            }
+            if (range.from > cursor) {
+                return false;
+            }
+            cursor = range.to + 1;
+            if (cursor > to) {
+                return true;
+            }
+        }
+        return cursor > to;
     }
 
     private static class FileRowIdKey {
