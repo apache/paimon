@@ -78,7 +78,7 @@ object Spark41DeleteMetadataRestore extends RewriteRowLevelCommand with PureAppe
       case _ => false
     }
     writeIsDelete && (rd.originalTable match {
-      case r: DataSourceV2Relation if targetsV2CopyOnWriteTable(r) =>
+      case r: DataSourceV2Relation if targetsV2CopyOnWriteDeleteTable(r) =>
         r.table match {
           case spk: SparkTable =>
             spk.getTable match {

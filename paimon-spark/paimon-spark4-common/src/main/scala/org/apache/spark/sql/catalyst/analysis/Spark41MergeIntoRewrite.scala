@@ -72,7 +72,7 @@ object Spark41MergeIntoRewrite
       plan.transformDown {
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.needSchemaEvolution &&
-              targetsV2CopyOnWriteTable(m.targetTable) =>
+              targetsV2CopyOnWriteMergeTable(m.targetTable) =>
           // Pure append-only tables skip postHoc `PaimonMergeInto`, so evolve schema here.
           val evolved = evolveSchemaIfPaimon(m)
           rewrite(alignAllMergeActions(evolved, evolved.targetTable.output))

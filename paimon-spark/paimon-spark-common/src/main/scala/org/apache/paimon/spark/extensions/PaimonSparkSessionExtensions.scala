@@ -56,12 +56,12 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // Spark 4.1 moved the row-level command rewrite rules (`RewriteUpdateTable` /
     // `RewriteDeleteFromTable` / `RewriteMergeIntoTable`) into the main Resolution batch and
     // implemented them with `plan resolveOperators { ... }`, which short-circuits on
-    // `analyzed=true` nodes. For pure append-only tables (no PK / RT / DE / DV) on Spark 4.1+,
-    // UPDATE and MERGE subtrees get flipped to `analyzed=true` by Paimon's own Resolution-batch
-    // rules before Spark's rewrite can fire, so the nodes fall through to the physical planner
-    // and are rejected with `UNSUPPORTED_FEATURE.TABLE_OPERATION`. DELETE is not affected —
-    // Paimon has no Resolution-batch rule touching `DeleteFromTable` — but Spark's unconditional
-    // `RewriteDeleteFromTable` defeats Paimon's metadata-only-delete optimization.
+    // `analyzed=true` nodes. For append-only tables eligible for Paimon's V2 row-level path on
+    // Spark 4.1+, UPDATE and MERGE subtrees get flipped to `analyzed=true` by Paimon's own
+    // Resolution-batch rules before Spark's rewrite can fire, so the nodes fall through to the
+    // physical planner and are rejected with `UNSUPPORTED_FEATURE.TABLE_OPERATION`. DELETE is not
+    // affected — Paimon has no Resolution-batch rule touching `DeleteFromTable` — but Spark's
+    // unconditional `RewriteDeleteFromTable` defeats Paimon's metadata-only-delete optimization.
     //
     // Three companion rules in `paimon-spark4-common` fix each case:
     //   - `Spark41UpdateTableRewrite`  — transcribes `RewriteUpdateTable` output (ReplaceData)

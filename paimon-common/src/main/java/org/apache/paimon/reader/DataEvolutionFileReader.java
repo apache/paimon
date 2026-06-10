@@ -89,6 +89,15 @@ public class DataEvolutionFileReader implements RecordReader<InternalRow> {
                 iterators[i] = batch;
             }
         }
+        // Expose file path and position when possible so callers that need per-row file
+        // metadata (e.g. Spark metadata columns and copy-on-write group filtering) can treat
+        // the assembled row as coming from one deterministic member file of the row-id group.
+        for (RecordIterator<InternalRow> iterator : iterators) {
+            if (iterator instanceof FileRecordIterator) {
+                return new DataEvolutionFileRecordIterator(
+                        row, iterators, (FileRecordIterator<InternalRow>) iterator);
+            }
+        }
         return new DataEvolutionIterator(row, iterators);
     }
 

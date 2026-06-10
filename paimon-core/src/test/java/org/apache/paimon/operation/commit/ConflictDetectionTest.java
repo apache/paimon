@@ -534,6 +534,43 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCheckRowIdExistenceAcceptsSubRangeCoveredBySameCommitDeletes() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        // Copy-on-write update: the whole group [0, 100) is deleted and the rewritten rows are
+        // re-added as sub-range files [0, 40) and [50, 100) with their original row ids.
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 40L));
+        deltaEntries.add(createFileEntryWithRowId("p2", ADD, 50L, 50L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceRejectsSubRangeNotCoveredBySameCommitDeletes() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+        baseEntries.add(createFileEntryWithRowId("f2", ADD, 100L, 100L));
+
+        // The added file [50, 150) spills past the deleted group [0, 100): rows of f2 are
+        // re-added without deleting f2, which would duplicate row ids.
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 50L, 100L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 200L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
     void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
         ConflictDetection detection = createConflictDetection();
 

@@ -26,7 +26,7 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, ROW_ID, SEQUENCE_NUMBER}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, BatchWriteBuilderImpl, CommitMessage, CommitMessageImpl}
 
 import org.apache.spark.sql.PaimonSparkSession
 import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
@@ -69,6 +69,12 @@ abstract class PaimonBatchWriteBase(
     builder
   }
 
+  // Data-evolution tables are row-tracking tables too, but their copy-on-write rewrite must not
+  // write physical row-tracking columns (see PaimonV2DataEvolutionDataWriterBase), so check the
+  // data-evolution branch first.
+  private val writeDataEvolution: Boolean =
+    coreOptions.dataEvolutionEnabled() && copyOnWriteScan.isDefined
+
   private val writeRowTracking: Boolean =
     coreOptions.rowTrackingEnabled() && copyOnWriteScan.isDefined
 
@@ -84,7 +90,9 @@ abstract class PaimonBatchWriteBase(
   protected def createPaimonDataWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     (_: Int, _: Long) =>
       {
-        if (writeRowTracking) {
+        if (writeDataEvolution) {
+          createPaimonDataEvolutionDataWriter()
+        } else if (writeRowTracking) {
           createPaimonMetadataAwareDataWriter()
         } else {
           PaimonV2DataWriter(
@@ -109,9 +117,30 @@ abstract class PaimonBatchWriteBase(
       rtPaimonWriteType)
   }
 
+  private def createPaimonDataEvolutionDataWriter(): PaimonV2DataEvolutionDataWriter = {
+    new PaimonV2DataEvolutionDataWriter(
+      batchWriteBuilder,
+      table.schema(),
+      writeSchema,
+      dataSchema,
+      rtMetadataSchema,
+      catalogContextForBlobDescriptor)
+  }
+
   protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
     commitStarted = true
     logInfo(s"Committing to table ${table.name()}")
+    // For data-evolution copy-on-write, validate row-id ranges against commits that landed
+    // after the scan snapshot (same as the V1 MergeIntoPaimonDataEvolutionTable command): a
+    // concurrent partial-column patch commit only ADDs files, so the deleted-file conflict
+    // checks alone cannot see it and the rewritten files would silently overlap the patch.
+    if (writeDataEvolution) {
+      copyOnWriteScan.get.dataSplits.headOption.foreach(
+        split =>
+          batchWriteBuilder
+            .asInstanceOf[BatchWriteBuilderImpl]
+            .rowIdCheckConflict(split.snapshotId()))
+    }
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
     val addCommitMessage = WriteTaskResult.merge(messages)

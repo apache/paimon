@@ -18,9 +18,10 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonAssignmentUtils
 
-import org.apache.spark.sql.catalyst.expressions.{Alias, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, Assignment, Filter, LogicalPlan, Project, ReplaceData, Union, UpdateTable}
 import org.apache.spark.sql.catalyst.util.RowDeltaUtils.WRITE_WITH_METADATA_OPERATION
@@ -29,6 +30,8 @@ import org.apache.spark.sql.connector.write.RowLevelOperation.Command.UPDATE
 import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, ExtractV2Table}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import scala.collection.JavaConverters._
 
 /**
  * Spark 4.1-only Resolution-batch rule that rewrites UPDATE on pure append-only Paimon tables (see
@@ -47,8 +50,9 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
  * We fire before `ResolveAssignments`, so `u.aligned` is `false`; the rule pre-aligns via
  * `PaimonAssignmentUtils.alignUpdateAssignments` before building the plan.
  *
- * Row-tracking-only tables use the same V2 copy-on-write rewrite. PK / DE / DV tables go through
- * the postHoc V1 rule because they do not expose `SupportsRowLevelOperations`. DELETE is handled by
+ * Row-tracking-only and data-evolution tables use the same V2 copy-on-write rewrite for UPDATE (the
+ * latter additionally rejects partition-column updates). PK / DV tables go through the postHoc V1
+ * rule because they do not expose `SupportsRowLevelOperations`. DELETE is handled by
  * [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
  */
 object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendOnlyScope {
@@ -61,6 +65,7 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
             if u.resolved && u.rewritable && targetsV2CopyOnWriteTable(aliasedTable) =>
           EliminateSubqueryAliases(aliasedTable) match {
             case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) =>
+              checkNoDataEvolutionPartitionUpdate(tbl, assignments)
               val table = buildOperationTable(tbl, UPDATE, CaseInsensitiveStringMap.empty())
               val updateCond = cond.getOrElse(TrueLiteral)
               // `ResolveAssignments` fires later in the batch, so `u.aligned` is still false.
@@ -79,6 +84,30 @@ object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendO
               u
           }
       }
+    }
+  }
+
+  /**
+   * Mirrors the postHoc `PaimonUpdateTable` guard: data-evolution rewritten files keep the original
+   * row ids, which are derived from the file's firstRowId per partition, so moving a row to another
+   * partition is not supported.
+   */
+  private def checkNoDataEvolutionPartitionUpdate(
+      tbl: SupportsRowLevelOperations,
+      assignments: Seq[Assignment]): Unit = {
+    tbl match {
+      case sparkTable: SparkTable if sparkTable.coreOptions.dataEvolutionEnabled() =>
+        val partitionKeys = sparkTable.getTable.partitionKeys().asScala
+        val updatesPartitionColumn = assignments.exists {
+          case Assignment(key: AttributeReference, value) if !key.fastEquals(value) =>
+            partitionKeys.exists(partitionKey => conf.resolver(partitionKey, key.name))
+          case _ => false
+        }
+        if (updatesPartitionColumn) {
+          throw new RuntimeException(
+            "Update to partition columns is not supported for data evolution tables.")
+        }
+      case _ =>
     }
   }
 

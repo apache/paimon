@@ -25,7 +25,7 @@ import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsRowLevelOperations, TableCapability}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{RowLevelOperationBuilder, RowLevelOperationInfo}
+import org.apache.spark.sql.connector.write.{RowLevelOperation, RowLevelOperationBuilder, RowLevelOperationInfo}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{EnumSet => JEnumSet, Set => JSet}
@@ -40,15 +40,17 @@ import java.util.{EnumSet => JEnumSet, Set => JSet}
  * If this base class implemented `SupportsRowLevelOperations`, Spark 4.1 would immediately call
  * `newRowLevelOperationBuilder` on tables whose V2 write is disabled (e.g. dynamic bucket or
  * primary-key tables that fall back to V1 write) and fail before Paimon has a chance to rewrite the
- * plan to a V1 command. Likewise, deletion-vector, data-evolution, and fixed-length CHAR tables
- * need to stay on Paimon's V1 postHoc path even when `useV2Write=true`, so they must also not
- * expose `SupportsRowLevelOperations`.
+ * plan to a V1 command. Likewise, deletion-vector, unsupported data-evolution variants, and
+ * fixed-length CHAR tables need to stay on Paimon's V1 postHoc path even when `useV2Write=true`, so
+ * they must also not expose `SupportsRowLevelOperations`.
  *
  * Tables that DO support V2 row-level operations use the [[SparkTableWithRowLevelOps]] subclass
  * instead; the [[SparkTable.of]] factory picks the right variant via
- * [[SparkTable.supportsV2RowLevelOps]]. Append-only tables, including row-tracking-only tables,
- * expose `SupportsRowLevelOperations` so DELETE, UPDATE, and MERGE INTO can go through the V2
- * copy-on-write path when the table has no PK, deletion vectors, data evolution, or CHAR columns.
+ * [[SparkTable.supportsV2RowLevelOps]]. Append-only tables expose `SupportsRowLevelOperations` so
+ * DELETE, UPDATE, and MERGE INTO can go through the V2 copy-on-write path when the table has no PK,
+ * deletion vectors, or CHAR columns. Data-evolution tables expose the capability only so UPDATE can
+ * use V2 copy-on-write; DELETE is rejected and MERGE INTO keeps the V1
+ * `MergeIntoPaimonDataEvolutionTable` command which writes partial-column patch files.
  */
 case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table)
 
@@ -64,6 +66,13 @@ class SparkTableWithRowLevelOps(tableArg: Table)
       info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
       case t: FileStoreTable =>
+        if (
+          t.coreOptions().dataEvolutionEnabled() &&
+          info.command() == RowLevelOperation.Command.DELETE
+        ) {
+          throw new RuntimeException(
+            "Delete operation is not supported when data evolution is enabled yet.")
+        }
         () => new PaimonSparkCopyOnWriteOperation(t, info)
       case _ =>
         throw new UnsupportedOperationException(
@@ -117,11 +126,27 @@ object SparkTable {
           !sparkTable.coreOptions.rowTrackingEnabled() || org.apache.spark.SPARK_VERSION >= "4.0"
         fs.primaryKeys().isEmpty &&
         supportsRowTrackingCopyOnWrite &&
+        supportsDataEvolutionCopyOnWrite(fs) &&
         !sparkTable.coreOptions.deletionVectorsEnabled() &&
-        !sparkTable.coreOptions.dataEvolutionEnabled() &&
         !SparkTypeUtils.containsCharType(fs.rowType())
       case _ => false
     }
+  }
+
+  /**
+   * Whether a table is eligible for the V2 copy-on-write UPDATE path with respect to data
+   * evolution. Non-data-evolution tables are unaffected (returns `true`). Data-evolution UPDATE
+   * rewrites whole row-id groups, which is not implemented yet for BLOB fields (blob files must
+   * stay aligned with the rewritten row ranges) or vector-store files.
+   *
+   * Single source of truth for the data-evolution capability gate, shared by
+   * [[supportsV2RowLevelOps]] and the Spark 4.1 `PureAppendOnlyScope` rewrite rules so the two
+   * cannot drift apart.
+   */
+  def supportsDataEvolutionCopyOnWrite(fs: FileStoreTable): Boolean = {
+    val options = fs.coreOptions()
+    !options.dataEvolutionEnabled() ||
+    (!SparkTypeUtils.containsBlobType(fs.rowType()) && !options.withVectorFormat())
   }
 }
 
