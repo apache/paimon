@@ -25,16 +25,9 @@ final class VectorIndexNative {
 
     private VectorIndexNative() {}
 
-    static native long createWriter(
-            int indexType,
-            int dimension,
-            int nlist,
-            int pqM,
-            int metric,
-            boolean useOpq,
-            int hnswM,
-            int efConstruction,
-            int maxLevel);
+    static native long createWriter(String[] optionKeys, String[] optionValues);
+
+    static native int writerDimension(long ptr);
 
     static native void train(long ptr, float[] data, int n);
 

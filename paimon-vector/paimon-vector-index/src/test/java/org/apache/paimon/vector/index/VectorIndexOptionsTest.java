@@ -39,13 +39,20 @@ public class VectorIndexOptionsTest {
         assertThat(indexOptions.nlist()).isEqualTo(256);
         assertThat(indexOptions.m()).isEqualTo(16);
         assertThat(indexOptions.useOpq()).isFalse();
-        assertThat(indexOptions.hnswConfig().m()).isEqualTo(20);
-        assertThat(indexOptions.hnswConfig().efConstruction()).isEqualTo(150);
-        assertThat(indexOptions.hnswConfig().maxLevel()).isEqualTo(7);
+        assertThat(indexOptions.hnswM()).isEqualTo(20);
+        assertThat(indexOptions.hnswEfConstruction()).isEqualTo(150);
+        assertThat(indexOptions.hnswMaxLevel()).isEqualTo(7);
         assertThat(indexOptions.nprobe()).isEqualTo(16);
         assertThat(indexOptions.efSearch()).isEqualTo(0);
         assertThat(indexOptions.trainSampleRatio()).isEqualTo(1.0);
         assertThat(indexOptions.addBatchSize()).isEqualTo(10000);
+        assertThat(indexOptions.toNativeOptions(12))
+                .containsEntry("index.type", "ivf_pq")
+                .containsEntry("dimension", "128")
+                .containsEntry("nlist", "12")
+                .containsEntry("metric", "inner_product")
+                .containsEntry("pq.m", "16")
+                .containsEntry("use-opq", "false");
     }
 
     @Test
@@ -71,13 +78,21 @@ public class VectorIndexOptionsTest {
         assertThat(indexOptions.nlist()).isEqualTo(128);
         assertThat(indexOptions.m()).isEqualTo(8);
         assertThat(indexOptions.useOpq()).isTrue();
-        assertThat(indexOptions.hnswConfig().m()).isEqualTo(12);
-        assertThat(indexOptions.hnswConfig().efConstruction()).isEqualTo(64);
-        assertThat(indexOptions.hnswConfig().maxLevel()).isEqualTo(5);
+        assertThat(indexOptions.hnswM()).isEqualTo(12);
+        assertThat(indexOptions.hnswEfConstruction()).isEqualTo(64);
+        assertThat(indexOptions.hnswMaxLevel()).isEqualTo(5);
         assertThat(indexOptions.nprobe()).isEqualTo(32);
         assertThat(indexOptions.efSearch()).isEqualTo(96);
         assertThat(indexOptions.trainSampleRatio()).isEqualTo(0.5);
         assertThat(indexOptions.addBatchSize()).isEqualTo(5000);
+        assertThat(indexOptions.toNativeOptions(7))
+                .containsEntry("index.type", "ivf_hnsw_sq")
+                .containsEntry("dimension", "64")
+                .containsEntry("nlist", "7")
+                .containsEntry("metric", "l2")
+                .containsEntry("hnsw.m", "12")
+                .containsEntry("hnsw.ef-construction", "64")
+                .containsEntry("hnsw.max-level", "5");
     }
 
     @Test
@@ -116,10 +131,11 @@ public class VectorIndexOptionsTest {
     }
 
     @Test
-    public void testMetricParsingUpperCase() {
+    public void testMetricParsingRejectsUpperCase() {
         Options options = new Options();
         options.setString("vector.distance.metric", "L2");
-        VectorIndexOptions indexOptions = new VectorIndexOptions(options, IndexType.IVF_PQ);
-        assertThat(indexOptions.metric()).isEqualTo(VectorMetric.L2);
+        assertThatThrownBy(() -> new VectorIndexOptions(options, IndexType.IVF_PQ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unknown metric");
     }
 }

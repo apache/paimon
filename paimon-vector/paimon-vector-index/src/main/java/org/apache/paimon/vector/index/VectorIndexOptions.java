@@ -18,13 +18,13 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.index.ivfpq.HnswConfig;
 import org.apache.paimon.index.ivfpq.IndexType;
-import org.apache.paimon.index.ivfpq.VectorIndexConfig;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /** Options for the Paimon vector index backed by paimon-vector-index. */
@@ -34,6 +34,10 @@ public class VectorIndexOptions {
     public static final String IVF_PQ_IDENTIFIER = "ivf-pq";
     public static final String IVF_HNSW_FLAT_IDENTIFIER = "ivf-hnsw-flat";
     public static final String IVF_HNSW_SQ_IDENTIFIER = "ivf-hnsw-sq";
+
+    static final int DEFAULT_HNSW_M = 20;
+    static final int DEFAULT_HNSW_EF_CONSTRUCTION = 150;
+    static final int DEFAULT_HNSW_MAX_LEVEL = 7;
 
     public static final ConfigOption<Integer> DIMENSION =
             ConfigOptions.key("vector.index.dimension")
@@ -71,19 +75,19 @@ public class VectorIndexOptions {
     public static final ConfigOption<Integer> HNSW_M =
             ConfigOptions.key("vector.hnsw.m")
                     .intType()
-                    .defaultValue(HnswConfig.DEFAULT.m())
+                    .defaultValue(DEFAULT_HNSW_M)
                     .withDescription("Maximum number of HNSW neighbors per node.");
 
     public static final ConfigOption<Integer> HNSW_EF_CONSTRUCTION =
             ConfigOptions.key("vector.hnsw.ef-construction")
                     .intType()
-                    .defaultValue(HnswConfig.DEFAULT.efConstruction())
+                    .defaultValue(DEFAULT_HNSW_EF_CONSTRUCTION)
                     .withDescription("HNSW efConstruction value used during index build.");
 
     public static final ConfigOption<Integer> HNSW_MAX_LEVEL =
             ConfigOptions.key("vector.hnsw.max-level")
                     .intType()
-                    .defaultValue(HnswConfig.DEFAULT.maxLevel())
+                    .defaultValue(DEFAULT_HNSW_MAX_LEVEL)
                     .withDescription("Maximum HNSW graph level.");
 
     public static final ConfigOption<Integer> NPROBE =
@@ -119,7 +123,9 @@ public class VectorIndexOptions {
     private final int nlist;
     private final int m;
     private final boolean useOpq;
-    private final HnswConfig hnswConfig;
+    private final int hnswM;
+    private final int hnswEfConstruction;
+    private final int hnswMaxLevel;
     private final int nprobe;
     private final int efSearch;
     private final double trainSampleRatio;
@@ -132,12 +138,12 @@ public class VectorIndexOptions {
         this.nlist = validatePositive(options.get(NLIST), optionKey(NLIST));
         this.m = validatePositive(options.get(M), optionKey(M));
         this.useOpq = options.get(USE_OPQ);
-        this.hnswConfig =
-                new HnswConfig(
-                        validatePositive(options.get(HNSW_M), optionKey(HNSW_M)),
-                        validatePositive(
-                                options.get(HNSW_EF_CONSTRUCTION), optionKey(HNSW_EF_CONSTRUCTION)),
-                        validatePositive(options.get(HNSW_MAX_LEVEL), optionKey(HNSW_MAX_LEVEL)));
+        this.hnswM = validatePositive(options.get(HNSW_M), optionKey(HNSW_M));
+        this.hnswEfConstruction =
+                validatePositive(
+                        options.get(HNSW_EF_CONSTRUCTION), optionKey(HNSW_EF_CONSTRUCTION));
+        this.hnswMaxLevel =
+                validatePositive(options.get(HNSW_MAX_LEVEL), optionKey(HNSW_MAX_LEVEL));
         this.nprobe = validatePositive(options.get(NPROBE), optionKey(NPROBE));
         this.efSearch = validateNonNegative(options.get(EF_SEARCH), optionKey(EF_SEARCH));
         this.trainSampleRatio = options.get(TRAIN_SAMPLE_RATIO);
@@ -182,8 +188,16 @@ public class VectorIndexOptions {
         return useOpq;
     }
 
-    public HnswConfig hnswConfig() {
-        return hnswConfig;
+    public int hnswM() {
+        return hnswM;
+    }
+
+    public int hnswEfConstruction() {
+        return hnswEfConstruction;
+    }
+
+    public int hnswMaxLevel() {
+        return hnswMaxLevel;
     }
 
     public int nprobe() {
@@ -202,23 +216,29 @@ public class VectorIndexOptions {
         return addBatchSize;
     }
 
-    public VectorIndexConfig toVectorIndexConfig(int effectiveNlist) {
+    public Map<String, String> toNativeOptions(int effectiveNlist) {
+        Map<String, String> nativeOptions = new LinkedHashMap<>();
+        nativeOptions.put("index.type", toNativeIndexType(indexType));
+        nativeOptions.put("dimension", String.valueOf(dimension));
+        nativeOptions.put("nlist", String.valueOf(effectiveNlist));
+        nativeOptions.put("metric", metric.getConfigName());
         switch (indexType) {
             case IVF_FLAT:
-                return VectorIndexConfig.ivfFlat(
-                        dimension, effectiveNlist, metric.toNativeMetric());
+                break;
             case IVF_PQ:
-                return VectorIndexConfig.ivfPq(
-                        dimension, effectiveNlist, m, metric.toNativeMetric(), useOpq);
+                nativeOptions.put("pq.m", String.valueOf(m));
+                nativeOptions.put("use-opq", String.valueOf(useOpq));
+                break;
             case IVF_HNSW_FLAT:
-                return VectorIndexConfig.ivfHnswFlat(
-                        dimension, effectiveNlist, metric.toNativeMetric(), hnswConfig);
             case IVF_HNSW_SQ:
-                return VectorIndexConfig.ivfHnswSq(
-                        dimension, effectiveNlist, metric.toNativeMetric(), hnswConfig);
+                nativeOptions.put("hnsw.m", String.valueOf(hnswM));
+                nativeOptions.put("hnsw.ef-construction", String.valueOf(hnswEfConstruction));
+                nativeOptions.put("hnsw.max-level", String.valueOf(hnswMaxLevel));
+                break;
             default:
                 throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
         }
+        return nativeOptions;
     }
 
     public String logName() {
@@ -226,11 +246,7 @@ public class VectorIndexOptions {
     }
 
     private static VectorMetric parseMetric(String value) {
-        try {
-            return VectorMetric.fromConfigName(value);
-        } catch (IllegalArgumentException e) {
-            return VectorMetric.fromString(value);
-        }
+        return VectorMetric.fromConfigName(value);
     }
 
     private static int validatePositive(int value, String key) {
@@ -275,6 +291,21 @@ public class VectorIndexOptions {
                 return IVF_HNSW_FLAT_IDENTIFIER;
             case IVF_HNSW_SQ:
                 return IVF_HNSW_SQ_IDENTIFIER;
+            default:
+                throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
+        }
+    }
+
+    private static String toNativeIndexType(IndexType indexType) {
+        switch (indexType) {
+            case IVF_FLAT:
+                return "ivf_flat";
+            case IVF_PQ:
+                return "ivf_pq";
+            case IVF_HNSW_FLAT:
+                return "ivf_hnsw_flat";
+            case IVF_HNSW_SQ:
+                return "ivf_hnsw_sq";
             default:
                 throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
         }

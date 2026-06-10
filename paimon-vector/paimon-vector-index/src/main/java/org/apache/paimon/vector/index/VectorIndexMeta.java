@@ -18,7 +18,6 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.index.ivfpq.HnswConfig;
 import org.apache.paimon.index.ivfpq.IndexType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
@@ -66,9 +65,9 @@ public class VectorIndexMeta implements Serializable {
         params.put(KEY_NLIST, String.valueOf(options.nlist()));
         params.put(KEY_M, String.valueOf(options.m()));
         params.put(KEY_USE_OPQ, String.valueOf(options.useOpq()));
-        params.put(KEY_HNSW_M, String.valueOf(options.hnswConfig().m()));
-        params.put(KEY_HNSW_EF_CONSTRUCTION, String.valueOf(options.hnswConfig().efConstruction()));
-        params.put(KEY_HNSW_MAX_LEVEL, String.valueOf(options.hnswConfig().maxLevel()));
+        params.put(KEY_HNSW_M, String.valueOf(options.hnswM()));
+        params.put(KEY_HNSW_EF_CONSTRUCTION, String.valueOf(options.hnswEfConstruction()));
+        params.put(KEY_HNSW_MAX_LEVEL, String.valueOf(options.hnswMaxLevel()));
         params.put(KEY_NPROBE, String.valueOf(options.nprobe()));
         params.put(KEY_EF_SEARCH, String.valueOf(options.efSearch()));
     }
@@ -106,11 +105,16 @@ public class VectorIndexMeta implements Serializable {
         return Boolean.parseBoolean(params.get(KEY_USE_OPQ));
     }
 
-    public HnswConfig hnswConfig() {
-        return new HnswConfig(
-                intValue(KEY_HNSW_M, HnswConfig.DEFAULT.m()),
-                intValue(KEY_HNSW_EF_CONSTRUCTION, HnswConfig.DEFAULT.efConstruction()),
-                intValue(KEY_HNSW_MAX_LEVEL, HnswConfig.DEFAULT.maxLevel()));
+    public int hnswM() {
+        return intValue(KEY_HNSW_M, VectorIndexOptions.DEFAULT_HNSW_M);
+    }
+
+    public int hnswEfConstruction() {
+        return intValue(KEY_HNSW_EF_CONSTRUCTION, VectorIndexOptions.DEFAULT_HNSW_EF_CONSTRUCTION);
+    }
+
+    public int hnswMaxLevel() {
+        return intValue(KEY_HNSW_MAX_LEVEL, VectorIndexOptions.DEFAULT_HNSW_MAX_LEVEL);
     }
 
     public int nprobe() {

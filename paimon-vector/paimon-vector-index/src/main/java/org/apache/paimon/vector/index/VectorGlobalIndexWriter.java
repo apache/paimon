@@ -226,7 +226,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
         long buildStart = System.currentTimeMillis();
 
         try (VectorIndexWriter writer =
-                new VectorIndexWriter(options.toVectorIndexConfig(effectiveNlist))) {
+                new VectorIndexWriter(options.toNativeOptions(effectiveNlist))) {
 
             // Phase 1: Train
             long phaseStart = System.currentTimeMillis();

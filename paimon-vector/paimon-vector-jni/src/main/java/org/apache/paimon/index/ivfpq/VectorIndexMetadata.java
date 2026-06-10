@@ -25,7 +25,9 @@ public final class VectorIndexMetadata {
     private final Metric metric;
     private final long totalVectors;
     private final int pqM;
-    private final HnswConfig hnsw;
+    private final int hnswM;
+    private final int hnswEfConstruction;
+    private final int hnswMaxLevel;
 
     public VectorIndexMetadata(
             int indexType,
@@ -43,7 +45,9 @@ public final class VectorIndexMetadata {
         this.metric = metricFromCode(metric);
         this.totalVectors = totalVectors;
         this.pqM = pqM;
-        this.hnsw = hnswM > 0 ? new HnswConfig(hnswM, efConstruction, maxLevel) : null;
+        this.hnswM = hnswM;
+        this.hnswEfConstruction = efConstruction;
+        this.hnswMaxLevel = maxLevel;
     }
 
     public IndexType indexType() {
@@ -70,8 +74,16 @@ public final class VectorIndexMetadata {
         return pqM;
     }
 
-    public HnswConfig hnsw() {
-        return hnsw;
+    public int hnswM() {
+        return hnswM;
+    }
+
+    public int hnswEfConstruction() {
+        return hnswEfConstruction;
+    }
+
+    public int hnswMaxLevel() {
+        return hnswMaxLevel;
     }
 
     private static Metric metricFromCode(int code) {

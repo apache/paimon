@@ -213,9 +213,9 @@ public class VectorGlobalIndexTest {
 
         assertThat(deserialized.indexType()).isEqualTo(IndexType.IVF_HNSW_FLAT);
         assertThat(deserialized.dimension()).isEqualTo(16);
-        assertThat(deserialized.hnswConfig().m()).isEqualTo(12);
-        assertThat(deserialized.hnswConfig().efConstruction()).isEqualTo(64);
-        assertThat(deserialized.hnswConfig().maxLevel()).isEqualTo(5);
+        assertThat(deserialized.hnswM()).isEqualTo(12);
+        assertThat(deserialized.hnswEfConstruction()).isEqualTo(64);
+        assertThat(deserialized.hnswMaxLevel()).isEqualTo(5);
         assertThat(deserialized.efSearch()).isEqualTo(80);
     }
 

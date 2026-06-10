@@ -18,28 +18,20 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.index.ivfpq.Metric;
-
 /** Enumeration of supported vector distance metrics. */
 public enum VectorMetric {
-    L2("l2", Metric.L2),
-    COSINE("cosine", Metric.COSINE),
-    INNER_PRODUCT("inner_product", Metric.INNER_PRODUCT);
+    L2("l2"),
+    COSINE("cosine"),
+    INNER_PRODUCT("inner_product");
 
     private final String configName;
-    private final Metric nativeMetric;
 
-    VectorMetric(String configName, Metric nativeMetric) {
+    VectorMetric(String configName) {
         this.configName = configName;
-        this.nativeMetric = nativeMetric;
     }
 
     public String getConfigName() {
         return configName;
-    }
-
-    public Metric toNativeMetric() {
-        return nativeMetric;
     }
 
     public static VectorMetric fromConfigName(String configName) {
@@ -49,9 +41,5 @@ public enum VectorMetric {
             }
         }
         throw new IllegalArgumentException("Unknown metric: " + configName);
-    }
-
-    public static VectorMetric fromString(String name) {
-        return valueOf(name.toUpperCase());
     }
 }
