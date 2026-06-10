@@ -75,10 +75,7 @@ def read_paimon(
             exclusive with ``tag_name``.
         tag_name: Optional tag name to time-travel to. Mutually
             exclusive with ``snapshot_id``.
-        dynamic_table_options: Optional table options applied at read time
-            via ``Table.copy()``. These override the table's stored options
-            without modifying them, e.g.
-            ``{"blob-as-descriptor": "true"}``.
+        dynamic_table_options: Optional dynamic options to override at read time.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in read tasks.
         concurrency: Optional max number of Ray read tasks to run concurrently.
         override_num_blocks: Optional override for the number of output blocks.
