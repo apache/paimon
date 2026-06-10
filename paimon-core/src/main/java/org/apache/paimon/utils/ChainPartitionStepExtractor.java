@@ -38,7 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class ChainPartitionStepExtractor {
 
     private static final LocalDateTime FINGERPRINT = LocalDateTime.of(2026, 6, 9, 11, 50, 58);
-
+    private static final String TIME_UNIT_CHARS = "yMdHhmsS";
     private static final Pattern VARIABLE = Pattern.compile("\\$[a-zA-Z_]+");
     private final String pattern;
     private final String formatter;
@@ -99,16 +99,26 @@ public class ChainPartitionStepExtractor {
     }
 
     private static boolean isTimeChar(char c) {
-        return "yMdHhmsS".indexOf(c) >= 0;
+        return TIME_UNIT_CHARS.indexOf(c) >= 0;
     }
 
     private static ChronoField resolveField(String value) {
         long v = Long.parseLong(value);
-        if (v == FINGERPRINT.getSecond()) return ChronoField.SECOND_OF_MINUTE;
-        if (v == FINGERPRINT.getMinute()) return ChronoField.MINUTE_OF_HOUR;
-        if (v == FINGERPRINT.getHour()) return ChronoField.HOUR_OF_DAY;
-        if (v == FINGERPRINT.getDayOfMonth()) return ChronoField.DAY_OF_MONTH;
-        if (v == FINGERPRINT.getMonthValue()) return ChronoField.MONTH_OF_YEAR;
+        if (v == FINGERPRINT.getSecond()) {
+            return ChronoField.SECOND_OF_MINUTE;
+        }
+        if (v == FINGERPRINT.getMinute()) {
+            return ChronoField.MINUTE_OF_HOUR;
+        }
+        if (v == FINGERPRINT.getHour()) {
+            return ChronoField.HOUR_OF_DAY;
+        }
+        if (v == FINGERPRINT.getDayOfMonth()) {
+            return ChronoField.DAY_OF_MONTH;
+        }
+        if (v == FINGERPRINT.getMonthValue()) {
+            return ChronoField.MONTH_OF_YEAR;
+        }
         if (v == FINGERPRINT.getYear() || v == FINGERPRINT.getYear() % 100) {
             return ChronoField.YEAR;
         }
@@ -222,7 +232,9 @@ public class ChainPartitionStepExtractor {
             char c = constant.charAt(i);
             char f = formatter.charAt(start + i);
             if (Character.isDigit(c)) {
-                if (!isTimeChar(f)) return false;
+                if (!isTimeChar(f)) {
+                    return false;
+                }
             } else if (c != f) {
                 return false;
             }
