@@ -41,14 +41,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Lint + test on 3.6 and 3.10 only (not every Python version).
+  # Lint + test on 3.10 and 3.11 only (not every Python version).
   lint-python:
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.6.15', '3.10', '3.11' ]
+        python-version: [ '3.10', '3.11' ]
 
     steps:
       - name: Checkout code
@@ -125,27 +125,18 @@ jobs:
         shell: bash
         run: |
           df -h
-          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
-            python -m pip install --upgrade pip==21.3.1
-          else
-            python -m pip install --upgrade pip
-          fi
+          python -m pip install --upgrade pip
           python --version
           python -m pip install --no-cache-dir -r paimon-python/dev/requirements-dev.txt
-          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
-            python -m pip install --no-cache-dir ossfs==2021.8.0
-          else
-            python -m pip install --no-cache-dir 'daft>=0.7.6' ossfs==2023.12.0 pylance==0.39.0 maturin[patchelf]
-            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
-              python -m pip install --no-cache-dir vortex-data==0.70.0
-            fi
-            python -m pip install 'paimon-mosaic>=0.1.0'
+          python -m pip install --no-cache-dir 'daft>=0.7.6' ossfs==2023.12.0 pylance==0.39.0 maturin[patchelf]
+          if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
+            python -m pip install --no-cache-dir vortex-data==0.70.0
           fi
+          python -m pip install 'paimon-mosaic>=0.1.0'
           python -m pip install --no-cache-dir 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
           df -h
 
       - name: Build and install tantivy-py from source
-        if: matrix.python-version != '3.6.15'
         shell: bash
         run: |
           git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
