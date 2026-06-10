@@ -56,6 +56,7 @@ def read_paimon(
     limit: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     tag_name: Optional[str] = None,
+    dynamic_table_options: Optional[Dict[str, str]] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
@@ -74,6 +75,10 @@ def read_paimon(
             exclusive with ``tag_name``.
         tag_name: Optional tag name to time-travel to. Mutually
             exclusive with ``snapshot_id``.
+        dynamic_table_options: Optional table options applied at read time
+            via ``Table.copy()``. These override the table's stored options
+            without modifying them, e.g.
+            ``{"blob-as-descriptor": "true"}``.
         ray_remote_args: Optional kwargs passed to ``ray.remote`` in read tasks.
         concurrency: Optional max number of Ray read tasks to run concurrently.
         override_num_blocks: Optional override for the number of output blocks.
@@ -106,6 +111,7 @@ def read_paimon(
         limit=limit,
         snapshot_id=snapshot_id,
         tag_name=tag_name,
+        dynamic_table_options=dynamic_table_options,
     )
 
     if not split_provider.splits():

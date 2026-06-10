@@ -85,6 +85,7 @@ class CatalogSplitProvider(SplitProvider):
         limit: Optional[int] = None,
         snapshot_id: Optional[int] = None,
         tag_name: Optional[str] = None,
+        dynamic_table_options: Optional[Dict[str, str]] = None,
     ):
         if not table_identifier:
             raise ValueError("table_identifier is required")
@@ -101,6 +102,7 @@ class CatalogSplitProvider(SplitProvider):
         self._limit = limit
         self._snapshot_id = snapshot_id
         self._tag_name = tag_name
+        self._dynamic_table_options = dynamic_table_options
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
@@ -110,13 +112,15 @@ class CatalogSplitProvider(SplitProvider):
             from pypaimon.catalog.catalog_factory import CatalogFactory
             catalog = CatalogFactory.create(self._catalog_options)
             table = catalog.get_table(self._table_identifier)
-            travel_options = {}
+            dynamic_options = {}
             if self._snapshot_id is not None:
-                travel_options["scan.snapshot-id"] = str(self._snapshot_id)
+                dynamic_options["scan.snapshot-id"] = str(self._snapshot_id)
             if self._tag_name is not None:
-                travel_options["scan.tag-name"] = self._tag_name
-            if travel_options:
-                table = table.copy(travel_options)
+                dynamic_options["scan.tag-name"] = self._tag_name
+            if self._dynamic_table_options:
+                dynamic_options.update(self._dynamic_table_options)
+            if dynamic_options:
+                table = table.copy(dynamic_options)
             self._table_cached = table
         return self._table_cached
 
