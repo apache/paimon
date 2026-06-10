@@ -33,6 +33,7 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
@@ -94,7 +95,7 @@ public class HttpClient implements RESTClient {
         HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
-            httpPost.setEntity(new StringEntity(encodedBody));
+            httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
         Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
         httpPost.setHeaders(authHeaders);
@@ -112,7 +113,7 @@ public class HttpClient implements RESTClient {
         HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
-            httpDelete.setEntity(new StringEntity(encodedBody));
+            httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
         Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
         httpDelete.setHeaders(authHeaders);
