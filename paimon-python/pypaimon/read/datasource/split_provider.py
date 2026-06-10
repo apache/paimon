@@ -91,10 +91,8 @@ class CatalogSplitProvider(SplitProvider):
             raise ValueError("table_identifier is required")
         if catalog_options is None:
             raise ValueError("catalog_options is required")
-        _TIME_TRAVEL_KEYS = {
-            "scan.snapshot-id", "scan.tag-name",
-            "scan.timestamp-millis", "scan.timestamp", "scan.watermark",
-        }
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        scan_keys = set(SCAN_KEYS)
 
         if snapshot_id is not None and tag_name is not None:
             raise ValueError(
@@ -102,7 +100,7 @@ class CatalogSplitProvider(SplitProvider):
             )
 
         if dynamic_table_options:
-            dynamic_tt_keys = _TIME_TRAVEL_KEYS & dynamic_table_options.keys()
+            dynamic_tt_keys = scan_keys & dynamic_table_options.keys()
             if (snapshot_id is not None or tag_name is not None) and dynamic_tt_keys:
                 raise ValueError(
                     "snapshot_id/tag_name and dynamic_table_options "

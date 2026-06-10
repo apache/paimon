@@ -249,6 +249,19 @@ class SplitProviderTest(unittest.TestCase):
         table = provider.table()
         self.assertTrue(table.options.blob_as_descriptor())
 
+    def test_dynamic_table_options_rejects_tt_conflict(self):
+        args = dict(table_identifier=self.identifier,
+                    catalog_options=self.catalog_options)
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(**args, snapshot_id=1,
+                                dynamic_table_options={'scan.tag-name': 'v1'})
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(**args, tag_name='v1',
+                                dynamic_table_options={'scan.snapshot-id': '1'})
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(**args, dynamic_table_options={
+                'scan.snapshot-id': '1', 'scan.tag-name': 'v1'})
+
     def test_pre_resolved_provider_returns_inputs(self):
         """PreResolvedSplitProvider just hands back what it was given."""
         catalog = CatalogFactory.create(self.catalog_options)
