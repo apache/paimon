@@ -423,6 +423,22 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testFileIndexColumnOptionWithoutColumnsDeclaration() {
+        Map<String, String> options = new HashMap<>();
+        options.put("file-index.bloom-filter.vin.items", "2000");
+        options.put("file-index.bloom-filter.vin.fpp", "0.0001");
+
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Wrong file index option 'file-index.bloom-filter.vin.")
+                .hasMessageContaining(
+                        "column 'vin' is not declared in 'file-index.bloom-filter.columns'")
+                .hasMessageContaining("Please add 'file-index.bloom-filter.columns' = 'vin'")
+                .hasMessageContaining(
+                        "For map nested index, declare it like '<map-column>[<map-key>]'");
+    }
+
+    @Test
     public void testFileIndexNestedColumn() {
         List<String> keys =
                 Arrays.asList(
