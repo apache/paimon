@@ -20,21 +20,17 @@ package org.apache.paimon.vector.index;
 
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.index.ivfpq.IndexType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
 /** Factory for creating vector indexes backed by paimon-vector-index. */
-public class VectorGlobalIndexerFactory implements GlobalIndexerFactory {
+public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "vector";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
+    protected abstract IndexType indexType();
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new VectorGlobalIndexer(field.type(), options, identifier());
+        return new VectorGlobalIndexer(field.type(), options, indexType());
     }
 }

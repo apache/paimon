@@ -32,7 +32,7 @@ public class VectorIndexOptionsTest {
     @Test
     public void testDefaults() {
         Options options = new Options();
-        VectorIndexOptions indexOptions = new VectorIndexOptions(options);
+        VectorIndexOptions indexOptions = new VectorIndexOptions(options, IndexType.IVF_PQ);
         assertThat(indexOptions.dimension()).isEqualTo(128);
         assertThat(indexOptions.indexType()).isEqualTo(IndexType.IVF_PQ);
         assertThat(indexOptions.metric()).isEqualTo(VectorMetric.INNER_PRODUCT);
@@ -51,7 +51,6 @@ public class VectorIndexOptionsTest {
     @Test
     public void testCustomOptions() {
         Options options = new Options();
-        options.setString("vector.index.type", "ivf-hnsw-sq");
         options.setInteger("vector.index.dimension", 64);
         options.setString("vector.distance.metric", "l2");
         options.setInteger("vector.nlist", 128);
@@ -65,7 +64,7 @@ public class VectorIndexOptionsTest {
         options.setString("vector.train.sample-ratio", "0.5");
         options.setInteger("vector.add.batch-size", 5000);
 
-        VectorIndexOptions indexOptions = new VectorIndexOptions(options);
+        VectorIndexOptions indexOptions = new VectorIndexOptions(options, IndexType.IVF_HNSW_SQ);
         assertThat(indexOptions.dimension()).isEqualTo(64);
         assertThat(indexOptions.indexType()).isEqualTo(IndexType.IVF_HNSW_SQ);
         assertThat(indexOptions.metric()).isEqualTo(VectorMetric.L2);
@@ -82,33 +81,11 @@ public class VectorIndexOptionsTest {
     }
 
     @Test
-    public void testIdentifierSelectsIndexType() {
-        assertThat(new VectorIndexOptions(new Options(), "ivf-flat").indexType())
-                .isEqualTo(IndexType.IVF_FLAT);
-        assertThat(new VectorIndexOptions(new Options(), "ivf-pq").indexType())
-                .isEqualTo(IndexType.IVF_PQ);
-        assertThat(new VectorIndexOptions(new Options(), "ivf-hnsw-flat").indexType())
-                .isEqualTo(IndexType.IVF_HNSW_FLAT);
-        assertThat(new VectorIndexOptions(new Options(), "ivf-hnsw-sq").indexType())
-                .isEqualTo(IndexType.IVF_HNSW_SQ);
-    }
-
-    @Test
-    public void testIdentifierRejectsConflictingIndexType() {
-        Options options = new Options();
-        options.setString("vector.index.type", "ivf-pq");
-
-        assertThatThrownBy(() -> new VectorIndexOptions(options, "ivf-flat"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Conflicting vector index type");
-    }
-
-    @Test
     public void testMDivisibilityValidation() {
         Options options = new Options();
         options.setInteger("vector.index.dimension", 10);
         options.setInteger("vector.pq.m", 3);
-        assertThatThrownBy(() -> new VectorIndexOptions(options))
+        assertThatThrownBy(() -> new VectorIndexOptions(options, IndexType.IVF_PQ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must divide");
     }
@@ -117,13 +94,13 @@ public class VectorIndexOptionsTest {
     public void testInvalidSampleRatio() {
         Options options = new Options();
         options.setString("vector.train.sample-ratio", "0.0");
-        assertThatThrownBy(() -> new VectorIndexOptions(options))
+        assertThatThrownBy(() -> new VectorIndexOptions(options, IndexType.IVF_PQ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("vector.train.sample-ratio");
 
         Options options2 = new Options();
         options2.setString("vector.train.sample-ratio", "1.5");
-        assertThatThrownBy(() -> new VectorIndexOptions(options2))
+        assertThatThrownBy(() -> new VectorIndexOptions(options2, IndexType.IVF_PQ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("vector.train.sample-ratio");
     }
@@ -133,7 +110,7 @@ public class VectorIndexOptionsTest {
         for (String metric : new String[] {"l2", "cosine", "inner_product"}) {
             Options options = new Options();
             options.setString("vector.distance.metric", metric);
-            VectorIndexOptions indexOptions = new VectorIndexOptions(options);
+            VectorIndexOptions indexOptions = new VectorIndexOptions(options, IndexType.IVF_PQ);
             assertThat(indexOptions.metric().getConfigName()).isEqualTo(metric);
         }
     }
@@ -142,7 +119,7 @@ public class VectorIndexOptionsTest {
     public void testMetricParsingUpperCase() {
         Options options = new Options();
         options.setString("vector.distance.metric", "L2");
-        VectorIndexOptions indexOptions = new VectorIndexOptions(options);
+        VectorIndexOptions indexOptions = new VectorIndexOptions(options, IndexType.IVF_PQ);
         assertThat(indexOptions.metric()).isEqualTo(VectorMetric.L2);
     }
 }

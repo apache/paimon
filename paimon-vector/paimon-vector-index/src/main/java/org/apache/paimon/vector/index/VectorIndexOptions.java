@@ -25,23 +25,15 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
-import java.util.Locale;
+import java.util.Objects;
 
 /** Options for the Paimon vector index backed by paimon-vector-index. */
 public class VectorIndexOptions {
 
-    public static final String DEFAULT_IDENTIFIER = "vector";
     public static final String IVF_FLAT_IDENTIFIER = "ivf-flat";
     public static final String IVF_PQ_IDENTIFIER = "ivf-pq";
     public static final String IVF_HNSW_FLAT_IDENTIFIER = "ivf-hnsw-flat";
     public static final String IVF_HNSW_SQ_IDENTIFIER = "ivf-hnsw-sq";
-
-    public static final ConfigOption<String> INDEX_TYPE =
-            ConfigOptions.key("vector.index.type")
-                    .stringType()
-                    .defaultValue(IVF_PQ_IDENTIFIER)
-                    .withDescription(
-                            "Vector index algorithm (ivf-flat, ivf-pq, ivf-hnsw-flat, ivf-hnsw-sq).");
 
     public static final ConfigOption<Integer> DIMENSION =
             ConfigOptions.key("vector.index.dimension")
@@ -121,7 +113,6 @@ public class VectorIndexOptions {
                     .defaultValue(10000)
                     .withDescription("Batch size for adding vectors after training.");
 
-    private final String identifier;
     private final IndexType indexType;
     private final int dimension;
     private final VectorMetric metric;
@@ -134,13 +125,8 @@ public class VectorIndexOptions {
     private final double trainSampleRatio;
     private final int addBatchSize;
 
-    public VectorIndexOptions(Options options) {
-        this(options, DEFAULT_IDENTIFIER);
-    }
-
-    public VectorIndexOptions(Options options, String identifier) {
-        this.identifier = normalizeIdentifier(identifier);
-        this.indexType = resolveIndexType(options, this.identifier);
+    public VectorIndexOptions(Options options, IndexType indexType) {
+        this.indexType = Objects.requireNonNull(indexType, "indexType must not be null");
         this.dimension = validatePositive(options.get(DIMENSION), optionKey(DIMENSION));
         this.metric = parseMetric(options.get(DISTANCE_METRIC));
         this.nlist = validatePositive(options.get(NLIST), optionKey(NLIST));
@@ -170,10 +156,6 @@ public class VectorIndexOptions {
                             "%s must be in (0, 1.0], but got %f",
                             optionKey(TRAIN_SAMPLE_RATIO), trainSampleRatio));
         }
-    }
-
-    public String identifier() {
-        return identifier;
     }
 
     public IndexType indexType() {
@@ -270,33 +252,14 @@ public class VectorIndexOptions {
         return value;
     }
 
-    private static IndexType resolveIndexType(Options options, String identifier) {
-        if (DEFAULT_IDENTIFIER.equals(identifier)) {
-            return parseIndexType(options.get(INDEX_TYPE));
-        }
-
-        IndexType identifierType = parseIndexType(identifier);
-        if (options.contains(INDEX_TYPE)) {
-            IndexType configuredType = parseIndexType(options.get(INDEX_TYPE));
-            if (configuredType != identifierType) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Conflicting vector index type: identifier is '%s' but %s is '%s'",
-                                identifier, INDEX_TYPE.key(), options.get(INDEX_TYPE)));
-            }
-        }
-        return identifierType;
-    }
-
     public static IndexType parseIndexType(String value) {
-        String normalized = normalizeIdentifier(value);
-        if (IVF_PQ_IDENTIFIER.equals(normalized)) {
+        if (IVF_PQ_IDENTIFIER.equals(value)) {
             return IndexType.IVF_PQ;
-        } else if (IVF_FLAT_IDENTIFIER.equals(normalized)) {
+        } else if (IVF_FLAT_IDENTIFIER.equals(value)) {
             return IndexType.IVF_FLAT;
-        } else if (IVF_HNSW_FLAT_IDENTIFIER.equals(normalized)) {
+        } else if (IVF_HNSW_FLAT_IDENTIFIER.equals(value)) {
             return IndexType.IVF_HNSW_FLAT;
-        } else if (IVF_HNSW_SQ_IDENTIFIER.equals(normalized)) {
+        } else if (IVF_HNSW_SQ_IDENTIFIER.equals(value)) {
             return IndexType.IVF_HNSW_SQ;
         }
         throw new IllegalArgumentException("Unknown vector index type: " + value);
@@ -315,11 +278,6 @@ public class VectorIndexOptions {
             default:
                 throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
         }
-    }
-
-    private static String normalizeIdentifier(String identifier) {
-        String value = identifier == null ? DEFAULT_IDENTIFIER : identifier;
-        return value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 
     private static String optionKey(ConfigOption<?> option) {

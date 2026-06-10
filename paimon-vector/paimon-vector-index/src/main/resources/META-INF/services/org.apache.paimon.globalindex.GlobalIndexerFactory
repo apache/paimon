@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.vector.index.VectorGlobalIndexerFactory
 org.apache.paimon.vector.index.IvfFlatVectorGlobalIndexerFactory
 org.apache.paimon.vector.index.IvfPqAlgorithmVectorGlobalIndexerFactory
 org.apache.paimon.vector.index.IvfHnswFlatVectorGlobalIndexerFactory

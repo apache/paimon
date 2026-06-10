@@ -19,6 +19,7 @@
 package org.apache.paimon.vector.index;
 
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.index.ivfpq.IndexType;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +30,6 @@ public class VectorGlobalIndexerFactoryTest {
 
     @Test
     public void testIdentifier() {
-        assertThat(new VectorGlobalIndexerFactory().identifier()).isEqualTo("vector");
         assertThat(new IvfFlatVectorGlobalIndexerFactory().identifier()).isEqualTo("ivf-flat");
         assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().identifier()).isEqualTo("ivf-pq");
         assertThat(new IvfHnswFlatVectorGlobalIndexerFactory().identifier())
@@ -39,8 +39,6 @@ public class VectorGlobalIndexerFactoryTest {
 
     @Test
     public void testLoadByIdentifier() {
-        assertThat(GlobalIndexerFactoryUtils.load("vector"))
-                .isExactlyInstanceOf(VectorGlobalIndexerFactory.class);
         assertThat(GlobalIndexerFactoryUtils.load("ivf-flat"))
                 .isExactlyInstanceOf(IvfFlatVectorGlobalIndexerFactory.class);
         assertThat(GlobalIndexerFactoryUtils.load("ivf-pq"))
@@ -49,5 +47,17 @@ public class VectorGlobalIndexerFactoryTest {
                 .isExactlyInstanceOf(IvfHnswFlatVectorGlobalIndexerFactory.class);
         assertThat(GlobalIndexerFactoryUtils.load("ivf-hnsw-sq"))
                 .isExactlyInstanceOf(IvfHnswSqVectorGlobalIndexerFactory.class);
+    }
+
+    @Test
+    public void testFactoryIndexType() {
+        assertThat(new IvfFlatVectorGlobalIndexerFactory().indexType())
+                .isEqualTo(IndexType.IVF_FLAT);
+        assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().indexType())
+                .isEqualTo(IndexType.IVF_PQ);
+        assertThat(new IvfHnswFlatVectorGlobalIndexerFactory().indexType())
+                .isEqualTo(IndexType.IVF_HNSW_FLAT);
+        assertThat(new IvfHnswSqVectorGlobalIndexerFactory().indexType())
+                .isEqualTo(IndexType.IVF_HNSW_SQ);
     }
 }

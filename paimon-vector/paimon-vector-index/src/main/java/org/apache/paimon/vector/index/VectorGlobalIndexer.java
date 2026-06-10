@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.ivfpq.IndexType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
@@ -36,13 +37,9 @@ public class VectorGlobalIndexer implements GlobalIndexer {
     private final DataType fieldType;
     private final VectorIndexOptions options;
 
-    public VectorGlobalIndexer(DataType fieldType, Options options) {
-        this(fieldType, options, VectorGlobalIndexerFactory.IDENTIFIER);
-    }
-
-    public VectorGlobalIndexer(DataType fieldType, Options options, String identifier) {
+    public VectorGlobalIndexer(DataType fieldType, Options options, IndexType indexType) {
         this.fieldType = fieldType;
-        this.options = new VectorIndexOptions(options, identifier);
+        this.options = new VectorIndexOptions(options, indexType);
     }
 
     @Override
