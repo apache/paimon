@@ -209,11 +209,13 @@ case class DataEvolutionTableDataWrite(
           }
       }
 
-      // DedicatedFormatRollingFileWriter validates that blob/vector-store row counts match the
-      // normal file. Here we only assert the normal-file shape assumed by row-id assignment.
-      if (normalFileCount != 1) {
+      // Raw blob/vector-store only partial writes may produce no normal file. If a normal file is
+      // produced, row-id assignment assumes there is at most one in this target row range.
+      // DedicatedFormatRollingFileWriter validates dedicated file row counts when a normal file
+      // exists.
+      if (normalFileCount > 1) {
         throw new IllegalStateException(
-          s"This is a bug: DataEvolution partial write should produce exactly one normal file, " +
+          s"This is a bug: DataEvolution partial write should produce at most one normal file, " +
             s"but produced $normalFileCount files. Files: ${dataFiles.mkString(", ")}")
       }
 
