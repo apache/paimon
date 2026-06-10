@@ -95,6 +95,17 @@ class CatalogSplitProvider(SplitProvider):
             raise ValueError(
                 "snapshot_id and tag_name cannot be set at the same time"
             )
+        if dynamic_table_options:
+            if snapshot_id is not None and "scan.snapshot-id" in dynamic_table_options:
+                raise ValueError(
+                    "snapshot_id and dynamic_table_options['scan.snapshot-id'] "
+                    "cannot be set at the same time"
+                )
+            if tag_name is not None and "scan.tag-name" in dynamic_table_options:
+                raise ValueError(
+                    "tag_name and dynamic_table_options['scan.tag-name'] "
+                    "cannot be set at the same time"
+                )
         self._table_identifier = table_identifier
         self._catalog_options = catalog_options
         self._predicate = predicate
