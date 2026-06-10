@@ -29,7 +29,7 @@ under the License.
     </parent>
 
     <artifactId>paimon-ivfpq-index</artifactId>
-    <name>Paimon : IVF-PQ Index</name>
+    <name>Paimon : Vector Index</name>
 
     <dependencies>
         <dependency>

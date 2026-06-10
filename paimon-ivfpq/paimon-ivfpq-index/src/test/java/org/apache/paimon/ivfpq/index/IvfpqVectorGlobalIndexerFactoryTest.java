@@ -24,17 +24,30 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for IVF-PQ global indexer factory SPI registration. */
+/** Tests for vector global indexer factory SPI registration. */
 public class IvfpqVectorGlobalIndexerFactoryTest {
 
     @Test
     public void testIdentifier() {
-        assertThat(new IvfpqVectorGlobalIndexerFactory().identifier()).isEqualTo("ivfpq");
+        assertThat(new IvfpqVectorGlobalIndexerFactory().identifier()).isEqualTo("vector");
+        assertThat(new IvfFlatVectorGlobalIndexerFactory().identifier()).isEqualTo("ivf-flat");
+        assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().identifier()).isEqualTo("ivf-pq");
+        assertThat(new IvfHnswFlatVectorGlobalIndexerFactory().identifier())
+                .isEqualTo("ivf-hnsw-flat");
+        assertThat(new IvfHnswSqVectorGlobalIndexerFactory().identifier()).isEqualTo("ivf-hnsw-sq");
     }
 
     @Test
     public void testLoadByIdentifier() {
-        assertThat(GlobalIndexerFactoryUtils.load("ivfpq"))
+        assertThat(GlobalIndexerFactoryUtils.load("vector"))
                 .isExactlyInstanceOf(IvfpqVectorGlobalIndexerFactory.class);
+        assertThat(GlobalIndexerFactoryUtils.load("ivf-flat"))
+                .isExactlyInstanceOf(IvfFlatVectorGlobalIndexerFactory.class);
+        assertThat(GlobalIndexerFactoryUtils.load("ivf-pq"))
+                .isExactlyInstanceOf(IvfPqAlgorithmVectorGlobalIndexerFactory.class);
+        assertThat(GlobalIndexerFactoryUtils.load("ivf-hnsw-flat"))
+                .isExactlyInstanceOf(IvfHnswFlatVectorGlobalIndexerFactory.class);
+        assertThat(GlobalIndexerFactoryUtils.load("ivf-hnsw-sq"))
+                .isExactlyInstanceOf(IvfHnswSqVectorGlobalIndexerFactory.class);
     }
 }

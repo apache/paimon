@@ -29,7 +29,7 @@ under the License.
     </parent>
 
     <artifactId>paimon-ivfpq-jni</artifactId>
-    <name>Paimon : IVF-PQ JNI</name>
+    <name>Paimon : Vector Index JNI</name>
 
     <properties>
         <target.java.version>1.8</target.java.version>

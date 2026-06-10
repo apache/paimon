@@ -18,6 +18,7 @@
 
 package org.apache.paimon.ivfpq.index;
 
+import org.apache.paimon.index.ivfpq.IndexType;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -33,11 +34,16 @@ public class IvfpqVectorIndexOptionsTest {
         Options options = new Options();
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         assertThat(indexOptions.dimension()).isEqualTo(128);
+        assertThat(indexOptions.indexType()).isEqualTo(IndexType.IVF_PQ);
         assertThat(indexOptions.metric()).isEqualTo(IvfpqVectorMetric.INNER_PRODUCT);
         assertThat(indexOptions.nlist()).isEqualTo(256);
         assertThat(indexOptions.m()).isEqualTo(16);
         assertThat(indexOptions.useOpq()).isFalse();
+        assertThat(indexOptions.hnswConfig().m()).isEqualTo(20);
+        assertThat(indexOptions.hnswConfig().efConstruction()).isEqualTo(150);
+        assertThat(indexOptions.hnswConfig().maxLevel()).isEqualTo(7);
         assertThat(indexOptions.nprobe()).isEqualTo(16);
+        assertThat(indexOptions.efSearch()).isEqualTo(0);
         assertThat(indexOptions.trainSampleRatio()).isEqualTo(1.0);
         assertThat(indexOptions.addBatchSize()).isEqualTo(10000);
     }
@@ -45,31 +51,63 @@ public class IvfpqVectorIndexOptionsTest {
     @Test
     public void testCustomOptions() {
         Options options = new Options();
-        options.setInteger("ivfpq.index.dimension", 64);
-        options.setString("ivfpq.distance.metric", "l2");
-        options.setInteger("ivfpq.nlist", 128);
-        options.setInteger("ivfpq.m", 8);
-        options.setBoolean("ivfpq.use_opq", true);
-        options.setInteger("ivfpq.nprobe", 32);
-        options.setDouble("ivfpq.train.sample_ratio", 0.5);
-        options.setInteger("ivfpq.add.batch_size", 5000);
+        options.setString("vector.index.type", "ivf-hnsw-sq");
+        options.setInteger("vector.index.dimension", 64);
+        options.setString("vector.distance.metric", "l2");
+        options.setInteger("vector.nlist", 128);
+        options.setInteger("vector.pq.m", 8);
+        options.setString("vector.pq.use-opq", "true");
+        options.setInteger("vector.hnsw.m", 12);
+        options.setInteger("vector.hnsw.ef-construction", 64);
+        options.setInteger("vector.hnsw.max-level", 5);
+        options.setInteger("vector.nprobe", 32);
+        options.setInteger("vector.hnsw.ef-search", 96);
+        options.setString("vector.train.sample-ratio", "0.5");
+        options.setInteger("vector.add.batch-size", 5000);
 
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         assertThat(indexOptions.dimension()).isEqualTo(64);
+        assertThat(indexOptions.indexType()).isEqualTo(IndexType.IVF_HNSW_SQ);
         assertThat(indexOptions.metric()).isEqualTo(IvfpqVectorMetric.L2);
         assertThat(indexOptions.nlist()).isEqualTo(128);
         assertThat(indexOptions.m()).isEqualTo(8);
         assertThat(indexOptions.useOpq()).isTrue();
+        assertThat(indexOptions.hnswConfig().m()).isEqualTo(12);
+        assertThat(indexOptions.hnswConfig().efConstruction()).isEqualTo(64);
+        assertThat(indexOptions.hnswConfig().maxLevel()).isEqualTo(5);
         assertThat(indexOptions.nprobe()).isEqualTo(32);
+        assertThat(indexOptions.efSearch()).isEqualTo(96);
         assertThat(indexOptions.trainSampleRatio()).isEqualTo(0.5);
         assertThat(indexOptions.addBatchSize()).isEqualTo(5000);
     }
 
     @Test
+    public void testIdentifierSelectsIndexType() {
+        assertThat(new IvfpqVectorIndexOptions(new Options(), "ivf-flat").indexType())
+                .isEqualTo(IndexType.IVF_FLAT);
+        assertThat(new IvfpqVectorIndexOptions(new Options(), "ivf-pq").indexType())
+                .isEqualTo(IndexType.IVF_PQ);
+        assertThat(new IvfpqVectorIndexOptions(new Options(), "ivf-hnsw-flat").indexType())
+                .isEqualTo(IndexType.IVF_HNSW_FLAT);
+        assertThat(new IvfpqVectorIndexOptions(new Options(), "ivf-hnsw-sq").indexType())
+                .isEqualTo(IndexType.IVF_HNSW_SQ);
+    }
+
+    @Test
+    public void testIdentifierRejectsConflictingIndexType() {
+        Options options = new Options();
+        options.setString("vector.index.type", "ivf-pq");
+
+        assertThatThrownBy(() -> new IvfpqVectorIndexOptions(options, "ivf-flat"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Conflicting vector index type");
+    }
+
+    @Test
     public void testMDivisibilityValidation() {
         Options options = new Options();
-        options.setInteger("ivfpq.index.dimension", 10);
-        options.setInteger("ivfpq.m", 3);
+        options.setInteger("vector.index.dimension", 10);
+        options.setInteger("vector.pq.m", 3);
         assertThatThrownBy(() -> new IvfpqVectorIndexOptions(options))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("must divide");
@@ -78,23 +116,23 @@ public class IvfpqVectorIndexOptionsTest {
     @Test
     public void testInvalidSampleRatio() {
         Options options = new Options();
-        options.setDouble("ivfpq.train.sample_ratio", 0.0);
+        options.setString("vector.train.sample-ratio", "0.0");
         assertThatThrownBy(() -> new IvfpqVectorIndexOptions(options))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("sample_ratio");
+                .hasMessageContaining("vector.train.sample-ratio");
 
         Options options2 = new Options();
-        options2.setDouble("ivfpq.train.sample_ratio", 1.5);
+        options2.setString("vector.train.sample-ratio", "1.5");
         assertThatThrownBy(() -> new IvfpqVectorIndexOptions(options2))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("sample_ratio");
+                .hasMessageContaining("vector.train.sample-ratio");
     }
 
     @Test
     public void testMetricParsing() {
         for (String metric : new String[] {"l2", "cosine", "inner_product"}) {
             Options options = new Options();
-            options.setString("ivfpq.distance.metric", metric);
+            options.setString("vector.distance.metric", metric);
             IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
             assertThat(indexOptions.metric().getConfigName()).isEqualTo(metric);
         }
@@ -103,7 +141,7 @@ public class IvfpqVectorIndexOptionsTest {
     @Test
     public void testMetricParsingUpperCase() {
         Options options = new Options();
-        options.setString("ivfpq.distance.metric", "L2");
+        options.setString("vector.distance.metric", "L2");
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         assertThat(indexOptions.metric()).isEqualTo(IvfpqVectorMetric.L2);
     }

@@ -24,8 +24,9 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.index.ivfpq.IVFPQReader;
-import org.apache.paimon.index.ivfpq.IVFPQResult;
+import org.apache.paimon.index.ivfpq.VectorIndexInput;
+import org.apache.paimon.index.ivfpq.VectorIndexReader;
+import org.apache.paimon.index.ivfpq.VectorSearchResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -45,11 +46,10 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Vector global index reader using IVF-PQ.
+ * Vector global index reader using paimon-vector-index.
  *
- * <p>Each shard has exactly one IVF-PQ index file. The reader lazily opens the index and performs
- * vector similarity search. The native Rust JNI layer calls {@code seek(long)} and {@code
- * read(byte[], int, int)} directly on the {@link SeekableInputStream}, so no adapter is needed.
+ * <p>Each shard has exactly one vector index file. The reader lazily opens the index and performs
+ * vector similarity search.
  */
 public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
 
@@ -60,7 +60,7 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
     private final ExecutorService executor;
 
     private volatile IvfpqIndexMeta indexMeta;
-    private volatile IVFPQReader ivfpqReader;
+    private volatile VectorIndexReader vectorReader;
     private SeekableInputStream openStream;
 
     public IvfpqVectorGlobalIndexReader(
@@ -88,7 +88,7 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
                     } catch (IOException e) {
                         throw new RuntimeException(
                                 String.format(
-                                        "Failed IVF-PQ search: field=%s, limit=%d",
+                                        "Failed vector index search: field=%s, limit=%d",
                                         vectorSearch.fieldName(), vectorSearch.limit()),
                                 e);
                     }
@@ -104,7 +104,7 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
         IvfpqVectorMetric metric = indexMeta.metric();
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
-        IVFPQResult result;
+        VectorSearchResult result;
 
         if (includeRowIds != null) {
             long cardinality = includeRowIds.getLongCardinality();
@@ -113,9 +113,11 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
             }
             byte[] filterBytes = includeRowIds.serialize();
             int effectiveK = (int) Math.min(limit, cardinality);
-            result = ivfpqReader.search(queryVector, effectiveK, nprobe, filterBytes);
+            result =
+                    vectorReader.search(
+                            queryVector, effectiveK, nprobe, indexMeta.efSearch(), filterBytes);
         } else {
-            result = ivfpqReader.search(queryVector, limit, nprobe);
+            result = vectorReader.search(queryVector, limit, nprobe, indexMeta.efSearch());
         }
 
         long[] ids = result.ids();
@@ -182,7 +184,7 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
         }
         if (!validFieldType) {
             throw new IllegalArgumentException(
-                    "IVF-PQ requires VectorType<FLOAT> or ArrayType<FLOAT>, but field type is: "
+                    "Vector index requires VectorType<FLOAT> or ArrayType<FLOAT>, but field type is: "
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
@@ -195,13 +197,14 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     private void ensureLoaded() throws IOException {
-        if (ivfpqReader == null) {
+        if (vectorReader == null) {
             synchronized (this) {
-                if (ivfpqReader == null) {
+                if (vectorReader == null) {
                     indexMeta = IvfpqIndexMeta.deserialize(ioMeta.metadata());
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     try {
-                        ivfpqReader = new IVFPQReader(in);
+                        vectorReader =
+                                new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
                         openStream = in;
                     } catch (Exception e) {
                         IOUtils.closeQuietly(in);
@@ -216,13 +219,13 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
     public void close() throws IOException {
         Throwable firstException = null;
 
-        if (ivfpqReader != null) {
+        if (vectorReader != null) {
             try {
-                ivfpqReader.close();
+                vectorReader.close();
             } catch (Throwable t) {
                 firstException = t;
             }
-            ivfpqReader = null;
+            vectorReader = null;
         }
 
         if (openStream != null) {
@@ -245,7 +248,46 @@ public class IvfpqVectorGlobalIndexReader implements GlobalIndexReader {
                 throw (RuntimeException) firstException;
             } else {
                 throw new RuntimeException(
-                        "Failed to close IVF-PQ vector global index reader", firstException);
+                        "Failed to close vector global index reader", firstException);
+            }
+        }
+    }
+
+    private static class SeekableStreamVectorIndexInput implements VectorIndexInput {
+
+        private final SeekableInputStream input;
+
+        private SeekableStreamVectorIndexInput(SeekableInputStream input) {
+            this.input = input;
+        }
+
+        @Override
+        public synchronized void pread(long[] positions, byte[][] buffers) {
+            if (positions.length != buffers.length) {
+                throw new IllegalArgumentException(
+                        "positions length "
+                                + positions.length
+                                + " != buffers length "
+                                + buffers.length);
+            }
+            try {
+                for (int i = 0; i < positions.length; i++) {
+                    input.seek(positions[i]);
+                    readFully(input, buffers[i]);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read vector index", e);
+            }
+        }
+
+        private static void readFully(SeekableInputStream input, byte[] buffer) throws IOException {
+            int offset = 0;
+            while (offset < buffer.length) {
+                int read = input.read(buffer, offset, buffer.length - offset);
+                if (read < 0) {
+                    throw new IOException("Unexpected end of vector index file");
+                }
+                offset += read;
             }
         }
     }

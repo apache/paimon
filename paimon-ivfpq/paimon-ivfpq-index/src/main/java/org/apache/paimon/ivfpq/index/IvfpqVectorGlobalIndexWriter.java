@@ -24,7 +24,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.index.ivfpq.IVFPQWriter;
+import org.apache.paimon.index.ivfpq.VectorIndexWriter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -45,7 +45,7 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Vector global index writer using IVF-PQ.
+ * Vector global index writer using paimon-vector-index.
  *
  * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object)},
  * keeping Java heap usage constant (~8 MB buffer). During index build, vectors are read back for
@@ -55,7 +55,7 @@ import java.util.Random;
  */
 public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
 
-    private static final String FILE_NAME_PREFIX = "ivfpq";
+    private static final String FILE_NAME_PREFIX = "vector";
 
     private static final Logger LOG = LoggerFactory.getLogger(IvfpqVectorGlobalIndexWriter.class);
 
@@ -89,7 +89,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
         validateFieldType(fieldType);
 
         try {
-            this.tempVectorFile = File.createTempFile("ivfpq-vectors-", ".bin");
+            this.tempVectorFile = File.createTempFile("paimon-vector-index-vectors-", ".bin");
             this.tempVectorFile.deleteOnExit();
             @SuppressWarnings("resource")
             RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "rw");
@@ -106,7 +106,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
             DataType elementType = ((VectorType) dataType).getElementType();
             if (!(elementType instanceof FloatType)) {
                 throw new IllegalArgumentException(
-                        "IVF-PQ index requires float vector, but got: " + elementType);
+                        "Vector index requires float vector, but got: " + elementType);
             }
             return;
         }
@@ -114,12 +114,12 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
             DataType elementType = ((ArrayType) dataType).getElementType();
             if (!(elementType instanceof FloatType)) {
                 throw new IllegalArgumentException(
-                        "IVF-PQ index requires float array, but got: " + elementType);
+                        "Vector index requires float array, but got: " + elementType);
             }
             return;
         }
         throw new IllegalArgumentException(
-                "IVF-PQ index requires VectorType or ArrayType<FLOAT>, but got: " + dataType);
+                "Vector index requires VectorType or ArrayType<FLOAT>, but got: " + dataType);
     }
 
     @Override
@@ -204,7 +204,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
             writeBuf = null;
             return Collections.singletonList(buildIndex());
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write IVF-PQ vector global index", e);
+            throw new RuntimeException("Failed to write vector global index", e);
         } finally {
             if (tempVectorFile != null) {
                 tempVectorFile.delete();
@@ -217,46 +217,54 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
         int effectiveNlist = (int) Math.min(options.nlist(), count);
 
         LOG.info(
-                "IVF-PQ index build started: {} vectors, dim={}, nlist={}, m={}, metric={}",
+                "{} vector index build started: {} vectors, dim={}, nlist={}, metric={}",
+                options.logName(),
                 count,
                 dim,
                 effectiveNlist,
-                options.m(),
                 options.metric());
         long buildStart = System.currentTimeMillis();
 
-        try (IVFPQWriter writer =
-                new IVFPQWriter(
-                        dim,
-                        effectiveNlist,
-                        options.m(),
-                        options.metric().toNativeMetric(),
-                        options.useOpq())) {
+        try (VectorIndexWriter writer =
+                new VectorIndexWriter(options.toVectorIndexConfig(effectiveNlist))) {
 
             // Phase 1: Train
             long phaseStart = System.currentTimeMillis();
-            LOG.info("IVF-PQ train phase started (sample_ratio={})", options.trainSampleRatio());
+            LOG.info(
+                    "{} train phase started (sample_ratio={})",
+                    options.logName(),
+                    options.trainSampleRatio());
             trainFromTempFile(writer);
-            LOG.info("IVF-PQ train phase done in {} ms", System.currentTimeMillis() - phaseStart);
+            LOG.info(
+                    "{} train phase done in {} ms",
+                    options.logName(),
+                    System.currentTimeMillis() - phaseStart);
 
             // Phase 2: Add all vectors in batches
             phaseStart = System.currentTimeMillis();
-            LOG.info("IVF-PQ add phase started");
+            LOG.info("{} add phase started", options.logName());
             addVectorsFromTempFile(writer);
-            LOG.info("IVF-PQ add phase done in {} ms", System.currentTimeMillis() - phaseStart);
+            LOG.info(
+                    "{} add phase done in {} ms",
+                    options.logName(),
+                    System.currentTimeMillis() - phaseStart);
 
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
-            LOG.info("IVF-PQ write phase started");
-            String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
+            LOG.info("{} write phase started", options.logName());
+            String fileName = fileWriter.newFileName(fileNamePrefix());
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
                 writer.writeIndex(out);
                 out.flush();
             }
-            LOG.info("IVF-PQ write phase done in {} ms", System.currentTimeMillis() - phaseStart);
+            LOG.info(
+                    "{} write phase done in {} ms",
+                    options.logName(),
+                    System.currentTimeMillis() - phaseStart);
 
             LOG.info(
-                    "IVF-PQ index build completed in {} ms",
+                    "{} vector index build completed in {} ms",
+                    options.logName(),
                     System.currentTimeMillis() - buildStart);
 
             IvfpqIndexMeta meta = new IvfpqIndexMeta(options);
@@ -264,7 +272,11 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
         }
     }
 
-    private void trainFromTempFile(IVFPQWriter writer) throws IOException {
+    private String fileNamePrefix() {
+        return FILE_NAME_PREFIX + "-" + options.logName();
+    }
+
+    private void trainFromTempFile(VectorIndexWriter writer) throws IOException {
         double sampleRatio = options.trainSampleRatio();
         int minTrainSize = (int) Math.min(count, Math.max(options.nlist() * 39L, 256));
         int sampleCount;
@@ -321,7 +333,7 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
         writer.train(trainData, sampleCount);
     }
 
-    private void addVectorsFromTempFile(IVFPQWriter writer) throws IOException {
+    private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {
         int batchSize = options.addBatchSize();
         long[] batchIds = new long[batchSize];
         float[] batchVectors = new float[batchSize * dim];
@@ -350,8 +362,8 @@ public class IvfpqVectorGlobalIndexWriter implements GlobalIndexSingletonWriter,
                 int percent = (int) ((count - remaining) * 100 / count);
                 if (percent / 10 > lastLoggedPercent / 10) {
                     LOG.info(
-                            "IVF-PQ add progress: {}/{} vectors ({}%)",
-                            count - remaining, count, percent);
+                            "{} add progress: {}/{} vectors ({}%)",
+                            options.logName(), count - remaining, count, percent);
                     lastLoggedPercent = percent;
                 }
             }

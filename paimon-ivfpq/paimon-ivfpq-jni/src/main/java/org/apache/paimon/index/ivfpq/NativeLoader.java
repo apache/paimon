@@ -28,7 +28,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Locale;
 
-/** Utility class for loading the native IVF-PQ JNI library. */
+/** Utility class for loading the native vector index JNI library. */
 public final class NativeLoader {
     private static boolean loaded = false;
 

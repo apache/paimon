@@ -23,10 +23,10 @@ import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
-/** Factory for creating IVF-PQ vector index. */
+/** Factory for creating vector indexes backed by paimon-vector-index. */
 public class IvfpqVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    public static final String IDENTIFIER = "ivfpq";
+    public static final String IDENTIFIER = "vector";
 
     @Override
     public String identifier() {
@@ -35,6 +35,6 @@ public class IvfpqVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new IvfpqVectorGlobalIndexer(field.type(), options);
+        return new IvfpqVectorGlobalIndexer(field.type(), options, identifier());
     }
 }

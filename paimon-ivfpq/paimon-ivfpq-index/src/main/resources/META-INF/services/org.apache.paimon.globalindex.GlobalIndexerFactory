@@ -14,3 +14,7 @@
 # limitations under the License.
 
 org.apache.paimon.ivfpq.index.IvfpqVectorGlobalIndexerFactory
+org.apache.paimon.ivfpq.index.IvfFlatVectorGlobalIndexerFactory
+org.apache.paimon.ivfpq.index.IvfPqAlgorithmVectorGlobalIndexerFactory
+org.apache.paimon.ivfpq.index.IvfHnswFlatVectorGlobalIndexerFactory
+org.apache.paimon.ivfpq.index.IvfHnswSqVectorGlobalIndexerFactory

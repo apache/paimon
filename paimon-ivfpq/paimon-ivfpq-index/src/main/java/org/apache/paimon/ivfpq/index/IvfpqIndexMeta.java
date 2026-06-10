@@ -18,6 +18,9 @@
 
 package org.apache.paimon.ivfpq.index;
 
+import org.apache.paimon.index.ivfpq.HnswConfig;
+import org.apache.paimon.index.ivfpq.IndexType;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -27,7 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Metadata for an IVF-PQ vector index file.
+ * Metadata for a vector index file.
  *
  * <p>Serialized as a flat JSON {@code Map<String, String>} storing the index build parameters
  * required for correct search-time behavior.
@@ -36,12 +39,17 @@ public class IvfpqIndexMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final String KEY_INDEX_TYPE = "index_type";
     private static final String KEY_DIMENSION = "dimension";
     private static final String KEY_METRIC = "metric";
     private static final String KEY_NLIST = "nlist";
     private static final String KEY_M = "m";
     private static final String KEY_USE_OPQ = "use_opq";
+    private static final String KEY_HNSW_M = "hnsw_m";
+    private static final String KEY_HNSW_EF_CONSTRUCTION = "hnsw_ef_construction";
+    private static final String KEY_HNSW_MAX_LEVEL = "hnsw_max_level";
     private static final String KEY_NPROBE = "nprobe";
+    private static final String KEY_EF_SEARCH = "ef_search";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -52,16 +60,30 @@ public class IvfpqIndexMeta implements Serializable {
 
     public IvfpqIndexMeta(IvfpqVectorIndexOptions options) {
         this.params = new LinkedHashMap<>();
+        params.put(KEY_INDEX_TYPE, IvfpqVectorIndexOptions.toIdentifier(options.indexType()));
         params.put(KEY_DIMENSION, String.valueOf(options.dimension()));
         params.put(KEY_METRIC, options.metric().getConfigName());
         params.put(KEY_NLIST, String.valueOf(options.nlist()));
         params.put(KEY_M, String.valueOf(options.m()));
         params.put(KEY_USE_OPQ, String.valueOf(options.useOpq()));
+        params.put(KEY_HNSW_M, String.valueOf(options.hnswConfig().m()));
+        params.put(KEY_HNSW_EF_CONSTRUCTION, String.valueOf(options.hnswConfig().efConstruction()));
+        params.put(KEY_HNSW_MAX_LEVEL, String.valueOf(options.hnswConfig().maxLevel()));
         params.put(KEY_NPROBE, String.valueOf(options.nprobe()));
+        params.put(KEY_EF_SEARCH, String.valueOf(options.efSearch()));
     }
 
     private IvfpqIndexMeta(Map<String, String> params) {
         this.params = new LinkedHashMap<>(params);
+    }
+
+    public IndexType indexType() {
+        String value = params.get(KEY_INDEX_TYPE);
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    "Missing required key in vector index metadata: " + KEY_INDEX_TYPE);
+        }
+        return IvfpqVectorIndexOptions.parseIndexType(value);
     }
 
     public int dimension() {
@@ -77,16 +99,26 @@ public class IvfpqIndexMeta implements Serializable {
     }
 
     public int m() {
-        return Integer.parseInt(params.get(KEY_M));
+        return intValue(KEY_M, 0);
     }
 
     public boolean useOpq() {
         return Boolean.parseBoolean(params.get(KEY_USE_OPQ));
     }
 
+    public HnswConfig hnswConfig() {
+        return new HnswConfig(
+                intValue(KEY_HNSW_M, HnswConfig.DEFAULT.m()),
+                intValue(KEY_HNSW_EF_CONSTRUCTION, HnswConfig.DEFAULT.efConstruction()),
+                intValue(KEY_HNSW_MAX_LEVEL, HnswConfig.DEFAULT.maxLevel()));
+    }
+
     public int nprobe() {
-        String val = params.get(KEY_NPROBE);
-        return val != null ? Integer.parseInt(val) : 16;
+        return intValue(KEY_NPROBE, 16);
+    }
+
+    public int efSearch() {
+        return intValue(KEY_EF_SEARCH, 0);
     }
 
     public byte[] serialize() throws IOException {
@@ -97,11 +129,20 @@ public class IvfpqIndexMeta implements Serializable {
         Map<String, String> map = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
         if (!map.containsKey(KEY_DIMENSION)) {
             throw new IOException(
-                    "Missing required key in IVF-PQ index metadata: " + KEY_DIMENSION);
+                    "Missing required key in vector index metadata: " + KEY_DIMENSION);
+        }
+        if (!map.containsKey(KEY_INDEX_TYPE)) {
+            throw new IOException(
+                    "Missing required key in vector index metadata: " + KEY_INDEX_TYPE);
         }
         if (!map.containsKey(KEY_METRIC)) {
-            throw new IOException("Missing required key in IVF-PQ index metadata: " + KEY_METRIC);
+            throw new IOException("Missing required key in vector index metadata: " + KEY_METRIC);
         }
         return new IvfpqIndexMeta(map);
+    }
+
+    private int intValue(String key, int defaultValue) {
+        String val = params.get(key);
+        return val == null ? defaultValue : Integer.parseInt(val);
     }
 }

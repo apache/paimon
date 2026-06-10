@@ -16,21 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.ivfpq;
+package org.apache.paimon.ivfpq.index;
 
-/** Distance metric for vector search. */
-public enum Metric {
-    L2(0),
-    INNER_PRODUCT(1),
-    COSINE(2);
+/** Factory for the {@code ivf-hnsw-flat} vector index identifier. */
+public class IvfHnswFlatVectorGlobalIndexerFactory extends IvfpqVectorGlobalIndexerFactory {
 
-    private final int code;
+    public static final String IDENTIFIER = "ivf-hnsw-flat";
 
-    Metric(int code) {
-        this.code = code;
-    }
-
-    public int code() {
-        return code;
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

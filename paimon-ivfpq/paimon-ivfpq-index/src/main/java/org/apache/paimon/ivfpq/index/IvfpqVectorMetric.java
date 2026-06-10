@@ -20,7 +20,7 @@ package org.apache.paimon.ivfpq.index;
 
 import org.apache.paimon.index.ivfpq.Metric;
 
-/** Enumeration of supported IVF-PQ vector distance metrics. */
+/** Enumeration of supported vector distance metrics. */
 public enum IvfpqVectorMetric {
     L2("l2", Metric.L2),
     COSINE("cosine", Metric.COSINE),

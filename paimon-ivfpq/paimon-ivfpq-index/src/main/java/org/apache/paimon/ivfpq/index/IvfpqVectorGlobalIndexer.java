@@ -30,15 +30,19 @@ import org.apache.paimon.types.DataType;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
-/** IVF-PQ vector global indexer. */
+/** Vector global indexer backed by paimon-vector-index. */
 public class IvfpqVectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
     private final IvfpqVectorIndexOptions options;
 
     public IvfpqVectorGlobalIndexer(DataType fieldType, Options options) {
+        this(fieldType, options, IvfpqVectorGlobalIndexerFactory.IDENTIFIER);
+    }
+
+    public IvfpqVectorGlobalIndexer(DataType fieldType, Options options, String identifier) {
         this.fieldType = fieldType;
-        this.options = new IvfpqVectorIndexOptions(options);
+        this.options = new IvfpqVectorIndexOptions(options, identifier);
     }
 
     @Override

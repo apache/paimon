@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.ivfpq.IndexType;
 import org.apache.paimon.index.ivfpq.NativeLoader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
@@ -112,6 +113,7 @@ public class IvfpqVectorGlobalIndexTest {
     public void testVectorTypeRejectsNonFloatElement() {
         DataType intVecType = new VectorType(2, new IntType());
         Options options = createDefaultOptions(2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
 
@@ -126,6 +128,7 @@ public class IvfpqVectorGlobalIndexTest {
     @Test
     public void testNanInVectorRejected() {
         Options options = createDefaultOptions(2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         IvfpqVectorGlobalIndexWriter writer =
@@ -141,6 +144,7 @@ public class IvfpqVectorGlobalIndexTest {
     @Test
     public void testInfinityInVectorRejected() {
         Options options = createDefaultOptions(2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         IvfpqVectorGlobalIndexWriter writer =
@@ -157,6 +161,7 @@ public class IvfpqVectorGlobalIndexTest {
     @Test
     public void testAllNullReturnsEmpty() {
         Options options = createDefaultOptions(2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         IvfpqVectorGlobalIndexWriter writer =
@@ -172,12 +177,13 @@ public class IvfpqVectorGlobalIndexTest {
 
     @Test
     public void testMetaSerializationRoundTrip() throws IOException {
-        Options options = createDefaultOptions(32);
-        options.setString("ivfpq.distance.metric", "cosine");
-        options.setInteger("ivfpq.nlist", 64);
-        options.setInteger("ivfpq.m", 8);
-        options.setBoolean("ivfpq.use_opq", true);
-        options.setInteger("ivfpq.nprobe", 24);
+        Options options = new Options();
+        options.setInteger("vector.index.dimension", 32);
+        options.setString("vector.distance.metric", "cosine");
+        options.setInteger("vector.nlist", 64);
+        options.setInteger("vector.pq.m", 8);
+        options.setString("vector.pq.use-opq", "true");
+        options.setInteger("vector.nprobe", 24);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
 
         IvfpqIndexMeta meta = new IvfpqIndexMeta(indexOptions);
@@ -185,6 +191,7 @@ public class IvfpqVectorGlobalIndexTest {
         IvfpqIndexMeta deserialized = IvfpqIndexMeta.deserialize(serialized);
 
         assertThat(deserialized.dimension()).isEqualTo(32);
+        assertThat(deserialized.indexType()).isEqualTo(IndexType.IVF_PQ);
         assertThat(deserialized.metric()).isEqualTo(IvfpqVectorMetric.COSINE);
         assertThat(deserialized.nlist()).isEqualTo(64);
         assertThat(deserialized.m()).isEqualTo(8);
@@ -192,16 +199,40 @@ public class IvfpqVectorGlobalIndexTest {
         assertThat(deserialized.nprobe()).isEqualTo(24);
     }
 
+    @Test
+    public void testMetaSerializationRoundTripForHnsw() throws IOException {
+        Options options = new Options();
+        options.setString("vector.index.type", "ivf-hnsw-flat");
+        options.setInteger("vector.index.dimension", 16);
+        options.setString("vector.distance.metric", "l2");
+        options.setInteger("vector.nlist", 8);
+        options.setInteger("vector.hnsw.m", 12);
+        options.setInteger("vector.hnsw.ef-construction", 64);
+        options.setInteger("vector.hnsw.max-level", 5);
+        options.setInteger("vector.hnsw.ef-search", 80);
+        IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
+
+        IvfpqIndexMeta deserialized =
+                IvfpqIndexMeta.deserialize(new IvfpqIndexMeta(indexOptions).serialize());
+
+        assertThat(deserialized.indexType()).isEqualTo(IndexType.IVF_HNSW_FLAT);
+        assertThat(deserialized.dimension()).isEqualTo(16);
+        assertThat(deserialized.hnswConfig().m()).isEqualTo(12);
+        assertThat(deserialized.hnswConfig().efConstruction()).isEqualTo(64);
+        assertThat(deserialized.hnswConfig().maxLevel()).isEqualTo(5);
+        assertThat(deserialized.efSearch()).isEqualTo(80);
+    }
+
     // =================== Tests that NEED native library =====================
 
     @Test
     public void testFloatVectorEndToEnd() throws IOException {
-        Assumptions.assumeTrue(isNativeAvailable(), "IVF-PQ native library not available");
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("ivfpq.nlist", 2);
-        options.setInteger("ivfpq.m", 1);
+        options.setInteger("vector.nlist", 2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
 
         float[][] vectors =
@@ -236,12 +267,12 @@ public class IvfpqVectorGlobalIndexTest {
 
     @Test
     public void testSearchWithRoaringFilter() throws IOException {
-        Assumptions.assumeTrue(isNativeAvailable(), "IVF-PQ native library not available");
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("ivfpq.nlist", 2);
-        options.setInteger("ivfpq.m", 1);
+        options.setInteger("vector.nlist", 2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
 
         float[][] vectors =
@@ -281,12 +312,12 @@ public class IvfpqVectorGlobalIndexTest {
 
     @Test
     public void testNullVectorSkipWithCorrectIds() throws IOException {
-        Assumptions.assumeTrue(isNativeAvailable(), "IVF-PQ native library not available");
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("ivfpq.nlist", 2);
-        options.setInteger("ivfpq.m", 1);
+        options.setInteger("vector.nlist", 2);
+        options.setInteger("vector.pq.m", 1);
         IvfpqVectorIndexOptions indexOptions = new IvfpqVectorIndexOptions(options);
 
         float[][] vectors =
@@ -330,12 +361,12 @@ public class IvfpqVectorGlobalIndexTest {
 
     @Test
     public void testViaIndexer() throws IOException {
-        Assumptions.assumeTrue(isNativeAvailable(), "IVF-PQ native library not available");
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("ivfpq.nlist", 2);
-        options.setInteger("ivfpq.m", 1);
+        options.setInteger("vector.nlist", 2);
+        options.setInteger("vector.pq.m", 1);
 
         float[][] vectors =
                 new float[][] {
@@ -367,8 +398,8 @@ public class IvfpqVectorGlobalIndexTest {
 
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
-        options.setInteger("ivfpq.index.dimension", dimension);
-        options.setString("ivfpq.distance.metric", "l2");
+        options.setInteger("vector.index.dimension", dimension);
+        options.setString("vector.distance.metric", "l2");
         return options;
     }
 
