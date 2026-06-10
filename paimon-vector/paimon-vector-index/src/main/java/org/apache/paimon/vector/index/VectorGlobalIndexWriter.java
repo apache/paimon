@@ -439,15 +439,6 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
 
     private Map<String, String> metadata() {
         Map<String, String> metadata = new LinkedHashMap<>();
-        metadata.put(VectorIndexMeta.KEY_INDEX_TYPE, identifier);
-        metadata.put(VectorIndexMeta.KEY_DIMENSION, String.valueOf(dim));
-        metadata.put(VectorIndexMeta.KEY_METRIC, metric);
-        metadata.put(VectorIndexMeta.KEY_NLIST, String.valueOf(nlist));
-        metadata.put(VectorIndexMeta.KEY_M, String.valueOf(pqM));
-        metadata.put(VectorIndexMeta.KEY_USE_OPQ, String.valueOf(useOpq));
-        metadata.put(VectorIndexMeta.KEY_HNSW_M, String.valueOf(hnswM));
-        metadata.put(VectorIndexMeta.KEY_HNSW_EF_CONSTRUCTION, String.valueOf(hnswEfConstruction));
-        metadata.put(VectorIndexMeta.KEY_HNSW_MAX_LEVEL, String.valueOf(hnswMaxLevel));
         metadata.put(VectorIndexMeta.KEY_NPROBE, String.valueOf(nprobe));
         metadata.put(VectorIndexMeta.KEY_EF_SEARCH, String.valueOf(efSearch));
         return metadata;

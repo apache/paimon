@@ -24,7 +24,9 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.index.ivfpq.Metric;
 import org.apache.paimon.index.ivfpq.VectorIndexInput;
+import org.apache.paimon.index.ivfpq.VectorIndexMetadata;
 import org.apache.paimon.index.ivfpq.VectorIndexReader;
 import org.apache.paimon.index.ivfpq.VectorSearchResult;
 import org.apache.paimon.predicate.FieldRef;
@@ -59,6 +61,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     private final ExecutorService executor;
 
     private volatile VectorIndexMeta indexMeta;
+    private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
     private SeekableInputStream openStream;
 
@@ -98,7 +101,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         int nprobe = indexMeta.nprobe();
-        String metric = indexMeta.metric();
+        Metric metric = nativeMeta.metric();
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
         VectorSearchResult result;
@@ -155,15 +158,17 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 });
     }
 
-    private static float convertDistanceToScore(float distance, String metric) {
-        if ("l2".equals(metric)) {
-            return 1.0f / (1.0f + distance);
-        } else if ("cosine".equals(metric)) {
-            return 1.0f - distance;
-        } else if ("inner_product".equals(metric)) {
-            return distance;
+    private static float convertDistanceToScore(float distance, Metric metric) {
+        switch (metric) {
+            case L2:
+                return 1.0f / (1.0f + distance);
+            case COSINE:
+                return 1.0f - distance;
+            case INNER_PRODUCT:
+                return distance;
+            default:
+                throw new IllegalArgumentException("Unknown metric: " + metric);
         }
-        throw new IllegalArgumentException("Unknown metric: " + metric);
     }
 
     private void validateSearchVector(Object vector) {
@@ -183,11 +188,11 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                             + fieldType);
         }
         int queryDim = ((float[]) vector).length;
-        if (queryDim != indexMeta.dimension()) {
+        if (queryDim != nativeMeta.dimension()) {
             throw new IllegalArgumentException(
                     String.format(
                             "Query vector dimension mismatch: index expects %d, but got %d",
-                            indexMeta.dimension(), queryDim));
+                            nativeMeta.dimension(), queryDim));
         }
     }
 
@@ -200,6 +205,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                     try {
                         vectorReader =
                                 new VectorIndexReader(new SeekableStreamVectorIndexInput(in));
+                        nativeMeta = vectorReader.metadata();
                         openStream = in;
                     } catch (Exception e) {
                         IOUtils.closeQuietly(in);

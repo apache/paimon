@@ -64,9 +64,6 @@ public class VectorGlobalIndexTest {
 
     private static final String IVF_PQ_IDENTIFIER =
             IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER;
-    private static final String IVF_HNSW_FLAT_IDENTIFIER =
-            IvfHnswFlatVectorGlobalIndexerFactory.IDENTIFIER;
-
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
@@ -173,48 +170,24 @@ public class VectorGlobalIndexTest {
     @Test
     public void testMetaSerializationRoundTrip() throws IOException {
         Options options = new Options();
-        options.setInteger("vector.index.dimension", 32);
-        options.setString("vector.distance.metric", "cosine");
-        options.setInteger("vector.nlist", 64);
-        options.setInteger("vector.pq.m", 8);
-        options.setString("vector.pq.use-opq", "true");
         options.setInteger("vector.nprobe", 24);
+        options.setInteger("vector.hnsw.ef-search", 80);
 
-        VectorIndexMeta meta = new VectorIndexMeta(metaOptions(IVF_PQ_IDENTIFIER, options));
+        VectorIndexMeta meta = new VectorIndexMeta(metaOptions(options));
         byte[] serialized = meta.serialize();
         VectorIndexMeta deserialized = VectorIndexMeta.deserialize(serialized);
 
-        assertThat(deserialized.dimension()).isEqualTo(32);
-        assertThat(deserialized.indexType()).isEqualTo(IndexType.IVF_PQ);
-        assertThat(deserialized.metric()).isEqualTo("cosine");
-        assertThat(deserialized.nlist()).isEqualTo(64);
-        assertThat(deserialized.m()).isEqualTo(8);
-        assertThat(deserialized.useOpq()).isTrue();
         assertThat(deserialized.nprobe()).isEqualTo(24);
+        assertThat(deserialized.efSearch()).isEqualTo(80);
     }
 
     @Test
-    public void testMetaSerializationRoundTripForHnsw() throws IOException {
-        Options options = new Options();
-        options.setInteger("vector.index.dimension", 16);
-        options.setString("vector.distance.metric", "l2");
-        options.setInteger("vector.nlist", 8);
-        options.setInteger("vector.hnsw.m", 12);
-        options.setInteger("vector.hnsw.ef-construction", 64);
-        options.setInteger("vector.hnsw.max-level", 5);
-        options.setInteger("vector.hnsw.ef-search", 80);
-
+    public void testMetaSerializationDefaults() throws IOException {
         VectorIndexMeta deserialized =
-                VectorIndexMeta.deserialize(
-                        new VectorIndexMeta(metaOptions(IVF_HNSW_FLAT_IDENTIFIER, options))
-                                .serialize());
+                VectorIndexMeta.deserialize(new VectorIndexMeta(new LinkedHashMap<>()).serialize());
 
-        assertThat(deserialized.indexType()).isEqualTo(IndexType.IVF_HNSW_FLAT);
-        assertThat(deserialized.dimension()).isEqualTo(16);
-        assertThat(deserialized.hnswM()).isEqualTo(12);
-        assertThat(deserialized.hnswEfConstruction()).isEqualTo(64);
-        assertThat(deserialized.hnswMaxLevel()).isEqualTo(5);
-        assertThat(deserialized.efSearch()).isEqualTo(80);
+        assertThat(deserialized.nprobe()).isEqualTo(16);
+        assertThat(deserialized.efSearch()).isEqualTo(0);
     }
 
     // =================== Tests that NEED native library =====================
@@ -394,30 +367,8 @@ public class VectorGlobalIndexTest {
         return options;
     }
 
-    private Map<String, String> metaOptions(String indexType, Options options) {
+    private Map<String, String> metaOptions(Options options) {
         Map<String, String> meta = new LinkedHashMap<>();
-        meta.put(VectorIndexMeta.KEY_INDEX_TYPE, indexType);
-        meta.put(
-                VectorIndexMeta.KEY_DIMENSION,
-                String.valueOf(options.getInteger("vector.index.dimension", 128)));
-        meta.put(
-                VectorIndexMeta.KEY_METRIC,
-                options.getString("vector.distance.metric", "inner_product"));
-        meta.put(
-                VectorIndexMeta.KEY_NLIST, String.valueOf(options.getInteger("vector.nlist", 256)));
-        meta.put(VectorIndexMeta.KEY_M, String.valueOf(options.getInteger("vector.pq.m", 16)));
-        meta.put(
-                VectorIndexMeta.KEY_USE_OPQ,
-                String.valueOf(options.getBoolean("vector.pq.use-opq", false)));
-        meta.put(
-                VectorIndexMeta.KEY_HNSW_M,
-                String.valueOf(options.getInteger("vector.hnsw.m", 20)));
-        meta.put(
-                VectorIndexMeta.KEY_HNSW_EF_CONSTRUCTION,
-                String.valueOf(options.getInteger("vector.hnsw.ef-construction", 150)));
-        meta.put(
-                VectorIndexMeta.KEY_HNSW_MAX_LEVEL,
-                String.valueOf(options.getInteger("vector.hnsw.max-level", 7)));
         meta.put(
                 VectorIndexMeta.KEY_NPROBE,
                 String.valueOf(options.getInteger("vector.nprobe", 16)));
