@@ -94,7 +94,11 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         this.partition = partition;
         this.readType = readType;
         this.indexField = indexField;
-        this.extraFields = extraFields;
+        // Copy into a serializable ArrayList: callers may pass a List#subList view (e.g.
+        // indexFields.subList(1, ...)), which is not Serializable, and this builder is serialized
+        // and shipped to Spark executors. A null value means no extra columns.
+        this.extraFields =
+                extraFields == null ? Collections.emptyList() : new ArrayList<>(extraFields);
         this.indexType = indexType;
         this.rowRange = rowRange;
         this.options = options;
