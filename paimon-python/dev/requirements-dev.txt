@@ -26,7 +26,7 @@ py4j==0.10.9.9
 pypaimon-rust==0.2.0; python_version >= "3.10"
 pytest~=7.0
 # merge_into needs Dataset.join (added in Ray 2.50). Python 3.8 has no 2.50 wheel.
-ray>=2.10.0; python_version >= "3.8" and python_version < "3.9"
+ray>=2.10.0; python_version < "3.9"
 ray>=2.50.0; python_version >= "3.9"
 requests
 # Vortex 0.71.0 regresses native predicate pushdown on single-row files.
