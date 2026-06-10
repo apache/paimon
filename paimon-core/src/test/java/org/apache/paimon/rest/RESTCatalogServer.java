@@ -45,10 +45,14 @@ import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
+import org.apache.paimon.resource.ResourceType;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
+import org.apache.paimon.rest.requests.AlterResourceRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
@@ -56,6 +60,7 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateResourceRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -73,6 +78,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetResourceResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -86,6 +92,9 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListResourceDetailsResponse;
+import org.apache.paimon.rest.responses.ListResourcesGloballyResponse;
+import org.apache.paimon.rest.responses.ListResourcesResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -121,6 +130,7 @@ import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
@@ -163,12 +173,15 @@ import static org.apache.paimon.rest.RESTApi.FUNCTION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.MAX_RESULTS;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
+import static org.apache.paimon.rest.RESTApi.RESOURCE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
 import static org.apache.paimon.rest.RESTApi.TAG_NAME_PREFIX;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
+import static org.apache.paimon.rest.ResourcePaths.RESOURCES;
+import static org.apache.paimon.rest.ResourcePaths.RESOURCE_DETAILS;
 import static org.apache.paimon.rest.ResourcePaths.TABLE_DETAILS;
 import static org.apache.paimon.rest.ResourcePaths.VIEWS;
 import static org.apache.paimon.rest.ResourcePaths.VIEW_DETAILS;
@@ -197,6 +210,7 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final List<String> noPermissionViews = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
+    private final Map<String, Resource> resourceStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
     private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
@@ -353,11 +367,12 @@ public class RESTCatalogServer {
                     } else if (StringUtils.startsWith(
                             request.getPath(), resourcePaths.functions())) {
                         return functionsHandle(parameters);
-                    } else if (request.getPath().startsWith(databaseUri)) {
+                    } else if (StringUtils.startsWith(
+                            request.getPath(), resourcePaths.resources())) {
+                        return resourcesHandle(parameters);
+                    } else if (resourcePath.startsWith(databaseUri)) {
                         String[] resources =
-                                request.getPath()
-                                        .substring((databaseUri + "/").length())
-                                        .split("/");
+                                resourcePath.substring((databaseUri + "/").length()).split("/");
                         String databaseName = RESTUtil.decodeString(resources[0]);
                         if (noPermissionDatabases.contains(databaseName)) {
                             throw new Catalog.DatabaseNoPermissionException(databaseName);
@@ -462,6 +477,12 @@ public class RESTCatalogServer {
                                 resources.length >= 5
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.TAGS.equals(resources[3]);
+                        boolean isResources =
+                                resources.length == 2 && resources[1].startsWith(RESOURCES);
+                        boolean isResourceDetails =
+                                resources.length == 2 && resources[1].startsWith(RESOURCE_DETAILS);
+                        boolean isResource =
+                                resources.length == 3 && RESOURCES.equals(resources[1]);
                         Identifier identifier =
                                 resources.length >= 3
                                                 && !"rename".equals(resources[2])
@@ -594,6 +615,19 @@ public class RESTCatalogServer {
                                     restAuthParameter.method(),
                                     identifier,
                                     restAuthParameter.data());
+                        } else if (isResource) {
+                            return resourceApiHandler(
+                                    identifier,
+                                    restAuthParameter.method(),
+                                    restAuthParameter.data());
+                        } else if (isResources) {
+                            return resourcesApiHandler(
+                                    databaseName,
+                                    restAuthParameter.method(),
+                                    restAuthParameter.data(),
+                                    parameters);
+                        } else if (isResourceDetails) {
+                            return resourceDetailsHandle(databaseName, parameters);
                         } else {
                             return databaseHandle(
                                     restAuthParameter.method(),
@@ -738,6 +772,22 @@ public class RESTCatalogServer {
                                     e.getMessage(),
                                     409);
                     return mockResponse(response, 409);
+                } catch (Catalog.ResourceNotExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    "RESOURCE",
+                                    e.identifier().getObjectName(),
+                                    e.getMessage(),
+                                    404);
+                    return mockResponse(response, 404);
+                } catch (Catalog.ResourceAlreadyExistException e) {
+                    response =
+                            new ErrorResponse(
+                                    "RESOURCE",
+                                    e.identifier().getObjectName(),
+                                    e.getMessage(),
+                                    409);
+                    return mockResponse(response, 409);
                 } catch (IllegalArgumentException e) {
                     response = new ErrorResponse(null, null, e.getMessage(), 400);
                     return mockResponse(response, 400);
@@ -757,9 +807,11 @@ public class RESTCatalogServer {
                         response = new ErrorResponse(null, null, e.getMessage(), 500);
                         return mockResponse(response, 500);
                     }
+                    String errorMsg =
+                            e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
                     return new MockResponse()
                             .setResponseCode(500)
-                            .setBody(e.getCause().getMessage());
+                            .setBody(errorMsg != null ? errorMsg : "Internal Server Error");
                 }
             }
         };
@@ -1270,6 +1322,174 @@ public class RESTCatalogServer {
                 1L,
                 "owner");
     }
+
+    // ==================== Resource Handlers ==========================
+
+    private MockResponse resourcesApiHandler(
+            String databaseName, String method, String data, Map<String, String> parameters)
+            throws Exception {
+        switch (method) {
+            case "GET":
+                String resourceNamePattern = parameters.get(RESOURCE_NAME_PATTERN);
+                List<String> resourceNames =
+                        resourceStore.keySet().stream()
+                                .map(Identifier::fromString)
+                                .filter(
+                                        id ->
+                                                id.getDatabaseName().equals(databaseName)
+                                                        && (Objects.isNull(resourceNamePattern)
+                                                                || matchNamePattern(
+                                                                        id.getObjectName(),
+                                                                        resourceNamePattern)))
+                                .map(Identifier::getObjectName)
+                                .collect(Collectors.toList());
+                return generateFinalListResourcesResponse(parameters, resourceNames);
+            case "POST":
+                CreateResourceRequest createRequest =
+                        RESTApi.fromJson(data, CreateResourceRequest.class);
+                Identifier resourceId = Identifier.create(databaseName, createRequest.name());
+                LOG.info(
+                        "resourcesApiHandler POST: databaseName={}, resourceId.fullName={}",
+                        databaseName,
+                        resourceId.getFullName());
+                if (resourceStore.containsKey(resourceId.getFullName())) {
+                    throw new Catalog.ResourceAlreadyExistException(resourceId);
+                }
+                Resource resource =
+                        Resource.toResource(
+                                ResourceType.fromValue(createRequest.resourceType()),
+                                resourceId,
+                                createRequest.comment(),
+                                createRequest.uri(),
+                                0L,
+                                System.currentTimeMillis());
+                resourceStore.put(resourceId.getFullName(), resource);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private MockResponse resourceApiHandler(Identifier identifier, String method, String data)
+            throws Exception {
+        if (!resourceStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.ResourceNotExistException(identifier);
+        }
+        switch (method) {
+            case "GET":
+                Resource resource = resourceStore.get(identifier.getFullName());
+                GetResourceResponse getResponse = toGetResourceResponse(resource);
+                return mockResponse(getResponse, 200);
+            case "DELETE":
+                resourceStore.remove(identifier.getFullName());
+                return new MockResponse().setResponseCode(200);
+            case "POST":
+                AlterResourceRequest alterRequest =
+                        RESTApi.fromJson(data, AlterResourceRequest.class);
+                Resource existingResource = resourceStore.get(identifier.getFullName());
+                String newComment = existingResource.comment().orElse(null);
+                String newUri = existingResource.uri();
+                for (ResourceChange change : alterRequest.changes()) {
+                    if (change instanceof ResourceChange.UpdateResourceComment) {
+                        newComment = ((ResourceChange.UpdateResourceComment) change).comment();
+                    } else if (change instanceof ResourceChange.UpdateResourceUri) {
+                        newUri = ((ResourceChange.UpdateResourceUri) change).uri();
+                    }
+                }
+                Resource updatedResource =
+                        Resource.toResource(
+                                existingResource.resourceType(),
+                                identifier,
+                                newComment,
+                                newUri,
+                                existingResource.size(),
+                                System.currentTimeMillis());
+                resourceStore.put(identifier.getFullName(), updatedResource);
+                return new MockResponse().setResponseCode(200);
+            default:
+                return new MockResponse().setResponseCode(404);
+        }
+    }
+
+    private MockResponse resourceDetailsHandle(
+            String databaseName, Map<String, String> parameters) {
+        String resourceNamePattern = parameters.get(RESOURCE_NAME_PATTERN);
+        List<GetResourceResponse> resourceDetails =
+                resourceStore.entrySet().stream()
+                        .filter(
+                                e -> {
+                                    Identifier id = Identifier.fromString(e.getKey());
+                                    return id.getDatabaseName().equals(databaseName)
+                                            && (Objects.isNull(resourceNamePattern)
+                                                    || matchNamePattern(
+                                                            id.getObjectName(),
+                                                            resourceNamePattern));
+                                })
+                        .map(e -> toGetResourceResponse(e.getValue()))
+                        .collect(Collectors.toList());
+
+        int maxResults;
+        try {
+            maxResults = getMaxResults(parameters);
+        } catch (NumberFormatException e) {
+            return handleInvalidMaxResults(parameters);
+        }
+        String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+
+        if (!resourceDetails.isEmpty()) {
+            PagedList<GetResourceResponse> pagedResourceDetails =
+                    buildPagedEntities(resourceDetails, maxResults, pageToken);
+            return mockResponse(
+                    new ListResourceDetailsResponse(
+                            pagedResourceDetails.getElements(),
+                            pagedResourceDetails.getNextPageToken()),
+                    200);
+        }
+        return mockResponse(new ListResourceDetailsResponse(Collections.emptyList(), null), 200);
+    }
+
+    private MockResponse generateFinalListResourcesResponse(
+            Map<String, String> parameters, List<String> resourceNames) {
+        int maxResults;
+        try {
+            maxResults = getMaxResults(parameters);
+        } catch (NumberFormatException e) {
+            return handleInvalidMaxResults(parameters);
+        }
+        String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+        PagedList<String> pagedResources = buildPagedEntities(resourceNames, maxResults, pageToken);
+        RESTResponse response =
+                new ListResourcesResponse(
+                        pagedResources.getElements(), pagedResources.getNextPageToken());
+        return mockResponse(response, 200);
+    }
+
+    private GetResourceResponse toGetResourceResponse(Resource resource) {
+        return new GetResourceResponse(
+                resource.name(),
+                resource.comment().orElse(null),
+                resource.uri(),
+                resource.size(),
+                resource.lastModifiedTime(),
+                resource.resourceType().getValue(),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
     private MockResponse databasesApiHandler(
             String method, String data, Map<String, String> parameters) throws Exception {
@@ -2349,6 +2569,46 @@ public class RESTCatalogServer {
         return fullViews;
     }
 
+    private MockResponse resourcesHandle(Map<String, String> parameters) {
+        RESTResponse response;
+        List<Identifier> resources = listResources(parameters);
+        if (!resources.isEmpty()) {
+            int maxResults;
+            try {
+                maxResults = getMaxResults(parameters);
+            } catch (NumberFormatException e) {
+                return handleInvalidMaxResults(parameters);
+            }
+            String pageToken = parameters.get(PAGE_TOKEN);
+            PagedList<Identifier> pagedResources =
+                    buildPagedEntities(resources, maxResults, pageToken);
+            response =
+                    new ListResourcesGloballyResponse(
+                            pagedResources.getElements(), pagedResources.getNextPageToken());
+        } else {
+            response = new ListResourcesGloballyResponse(Collections.emptyList(), null);
+        }
+        return mockResponse(response, 200);
+    }
+
+    private List<Identifier> listResources(Map<String, String> parameters) {
+        String resourceNamePattern = parameters.get(RESOURCE_NAME_PATTERN);
+        String databaseNamePattern = parameters.get(DATABASE_NAME_PATTERN);
+        List<Identifier> fullResources = new ArrayList<>();
+        for (Map.Entry<String, Resource> entry : resourceStore.entrySet()) {
+            Identifier identifier = Identifier.fromString(entry.getKey());
+            if ((Objects.isNull(databaseNamePattern)
+                            || matchNamePattern(identifier.getDatabaseName(), databaseNamePattern))
+                    && (Objects.isNull(resourceNamePattern)
+                            || matchNamePattern(identifier.getObjectName(), resourceNamePattern))) {
+                fullResources.add(identifier);
+            }
+        }
+        return fullResources;
+    }
+
+
+
     private MockResponse viewHandle(String method, Identifier identifier, String requestData)
             throws Exception {
         RESTResponse response;
@@ -2801,6 +3061,8 @@ public class RESTCatalogServer {
         } else if (entity instanceof GetFunctionResponse) {
             GetFunctionResponse functionResponse = (GetFunctionResponse) entity;
             return functionResponse.name();
+        } else if (entity instanceof GetResourceResponse) {
+            return ((GetResourceResponse) entity).name();
         } else if (entity instanceof Identifier) {
             Identifier identifier = (Identifier) entity;
             return identifier.getFullName();

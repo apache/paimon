@@ -24,6 +24,8 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -362,6 +364,35 @@ public abstract class DelegateCatalog implements Catalog {
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
         wrapped.alterFunction(identifier, changes, ignoreIfNotExists);
+    }
+
+    @Override
+    public List<String> listResources(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listResources(databaseName);
+    }
+
+    @Override
+    public Resource getResource(Identifier identifier) throws ResourceNotExistException {
+        return wrapped.getResource(identifier);
+    }
+
+    @Override
+    public void createResource(Identifier identifier, Resource resource, boolean ignoreIfExists)
+            throws ResourceAlreadyExistException, DatabaseNotExistException {
+        wrapped.createResource(identifier, resource, ignoreIfExists);
+    }
+
+    @Override
+    public void dropResource(Identifier identifier, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
+        wrapped.dropResource(identifier, ignoreIfNotExists);
+    }
+
+    @Override
+    public void alterResource(
+            Identifier identifier, List<ResourceChange> changes, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
+        wrapped.alterResource(identifier, changes, ignoreIfNotExists);
     }
 
     @Override

@@ -28,6 +28,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -35,6 +36,7 @@ import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
+import org.apache.paimon.rest.requests.AlterResourceRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.AuthTableQueryRequest;
@@ -42,6 +44,7 @@ import org.apache.paimon.rest.requests.CommitTableRequest;
 import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateResourceRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
@@ -61,6 +64,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetResourceResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -73,6 +77,9 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
+import org.apache.paimon.rest.responses.ListResourceDetailsResponse;
+import org.apache.paimon.rest.responses.ListResourcesGloballyResponse;
+import org.apache.paimon.rest.responses.ListResourcesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
@@ -153,6 +160,7 @@ public class RESTApi {
     public static final String TABLE_TYPE = "tableType";
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
+    public static final String RESOURCE_NAME_PATTERN = "resourceNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
     public static final String TAG_NAME_PREFIX = "tagNamePrefix";
 
@@ -1536,6 +1544,173 @@ public class RESTApi {
                 resourcePaths.view(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
+    }
+
+    // ==================== Resources ==========================
+
+    /**
+     * List resources for database.
+     *
+     * @param databaseName database name
+     * @return a list of resource names
+     */
+    public List<String> listResources(String databaseName) {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.resources(databaseName),
+                                queryParams,
+                                ListResourcesResponse.class,
+                                restAuthFunction));
+    }
+
+    /**
+     * List resources by page.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional maximum number of results.
+     * @param pageToken Optional next page token.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException if the database does not exist
+     */
+    public PagedList<String> listResourcesPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern) {
+        ListResourcesResponse response =
+                client.get(
+                        resourcePaths.resources(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(RESOURCE_NAME_PATTERN, resourceNamePattern)),
+                        ListResourcesResponse.class,
+                        restAuthFunction);
+        List<String> resources = response.resources();
+        if (resources == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(resources, response.getNextPageToken());
+    }
+
+    /**
+     * List resource details.
+     *
+     * @param databaseName database name
+     * @param maxResults Optional maximum number of results.
+     * @param pageToken Optional next page token.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException if the database does not exist
+     */
+    public PagedList<GetResourceResponse> listResourceDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern) {
+        ListResourceDetailsResponse response =
+                client.get(
+                        resourcePaths.resourceDetails(databaseName),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(RESOURCE_NAME_PATTERN, resourceNamePattern)),
+                        ListResourceDetailsResponse.class,
+                        restAuthFunction);
+        List<GetResourceResponse> resourceDetails = response.data();
+        if (resourceDetails == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(resourceDetails, response.getNextPageToken());
+    }
+
+    /**
+     * Get a resource by identifier.
+     *
+     * @param identifier the identifier of the resource to retrieve
+     * @return the resource response object
+     * @throws NoSuchResourceException if the resource does not exist
+     */
+    public GetResourceResponse getResource(Identifier identifier) {
+        return client.get(
+                resourcePaths.resource(identifier.getDatabaseName(), identifier.getObjectName()),
+                GetResourceResponse.class,
+                restAuthFunction);
+    }
+
+    /**
+     * Create a resource.
+     *
+     * @param identifier database name and resource name.
+     * @param resource the resource to be created
+     * @throws AlreadyExistsException if a resource already exists
+     */
+    public void createResource(
+            Identifier identifier, org.apache.paimon.resource.Resource resource) {
+        client.post(
+                resourcePaths.resources(identifier.getDatabaseName()),
+                new CreateResourceRequest(resource),
+                restAuthFunction);
+    }
+
+    /**
+     * Drop a resource.
+     *
+     * @param identifier database name and resource name.
+     * @throws NoSuchResourceException if the resource does not exist
+     */
+    public void dropResource(Identifier identifier) {
+        client.delete(
+                resourcePaths.resource(identifier.getDatabaseName(), identifier.getObjectName()),
+                restAuthFunction);
+    }
+
+    /**
+     * Alter a resource.
+     *
+     * @param identifier database name and resource name.
+     * @param changes list of resource changes to apply
+     * @throws NoSuchResourceException if the resource does not exist
+     * @throws ForbiddenException if the user lacks permission to modify the resource
+     */
+    public void alterResource(Identifier identifier, List<ResourceChange> changes) {
+        client.post(
+                resourcePaths.resource(identifier.getDatabaseName(), identifier.getObjectName()),
+                new AlterResourceRequest(changes),
+                restAuthFunction);
+    }
+
+    /**
+     * List resources for a catalog globally.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @param maxResults Optional maximum number of results.
+     * @param pageToken Optional next page token.
+     * @return {@link PagedList}: elements and nextPageToken.
+     */
+    public PagedList<Identifier> listResourcesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String resourceNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        ListResourcesGloballyResponse response =
+                client.get(
+                        resourcePaths.resources(),
+                        buildPagedQueryParams(
+                                maxResults,
+                                pageToken,
+                                Pair.of(DATABASE_NAME_PATTERN, databaseNamePattern),
+                                Pair.of(RESOURCE_NAME_PATTERN, resourceNamePattern)),
+                        ListResourcesGloballyResponse.class,
+                        restAuthFunction);
+        List<Identifier> resources = response.data();
+        if (resources == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(resources, response.getNextPageToken());
     }
 
     /**

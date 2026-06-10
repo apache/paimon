@@ -20,10 +20,12 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
+import org.apache.paimon.rest.requests.AlterResourceRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateResourceRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -34,6 +36,7 @@ import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetResourceResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -298,6 +301,41 @@ public class RESTApiJsonTest {
         String requestStr = RESTApi.toJson(request);
         AlterFunctionRequest parseData = RESTApi.fromJson(requestStr, AlterFunctionRequest.class);
         assertEquals(parseData.changes().size(), request.changes().size());
+    }
+
+    @Test
+    public void getResourceResponseParseTest() throws Exception {
+        GetResourceResponse response = MockRESTMessage.getResourceResponse();
+        String responseStr = RESTApi.toJson(response);
+        GetResourceResponse parseData = RESTApi.fromJson(responseStr, GetResourceResponse.class);
+        assertEquals(response.name(), parseData.name());
+        assertEquals(response.comment(), parseData.comment());
+        assertEquals(response.uri(), parseData.uri());
+        assertEquals(response.size(), parseData.size());
+        assertEquals(response.lastModifiedTime(), parseData.lastModifiedTime());
+        assertEquals(response.resourceType(), parseData.resourceType());
+    }
+
+    @Test
+    public void createResourceRequestParseTest() throws JsonProcessingException {
+        CreateResourceRequest request = MockRESTMessage.createResourceRequest();
+        String requestStr = RESTApi.toJson(request);
+        CreateResourceRequest parseData = RESTApi.fromJson(requestStr, CreateResourceRequest.class);
+        assertEquals(request.name(), parseData.name());
+        assertEquals(request.comment(), parseData.comment());
+        assertEquals(request.uri(), parseData.uri());
+        assertEquals(request.resourceType(), parseData.resourceType());
+    }
+
+    @Test
+    public void alterResourceRequestParseTest() throws JsonProcessingException {
+        AlterResourceRequest request = MockRESTMessage.alterResourceRequest();
+        String requestStr = RESTApi.toJson(request);
+        AlterResourceRequest parseData = RESTApi.fromJson(requestStr, AlterResourceRequest.class);
+        assertEquals(request.changes().size(), parseData.changes().size());
+        for (int i = 0; i < request.changes().size(); i++) {
+            assertEquals(request.changes().get(i), parseData.changes().get(i));
+        }
     }
 
     @Test

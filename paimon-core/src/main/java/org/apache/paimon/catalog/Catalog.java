@@ -27,6 +27,8 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -1200,6 +1202,117 @@ public interface Catalog extends AutoCloseable {
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException;
 
+    // ==================== Resources ==========================
+
+    /**
+     * Get the names of all resources in a database.
+     *
+     * @param databaseName the database name
+     * @return a list of the names of all resources
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    List<String> listResources(String databaseName) throws DatabaseNotExistException;
+
+    /**
+     * Get paged list names of resources under this database.
+     *
+     * @param databaseName Name of the database to list resources.
+     * @param maxResults Optional parameter indicating the maximum number of results.
+     * @param pageToken Optional parameter indicating the next page token.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @return a list of the names of resources with provided page size and next page token.
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default PagedList<String> listResourcesPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        return new PagedList<>(listResources(databaseName), null);
+    }
+
+    /**
+     * Gets an array of resource identifiers for a catalog.
+     *
+     * @param databaseNamePattern A sql LIKE pattern (%) for database names.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @param maxResults Optional parameter indicating the maximum number of results.
+     * @param pageToken Optional parameter indicating the next page token.
+     * @return a list of the resource identifiers with provided page size and next page token.
+     */
+    default PagedList<Identifier> listResourcesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String resourceNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        throw new UnsupportedOperationException(
+                "Current Catalog does not support listResourcesPagedGlobally");
+    }
+
+    /**
+     * Get paged list resource details under this database.
+     *
+     * @param databaseName Name of the database to list resource details.
+     * @param maxResults Optional parameter indicating the maximum number of results.
+     * @param pageToken Optional parameter indicating the next page token.
+     * @param resourceNamePattern A sql LIKE pattern (%) for resource names.
+     * @return a list of the resource details with provided page size and next page token.
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    default PagedList<Resource> listResourceDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        return new PagedList<>(Collections.emptyList(), null);
+    }
+
+    /**
+     * Get resource by identifier.
+     *
+     * @param identifier path of the resource to get
+     * @return the requested resource
+     * @throws ResourceNotExistException if the resource does not exist
+     */
+    Resource getResource(Identifier identifier) throws ResourceNotExistException;
+
+    /**
+     * Create a new resource.
+     *
+     * @param identifier path of the resource to be created
+     * @param resource the resource definition
+     * @param ignoreIfExists flag to specify behavior when a resource already exists
+     * @throws ResourceAlreadyExistException if resource already exists and ignoreIfExists is false
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
+     */
+    void createResource(Identifier identifier, Resource resource, boolean ignoreIfExists)
+            throws ResourceAlreadyExistException, DatabaseNotExistException;
+
+    /**
+     * Drop resource.
+     *
+     * @param identifier path of the resource to be dropped
+     * @param ignoreIfNotExists Flag to specify behavior when the resource does not exist
+     * @throws ResourceNotExistException if the resource doesn't exist
+     */
+    void dropResource(Identifier identifier, boolean ignoreIfNotExists)
+            throws ResourceNotExistException;
+
+    /**
+     * Alter a resource.
+     *
+     * @param identifier path of the resource to be altered
+     * @param changes the changes to apply to the resource
+     * @param ignoreIfNotExists flag to specify behavior when the resource does not exist
+     * @throws ResourceNotExistException if the resource doesn't exist and ignoreIfNotExists is
+     *     false
+     */
+    void alterResource(
+            Identifier identifier, List<ResourceChange> changes, boolean ignoreIfNotExists)
+            throws ResourceNotExistException;
+
     // ==================== Table Auth ==========================
 
     /**
@@ -1832,6 +1945,48 @@ public interface Catalog extends AutoCloseable {
 
         public String name() {
             return name;
+        }
+    }
+
+    /** Exception for trying to create a resource that already exists. */
+    class ResourceAlreadyExistException extends Exception {
+
+        private static final String MSG = "Resource %s already exists.";
+
+        private final Identifier identifier;
+
+        public ResourceAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ResourceAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to get a resource that doesn't exist. */
+    class ResourceNotExistException extends Exception {
+
+        private static final String MSG = "Resource %s doesn't exist.";
+
+        private final Identifier identifier;
+
+        public ResourceNotExistException(Identifier identifier) {
+            this(identifier, null);
+        }
+
+        public ResourceNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier), cause);
+            this.identifier = identifier;
+        }
+
+        public Identifier identifier() {
+            return identifier;
         }
     }
 }

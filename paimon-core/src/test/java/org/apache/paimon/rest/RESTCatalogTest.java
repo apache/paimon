@@ -62,6 +62,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -2600,6 +2602,152 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RESTFunctionValidator.checkFunctionName(null));
+    }
+
+    @Test
+    void testResource() throws Exception {
+        Identifier identifierWithSlash = new Identifier("rest_catalog_db", "resource/");
+        catalog.createDatabase(identifierWithSlash.getDatabaseName(), false);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createResource(
+                                identifierWithSlash,
+                                MockRESTMessage.resource(identifierWithSlash),
+                                false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.getResource(identifierWithSlash));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropResource(identifierWithSlash, true));
+
+        Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createResource(
+                                identifierWithoutAlphabet,
+                                MockRESTMessage.resource(identifierWithoutAlphabet),
+                                false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.getResource(identifierWithoutAlphabet));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropResource(identifierWithoutAlphabet, true));
+
+        Identifier identifier = Identifier.fromString("rest_catalog_db.resource.na_me-01");
+        Resource resource = MockRESTMessage.resource(identifier);
+
+        catalog.createResource(identifier, resource, true);
+        assertThrows(
+                Catalog.ResourceAlreadyExistException.class,
+                () -> catalog.createResource(identifier, resource, false));
+
+        assertThat(catalog.listResources(identifier.getDatabaseName()).contains(resource.name()))
+                .isTrue();
+
+        Resource getResource = catalog.getResource(identifier);
+        assertThat(getResource.name()).isEqualTo(resource.name());
+        assertThat(getResource.uri()).isEqualTo(resource.uri());
+        assertThat(getResource.resourceType()).isEqualTo(resource.resourceType());
+        assertThat(getResource.comment()).isEqualTo(resource.comment());
+
+        catalog.dropResource(identifier, true);
+
+        assertThat(catalog.listResources(identifier.getDatabaseName()).contains(resource.name()))
+                .isFalse();
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.dropResource(identifier, false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class, () -> catalog.getResource(identifier));
+    }
+
+    @Test
+    void testListResources() throws Exception {
+        String db1 = "db_rest_catalog_resource_db";
+        String db2 = "db2_rest_catalog_resource";
+        Identifier identifier = new Identifier(db1, "list_resource");
+        Identifier identifier1 = new Identifier(db1, "resource");
+        Identifier identifier2 = new Identifier(db2, "list_resource");
+        Identifier identifier3 = new Identifier(db2, "resource");
+        catalog.createDatabase(db1, false);
+        catalog.createDatabase(db2, false);
+        catalog.createResource(identifier, MockRESTMessage.resource(identifier), true);
+        catalog.createResource(identifier1, MockRESTMessage.resource(identifier1), true);
+        catalog.createResource(identifier2, MockRESTMessage.resource(identifier2), true);
+        catalog.createResource(identifier3, MockRESTMessage.resource(identifier3), true);
+        assertThat(catalog.listResourcesPaged(db1, null, null, null).getElements())
+                .containsExactlyInAnyOrder(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(catalog.listResourcesPaged(db1, 1, null, null).getElements())
+                .containsAnyOf(identifier.getObjectName(), identifier1.getObjectName());
+        assertThat(
+                        catalog.listResourcesPaged(db1, 1, identifier.getObjectName(), null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier1.getObjectName());
+        assertThat(catalog.listResourcesPaged(db1, null, null, "res%").getElements())
+                .containsExactlyInAnyOrder(identifier1.getObjectName());
+        assertThat(
+                        catalog.listResourcesPagedGlobally("db2_rest_catalog%", "res%", null, null)
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier3);
+        assertThat(
+                        catalog.listResourcesPagedGlobally("db2_rest_catalog%", null, 1, null)
+                                .getElements())
+                .containsAnyOf(identifier2, identifier3);
+        assertThat(
+                        catalog.listResourcesPagedGlobally(
+                                        "db2_rest_catalog%", null, 1, identifier2.getFullName())
+                                .getElements())
+                .containsExactlyInAnyOrder(identifier3);
+
+        assertThat(
+                        catalog.listResourceDetailsPaged(db1, 1, null, null).getElements().stream()
+                                .map(r -> r.fullName())
+                                .collect(Collectors.toList()))
+                .containsAnyOf(identifier.getFullName(), identifier1.getFullName());
+
+        assertThat(
+                        catalog.listResourceDetailsPaged(db2, 4, null, "res%").getElements()
+                                .stream()
+                                .map(r -> r.fullName())
+                                .collect(Collectors.toList()))
+                .containsExactly(identifier3.getFullName());
+
+        assertThat(
+                        catalog.listResourceDetailsPaged(db2, 1, identifier2.getObjectName(), null)
+                                .getElements().stream()
+                                .map(r -> r.fullName())
+                                .collect(Collectors.toList()))
+                .contains(identifier3.getFullName());
+    }
+
+    @Test
+    void testAlterResource() throws Exception {
+        Identifier identifier = new Identifier("rest_catalog_db", "alter_resource_name");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Resource resource = MockRESTMessage.resource(identifier);
+        ResourceChange updateUri = ResourceChange.updateUri("/new/path/to/resource");
+        assertDoesNotThrow(
+                () -> catalog.alterResource(identifier, ImmutableList.of(updateUri), true));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.alterResource(identifier, ImmutableList.of(updateUri), false));
+        catalog.createResource(identifier, resource, true);
+
+        // update uri
+        catalog.alterResource(identifier, ImmutableList.of(updateUri), false);
+        Resource catalogResource = catalog.getResource(identifier);
+        assertThat(catalogResource.uri()).isEqualTo("/new/path/to/resource");
+
+        // update comment
+        String newComment = "new comment";
+        catalog.alterResource(
+                identifier, ImmutableList.of(ResourceChange.updateComment(newComment)), false);
+        catalogResource = catalog.getResource(identifier);
+        assertThat(catalogResource.comment().orElse(null)).isEqualTo(newComment);
     }
 
     @Test

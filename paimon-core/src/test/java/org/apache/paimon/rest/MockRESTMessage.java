@@ -28,12 +28,17 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.UpperTransform;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
+import org.apache.paimon.resource.ResourceType;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
+import org.apache.paimon.rest.requests.AlterResourceRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreateResourceRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -42,6 +47,7 @@ import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetResourceResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -365,6 +371,44 @@ public class MockRESTMessage {
                 FunctionChange.updateDefinition("engine", FunctionDefinition.sql("x * y")));
         functionChanges.add(FunctionChange.dropDefinition("engine"));
         return new AlterFunctionRequest(functionChanges);
+    }
+
+    public static Resource resource(Identifier identifier) {
+        return Resource.toResource(
+                ResourceType.FILE,
+                identifier,
+                "comment",
+                "/path/to/" + identifier.getObjectName(),
+                1024L,
+                System.currentTimeMillis());
+    }
+
+    public static GetResourceResponse getResourceResponse() {
+        Resource resource = resource(Identifier.create(databaseName(), "resource"));
+        return new GetResourceResponse(
+                resource.name(),
+                resource.comment().orElse(null),
+                resource.uri(),
+                resource.size(),
+                resource.lastModifiedTime(),
+                resource.resourceType().getValue(),
+                "owner",
+                1L,
+                "owner",
+                1L,
+                "owner");
+    }
+
+    public static CreateResourceRequest createResourceRequest() {
+        Resource resource = resource(Identifier.create(databaseName(), "resource"));
+        return new CreateResourceRequest(resource);
+    }
+
+    public static AlterResourceRequest alterResourceRequest() {
+        List<ResourceChange> resourceChanges = new ArrayList<>();
+        resourceChanges.add(ResourceChange.updateComment("comment"));
+        resourceChanges.add(ResourceChange.updateUri("/new/path/to/resource"));
+        return new AlterResourceRequest(resourceChanges);
     }
 
     private static ViewSchema viewSchema() {
