@@ -81,11 +81,17 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     }
 
     /**
-     * Threshold above which we consider a reuse buffer "oversized" and eligible for shrinking. This
-     * prevents accumulation of large byte arrays when a few large records inflate the reuse buffer
-     * and subsequent small records never trigger reallocation.
+     * Maximum retained reuse buffer size in bytes. Buffers exceeding this cap are eligible for
+     * shrinking when the shrink ratio condition is also met.
      */
-    private static final int REUSE_SHRINK_THRESHOLD = 4 * 1024 * 1024; // 4MB
+    private static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
+
+    /**
+     * Shrink ratio. The buffer is reallocated only when its size exceeds {@link
+     * #MAX_RETAINED_REUSE_BUFFER_SIZE} AND is more than {@code SHRINK_RATIO} times the current
+     * record length.
+     */
+    private static final int SHRINK_RATIO = 4;
 
     public BinaryRow deserialize(BinaryRow reuse, DataInputView source) throws IOException {
         MemorySegment[] segments = reuse.getSegments();
@@ -97,11 +103,8 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         if (segments == null || segments[0].size() < length) {
             // Need a larger buffer
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
-        } else if (segments[0].size() > REUSE_SHRINK_THRESHOLD && length < REUSE_SHRINK_THRESHOLD) {
-            // Hysteresis: only shrink when the buffer is oversized AND the current record is
-            // small. This avoids thrashing (release-and-rebuild on every record) when records
-            // are consistently large (e.g. 5-10MB), while still reclaiming memory when the
-            // workload transitions back to small records.
+        } else if (segments[0].size() > MAX_RETAINED_REUSE_BUFFER_SIZE
+                && segments[0].size() > (long) length * SHRINK_RATIO) {
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
         }
         source.readFully(segments[0].getArray(), 0, length);

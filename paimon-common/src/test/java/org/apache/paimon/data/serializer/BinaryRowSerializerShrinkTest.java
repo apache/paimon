@@ -30,107 +30,124 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests for {@link BinaryRowSerializer#deserialize(BinaryRow, org.apache.paimon.io.DataInputView)},
- * focusing on the REUSE_SHRINK_THRESHOLD behavior.
+ * focusing on the combined cap + ratio shrink behavior.
  */
 class BinaryRowSerializerShrinkTest {
 
-    private static final int SHRINK_THRESHOLD = 4 * 1024 * 1024; // 4MB
+    private static final int MAX_RETAINED = 4 * 1024 * 1024; // 4MB
 
     @Test
-    void testDeserializeShrinksOversizedReuseBuffer() throws Exception {
+    void testShrinksWhenSpikeFollowedBySmallRecord() throws Exception {
         BinaryRowSerializer serializer = new BinaryRowSerializer(1);
 
-        // Serialize a large record (> 4MB)
+        // Inflate buffer with a large record (> 4MB)
         BinaryRow largeRow = createRowWithPayload(5 * 1024 * 1024);
         byte[] largeBytes = serializeRow(serializer, largeRow);
 
-        // Deserialize into a fresh reuse row — buffer grows to hold the large record
         BinaryRow reuse = serializer.createInstance();
-        DataInputDeserializer largeInput = new DataInputDeserializer(largeBytes);
-        reuse = serializer.deserialize(reuse, largeInput);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(largeBytes));
         int largeBufferSize = reuse.getSegments()[0].size();
         assertThat(largeBufferSize).isGreaterThanOrEqualTo(5 * 1024 * 1024);
 
-        // Serialize a small record
+        // Deserialize a small record — buffer > 4MB and ratio huge > 4x → shrink
         BinaryRow smallRow = createRowWithPayload(100);
         byte[] smallBytes = serializeRow(serializer, smallRow);
-
-        // Deserialize the small record into the same reuse row
-        // The oversized buffer (> 4MB) should be shrunk to the exact size needed
-        DataInputDeserializer smallInput = new DataInputDeserializer(smallBytes);
-        reuse = serializer.deserialize(reuse, smallInput);
-        int shrunkBufferSize = reuse.getSegments()[0].size();
-        assertThat(shrunkBufferSize).isLessThan(SHRINK_THRESHOLD);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(smallBytes));
+        assertThat(reuse.getSegments()[0].size()).isLessThan(MAX_RETAINED);
     }
 
     @Test
-    void testDeserializeKeepsSmallReuseBuffer() throws Exception {
+    void testShrinksWhenSpikeFollowedByMediumRecord() throws Exception {
         BinaryRowSerializer serializer = new BinaryRowSerializer(1);
 
-        // Serialize a small record (< 4MB)
+        // Inflate buffer with a very large record (100MB)
+        BinaryRow hugeRow = createRowWithPayload(100 * 1024 * 1024);
+        byte[] hugeBytes = serializeRow(serializer, hugeRow);
+
+        BinaryRow reuse = serializer.createInstance();
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(hugeBytes));
+        int hugeBufferSize = reuse.getSegments()[0].size();
+        assertThat(hugeBufferSize).isGreaterThanOrEqualTo(100 * 1024 * 1024);
+
+        // Deserialize a 5MB record — buffer ~100MB, ratio ~20x > 4x → shrink
+        BinaryRow mediumRow = createRowWithPayload(5 * 1024 * 1024);
+        byte[] mediumBytes = serializeRow(serializer, mediumRow);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(mediumBytes));
+        assertThat(reuse.getSegments()[0].size()).isLessThan(hugeBufferSize);
+    }
+
+    @Test
+    void testRetainsWhenBufferProportionalToRecordSize() throws Exception {
+        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
+
+        // Inflate buffer with a 5MB record
+        BinaryRow row1 = createRowWithPayload(5 * 1024 * 1024);
+        byte[] bytes1 = serializeRow(serializer, row1);
+
+        BinaryRow reuse = serializer.createInstance();
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(bytes1));
+        int bufferAfterFirst = reuse.getSegments()[0].size();
+        assertThat(bufferAfterFirst).isGreaterThan(MAX_RETAINED);
+
+        // Deserialize another record just above threshold — ratio ~1.2x < 4x → retain
+        BinaryRow row2 = createRowWithPayload(MAX_RETAINED + 100);
+        byte[] bytes2 = serializeRow(serializer, row2);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(bytes2));
+        assertThat(reuse.getSegments()[0].size()).isEqualTo(bufferAfterFirst);
+    }
+
+    @Test
+    void testKeepsSmallBuffer() throws Exception {
+        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
+
         BinaryRow row1 = createRowWithPayload(1024);
         byte[] bytes1 = serializeRow(serializer, row1);
 
         BinaryRow reuse = serializer.createInstance();
-        DataInputDeserializer input1 = new DataInputDeserializer(bytes1);
-        reuse = serializer.deserialize(reuse, input1);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(bytes1));
         int bufferSize1 = reuse.getSegments()[0].size();
 
-        // Serialize an even smaller record
+        // Smaller record — buffer < 4MB, should reuse without shrinking
         BinaryRow row2 = createRowWithPayload(100);
         byte[] bytes2 = serializeRow(serializer, row2);
-
-        // Deserialize — buffer should be reused (not shrunk), since it's < 4MB
-        DataInputDeserializer input2 = new DataInputDeserializer(bytes2);
-        reuse = serializer.deserialize(reuse, input2);
-        int bufferSize2 = reuse.getSegments()[0].size();
-        assertThat(bufferSize2).isEqualTo(bufferSize1);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(bytes2));
+        assertThat(reuse.getSegments()[0].size()).isEqualTo(bufferSize1);
     }
 
     @Test
-    void testDeserializeRetainsBufferForConsecutiveLargeRecords() throws Exception {
+    void testGrowsBufferWhenNeeded() throws Exception {
         BinaryRowSerializer serializer = new BinaryRowSerializer(1);
 
-        // Serialize a large record (> 4MB) to inflate the buffer
-        BinaryRow largeRow1 = createRowWithPayload(5 * 1024 * 1024);
-        byte[] largeBytes1 = serializeRow(serializer, largeRow1);
-
-        BinaryRow reuse = serializer.createInstance();
-        DataInputDeserializer input1 = new DataInputDeserializer(largeBytes1);
-        reuse = serializer.deserialize(reuse, input1);
-        int bufferAfterFirst = reuse.getSegments()[0].size();
-        assertThat(bufferAfterFirst).isGreaterThanOrEqualTo(5 * 1024 * 1024);
-
-        // Deserialize another large record (also > 4MB)
-        // Hysteresis: buffer should NOT be shrunk because the incoming record is also large
-        BinaryRow largeRow2 = createRowWithPayload(SHRINK_THRESHOLD + 100);
-        byte[] largeBytes2 = serializeRow(serializer, largeRow2);
-
-        DataInputDeserializer input2 = new DataInputDeserializer(largeBytes2);
-        reuse = serializer.deserialize(reuse, input2);
-        int bufferAfterSecond = reuse.getSegments()[0].size();
-        assertThat(bufferAfterSecond).isEqualTo(bufferAfterFirst);
-    }
-
-    @Test
-    void testDeserializeGrowsBufferWhenNeeded() throws Exception {
-        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
-
-        // Start with a small record
         BinaryRow smallRow = createRowWithPayload(100);
         byte[] smallBytes = serializeRow(serializer, smallRow);
 
         BinaryRow reuse = serializer.createInstance();
-        DataInputDeserializer smallInput = new DataInputDeserializer(smallBytes);
-        reuse = serializer.deserialize(reuse, smallInput);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(smallBytes));
 
-        // Deserialize a larger record — buffer should grow
+        // Larger record arrives — buffer must grow
         BinaryRow largerRow = createRowWithPayload(2048);
         byte[] largerBytes = serializeRow(serializer, largerRow);
-
-        DataInputDeserializer largerInput = new DataInputDeserializer(largerBytes);
-        reuse = serializer.deserialize(reuse, largerInput);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(largerBytes));
         assertThat(reuse.getSegments()[0].size()).isGreaterThanOrEqualTo(2048);
+    }
+
+    @Test
+    void testRetainsBufferForConsecutiveLargeRecords() throws Exception {
+        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
+
+        // Inflate buffer with 5MB record
+        BinaryRow largeRow1 = createRowWithPayload(5 * 1024 * 1024);
+        byte[] largeBytes1 = serializeRow(serializer, largeRow1);
+
+        BinaryRow reuse = serializer.createInstance();
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(largeBytes1));
+        int bufferAfterFirst = reuse.getSegments()[0].size();
+
+        // Another 5MB record — ratio ~1x < 4x → retain
+        BinaryRow largeRow2 = createRowWithPayload(5 * 1024 * 1024);
+        byte[] largeBytes2 = serializeRow(serializer, largeRow2);
+        reuse = serializer.deserialize(reuse, new DataInputDeserializer(largeBytes2));
+        assertThat(reuse.getSegments()[0].size()).isEqualTo(bufferAfterFirst);
     }
 
     private static BinaryRow createRowWithPayload(int payloadSize) {
