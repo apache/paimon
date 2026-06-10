@@ -119,7 +119,8 @@ public class FormatTableWrite implements BatchTableWrite {
 
     @Override
     public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
-        throw new UnsupportedOperationException();
+        write.withBlobConsumer(blobConsumer);
+        return this;
     }
 
     @Override

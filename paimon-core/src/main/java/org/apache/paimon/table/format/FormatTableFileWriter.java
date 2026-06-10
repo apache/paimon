@@ -20,8 +20,10 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
@@ -76,6 +78,14 @@ public class FormatTableFileWriter {
 
     public void withWriteType(RowType writeType) {
         this.writeRowType = writeType;
+    }
+
+    public void withBlobConsumer(BlobConsumer blobConsumer) {
+        if (!(fileFormat instanceof BlobFileFormat)) {
+            throw new UnsupportedOperationException(
+                    "BlobConsumer is only supported for BLOB format table.");
+        }
+        ((BlobFileFormat) fileFormat).setWriteConsumer(blobConsumer);
     }
 
     public void write(BinaryRow partition, InternalRow data) throws Exception {

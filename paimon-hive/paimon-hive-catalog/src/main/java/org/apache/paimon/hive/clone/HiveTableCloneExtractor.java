@@ -135,7 +135,8 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
     @Override
     public boolean supportCloneSplits(String format) {
         for (FormatTable.Format supportFormat : FormatTable.Format.values()) {
-            if (supportFormat.name().equalsIgnoreCase(format)) {
+            if (supportFormat != FormatTable.Format.BLOB
+                    && supportFormat.name().equalsIgnoreCase(format)) {
                 return true;
             }
         }

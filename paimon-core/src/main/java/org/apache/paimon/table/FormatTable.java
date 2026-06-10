@@ -77,6 +77,7 @@ public interface FormatTable extends Table {
     enum Format {
         ORC,
         PARQUET,
+        BLOB,
         CSV,
         TEXT,
         JSON,

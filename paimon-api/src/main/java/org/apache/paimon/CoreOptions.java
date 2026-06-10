@@ -291,6 +291,7 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_TEXT = "text";
     public static final String FILE_FORMAT_JSON = "json";
     public static final String FILE_FORMAT_MOSAIC = "mosaic";
+    public static final String FILE_FORMAT_BLOB = "blob";
 
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
@@ -2908,6 +2909,7 @@ public class CoreOptions implements Serializable {
                 case FILE_FORMAT_CSV:
                 case FILE_FORMAT_TEXT:
                 case FILE_FORMAT_JSON:
+                case FILE_FORMAT_BLOB:
                     return "none";
                 default:
                     throw new UnsupportedOperationException(

@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
@@ -63,6 +64,10 @@ public class FormatTableSingleFileWriter {
             } else {
                 out = fileIO.newTwoPhaseOutputStream(path, false);
                 writer = factory.create(out, compression);
+            }
+            if (writer instanceof FileAwareFormatWriter) {
+                FileAwareFormatWriter fileAwareFormatWriter = (FileAwareFormatWriter) writer;
+                fileAwareFormatWriter.setFile(path);
             }
         } catch (IOException e) {
             LOG.warn(
