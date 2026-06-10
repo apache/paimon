@@ -627,6 +627,33 @@ class SplitRead(ABC):
 
 
 class RawFileSplitRead(SplitRead):
+    def __init__(
+            self,
+            table,
+            predicate: Optional[Predicate],
+            read_type: List[DataField],
+            split: Split,
+            row_tracking_enabled: bool,
+            outer_extract_name_paths: Optional[List[List[str]]] = None,
+            outer_flat_read_type: Optional[List[DataField]] = None,
+            limit: Optional[int] = None):
+        # Nested-leaf projection is NOT pushed down by name: a leaf path is
+        # only valid against the latest schema, while each data file stores
+        # its own (possibly renamed / retyped) sub-fields. Instead the read
+        # widens to the full top-level columns, which the per-file field-id
+        # normalization aligns to the latest schema, and the requested leaf
+        # paths are extracted afterwards (``outer_extract_name_paths``).
+        super().__init__(
+            table=table,
+            predicate=predicate,
+            read_type=read_type,
+            split=split,
+            row_tracking_enabled=row_tracking_enabled,
+            nested_name_paths=None,
+            limit=limit)
+        self.outer_extract_name_paths = outer_extract_name_paths
+        self.outer_flat_read_type = outer_flat_read_type
+
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
         # Check if this is a SlicedSplit to get shard_file_idx_map
@@ -676,10 +703,27 @@ class RawFileSplitRead(SplitRead):
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
         if self.table.is_primary_key_table and self.predicate_for_reader:
             reader = FilterRecordReader(concat_reader, self.predicate_for_reader)
+            if self.outer_extract_name_paths:
+                # Row-level extraction: the filter evaluates rows in the
+                # widened top-level coordinate space, so extract after it.
+                from pypaimon.read.reader.outer_projection_record_reader import \
+                    OuterProjectionRecordReader
+                reader = OuterProjectionRecordReader(
+                    reader, [f.name for f in self.read_fields],
+                    self.outer_extract_name_paths,
+                    file_io=self.table.file_io,
+                    blob_field_indices=_blob_field_indices(self.read_fields),
+                    vector_field_indices=_vector_field_indices(self.read_fields))
             if self.limit is not None:
                 reader = LimitedRecordReader(reader, self.limit)
         else:
             reader = concat_reader
+            if self.outer_extract_name_paths:
+                from pypaimon.read.reader.nested_leaf_batch_reader import \
+                    NestedLeafBatchReader
+                reader = NestedLeafBatchReader(
+                    reader, self.outer_extract_name_paths,
+                    self.outer_flat_read_type)
             if self.limit is not None:
                 reader = LimitedRecordBatchReader(reader, self.limit)
         return reader

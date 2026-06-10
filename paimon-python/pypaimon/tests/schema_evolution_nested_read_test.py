@@ -351,6 +351,56 @@ class SchemaEvolutionNestedSubfieldTest(_NestedBase):
                     ['mv', 'latest_version'], AtomicType('DATE'))], False)
         self.assertIn('cannot be converted', str(cm.exception))
 
+    def test_nested_projection_after_rename_subfield(self):
+        # Projecting a renamed leaf must follow the field id into old files,
+        # not look the new name up in the file's physical schema.
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('v', pa.int32()), ('s', pa.string())]))])
+        table = self._create('nsub_proj_rename', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'v': 10, 's': 'a'}}], schema=s0))
+        self.catalog.alter_table(
+            'default.nsub_proj_rename',
+            [SchemaChange.rename_column(['mv', 's'], 'ss')], False)
+        table = self.catalog.get_table('default.nsub_proj_rename')
+        s1 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('v', pa.int32()), ('ss', pa.string())]))])
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 2, 'mv': {'v': 20, 'ss': 'b'}}], schema=s1))
+
+        rows = self._read_sorted(table, projection=['id', 'mv.ss'])
+        self.assertEqual(rows, [
+            {'id': 1, 'mv_ss': 'a'},
+            {'id': 2, 'mv_ss': 'b'},
+        ])
+
+    def test_nested_projection_after_update_subfield_type(self):
+        # Projecting a type-changed leaf must cast old batches to the latest
+        # type instead of emitting mixed-type batches.
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('v', pa.int32()), ('s', pa.string())]))])
+        table = self._create('nsub_proj_type', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'v': 10, 's': 'a'}}], schema=s0))
+        self.catalog.alter_table(
+            'default.nsub_proj_type',
+            [SchemaChange.update_column_type(['mv', 'v'], AtomicType('BIGINT'))], False)
+        table = self.catalog.get_table('default.nsub_proj_type')
+        s1 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('v', pa.int64()), ('s', pa.string())]))])
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 2, 'mv': {'v': 20, 's': 'b'}}], schema=s1))
+
+        rb = table.new_read_builder().with_projection(['id', 'mv.v'])
+        splits = rb.new_scan().plan().splits()
+        arrow = rb.new_read().to_arrow(splits)
+        self.assertEqual(arrow.schema.field('mv_v').type, pa.int64())
+        rows = sorted(arrow.to_pylist(), key=lambda r: r['id'])
+        self.assertEqual(rows, [
+            {'id': 1, 'mv_v': 10},
+            {'id': 2, 'mv_v': 20},
+        ])
+
     def test_pk_nested_subfield_evolution_merge(self):
         s0 = pa.schema([('id', pa.int64()), ('mv', _MV_PA)])
         table = self._create('nsub_pk', s0, primary_keys=['id'], bucket='1')
