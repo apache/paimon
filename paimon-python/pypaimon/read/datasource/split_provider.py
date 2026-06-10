@@ -91,20 +91,29 @@ class CatalogSplitProvider(SplitProvider):
             raise ValueError("table_identifier is required")
         if catalog_options is None:
             raise ValueError("catalog_options is required")
+        _TIME_TRAVEL_KEYS = {
+            "scan.snapshot-id", "scan.tag-name",
+            "scan.timestamp-millis", "scan.timestamp", "scan.watermark",
+        }
+
         if snapshot_id is not None and tag_name is not None:
             raise ValueError(
                 "snapshot_id and tag_name cannot be set at the same time"
             )
+
         if dynamic_table_options:
-            if snapshot_id is not None and "scan.snapshot-id" in dynamic_table_options:
+            dynamic_tt_keys = _TIME_TRAVEL_KEYS & dynamic_table_options.keys()
+            if (snapshot_id is not None or tag_name is not None) and dynamic_tt_keys:
                 raise ValueError(
-                    "snapshot_id and dynamic_table_options['scan.snapshot-id'] "
-                    "cannot be set at the same time"
+                    "snapshot_id/tag_name and dynamic_table_options "
+                    "time-travel keys cannot be set at the same time, "
+                    "got: {}".format(", ".join(sorted(dynamic_tt_keys)))
                 )
-            if tag_name is not None and "scan.tag-name" in dynamic_table_options:
+            if len(dynamic_tt_keys) > 1:
                 raise ValueError(
-                    "tag_name and dynamic_table_options['scan.tag-name'] "
-                    "cannot be set at the same time"
+                    "dynamic_table_options contains multiple time-travel "
+                    "keys which are mutually exclusive: {}".format(
+                        ", ".join(sorted(dynamic_tt_keys)))
                 )
         self._table_identifier = table_identifier
         self._catalog_options = catalog_options
