@@ -60,8 +60,12 @@ public class ChainPartitionStepExtractorTest {
 
     @Test
     public void testVariablePatternsWithPeriod() {
-        assertThat(extractMinStep("$a$b", "yyyyMMdd")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$a-01-$b", "yyyy-MM-dd")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$a-01", "yyyy-MM-dd")).isEqualTo(Period.ofMonths(1));
+        assertThat(extractMinStep("$y/$m/$day", "yyyy/MM/dd")).isEqualTo(Duration.ofDays(1));
+
         assertThat(extractMinStep("$a01", "yyyyMMdd")).isEqualTo(Period.ofMonths(1));
+        assertThat(extractMinStep("$a$b", "yyyyMMdd")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("202601$a", "yyyyMMdd")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("2026$a01", "yyyyMMdd")).isEqualTo(Period.ofMonths(1));
         assertThat(extractMinStep("$a1201", "yyyyMMdd")).isEqualTo(Period.ofYears(1));

@@ -59,16 +59,9 @@ public class ChainPartitionStepExtractor {
     public TemporalAmount extractMinStep() {
         List<TimeSpan> spans = parseFormatter(formatter);
         List<Fragment> fragments = splitPattern(pattern);
-
-        boolean hasConstant = fragments.stream().anyMatch(f -> !f.isVariable);
-        ChronoField field;
-        if (!hasConstant) {
-            field = minField(spans);
-        } else {
-            List<int[]> varRanges = matchFragments(fragments, formatter);
-            field = minFieldInRanges(spans, varRanges);
-        }
-        return toTemporalAmount(field);
+        List<int[]> varRanges = matchFragments(fragments, formatter);
+        ChronoField field = minFieldInRanges(spans, varRanges);
+        return stepOf(field);
     }
 
     /** Parses formatter into time spans with their positions. */
@@ -132,13 +125,13 @@ public class ChainPartitionStepExtractor {
 
         while (m.find()) {
             if (m.start() > last) {
-                fragments.add(new Fragment(pattern, last, m.start(), false));
+                fragments.add(new Fragment(pattern.substring(last, m.start()), false));
             }
+            fragments.add(new Fragment(m.group(), true));
             last = m.end();
-            fragments.add(new Fragment(pattern, m.start(), last, true));
         }
         if (last < pattern.length()) {
-            fragments.add(new Fragment(pattern, last, pattern.length(), false));
+            fragments.add(new Fragment(pattern.substring(last), false));
         }
         return fragments;
     }
@@ -208,18 +201,21 @@ public class ChainPartitionStepExtractor {
             String constant, String formatter, int fragIndex, int fragCount, int startFrom) {
         int constLen = constant.length();
         int maxStart = formatter.length() - constLen;
-        if (fragIndex == 0) {
-            return 0;
-        } else if (fragIndex == fragCount - 1) {
-            return maxStart;
+        if (fragIndex == fragCount - 1) {
+            // Last fragment: match from the end to ensure it occupies the trailing positions
+            for (int s = maxStart; s >= startFrom; s--) {
+                if (matchConstant(constant, formatter, s)) {
+                    return s;
+                }
+            }
         } else {
             for (int s = startFrom; s <= maxStart; s++) {
                 if (matchConstant(constant, formatter, s)) {
                     return s;
                 }
             }
-            return -1;
         }
+        return -1;
     }
 
     /**
@@ -242,16 +238,6 @@ public class ChainPartitionStepExtractor {
         return true;
     }
 
-    private static ChronoField minField(List<TimeSpan> spans) {
-        ChronoField min = spans.get(0).field;
-        for (int i = 1; i < spans.size(); i++) {
-            if (spans.get(i).field.ordinal() < min.ordinal()) {
-                min = spans.get(i).field;
-            }
-        }
-        return min;
-    }
-
     private static ChronoField minFieldInRanges(List<TimeSpan> spans, List<int[]> ranges) {
         ChronoField min = null;
         int start = 0;
@@ -270,7 +256,7 @@ public class ChainPartitionStepExtractor {
         return min;
     }
 
-    private static TemporalAmount toTemporalAmount(ChronoField field) {
+    private static TemporalAmount stepOf(ChronoField field) {
         switch (field) {
             case SECOND_OF_MINUTE:
                 return Duration.ofSeconds(1);
@@ -304,13 +290,9 @@ public class ChainPartitionStepExtractor {
     private static class Fragment {
         final String text;
         final boolean isVariable;
-        final int start;
-        final int end;
 
-        Fragment(String pattern, int start, int end, boolean isVariable) {
-            this.start = start;
-            this.end = end;
-            this.text = pattern.substring(start, end);
+        Fragment(String text, boolean isVariable) {
+            this.text = text;
             this.isVariable = isVariable;
         }
     }
