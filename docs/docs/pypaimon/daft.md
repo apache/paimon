@@ -256,7 +256,7 @@ df = read_paimon(
 )
 
 # Filter runs BEFORE any blob bytes are read.
-df = df.where(daft.col("obs_index") < 2)
+df = df.where(daft.col("id") < 100)
 
 # Only filtered rows trigger blob I/O inside the UDF.
 @daft.func
@@ -264,7 +264,7 @@ def image_size(file: daft.File) -> int:
     with file.open() as f:
         return len(f.read())
 
-result = df.with_column("real_size", image_size(df["image_jpeg"]))
+result = df.with_column("size", image_size(df["image"]))
 result.show()
 ```
 
@@ -289,7 +289,7 @@ async def image_size(file: daft.File) -> int:
     with file.open() as f:
         return len(f.read())
 
-result = df.with_column("real_size", image_size(df["image_jpeg"]))
+result = df.with_column("size", image_size(df["image"]))
 result.show()
 ```
 
