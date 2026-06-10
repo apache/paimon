@@ -225,6 +225,37 @@ Use `pypaimon.daft` when your application is written with Daft DataFrames and
 you want Daft to schedule the execution on Ray. Use `pypaimon.ray` instead when
 your application directly reads or writes Ray Datasets.
 
+## Reading Blob Columns
+
+Tables with BLOB columns (see [Blob Storage](./blob)) can be read with Daft.
+Blob columns are returned as `daft.File` references — the actual bytes are
+**not** loaded until you explicitly read them. Use `daft.func` to process blob
+data in parallel:
+
+```python
+import daft
+from pypaimon.daft import read_paimon
+
+df = read_paimon(
+    "my_db.image_table",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+)
+
+# Blob columns appear as File references (lazy, no I/O yet).
+# Use @daft.func to read and process blob data in parallel.
+@daft.func
+def image_size(file: daft.File) -> int:
+    with file.open() as f:
+        return len(f.read())
+
+result = df.with_column("size", image_size(df["image"]))
+result.show()
+```
+
+When running on Ray, the UDF calls are distributed across Ray workers
+automatically — each worker processes its partition in parallel, giving you
+batch-level concurrency without any extra code.
+
 ## Catalog Abstraction
 
 Paimon catalogs can integrate with Daft's unified `Catalog` / `Table` interfaces:
