@@ -328,8 +328,9 @@ result = df.with_column("header", first_4k(col("image")))
 result.show()
 ```
 
-See [Blob Storage — Streaming Read](./blob#streaming-read) for more details on
-the underlying `OffsetInputStream` API (`read(size)` / `seek()` / `tell()`).
+See [Blob Storage — Streaming for Large Blobs](./blob#streaming-for-large-blobs)
+for more details on the underlying `OffsetInputStream` API (`read(size)` /
+`seek()` / `tell()`).
 
 ## Catalog Abstraction
 
