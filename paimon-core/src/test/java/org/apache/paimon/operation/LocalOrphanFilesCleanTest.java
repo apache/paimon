@@ -629,6 +629,20 @@ public class LocalOrphanFilesCleanTest {
     }
 
     @Test
+    public void testNoUserFiles() throws Exception {
+        commit(generateData());
+        commit(generateData());
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(table) {
+                    @Override
+                    protected Set<Snapshot> safelyGetAllSnapshots(String branch) {
+                        return Collections.emptySet();
+                    }
+                };
+        assertThat(orphanFilesClean.clean().getDeletedFileCount()).isEqualTo(0);
+    }
+
+    @Test
     void testDirectoriesNotTreatedAsOrphanCandidates() throws Exception {
         commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
 
