@@ -395,7 +395,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             state.maxSequenceNumber,
                             state.commitIncrement,
                             compactExecutor(),
-                            state.deletionVectorsMaintainer);
+                            state.deletionVectorsMaintainer,
+                            // Restore reconstructs writer state from checkpointed files, so do
+                            // not ignore them.
+                            false);
             notifyNewWriter(writer);
             WriterContainer<T> writerContainer =
                     new WriterContainer<>(
@@ -483,7 +486,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                                 getMaxSequenceNumber(restoreFiles), latestSnapshot),
                         null,
                         compactExecutor(),
-                        dvMaintainer);
+                        dvMaintainer,
+                        actualIgnorePreviousFiles);
         notifyNewWriter(writer);
 
         Snapshot previousSnapshot = restored.snapshot();
@@ -590,7 +594,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer deletionVectorsMaintainer);
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+            boolean ignorePreviousFiles);
 
     // force buffer spill to avoid out of memory in batch mode
     protected void forceBufferSpill() throws Exception {}
