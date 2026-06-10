@@ -595,7 +595,8 @@ public class WriteRestoreScanBenchmark extends TableBenchmark {
         printDiskLine(disk);
         if (sc.count > 0) {
             System.out.printf(
-                    "  SegmentsCache bytes    avg=%,d, min=%,d, max=%,d%n", sc.avg(), sc.min, sc.max);
+                    "  SegmentsCache bytes    avg=%,d, min=%,d, max=%,d%n",
+                    sc.avg(), sc.min, sc.max);
         } else {
             System.out.println(
                     "  SegmentsCache n/a (no manifest cache attached to table — cache disabled)");
