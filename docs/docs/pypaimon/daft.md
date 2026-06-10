@@ -259,34 +259,31 @@ df = read_paimon(
 # Filter runs BEFORE any blob bytes are read.
 df = df.where(col("id") < 100)
 
-# Only filtered rows trigger blob I/O inside the UDF.
-@daft.func
-def image_size(file: daft.File) -> int:
-    with file.open() as f:
-        return len(f.read())
-
-result = df.with_column("size", image_size(col("image")))
-result.show()
-```
-
-To get the blob size **without** reading the actual bytes, use `file.length`
-which is available directly from the descriptor:
-
-```python
+# file.length returns the blob size from the descriptor (zero I/O).
 @daft.func(return_dtype=daft.DataType.int64())
 def file_length(f: daft.File) -> int | None:
     return None if f is None else f.length
 
-result = (
-    df.where(col("id") < 100)
-      .with_column("size", file_length(col("image")))
-)
+result = df.with_column("size", file_length(col("image")))
 result.show()
 ```
 
-Note: `col("image").length()` does not work on `File` type columns. Use a
-UDF with `file.length` instead — this reads the size from the blob descriptor
-with zero I/O.
+Note: `col("image").length()` does not work on `File` type columns — use
+`file.length` as shown above.
+
+To read actual blob content (e.g., decode an image), use `file.open()`.
+Only filtered rows trigger I/O:
+
+```python
+@daft.func
+def decode_image(file: daft.File) -> str:
+    with file.open() as f:
+        data = f.read()
+    return f"decoded {len(data)} bytes"
+
+result = df.with_column("info", decode_image(col("image")))
+result.show()
+```
 
 ### Parallel blob reading
 
