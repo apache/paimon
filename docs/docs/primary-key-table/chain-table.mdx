@@ -22,6 +22,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Chain Table
 
 Chain table is a new capability for primary key tables that transforms how you process incremental data.
@@ -46,9 +49,8 @@ automatically chooses the appropriate strategy based on the read mode, such as f
 To enable chain table, you must config `chain-table.enabled` to true in the table options when creating the
 table, and the snapshot and delta branch need to be created as well.
 
-{{< tabs "chain-table-setup" >}}
-
-{{< tab "Spark SQL" >}}
+<Tabs groupId="chain-table-setup">
+<TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
 CREATE TABLE default.t (
@@ -85,9 +87,8 @@ ALTER TABLE `default`.`t$branch_delta` SET tblproperties
      'scan.fallback-delta-branch' = 'delta');
 ```
 
-{{< /tab >}}
-
-{{< tab "Flink SQL" >}}
+</TabItem>
+<TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
 CREATE TABLE default.t (
@@ -122,9 +123,8 @@ ALTER TABLE `default`.`t$branch_delta` SET (
     'scan.fallback-delta-branch' = 'delta');
 ```
 
-{{< /tab >}}
-
-{{< /tabs >}}
+</TabItem>
+</Tabs>
 
 Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
