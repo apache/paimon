@@ -372,6 +372,37 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<String> listResourcesPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        return wrapped.listResourcesPaged(databaseName, maxResults, pageToken, resourceNamePattern);
+    }
+
+    @Override
+    public PagedList<Resource> listResourceDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        return wrapped.listResourceDetailsPaged(
+                databaseName, maxResults, pageToken, resourceNamePattern);
+    }
+
+    @Override
+    public PagedList<Identifier> listResourcesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String resourceNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        return wrapped.listResourcesPagedGlobally(
+                databaseNamePattern, resourceNamePattern, maxResults, pageToken);
+    }
+
+    @Override
     public Resource getResource(Identifier identifier) throws ResourceNotExistException {
         return wrapped.getResource(identifier);
     }
