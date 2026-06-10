@@ -167,7 +167,7 @@ case class DataEvolutionTableDataWrite(
           s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
         val result = recordWriter.prepareCommit(false)
         val dataFiles = result.newFilesIncrement().newFiles()
-        val dataFileMetas = assignFirstRowIds(dataFiles.asScala)
+        val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
         Seq(
           new CommitMessageImpl(
             partition,
@@ -188,6 +188,7 @@ case class DataEvolutionTableDataWrite(
         : Seq[org.apache.paimon.io.DataFileMeta] = {
       val assigned = ListBuffer[org.apache.paimon.io.DataFileMeta]()
       val blobFieldStarts = mutable.HashMap[String, Long]()
+      var normalFileCount = 0
       var normalFileStart = firstRowId
       var vectorStoreStart = firstRowId
 
@@ -202,9 +203,18 @@ case class DataEvolutionTableDataWrite(
             assigned += file.assignFirstRowId(vectorStoreStart)
             vectorStoreStart += file.rowCount()
           } else {
+            normalFileCount += 1
             assigned += file.assignFirstRowId(normalFileStart)
             normalFileStart += file.rowCount()
           }
+      }
+
+      // DedicatedFormatRollingFileWriter validates that blob/vector-store row counts match the
+      // normal file. Here we only assert the normal-file shape assumed by row-id assignment.
+      if (normalFileCount != 1) {
+        throw new IllegalStateException(
+          s"This is a bug: DataEvolution partial write should produce exactly one normal file, " +
+            s"but produced $normalFileCount files. Files: ${dataFiles.mkString(", ")}")
       }
 
       assigned.toSeq
