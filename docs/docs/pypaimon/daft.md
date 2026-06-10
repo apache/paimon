@@ -302,6 +302,26 @@ When running on Ray, the UDF calls are distributed across Ray workers
 automatically — each worker processes its partition in parallel, giving you
 batch-level concurrency without any extra code.
 
+### Streaming (chunk) reads
+
+`file.open()` returns a seekable stream that supports `read(size)`, so you can
+process large blobs in chunks without loading everything into memory:
+
+```python
+@daft.func(return_dtype=daft.DataType.binary())
+def first_4k(file: daft.File) -> bytes | None:
+    if file is None:
+        return None
+    with file.open() as f:
+        return f.read(4096)
+
+result = df.with_column("header", first_4k(col("image")))
+result.show()
+```
+
+See [Blob Storage — Streaming Read](./blob#streaming-read) for more details on
+the underlying `OffsetInputStream` API (`read(size)` / `seek()` / `tell()`).
+
 ## Catalog Abstraction
 
 Paimon catalogs can integrate with Daft's unified `Catalog` / `Table` interfaces:
