@@ -288,22 +288,13 @@ By default, `@daft.func` processes rows sequentially. To read blobs
 concurrently, use an async UDF with `max_concurrency`:
 
 ```python
-import asyncio
-import daft
-from pypaimon.daft import read_paimon
-
-df = read_paimon(
-    "my_db.image_table",
-    catalog_options={"warehouse": "/path/to/warehouse"},
-)
-
 @daft.func(max_concurrency=8)
-async def image_size(file: daft.File) -> int:
-    await asyncio.sleep(0)
+async def decode_image(file: daft.File) -> str:
     with file.open() as f:
-        return len(f.read())
+        data = f.read()
+    return f"decoded {len(data)} bytes"
 
-result = df.with_column("size", image_size(df["image"]))
+result = df.with_column("info", decode_image(col("image")))
 result.show()
 ```
 
