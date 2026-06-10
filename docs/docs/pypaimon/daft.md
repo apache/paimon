@@ -229,8 +229,23 @@ your application directly reads or writes Ray Datasets.
 
 Tables with BLOB columns (see [Blob Storage](./blob)) can be read with Daft.
 Blob columns are returned as `daft.File` references — the actual bytes are
-**not** loaded until you explicitly read them. Use `daft.func` to process blob
-data in parallel:
+**not** loaded until you explicitly read them.
+
+:::caution Use `pypaimon.daft`, not Daft's built-in connector
+
+Daft's built-in `daft.read_paimon()` does **not** support blob lazy loading —
+it reads blob data eagerly during the scan phase, ignoring column pruning and
+filter pushdown for blob columns. Always use `from pypaimon.daft import
+read_paimon` for tables with BLOB columns.
+:::
+
+### Lazy loading
+
+When you read a blob table through `pypaimon.daft`, the connector
+automatically enables descriptor mode internally. Blob columns appear as
+`daft.File` references in the DataFrame — no bytes are fetched from storage
+at this point. The actual I/O only happens when you call `file.open()` inside
+a UDF, and only for the rows that survive earlier filters:
 
 ```python
 import daft
@@ -241,14 +256,41 @@ df = read_paimon(
     catalog_options={"warehouse": "/path/to/warehouse"},
 )
 
-# Blob columns appear as File references (lazy, no I/O yet).
-# Use @daft.func to read and process blob data in parallel.
+# Filter runs BEFORE any blob bytes are read.
+df = df.where(daft.col("obs_index") < 2)
+
+# Only filtered rows trigger blob I/O inside the UDF.
 @daft.func
 def image_size(file: daft.File) -> int:
     with file.open() as f:
         return len(f.read())
 
-result = df.with_column("size", image_size(df["image"]))
+result = df.with_column("real_size", image_size(df["image_jpeg"]))
+result.show()
+```
+
+### Parallel blob reading
+
+By default, `@daft.func` processes rows sequentially. To read blobs
+concurrently, use an async UDF with `max_concurrency`:
+
+```python
+import asyncio
+import daft
+from pypaimon.daft import read_paimon
+
+df = read_paimon(
+    "my_db.image_table",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+)
+
+@daft.func(max_concurrency=8)
+async def image_size(file: daft.File) -> int:
+    await asyncio.sleep(0)
+    with file.open() as f:
+        return len(f.read())
+
+result = df.with_column("real_size", image_size(df["image_jpeg"]))
 result.show()
 ```
 
