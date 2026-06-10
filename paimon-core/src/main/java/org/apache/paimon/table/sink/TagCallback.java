@@ -18,12 +18,16 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.table.FileStoreTable;
+
 /**
  * This callback will be called after tag operations.
  *
  * <p>NOTE: No guarantee that this callback must be called.
  */
 public interface TagCallback extends AutoCloseable {
+
+    default void setTable(FileStoreTable table) {}
 
     void notifyCreation(String tagName);
 
