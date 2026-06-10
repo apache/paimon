@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * Extracts the time step duration from a timestamp pattern and formatter for chain table
  * partitions.
@@ -42,12 +44,8 @@ public class ChainPartitionStepExtractor {
     private final String formatter;
 
     public ChainPartitionStepExtractor(String pattern, String formatter) {
-        if (pattern == null) {
-            throw new IllegalArgumentException("pattern cannot be null");
-        }
-        if (formatter == null) {
-            throw new IllegalArgumentException("formatter cannot be null");
-        }
+        checkArgument(pattern != null, "pattern cannot be null");
+        checkArgument(formatter != null, "formatter cannot be null");
         this.pattern = pattern;
         this.formatter = formatter;
     }
@@ -77,10 +75,10 @@ public class ChainPartitionStepExtractor {
     private static List<TimeSpan> parseFormatter(String formatter) {
         String fingerprint = DateTimeFormatter.ofPattern(formatter).format(FINGERPRINT);
 
-        if (fingerprint.length() != formatter.length()) {
-            throw new IllegalArgumentException(
-                    "Formatter with escapes or variable length not supported: " + formatter);
-        }
+        checkArgument(
+                fingerprint.length() == formatter.length(),
+                "Formatter with escapes or variable length not supported: %s",
+                formatter);
 
         List<TimeSpan> spans = new ArrayList<>();
         int i = 0;
@@ -96,9 +94,7 @@ public class ChainPartitionStepExtractor {
                 i++;
             }
         }
-        if (spans.isEmpty()) {
-            throw new IllegalArgumentException("No time unit found in formatter: " + formatter);
-        }
+        checkArgument(!spans.isEmpty(), "No time unit found in formatter: %s", formatter);
         return spans;
     }
 
@@ -116,7 +112,7 @@ public class ChainPartitionStepExtractor {
         if (v == FINGERPRINT.getYear() || v == FINGERPRINT.getYear() % 100) {
             return ChronoField.YEAR;
         }
-        throw new IllegalArgumentException("Unknown time unit value: " + value);
+        throw new IllegalStateException("Unknown time unit value: " + value);
     }
 
     private static List<Fragment> splitPattern(String pattern) {
@@ -178,19 +174,17 @@ public class ChainPartitionStepExtractor {
                 String constant = fragment.text;
                 int constLen = constant.length();
 
-                if (constLen > formatterLen - lastMatchedEnd) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Constant '%s' exceeds remaining formatter length", constant));
-                }
+                checkArgument(
+                        constLen <= formatterLen - lastMatchedEnd,
+                        "Constant '%s' exceeds remaining formatter length",
+                        constant);
 
                 int pos = findConstantPos(constant, formatter, i, fragments.size(), lastMatchedEnd);
-                if (pos == -1) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Constant '%s' not found after position %d in formatter",
-                                    constant, lastMatchedEnd));
-                }
+                checkArgument(
+                        pos >= 0,
+                        "Constant '%s' not found after position %d in formatter",
+                        constant,
+                        lastMatchedEnd);
 
                 constantRanges.add(new int[] {pos, pos + constLen});
                 lastMatchedEnd = pos + constLen;
@@ -260,9 +254,7 @@ public class ChainPartitionStepExtractor {
                 }
             }
         }
-        if (min == null) {
-            throw new IllegalArgumentException("No time unit found in variable ranges");
-        }
+        checkArgument(min != null, "No time unit found in variable ranges");
         return min;
     }
 
@@ -281,11 +273,10 @@ public class ChainPartitionStepExtractor {
             case YEAR:
                 return Period.ofYears(1);
             default:
-                throw new IllegalArgumentException("Unsupported field: " + field);
+                throw new IllegalStateException("Unsupported field: " + field);
         }
     }
 
-    /** Represents a time unit span within the formatter string. */
     private static class TimeSpan {
         final ChronoField field;
         final int start;
@@ -298,7 +289,6 @@ public class ChainPartitionStepExtractor {
         }
     }
 
-    /** Represents a fragment of the pattern (either variable or constant). */
     private static class Fragment {
         final String text;
         final boolean isVariable;
