@@ -44,7 +44,7 @@ configurations that are suited for different scenarios.
 | Queue-like ordered streaming | Append Table | `bucket = N, bucket-key = col` |
 | Large-scale OLAP with ad-hoc queries | Append Table | Incremental Clustering |
 | Store images / videos / documents | Append Table (Blob) | `__BLOB_FIELD` comment, Data Evolution enabled |
-| AI vector search / RAG | Append Table (Vector) | `VECTOR` type, Global Index (DiskANN) |
+| AI vector search / RAG | Append Table (Vector) | `VECTOR` type, Vector Global Index |
 | AI feature engineering & column evolution | Append Table | `data-evolution.enabled = true` |
 | Python AI pipeline (Ray / PyTorch) | Append Table | PyPaimon SDK |
 
@@ -456,21 +456,19 @@ Schema schema = Schema.newBuilder()
 **Build the vector index and search:**
 
 ```sql
--- Build DiskANN vector index
+-- Build IVF-PQ vector index
 CALL sys.create_global_index(
     table => 'db.doc_embeddings',
     index_column => 'embedding',
-    index_type => 'lumina',
-    options => 'lumina.index.dimension=768'
+    index_type => 'ivf-pq',
+    options => 'vector.distance.metric=cosine,vector.nlist=256,vector.pq.m=16'
 );
 
 -- Search for top-5 nearest neighbors
 SELECT * FROM vector_search('doc_embeddings', 'embedding', array(0.1f, 0.2f, ...), 5);
 ```
 
-The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
-
-**Why:** The [Global Index](../multimodal-table/global-index) with DiskANN provides high-performance ANN search.
+**Why:** The [Global Index](../multimodal-table/global-index) with vector indexes provides high-performance ANN search.
 Vector data is stored in dedicated `.vector.lance` files optimized for dense vectors, while scalar columns stay in
 Parquet. You can also build a **BTree Index** on scalar columns for efficient filtering:
 
@@ -664,7 +662,7 @@ Do you need upsert / update / delete?
     │
     └── AI / Multimodal scenarios? → Enable Data Evolution
         ├── Store images / videos / docs? → Blob Table (__BLOB_FIELD comment)
-        ├── Vector search / RAG? → VECTOR type + Global Index (DiskANN)
+        ├── Vector search / RAG? → VECTOR type + Vector Global Index
         ├── Feature engineering? → Data Evolution (MERGE INTO partial columns)
         └── Python pipeline? → PyPaimon (Ray / PyTorch / Pandas)
 ```

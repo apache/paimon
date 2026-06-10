@@ -29,22 +29,28 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** Vector global indexer backed by paimon-vector-index. */
 public class VectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
-    private final VectorIndexOptions options;
+    private final Options options;
+    private final IndexType indexType;
+    private final String identifier;
 
-    public VectorGlobalIndexer(DataType fieldType, Options options, IndexType indexType) {
+    public VectorGlobalIndexer(
+            DataType fieldType, Options options, IndexType indexType, String identifier) {
         this.fieldType = fieldType;
-        this.options = new VectorIndexOptions(options, indexType);
+        this.options = options;
+        this.indexType = Objects.requireNonNull(indexType, "indexType must not be null");
+        this.identifier = Objects.requireNonNull(identifier, "identifier must not be null");
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new VectorGlobalIndexWriter(fileWriter, fieldType, options);
+        return new VectorGlobalIndexWriter(fileWriter, fieldType, options, indexType, identifier);
     }
 
     @Override
@@ -52,6 +58,6 @@ public class VectorGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
-        return new VectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
+        return new VectorGlobalIndexReader(fileReader, files, fieldType, executor);
     }
 }

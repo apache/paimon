@@ -24,7 +24,9 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.ivfpq.IndexType;
 import org.apache.paimon.index.ivfpq.VectorIndexWriter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -41,7 +43,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -60,10 +64,35 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     private static final Logger LOG = LoggerFactory.getLogger(VectorGlobalIndexWriter.class);
 
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
+    private static final String OPTION_PREFIX = "vector.";
+    private static final int DEFAULT_DIMENSION = 128;
+    private static final String DEFAULT_METRIC = "inner_product";
+    private static final int DEFAULT_NLIST = 256;
+    private static final int DEFAULT_PQ_M = 16;
+    private static final boolean DEFAULT_USE_OPQ = false;
+    private static final int DEFAULT_HNSW_M = 20;
+    private static final int DEFAULT_HNSW_EF_CONSTRUCTION = 150;
+    private static final int DEFAULT_HNSW_MAX_LEVEL = 7;
+    private static final int DEFAULT_NPROBE = 16;
+    private static final int DEFAULT_EF_SEARCH = 0;
+    private static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
+    private static final int DEFAULT_ADD_BATCH_SIZE = 10000;
 
     private final GlobalIndexFileWriter fileWriter;
-    private final VectorIndexOptions options;
+    private final IndexType indexType;
+    private final String identifier;
     private final int dim;
+    private final String metric;
+    private final int nlist;
+    private final int pqM;
+    private final boolean useOpq;
+    private final int hnswM;
+    private final int hnswEfConstruction;
+    private final int hnswMaxLevel;
+    private final int nprobe;
+    private final int efSearch;
+    private final double trainSampleRatio;
+    private final int addBatchSize;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -77,16 +106,35 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     private long logicalRowId;
 
     public VectorGlobalIndexWriter(
-            GlobalIndexFileWriter fileWriter, DataType fieldType, VectorIndexOptions options) {
+            GlobalIndexFileWriter fileWriter,
+            DataType fieldType,
+            Options options,
+            IndexType indexType,
+            String identifier) {
         this.fileWriter = fileWriter;
-        this.options = options;
-        this.dim = options.dimension();
+        this.indexType = indexType;
+        this.identifier = identifier;
+        this.dim = dimension(fieldType, options);
+        this.metric = stringOption(options, "distance.metric", DEFAULT_METRIC);
+        this.nlist = positiveIntOption(options, "nlist", DEFAULT_NLIST);
+        this.pqM = positiveIntOption(options, "pq.m", DEFAULT_PQ_M);
+        this.useOpq = booleanOption(options, "pq.use-opq", DEFAULT_USE_OPQ);
+        this.hnswM = positiveIntOption(options, "hnsw.m", DEFAULT_HNSW_M);
+        this.hnswEfConstruction =
+                positiveIntOption(options, "hnsw.ef-construction", DEFAULT_HNSW_EF_CONSTRUCTION);
+        this.hnswMaxLevel = positiveIntOption(options, "hnsw.max-level", DEFAULT_HNSW_MAX_LEVEL);
+        this.nprobe = positiveIntOption(options, "nprobe", DEFAULT_NPROBE);
+        this.efSearch = nonNegativeIntOption(options, "hnsw.ef-search", DEFAULT_EF_SEARCH);
+        this.trainSampleRatio =
+                doubleOption(options, "train.sample-ratio", DEFAULT_TRAIN_SAMPLE_RATIO);
+        this.addBatchSize = positiveIntOption(options, "add.batch-size", DEFAULT_ADD_BATCH_SIZE);
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
         this.vectorBuf = new float[dim];
 
         validateFieldType(fieldType);
+        validateOptions();
 
         try {
             this.tempVectorFile = File.createTempFile("paimon-vector-index-vectors-", ".bin");
@@ -214,44 +262,40 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     private ResultEntry buildIndex() throws IOException {
-        int effectiveNlist = (int) Math.min(options.nlist(), count);
+        int effectiveNlist = (int) Math.min(nlist, count);
 
         LOG.info(
                 "{} vector index build started: {} vectors, dim={}, nlist={}, metric={}",
-                options.logName(),
+                identifier,
                 count,
                 dim,
                 effectiveNlist,
-                options.metric());
+                metric);
         long buildStart = System.currentTimeMillis();
 
-        try (VectorIndexWriter writer =
-                new VectorIndexWriter(options.toNativeOptions(effectiveNlist))) {
+        try (VectorIndexWriter writer = new VectorIndexWriter(nativeOptions(effectiveNlist))) {
 
             // Phase 1: Train
             long phaseStart = System.currentTimeMillis();
-            LOG.info(
-                    "{} train phase started (sample_ratio={})",
-                    options.logName(),
-                    options.trainSampleRatio());
+            LOG.info("{} train phase started (sample_ratio={})", identifier, trainSampleRatio);
             trainFromTempFile(writer);
             LOG.info(
                     "{} train phase done in {} ms",
-                    options.logName(),
+                    identifier,
                     System.currentTimeMillis() - phaseStart);
 
             // Phase 2: Add all vectors in batches
             phaseStart = System.currentTimeMillis();
-            LOG.info("{} add phase started", options.logName());
+            LOG.info("{} add phase started", identifier);
             addVectorsFromTempFile(writer);
             LOG.info(
                     "{} add phase done in {} ms",
-                    options.logName(),
+                    identifier,
                     System.currentTimeMillis() - phaseStart);
 
             // Phase 3: Write index
             phaseStart = System.currentTimeMillis();
-            LOG.info("{} write phase started", options.logName());
+            LOG.info("{} write phase started", identifier);
             String fileName = fileWriter.newFileName(fileNamePrefix());
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
                 writer.writeIndex(out);
@@ -259,31 +303,30 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             }
             LOG.info(
                     "{} write phase done in {} ms",
-                    options.logName(),
+                    identifier,
                     System.currentTimeMillis() - phaseStart);
 
             LOG.info(
                     "{} vector index build completed in {} ms",
-                    options.logName(),
+                    identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta meta = new VectorIndexMeta(options);
+            VectorIndexMeta meta = new VectorIndexMeta(metadata());
             return new ResultEntry(fileName, logicalRowId, meta.serialize());
         }
     }
 
     private String fileNamePrefix() {
-        return FILE_NAME_PREFIX + "-" + options.logName();
+        return FILE_NAME_PREFIX + "-" + identifier;
     }
 
     private void trainFromTempFile(VectorIndexWriter writer) throws IOException {
-        double sampleRatio = options.trainSampleRatio();
-        int minTrainSize = (int) Math.min(count, Math.max(options.nlist() * 39L, 256));
+        int minTrainSize = (int) Math.min(count, Math.max(nlist * 39L, 256));
         int sampleCount;
-        if (sampleRatio >= 1.0) {
+        if (trainSampleRatio >= 1.0) {
             sampleCount = (int) count;
         } else {
-            sampleCount = Math.max((int) (count * sampleRatio), minTrainSize);
+            sampleCount = Math.max((int) (count * trainSampleRatio), minTrainSize);
             sampleCount = (int) Math.min(sampleCount, count);
         }
 
@@ -334,9 +377,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {
-        int batchSize = options.addBatchSize();
-        long[] batchIds = new long[batchSize];
-        float[] batchVectors = new float[batchSize * dim];
+        long[] batchIds = new long[addBatchSize];
+        float[] batchVectors = new float[addBatchSize * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
@@ -348,7 +390,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             int lastLoggedPercent = -1;
 
             while (remaining > 0) {
-                int thisBatch = (int) Math.min(batchSize, remaining);
+                int thisBatch = (int) Math.min(addBatchSize, remaining);
                 for (int i = 0; i < thisBatch; i++) {
                     ensureAvailable(readBuf, channel, recordSizeInBytes);
                     batchIds[i] = readBuf.getLong();
@@ -363,10 +405,125 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                 if (percent / 10 > lastLoggedPercent / 10) {
                     LOG.info(
                             "{} add progress: {}/{} vectors ({}%)",
-                            options.logName(), count - remaining, count, percent);
+                            identifier, count - remaining, count, percent);
                     lastLoggedPercent = percent;
                 }
             }
+        }
+    }
+
+    private Map<String, String> nativeOptions(int effectiveNlist) {
+        Map<String, String> nativeOptions = new LinkedHashMap<>();
+        nativeOptions.put("index.type", nativeIndexType(indexType));
+        nativeOptions.put("dimension", String.valueOf(dim));
+        nativeOptions.put("nlist", String.valueOf(effectiveNlist));
+        nativeOptions.put("metric", metric);
+        switch (indexType) {
+            case IVF_FLAT:
+                break;
+            case IVF_PQ:
+                nativeOptions.put("pq.m", String.valueOf(pqM));
+                nativeOptions.put("use-opq", String.valueOf(useOpq));
+                break;
+            case IVF_HNSW_FLAT:
+            case IVF_HNSW_SQ:
+                nativeOptions.put("hnsw.m", String.valueOf(hnswM));
+                nativeOptions.put("hnsw.ef-construction", String.valueOf(hnswEfConstruction));
+                nativeOptions.put("hnsw.max-level", String.valueOf(hnswMaxLevel));
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
+        }
+        return nativeOptions;
+    }
+
+    private Map<String, String> metadata() {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        metadata.put(VectorIndexMeta.KEY_INDEX_TYPE, identifier);
+        metadata.put(VectorIndexMeta.KEY_DIMENSION, String.valueOf(dim));
+        metadata.put(VectorIndexMeta.KEY_METRIC, metric);
+        metadata.put(VectorIndexMeta.KEY_NLIST, String.valueOf(nlist));
+        metadata.put(VectorIndexMeta.KEY_M, String.valueOf(pqM));
+        metadata.put(VectorIndexMeta.KEY_USE_OPQ, String.valueOf(useOpq));
+        metadata.put(VectorIndexMeta.KEY_HNSW_M, String.valueOf(hnswM));
+        metadata.put(VectorIndexMeta.KEY_HNSW_EF_CONSTRUCTION, String.valueOf(hnswEfConstruction));
+        metadata.put(VectorIndexMeta.KEY_HNSW_MAX_LEVEL, String.valueOf(hnswMaxLevel));
+        metadata.put(VectorIndexMeta.KEY_NPROBE, String.valueOf(nprobe));
+        metadata.put(VectorIndexMeta.KEY_EF_SEARCH, String.valueOf(efSearch));
+        return metadata;
+    }
+
+    private void validateOptions() {
+        if (indexType == IndexType.IVF_PQ && dim % pqM != 0) {
+            throw new IllegalArgumentException(
+                    String.format("vector.pq.m (%d) must divide vector dimension (%d)", pqM, dim));
+        }
+        if (trainSampleRatio <= 0 || trainSampleRatio > 1.0) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "vector.train.sample-ratio must be in (0, 1.0], but got %f",
+                            trainSampleRatio));
+        }
+    }
+
+    private static int dimension(DataType fieldType, Options options) {
+        if (fieldType instanceof VectorType) {
+            return ((VectorType) fieldType).getLength();
+        }
+        return positiveIntOption(options, "index.dimension", DEFAULT_DIMENSION);
+    }
+
+    private static String stringOption(Options options, String key, String defaultValue) {
+        String value = options.get(OPTION_PREFIX + key);
+        return value == null ? defaultValue : value;
+    }
+
+    private static int positiveIntOption(Options options, String key, int defaultValue) {
+        int value = options.getInteger(OPTION_PREFIX + key, defaultValue);
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid value for 'vector."
+                            + key
+                            + "': "
+                            + value
+                            + ". Must be a positive integer.");
+        }
+        return value;
+    }
+
+    private static int nonNegativeIntOption(Options options, String key, int defaultValue) {
+        int value = options.getInteger(OPTION_PREFIX + key, defaultValue);
+        if (value < 0) {
+            throw new IllegalArgumentException(
+                    "Invalid value for 'vector."
+                            + key
+                            + "': "
+                            + value
+                            + ". Must be a non-negative integer.");
+        }
+        return value;
+    }
+
+    private static boolean booleanOption(Options options, String key, boolean defaultValue) {
+        return options.getBoolean(OPTION_PREFIX + key, defaultValue);
+    }
+
+    private static double doubleOption(Options options, String key, double defaultValue) {
+        return options.getDouble(OPTION_PREFIX + key, defaultValue);
+    }
+
+    private static String nativeIndexType(IndexType indexType) {
+        switch (indexType) {
+            case IVF_FLAT:
+                return "ivf_flat";
+            case IVF_PQ:
+                return "ivf_pq";
+            case IVF_HNSW_FLAT:
+                return "ivf_hnsw_flat";
+            case IVF_HNSW_SQ:
+                return "ivf_hnsw_sq";
+            default:
+                throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
         }
     }
 

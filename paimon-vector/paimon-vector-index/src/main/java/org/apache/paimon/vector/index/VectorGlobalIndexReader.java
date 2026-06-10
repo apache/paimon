@@ -56,7 +56,6 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
-    private final VectorIndexOptions options;
     private final ExecutorService executor;
 
     private volatile VectorIndexMeta indexMeta;
@@ -67,14 +66,12 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
-            VectorIndexOptions options,
             ExecutorService executor) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
-        this.options = options;
     }
 
     @Override
@@ -101,7 +98,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         int nprobe = indexMeta.nprobe();
-        VectorMetric metric = indexMeta.metric();
+        String metric = indexMeta.metric();
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
         VectorSearchResult result;
@@ -158,17 +155,15 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 });
     }
 
-    private static float convertDistanceToScore(float distance, VectorMetric metric) {
-        switch (metric) {
-            case L2:
-                return 1.0f / (1.0f + distance);
-            case COSINE:
-                return 1.0f - distance;
-            case INNER_PRODUCT:
-                return distance;
-            default:
-                throw new IllegalArgumentException("Unknown metric: " + metric);
+    private static float convertDistanceToScore(float distance, String metric) {
+        if ("l2".equals(metric)) {
+            return 1.0f / (1.0f + distance);
+        } else if ("cosine".equals(metric)) {
+            return 1.0f - distance;
+        } else if ("inner_product".equals(metric)) {
+            return distance;
         }
+        throw new IllegalArgumentException("Unknown metric: " + metric);
     }
 
     private void validateSearchVector(Object vector) {

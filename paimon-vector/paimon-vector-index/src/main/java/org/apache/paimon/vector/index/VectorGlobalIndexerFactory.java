@@ -31,6 +31,6 @@ public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new VectorGlobalIndexer(field.type(), options, indexType());
+        return new VectorGlobalIndexer(field.type(), options, indexType(), identifier());
     }
 }

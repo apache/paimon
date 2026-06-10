@@ -38,17 +38,17 @@ public class VectorIndexMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private static final String KEY_INDEX_TYPE = "index_type";
-    private static final String KEY_DIMENSION = "dimension";
-    private static final String KEY_METRIC = "metric";
-    private static final String KEY_NLIST = "nlist";
-    private static final String KEY_M = "m";
-    private static final String KEY_USE_OPQ = "use_opq";
-    private static final String KEY_HNSW_M = "hnsw_m";
-    private static final String KEY_HNSW_EF_CONSTRUCTION = "hnsw_ef_construction";
-    private static final String KEY_HNSW_MAX_LEVEL = "hnsw_max_level";
-    private static final String KEY_NPROBE = "nprobe";
-    private static final String KEY_EF_SEARCH = "ef_search";
+    static final String KEY_INDEX_TYPE = "index_type";
+    static final String KEY_DIMENSION = "dimension";
+    static final String KEY_METRIC = "metric";
+    static final String KEY_NLIST = "nlist";
+    static final String KEY_M = "m";
+    static final String KEY_USE_OPQ = "use_opq";
+    static final String KEY_HNSW_M = "hnsw_m";
+    static final String KEY_HNSW_EF_CONSTRUCTION = "hnsw_ef_construction";
+    static final String KEY_HNSW_MAX_LEVEL = "hnsw_max_level";
+    static final String KEY_NPROBE = "nprobe";
+    static final String KEY_EF_SEARCH = "ef_search";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -57,22 +57,7 @@ public class VectorIndexMeta implements Serializable {
 
     private final Map<String, String> params;
 
-    public VectorIndexMeta(VectorIndexOptions options) {
-        this.params = new LinkedHashMap<>();
-        params.put(KEY_INDEX_TYPE, VectorIndexOptions.toIdentifier(options.indexType()));
-        params.put(KEY_DIMENSION, String.valueOf(options.dimension()));
-        params.put(KEY_METRIC, options.metric().getConfigName());
-        params.put(KEY_NLIST, String.valueOf(options.nlist()));
-        params.put(KEY_M, String.valueOf(options.m()));
-        params.put(KEY_USE_OPQ, String.valueOf(options.useOpq()));
-        params.put(KEY_HNSW_M, String.valueOf(options.hnswM()));
-        params.put(KEY_HNSW_EF_CONSTRUCTION, String.valueOf(options.hnswEfConstruction()));
-        params.put(KEY_HNSW_MAX_LEVEL, String.valueOf(options.hnswMaxLevel()));
-        params.put(KEY_NPROBE, String.valueOf(options.nprobe()));
-        params.put(KEY_EF_SEARCH, String.valueOf(options.efSearch()));
-    }
-
-    private VectorIndexMeta(Map<String, String> params) {
+    VectorIndexMeta(Map<String, String> params) {
         this.params = new LinkedHashMap<>(params);
     }
 
@@ -82,15 +67,15 @@ public class VectorIndexMeta implements Serializable {
             throw new IllegalArgumentException(
                     "Missing required key in vector index metadata: " + KEY_INDEX_TYPE);
         }
-        return VectorIndexOptions.parseIndexType(value);
+        return parseIndexType(value);
     }
 
     public int dimension() {
         return Integer.parseInt(params.get(KEY_DIMENSION));
     }
 
-    public VectorMetric metric() {
-        return VectorMetric.fromConfigName(params.get(KEY_METRIC));
+    public String metric() {
+        return params.get(KEY_METRIC);
     }
 
     public int nlist() {
@@ -106,15 +91,15 @@ public class VectorIndexMeta implements Serializable {
     }
 
     public int hnswM() {
-        return intValue(KEY_HNSW_M, VectorIndexOptions.DEFAULT_HNSW_M);
+        return intValue(KEY_HNSW_M, 20);
     }
 
     public int hnswEfConstruction() {
-        return intValue(KEY_HNSW_EF_CONSTRUCTION, VectorIndexOptions.DEFAULT_HNSW_EF_CONSTRUCTION);
+        return intValue(KEY_HNSW_EF_CONSTRUCTION, 150);
     }
 
     public int hnswMaxLevel() {
-        return intValue(KEY_HNSW_MAX_LEVEL, VectorIndexOptions.DEFAULT_HNSW_MAX_LEVEL);
+        return intValue(KEY_HNSW_MAX_LEVEL, 7);
     }
 
     public int nprobe() {
@@ -148,5 +133,18 @@ public class VectorIndexMeta implements Serializable {
     private int intValue(String key, int defaultValue) {
         String val = params.get(key);
         return val == null ? defaultValue : Integer.parseInt(val);
+    }
+
+    private static IndexType parseIndexType(String value) {
+        if (IvfPqAlgorithmVectorGlobalIndexerFactory.IDENTIFIER.equals(value)) {
+            return IndexType.IVF_PQ;
+        } else if (IvfFlatVectorGlobalIndexerFactory.IDENTIFIER.equals(value)) {
+            return IndexType.IVF_FLAT;
+        } else if (IvfHnswFlatVectorGlobalIndexerFactory.IDENTIFIER.equals(value)) {
+            return IndexType.IVF_HNSW_FLAT;
+        } else if (IvfHnswSqVectorGlobalIndexerFactory.IDENTIFIER.equals(value)) {
+            return IndexType.IVF_HNSW_SQ;
+        }
+        throw new IllegalArgumentException("Unknown vector index type: " + value);
     }
 }
