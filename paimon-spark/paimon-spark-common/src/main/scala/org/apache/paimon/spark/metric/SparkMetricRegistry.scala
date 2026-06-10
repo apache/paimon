@@ -18,11 +18,12 @@
 
 package org.apache.paimon.spark.metric
 
-import org.apache.paimon.metrics.{Gauge, Metric, MetricGroup, MetricGroupImpl, MetricRegistry}
+import org.apache.paimon.metrics.{Gauge, Metric, MetricGroup, MetricRegistry}
 import org.apache.paimon.operation.metrics.{CommitMetrics, ScanMetrics, WriterBufferMetric}
 import org.apache.paimon.spark._
 
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import org.apache.spark.sql.paimon.PaimonMetricsSource
 
 import java.util.{Map => JMap}
 
@@ -35,7 +36,8 @@ case class SparkMetricRegistry() extends MetricRegistry {
   override def createMetricGroup(
       groupName: String,
       variables: JMap[String, String]): MetricGroup = {
-    val metricGroup = new MetricGroupImpl(groupName, variables)
+    val source = PaimonMetricsSource.getOrCreate()
+    val metricGroup = new SparkMetricGroup(groupName, variables, source.metricRegistry)
     metricGroups.put(groupName, metricGroup)
     metricGroup
   }
