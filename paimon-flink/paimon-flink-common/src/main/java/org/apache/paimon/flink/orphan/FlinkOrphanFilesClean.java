@@ -364,6 +364,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                         String, Tuple2<String, Long>, CleanOrphanFilesResult>() {
 
                                     private boolean buildEnd;
+                                    private boolean abortDeletion;
                                     private long emittedFilesCount;
                                     private long emittedFilesLen;
 
@@ -383,6 +384,12 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                 checkState(!buildEnd, "Should not build ended.");
                                                 LOG.info("Finish build phase.");
                                                 buildEnd = true;
+                                                if (used.isEmpty()) {
+                                                    abortDeletion = true;
+                                                    LOG.warn(
+                                                            "Collected used files is empty, "
+                                                                    + "aborting orphan files clean to prevent data loss.");
+                                                }
                                                 break;
                                             case 2:
                                                 checkState(buildEnd, "Should build ended.");
@@ -409,6 +416,9 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     public void processElement2(
                                             StreamRecord<Tuple2<String, Long>> element) {
                                         checkState(buildEnd, "Should build ended.");
+                                        if (abortDeletion) {
+                                            return;
+                                        }
                                         Tuple2<String, Long> fileInfo = element.getValue();
                                         String value = fileInfo.f0;
                                         Path path = new Path(value);
