@@ -285,14 +285,21 @@ result.show()
 ### Parallel blob reading
 
 By default, `@daft.func` processes rows sequentially. To read blobs
-concurrently, use an async UDF with `max_concurrency`:
+concurrently within a single worker, use an async UDF with
+`max_concurrency` and `asyncio.to_thread` (because `file.open().read()`
+is synchronous blocking I/O):
 
 ```python
-@daft.func(max_concurrency=8)
-async def decode_image(file: daft.File) -> str:
+import asyncio
+
+def _read_blob(file: daft.File) -> str:
     with file.open() as f:
         data = f.read()
     return f"decoded {len(data)} bytes"
+
+@daft.func(max_concurrency=8)
+async def decode_image(file: daft.File) -> str:
+    return await asyncio.to_thread(_read_blob, file)
 
 result = df.with_column("info", decode_image(col("image")))
 result.show()
