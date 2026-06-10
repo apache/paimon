@@ -119,6 +119,22 @@ public class GlobalIndexMeta {
         return fields;
     }
 
+    /** The primary index column. */
+    public DataField getIndexField(RowType rowType) {
+        return rowType.getField(indexFieldId);
+    }
+
+    /** The extra columns beyond the primary one; empty for a single-column index. */
+    public List<DataField> getExtraFields(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        if (extraFieldIds != null) {
+            for (int id : extraFieldIds) {
+                fields.add(rowType.getField(id));
+            }
+        }
+        return fields;
+    }
+
     public List<String> getIndexedFieldNames(RowType rowType) {
         List<String> names = new ArrayList<>();
         for (int id : getIndexedFieldIds()) {

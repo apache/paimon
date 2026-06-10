@@ -29,7 +29,7 @@ public interface GlobalIndexerFactory {
 
     String identifier();
 
-    GlobalIndexer create(DataField dataField, Options options);
+    GlobalIndexer create(DataField indexField, Options options);
 
     /**
      * Whether this index type supports multi-column indexes. A factory that returns {@code true}
@@ -40,18 +40,18 @@ public interface GlobalIndexerFactory {
     }
 
     /**
-     * Creates an indexer over a primary column plus optional extra columns. {@code dataField} is
+     * Creates an indexer over a primary column plus optional extra columns. {@code indexField} is
      * the primary column; {@code extraFields} holds the remaining columns and is empty for a
      * single-column index.
      */
     default GlobalIndexer create(
-            DataField dataField, List<DataField> extraFields, Options options) {
+            DataField indexField, List<DataField> extraFields, Options options) {
         if (extraFields != null && !extraFields.isEmpty()) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Index type '%s' does not support multi-column index, got extra columns: %s",
                             identifier(), extraFields));
         }
-        return create(dataField, options);
+        return create(indexField, options);
     }
 }

@@ -197,7 +197,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         table,
                                         indexType,
                                         readRowType,
-                                        indexFields,
+                                        indexFields.get(0),
+                                        indexFields.subList(1, indexFields.size()),
                                         userOptions);
 
                         try (TableCommitImpl commit =

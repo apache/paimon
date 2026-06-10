@@ -92,12 +92,11 @@ public class VectorReadImpl implements VectorRead, Serializable {
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
         if (firstMeta.isMultiColumn()) {
-            List<DataField> fields = firstMeta.getIndexedFields(table.rowType());
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)
                             .create(
-                                    fields.get(0),
-                                    fields.subList(1, fields.size()),
+                                    firstMeta.getIndexField(table.rowType()),
+                                    firstMeta.getExtraFields(table.rowType()),
                                     table.coreOptions().toConfiguration());
         } else {
             globalIndexer =

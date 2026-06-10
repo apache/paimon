@@ -54,14 +54,15 @@ public interface GlobalIndexTopologyBuilder {
             FileStoreTable table,
             String indexType,
             RowType readType,
-            List<DataField> indexFields,
+            DataField indexField,
+            List<DataField> extraFields,
             Options options)
             throws IOException {
-        if (indexFields.size() > 1) {
+        if (extraFields != null && !extraFields.isEmpty()) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Topology builder '%s' does not support multi-column index, got columns: %s",
-                            identifier(), indexFields));
+                            "Topology builder '%s' does not support multi-column index, got extra columns: %s",
+                            identifier(), extraFields));
         }
         return buildIndex(
                 spark,
@@ -70,7 +71,7 @@ public interface GlobalIndexTopologyBuilder {
                 table,
                 indexType,
                 readType,
-                indexFields.get(0),
+                indexField,
                 options);
     }
 }

@@ -41,6 +41,7 @@ import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -55,7 +56,8 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     private final FileStoreTable table;
     private final BinaryRow partition;
     private final RowType readType;
-    private final List<DataField> indexFields;
+    private final DataField indexField;
+    private final List<DataField> extraFields;
     private final String indexType;
     private final Range rowRange;
     private final Options options;
@@ -72,7 +74,8 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 table,
                 partition,
                 readType,
-                Collections.singletonList(indexField),
+                indexField,
+                Collections.emptyList(),
                 indexType,
                 rowRange,
                 options);
@@ -82,17 +85,27 @@ public class DefaultGlobalIndexBuilder implements Serializable {
             FileStoreTable table,
             BinaryRow partition,
             RowType readType,
-            List<DataField> indexFields,
+            DataField indexField,
+            List<DataField> extraFields,
             String indexType,
             Range rowRange,
             Options options) {
         this.table = table;
         this.partition = partition;
         this.readType = readType;
-        this.indexFields = indexFields;
+        this.indexField = indexField;
+        this.extraFields = extraFields;
         this.indexType = indexType;
         this.rowRange = rowRange;
         this.options = options;
+    }
+
+    /** The primary index column followed by the extra columns, in index order. */
+    private List<DataField> indexedFields() {
+        List<DataField> fields = new ArrayList<>(1 + extraFields.size());
+        fields.add(indexField);
+        fields.addAll(extraFields);
+        return fields;
     }
 
     public FileStoreTable table() {
@@ -112,7 +125,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        indexFields,
+                        indexedFields(),
                         indexType,
                         resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
@@ -123,21 +136,17 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     private List<ResultEntry> writePaimonRows(
             CloseableIterator<InternalRow> rows, LongCounter rowCounter) throws IOException {
         GlobalIndexWriter indexWriter =
-                createIndexWriter(
-                        table,
-                        indexType,
-                        indexFields.get(0),
-                        indexFields.subList(1, indexFields.size()),
-                        options);
-        boolean multiColumn = indexFields.size() > 1;
+                createIndexWriter(table, indexType, indexField, extraFields, options);
+        boolean multiColumn = !extraFields.isEmpty();
 
         try {
             if (multiColumn) {
                 GlobalIndexMultiColumnWriter multiWriter =
                         (GlobalIndexMultiColumnWriter) indexWriter;
-                int[] projection = new int[indexFields.size()];
-                for (int i = 0; i < indexFields.size(); i++) {
-                    DataField field = indexFields.get(i);
+                List<DataField> indexedFields = indexedFields();
+                int[] projection = new int[indexedFields.size()];
+                for (int i = 0; i < indexedFields.size(); i++) {
+                    DataField field = indexedFields.get(i);
                     projection[i] = readType.getFieldIndex(field.name());
                 }
                 ProjectedRow projectedRow = ProjectedRow.from(projection);
@@ -152,7 +161,6 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                     rowCounter.add(1);
                 }
             } else {
-                DataField indexField = indexFields.get(0);
                 GlobalIndexSingletonWriter singleWriter = (GlobalIndexSingletonWriter) indexWriter;
                 InternalRow.FieldGetter getter =
                         InternalRow.createFieldGetter(

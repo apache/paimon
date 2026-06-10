@@ -86,7 +86,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 table,
                 indexType,
                 readType,
-                Collections.singletonList(indexField),
+                indexField,
+                Collections.emptyList(),
                 options);
     }
 
@@ -98,7 +99,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             FileStoreTable table,
             String indexType,
             RowType readType,
-            List<DataField> indexFields,
+            DataField indexField,
+            List<DataField> extraFields,
             Options options)
             throws IOException {
         Options tableOptions = table.coreOptions().toConfiguration();
@@ -112,6 +114,9 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
 
         List<ManifestEntry> entries =
                 table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+        List<DataField> indexFields = new ArrayList<>();
+        indexFields.add(indexField);
+        indexFields.addAll(extraFields);
         List<String> indexColumns =
                 indexFields.stream().map(DataField::name).collect(Collectors.toList());
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
@@ -137,7 +142,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                                 table,
                                 partition,
                                 readType,
-                                indexFields,
+                                indexField,
+                                extraFields,
                                 indexType,
                                 indexedSplit.rowRanges().get(0),
                                 options);
