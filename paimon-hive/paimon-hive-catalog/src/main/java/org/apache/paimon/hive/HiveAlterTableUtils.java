@@ -39,7 +39,7 @@ public class HiveAlterTableUtils {
         try {
             alterTableWithEnv(client, identifier, table, skipUpdateStats, cascade);
         } catch (NoClassDefFoundError | NoSuchMethodError e) {
-            alterTableWithoutEnv(client, identifier, table);
+            alterTableWithoutEnv(client, identifier, table, cascade);
         }
     }
 
@@ -64,7 +64,8 @@ public class HiveAlterTableUtils {
     }
 
     private static void alterTableWithoutEnv(
-            IMetaStoreClient client, Identifier identifier, Table table) throws TException {
-        client.alter_table(identifier.getDatabaseName(), identifier.getTableName(), table, true);
+            IMetaStoreClient client, Identifier identifier, Table table, boolean cascade)
+            throws TException {
+        client.alter_table(identifier.getDatabaseName(), identifier.getTableName(), table, cascade);
     }
 }
