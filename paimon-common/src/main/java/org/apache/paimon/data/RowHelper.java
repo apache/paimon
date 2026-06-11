@@ -36,6 +36,20 @@ public class RowHelper implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Maximum retained reuse buffer size in bytes. Buffers exceeding this cap are eligible for
+     * release when the shrink ratio condition is also met.
+     */
+    private static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
+
+    /**
+     * Shrink ratio for hysteresis. The buffer is released only when its capacity exceeds {@link
+     * #MAX_RETAINED_REUSE_BUFFER_SIZE} AND is more than {@code SHRINK_RATIO} times the current
+     * row's size. This avoids thrashing for sustained medium-to-large records while still releasing
+     * after a spike (e.g. 100MB buffer with 5MB rows → 20x > 4x → release).
+     */
+    private static final int SHRINK_RATIO = 4;
+
     private final FieldGetter[] fieldGetters;
     private final ValueSetter[] valueSetters;
     private final boolean[] writeNulls;
@@ -79,6 +93,32 @@ public class RowHelper implements Serializable {
             }
         }
         reuseWriter.complete();
+    }
+
+    /**
+     * Release the internal reuse buffer if the given row is the reuse row produced by this helper,
+     * the backing segment exceeds the maximum retained size, and the buffer is clearly oversized
+     * relative to the current record. The identity check ({@code currentRow == reuseRow}) ensures
+     * we only act when the caller actually used this helper's buffer.
+     *
+     * <p>The release condition combines a fixed cap with a relative ratio check:
+     *
+     * <ul>
+     *   <li>bufferCapacity > {@link #MAX_RETAINED_REUSE_BUFFER_SIZE} — the buffer was inflated
+     *       beyond the baseline
+     *   <li>bufferCapacity > currentRow.getSizeInBytes() * {@link #SHRINK_RATIO} — the buffer is
+     *       significantly larger than the current workload needs
+     * </ul>
+     */
+    public void resetIfTooLarge(BinaryRow currentRow) {
+        if (currentRow == reuseRow && reuseWriter != null && reuseWriter.getSegments() != null) {
+            int bufferCapacity = reuseWriter.getSegments().size();
+            if (bufferCapacity > MAX_RETAINED_REUSE_BUFFER_SIZE
+                    && bufferCapacity > (long) currentRow.getSizeInBytes() * SHRINK_RATIO) {
+                reuseRow = null;
+                reuseWriter = null;
+            }
+        }
     }
 
     public BinaryRow reuseRow() {
