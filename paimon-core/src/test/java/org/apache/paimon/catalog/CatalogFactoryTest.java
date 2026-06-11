@@ -170,6 +170,7 @@ public class CatalogFactoryTest {
         }
     }
 
+    /** Runner loaded by {@link NoHadoopClassLoader} to verify no-Hadoop catalog creation. */
     public static class NoHadoopCatalogContextRunner {
 
         public static void run(String warehouse, ClassLoader classLoader) throws Exception {
