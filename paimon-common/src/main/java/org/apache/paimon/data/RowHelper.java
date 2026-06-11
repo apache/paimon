@@ -40,7 +40,7 @@ public class RowHelper implements Serializable {
      * Maximum retained reuse buffer size in bytes. Buffers exceeding this cap are eligible for
      * release when the shrink ratio condition is also met.
      */
-    private static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
+    public static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
 
     /**
      * Shrink ratio for hysteresis. The buffer is released only when its capacity exceeds {@link
@@ -48,7 +48,7 @@ public class RowHelper implements Serializable {
      * row's size. This avoids thrashing for sustained medium-to-large records while still releasing
      * after a spike (e.g. 100MB buffer with 5MB rows → 20x > 4x → release).
      */
-    private static final int SHRINK_RATIO = 4;
+    public static final int SHRINK_RATIO = 4;
 
     private final FieldGetter[] fieldGetters;
     private final ValueSetter[] valueSetters;

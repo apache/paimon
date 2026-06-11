@@ -21,6 +21,7 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.RowHelper;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
@@ -88,6 +89,10 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
 
         int length = source.readInt();
         if (segments == null || segments[0].size() < length) {
+            // Need a larger buffer
+            segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
+        } else if (segments[0].size() > RowHelper.MAX_RETAINED_REUSE_BUFFER_SIZE
+                && segments[0].size() > (long) length * RowHelper.SHRINK_RATIO) {
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
         }
         source.readFully(segments[0].getArray(), 0, length);
