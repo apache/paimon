@@ -19,10 +19,17 @@
 package org.apache.paimon.vector.index;
 
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.VectorType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for vector global indexer factory SPI registration. */
 public class VectorGlobalIndexerFactoryTest {
@@ -49,14 +56,60 @@ public class VectorGlobalIndexerFactoryTest {
     }
 
     @Test
-    public void testFactoryIndexType() {
-        assertThat(new IvfFlatVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(VectorIndexType.IVF_FLAT);
-        assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(VectorIndexType.IVF_PQ);
-        assertThat(new IvfHnswFlatVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(VectorIndexType.IVF_HNSW_FLAT);
-        assertThat(new IvfHnswSqVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(VectorIndexType.IVF_HNSW_SQ);
+    public void testNativeOptionsOnlyUsesIdentifierPrefix() {
+        Options options = new Options();
+        options.setString("bucket", "4");
+        options.setString("vector.file.format", "vortex");
+        options.setString("vector.nlist", "64");
+        options.setString("ivf-flat.dimension", "32");
+        options.setString("ivf-flat.distance.metric", "cosine");
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("ivf-pq.nlist", "256");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
+
+        assertThat(nativeOptions)
+                .containsEntry("index.type", "ivf_flat")
+                .containsEntry("dimension", "32")
+                .containsEntry("metric", "cosine")
+                .containsEntry("nlist", "128")
+                .doesNotContainEntry("nlist", "64")
+                .doesNotContainEntry("nlist", "256")
+                .doesNotContainKey("bucket")
+                .doesNotContainKey("vector.file.format");
+    }
+
+    @Test
+    public void testNativeOptionsUsesVectorTypeDimension() {
+        Options options = new Options();
+        options.setString("ivf-flat.dimension", "32");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new VectorType(8, new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
+
+        assertThat(nativeOptions).containsEntry("dimension", "8");
+    }
+
+    @Test
+    public void testInvalidDimension() {
+        Options options = new Options();
+        options.setString("ivf-flat.dimension", "0");
+
+        assertThatThrownBy(
+                        () ->
+                                VectorGlobalIndexerFactory.nativeOptions(
+                                        new ArrayType(new FloatType()),
+                                        options,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.dimension")
+                .hasMessageContaining("positive integer");
     }
 }

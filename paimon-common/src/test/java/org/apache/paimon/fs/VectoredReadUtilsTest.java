@@ -25,9 +25,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class VectoredReadUtilsTest {
 
@@ -126,5 +131,109 @@ class VectoredReadUtilsTest {
             lastEnd = start + len;
         }
         doTest(ranges);
+    }
+
+    @Test
+    public void testReadOptionsCanDisableSequentialReadFallback() throws Exception {
+        TestSeekableVectoredReadable readable = new TestSeekableVectoredReadable(2);
+
+        List<FileRange> ranges =
+                Arrays.asList(
+                        FileRange.createFileRange(0, 100), FileRange.createFileRange(150, 100));
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+
+        VectoredReadUtils.readVectored(readable, ranges, options);
+        assertThat(readable.readsStarted.await(5, TimeUnit.SECONDS)).isTrue();
+        readable.finishReads.countDown();
+
+        for (FileRange range : ranges) {
+            assertThat(range.getData().get(5, TimeUnit.SECONDS)).hasSize(range.getLength());
+        }
+        assertThat(readable.reads).hasValue(2);
+        assertThat(readable.sequentialReads).hasValue(0);
+        assertThat(readable.maxActiveReads).hasValue(2);
+    }
+
+    @Test
+    public void testReadOptionsPropagateSplitReadFailure() throws Exception {
+        VectoredReadable readable =
+                new VectoredReadable() {
+                    @Override
+                    public int pread(long position, byte[] buffer, int offset, int length)
+                            throws IOException {
+                        throw new IOException("failed");
+                    }
+                };
+
+        List<FileRange> ranges =
+                Arrays.asList(
+                        FileRange.createFileRange(0, 100), FileRange.createFileRange(150, 100));
+        VectoredReadUtils.ReadOptions options =
+                new VectoredReadUtils.ReadOptions(1000, 100, 2, false);
+
+        VectoredReadUtils.readVectored(readable, ranges, options);
+
+        assertThatThrownBy(() -> ranges.get(0).getData().get(5, TimeUnit.SECONDS))
+                .isInstanceOf(ExecutionException.class)
+                .hasMessageContaining("failed");
+        assertThatThrownBy(() -> ranges.get(1).getData().get(5, TimeUnit.SECONDS))
+                .isInstanceOf(ExecutionException.class)
+                .hasMessageContaining("failed");
+    }
+
+    private class TestSeekableVectoredReadable extends SeekableInputStream
+            implements VectoredReadable {
+
+        private final CountDownLatch readsStarted;
+        private final CountDownLatch finishReads = new CountDownLatch(1);
+        private final AtomicInteger reads = new AtomicInteger();
+        private final AtomicInteger sequentialReads = new AtomicInteger();
+        private final AtomicInteger activeReads = new AtomicInteger();
+        private final AtomicInteger maxActiveReads = new AtomicInteger();
+
+        private TestSeekableVectoredReadable(int expectedReads) {
+            this.readsStarted = new CountDownLatch(expectedReads);
+        }
+
+        @Override
+        public void seek(long desired) {}
+
+        @Override
+        public long getPos() {
+            return 0;
+        }
+
+        @Override
+        public int read() throws IOException {
+            throw new IOException("Sequential read should not be used");
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            sequentialReads.incrementAndGet();
+            throw new IOException("Sequential read should not be used");
+        }
+
+        @Override
+        public void close() {}
+
+        @Override
+        public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+            int active = activeReads.incrementAndGet();
+            maxActiveReads.accumulateAndGet(active, Math::max);
+            readsStarted.countDown();
+            try {
+                finishReads.await();
+                System.arraycopy(bytes, (int) position, buffer, offset, length);
+                reads.incrementAndGet();
+                return length;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            } finally {
+                activeReads.decrementAndGet();
+            }
+        }
     }
 }

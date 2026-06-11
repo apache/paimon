@@ -27,9 +27,4 @@ public class IvfHnswFlatVectorGlobalIndexerFactory extends VectorGlobalIndexerFa
     public String identifier() {
         return IDENTIFIER;
     }
-
-    @Override
-    protected VectorIndexType indexType() {
-        return VectorIndexType.IVF_HNSW_FLAT;
-    }
 }

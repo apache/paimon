@@ -27,9 +27,4 @@ public class IvfHnswSqVectorGlobalIndexerFactory extends VectorGlobalIndexerFact
     public String identifier() {
         return IDENTIFIER;
     }
-
-    @Override
-    protected VectorIndexType indexType() {
-        return VectorIndexType.IVF_HNSW_SQ;
-    }
 }

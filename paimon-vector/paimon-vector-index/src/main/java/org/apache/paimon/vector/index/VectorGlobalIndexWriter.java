@@ -25,7 +25,6 @@ import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.VectorIndexWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -42,17 +41,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
 /**
  * Vector global index writer using paimon-vector-index.
  *
  * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object)},
  * keeping Java heap usage constant (~8 MB buffer). During index build, vectors are read back for
- * training (with optional reservoir sampling) and batch insertion.
+ * training and batch insertion.
  *
  * <p><b>Thread safety:</b> This class is <b>not</b> thread-safe.
  */
@@ -63,35 +60,12 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     private static final Logger LOG = LoggerFactory.getLogger(VectorGlobalIndexWriter.class);
 
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
-    private static final String OPTION_PREFIX = "vector.";
-    private static final int DEFAULT_DIMENSION = 128;
-    private static final String DEFAULT_METRIC = "inner_product";
-    private static final int DEFAULT_NLIST = 256;
-    private static final int DEFAULT_PQ_M = 16;
-    private static final boolean DEFAULT_USE_OPQ = false;
-    private static final int DEFAULT_HNSW_M = 20;
-    private static final int DEFAULT_HNSW_EF_CONSTRUCTION = 150;
-    private static final int DEFAULT_HNSW_MAX_LEVEL = 7;
-    private static final int DEFAULT_NPROBE = 16;
-    private static final int DEFAULT_EF_SEARCH = 0;
-    private static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
-    private static final int DEFAULT_ADD_BATCH_SIZE = 10000;
+    private static final int ADD_BATCH_SIZE = 10000;
 
     private final GlobalIndexFileWriter fileWriter;
-    private final VectorIndexType indexType;
     private final String identifier;
+    private final Map<String, String> nativeOptions;
     private final int dim;
-    private final String metric;
-    private final int nlist;
-    private final int pqM;
-    private final boolean useOpq;
-    private final int hnswM;
-    private final int hnswEfConstruction;
-    private final int hnswMaxLevel;
-    private final int nprobe;
-    private final int efSearch;
-    private final double trainSampleRatio;
-    private final int addBatchSize;
 
     private File tempVectorFile;
     private FileChannel writeChannel;
@@ -107,33 +81,17 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
             DataType fieldType,
-            Options options,
-            VectorIndexType indexType,
+            Map<String, String> options,
             String identifier) {
         this.fileWriter = fileWriter;
-        this.indexType = indexType;
         this.identifier = identifier;
-        this.dim = dimension(fieldType, options);
-        this.metric = stringOption(options, "distance.metric", DEFAULT_METRIC);
-        this.nlist = positiveIntOption(options, "nlist", DEFAULT_NLIST);
-        this.pqM = positiveIntOption(options, "pq.m", DEFAULT_PQ_M);
-        this.useOpq = booleanOption(options, "pq.use-opq", DEFAULT_USE_OPQ);
-        this.hnswM = positiveIntOption(options, "hnsw.m", DEFAULT_HNSW_M);
-        this.hnswEfConstruction =
-                positiveIntOption(options, "hnsw.ef-construction", DEFAULT_HNSW_EF_CONSTRUCTION);
-        this.hnswMaxLevel = positiveIntOption(options, "hnsw.max-level", DEFAULT_HNSW_MAX_LEVEL);
-        this.nprobe = positiveIntOption(options, "nprobe", DEFAULT_NPROBE);
-        this.efSearch = nonNegativeIntOption(options, "hnsw.ef-search", DEFAULT_EF_SEARCH);
-        this.trainSampleRatio =
-                doubleOption(options, "train.sample-ratio", DEFAULT_TRAIN_SAMPLE_RATIO);
-        this.addBatchSize = positiveIntOption(options, "add.batch-size", DEFAULT_ADD_BATCH_SIZE);
+        validateFieldType(fieldType);
+        this.nativeOptions = options;
+        this.dim = Integer.parseInt(options.get("dimension"));
         this.count = 0;
         this.closed = false;
         this.recordSizeInBytes = checkedRecordSize(dim, IO_BUFFER_SIZE);
         this.vectorBuf = new float[dim];
-
-        validateFieldType(fieldType);
-        validateOptions();
 
         try {
             this.tempVectorFile = File.createTempFile("paimon-vector-index-vectors-", ".bin");
@@ -261,22 +219,14 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     private ResultEntry buildIndex() throws IOException {
-        int effectiveNlist = (int) Math.min(nlist, count);
-
-        LOG.info(
-                "{} vector index build started: {} vectors, dim={}, nlist={}, metric={}",
-                identifier,
-                count,
-                dim,
-                effectiveNlist,
-                metric);
+        LOG.info("{} vector index build started: {} vectors, dim={}", identifier, count, dim);
         long buildStart = System.currentTimeMillis();
 
-        try (VectorIndexWriter writer = new VectorIndexWriter(nativeOptions(effectiveNlist))) {
+        try (VectorIndexWriter writer = new VectorIndexWriter(nativeOptions)) {
 
             // Phase 1: Train
             long phaseStart = System.currentTimeMillis();
-            LOG.info("{} train phase started (sample_ratio={})", identifier, trainSampleRatio);
+            LOG.info("{} train phase started", identifier);
             trainFromTempFile(writer);
             LOG.info(
                     "{} train phase done in {} ms",
@@ -310,7 +260,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                     identifier,
                     System.currentTimeMillis() - buildStart);
 
-            VectorIndexMeta meta = new VectorIndexMeta(metadata());
+            VectorIndexMeta meta = new VectorIndexMeta();
             return new ResultEntry(fileName, logicalRowId, meta.serialize());
         }
     }
@@ -320,16 +270,8 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     private void trainFromTempFile(VectorIndexWriter writer) throws IOException {
-        int minTrainSize = (int) Math.min(count, Math.max(nlist * 39L, 256));
-        int sampleCount;
-        if (trainSampleRatio >= 1.0) {
-            sampleCount = (int) count;
-        } else {
-            sampleCount = Math.max((int) (count * trainSampleRatio), minTrainSize);
-            sampleCount = (int) Math.min(sampleCount, count);
-        }
-
-        float[] trainData = new float[sampleCount * dim];
+        int trainCount = (int) count;
+        float[] trainData = new float[trainCount * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
@@ -337,47 +279,21 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             readBuf.order(ByteOrder.nativeOrder());
             readBuf.limit(0);
 
-            if (sampleCount == (int) count) {
-                // Read all vectors
-                for (int i = 0; i < sampleCount; i++) {
-                    ensureAvailable(readBuf, channel, recordSizeInBytes);
-                    readBuf.getLong(); // skip rowId
-                    for (int d = 0; d < dim; d++) {
-                        trainData[i * dim + d] = readBuf.getFloat();
-                    }
-                }
-            } else {
-                // Reservoir sampling
-                Random rng = new Random(42);
-                int collected = 0;
-                for (long i = 0; i < count; i++) {
-                    ensureAvailable(readBuf, channel, recordSizeInBytes);
-                    readBuf.getLong(); // skip rowId
-                    if (collected < sampleCount) {
-                        for (int d = 0; d < dim; d++) {
-                            trainData[collected * dim + d] = readBuf.getFloat();
-                        }
-                        collected++;
-                    } else {
-                        int j = rng.nextInt((int) (i + 1));
-                        if (j < sampleCount) {
-                            for (int d = 0; d < dim; d++) {
-                                trainData[j * dim + d] = readBuf.getFloat();
-                            }
-                        } else {
-                            readBuf.position(readBuf.position() + dim * Float.BYTES);
-                        }
-                    }
+            for (int i = 0; i < trainCount; i++) {
+                ensureAvailable(readBuf, channel, recordSizeInBytes);
+                readBuf.getLong(); // skip rowId
+                for (int d = 0; d < dim; d++) {
+                    trainData[i * dim + d] = readBuf.getFloat();
                 }
             }
         }
 
-        writer.train(trainData, sampleCount);
+        writer.train(trainData, trainCount);
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {
-        long[] batchIds = new long[addBatchSize];
-        float[] batchVectors = new float[addBatchSize * dim];
+        long[] batchIds = new long[ADD_BATCH_SIZE];
+        float[] batchVectors = new float[ADD_BATCH_SIZE * dim];
 
         try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
@@ -389,7 +305,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             int lastLoggedPercent = -1;
 
             while (remaining > 0) {
-                int thisBatch = (int) Math.min(addBatchSize, remaining);
+                int thisBatch = (int) Math.min(ADD_BATCH_SIZE, remaining);
                 for (int i = 0; i < thisBatch; i++) {
                     ensureAvailable(readBuf, channel, recordSizeInBytes);
                     batchIds[i] = readBuf.getLong();
@@ -409,97 +325,6 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                 }
             }
         }
-    }
-
-    private Map<String, String> nativeOptions(int effectiveNlist) {
-        Map<String, String> nativeOptions = new LinkedHashMap<>();
-        nativeOptions.put("index.type", indexType.nativeName());
-        nativeOptions.put("dimension", String.valueOf(dim));
-        nativeOptions.put("nlist", String.valueOf(effectiveNlist));
-        nativeOptions.put("metric", metric);
-        switch (indexType) {
-            case IVF_FLAT:
-                break;
-            case IVF_PQ:
-                nativeOptions.put("pq.m", String.valueOf(pqM));
-                nativeOptions.put("use-opq", String.valueOf(useOpq));
-                break;
-            case IVF_HNSW_FLAT:
-            case IVF_HNSW_SQ:
-                nativeOptions.put("hnsw.m", String.valueOf(hnswM));
-                nativeOptions.put("hnsw.ef-construction", String.valueOf(hnswEfConstruction));
-                nativeOptions.put("hnsw.max-level", String.valueOf(hnswMaxLevel));
-                break;
-            default:
-                throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
-        }
-        return nativeOptions;
-    }
-
-    private Map<String, String> metadata() {
-        Map<String, String> metadata = new LinkedHashMap<>();
-        metadata.put(VectorIndexMeta.KEY_NPROBE, String.valueOf(nprobe));
-        metadata.put(VectorIndexMeta.KEY_EF_SEARCH, String.valueOf(efSearch));
-        return metadata;
-    }
-
-    private void validateOptions() {
-        if (indexType == VectorIndexType.IVF_PQ && dim % pqM != 0) {
-            throw new IllegalArgumentException(
-                    String.format("vector.pq.m (%d) must divide vector dimension (%d)", pqM, dim));
-        }
-        if (trainSampleRatio <= 0 || trainSampleRatio > 1.0) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "vector.train.sample-ratio must be in (0, 1.0], but got %f",
-                            trainSampleRatio));
-        }
-    }
-
-    private static int dimension(DataType fieldType, Options options) {
-        if (fieldType instanceof VectorType) {
-            return ((VectorType) fieldType).getLength();
-        }
-        return positiveIntOption(options, "index.dimension", DEFAULT_DIMENSION);
-    }
-
-    private static String stringOption(Options options, String key, String defaultValue) {
-        String value = options.get(OPTION_PREFIX + key);
-        return value == null ? defaultValue : value;
-    }
-
-    private static int positiveIntOption(Options options, String key, int defaultValue) {
-        int value = options.getInteger(OPTION_PREFIX + key, defaultValue);
-        if (value <= 0) {
-            throw new IllegalArgumentException(
-                    "Invalid value for 'vector."
-                            + key
-                            + "': "
-                            + value
-                            + ". Must be a positive integer.");
-        }
-        return value;
-    }
-
-    private static int nonNegativeIntOption(Options options, String key, int defaultValue) {
-        int value = options.getInteger(OPTION_PREFIX + key, defaultValue);
-        if (value < 0) {
-            throw new IllegalArgumentException(
-                    "Invalid value for 'vector."
-                            + key
-                            + "': "
-                            + value
-                            + ". Must be a non-negative integer.");
-        }
-        return value;
-    }
-
-    private static boolean booleanOption(Options options, String key, boolean defaultValue) {
-        return options.getBoolean(OPTION_PREFIX + key, defaultValue);
-    }
-
-    private static double doubleOption(Options options, String key, double defaultValue) {
-        return options.getDouble(OPTION_PREFIX + key, defaultValue);
     }
 
     private static void ensureAvailable(ByteBuffer readBuf, FileChannel channel, int minBytes)

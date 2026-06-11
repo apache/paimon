@@ -27,9 +27,4 @@ public class IvfPqAlgorithmVectorGlobalIndexerFactory extends VectorGlobalIndexe
     public String identifier() {
         return IDENTIFIER;
     }
-
-    @Override
-    protected VectorIndexType indexType() {
-        return VectorIndexType.IVF_PQ;
-    }
 }

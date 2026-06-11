@@ -27,9 +27,4 @@ public class IvfFlatVectorGlobalIndexerFactory extends VectorGlobalIndexerFactor
     public String identifier() {
         return IDENTIFIER;
     }
-
-    @Override
-    protected VectorIndexType indexType() {
-        return VectorIndexType.IVF_FLAT;
-    }
 }

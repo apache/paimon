@@ -24,10 +24,10 @@ import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
@@ -35,21 +35,18 @@ import java.util.concurrent.ExecutorService;
 public class VectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
-    private final Options options;
-    private final VectorIndexType indexType;
+    private final Map<String, String> options;
     private final String identifier;
 
-    public VectorGlobalIndexer(
-            DataType fieldType, Options options, VectorIndexType indexType, String identifier) {
+    public VectorGlobalIndexer(DataType fieldType, Map<String, String> options, String identifier) {
         this.fieldType = fieldType;
-        this.options = options;
-        this.indexType = Objects.requireNonNull(indexType, "indexType must not be null");
+        this.options = Objects.requireNonNull(options, "options must not be null");
         this.identifier = Objects.requireNonNull(identifier, "identifier must not be null");
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new VectorGlobalIndexWriter(fileWriter, fieldType, options, indexType, identifier);
+        return new VectorGlobalIndexWriter(fileWriter, fieldType, options, identifier);
     }
 
     @Override

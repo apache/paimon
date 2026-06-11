@@ -44,9 +44,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -114,7 +115,7 @@ public class VectorGlobalIndexTest {
     public void testVectorTypeRejectsNonFloatElement() {
         DataType intVecType = new VectorType(2, new IntType());
         Options options = createDefaultOptions(2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
 
         assertThatThrownBy(() -> createIvfPqWriter(fileWriter, intVecType, options))
@@ -125,7 +126,7 @@ public class VectorGlobalIndexTest {
     @Test
     public void testNanInVectorRejected() {
         Options options = createDefaultOptions(2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
@@ -139,7 +140,7 @@ public class VectorGlobalIndexTest {
     @Test
     public void testInfinityInVectorRejected() {
         Options options = createDefaultOptions(2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
@@ -154,7 +155,7 @@ public class VectorGlobalIndexTest {
     @Test
     public void testAllNullReturnsEmpty() {
         Options options = createDefaultOptions(2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
@@ -167,26 +168,36 @@ public class VectorGlobalIndexTest {
     }
 
     @Test
-    public void testMetaSerializationRoundTrip() throws IOException {
-        Options options = new Options();
-        options.setInteger("vector.nprobe", 24);
-        options.setInteger("vector.hnsw.ef-search", 80);
-
-        VectorIndexMeta meta = new VectorIndexMeta(metaOptions(options));
+    public void testMetaSerializationIsEmptyMap() throws IOException {
+        VectorIndexMeta meta = new VectorIndexMeta();
         byte[] serialized = meta.serialize();
         VectorIndexMeta deserialized = VectorIndexMeta.deserialize(serialized);
 
-        assertThat(deserialized.nprobe()).isEqualTo(24);
-        assertThat(deserialized.efSearch()).isEqualTo(80);
+        assertThat(new String(serialized, StandardCharsets.UTF_8)).isEqualTo("{}");
+        assertThat(new String(deserialized.serialize(), StandardCharsets.UTF_8)).isEqualTo("{}");
     }
 
     @Test
-    public void testMetaSerializationDefaults() throws IOException {
-        VectorIndexMeta deserialized =
-                VectorIndexMeta.deserialize(new VectorIndexMeta(new LinkedHashMap<>()).serialize());
+    public void testVectorSearchParameterParsing() {
+        Map<String, String> parameters = new HashMap<>();
+        parameters.put("ivf.nprobe", "24");
+        parameters.put("hnsw.ef_search", "80");
+        parameters.put("ignored", "bad");
 
-        assertThat(deserialized.nprobe()).isEqualTo(16);
-        assertThat(deserialized.efSearch()).isEqualTo(0);
+        assertThat(VectorGlobalIndexReader.nprobe(parameters)).isEqualTo(24);
+        assertThat(VectorGlobalIndexReader.efSearch(parameters)).isEqualTo(80);
+        assertThat(VectorGlobalIndexReader.nprobe(Collections.emptyMap())).isEqualTo(16);
+        assertThat(VectorGlobalIndexReader.efSearch(Collections.emptyMap())).isEqualTo(0);
+    }
+
+    @Test
+    public void testVectorSearchParameterRangeValidationDelegatedToNative() {
+        assertThat(VectorGlobalIndexReader.nprobe(Collections.singletonMap("ivf.nprobe", "0")))
+                .isEqualTo(0);
+        assertThat(
+                        VectorGlobalIndexReader.efSearch(
+                                Collections.singletonMap("hnsw.ef_search", "-1")))
+                .isEqualTo(-1);
     }
 
     // =================== Tests that NEED native library =====================
@@ -197,8 +208,8 @@ public class VectorGlobalIndexTest {
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("vector.nlist", 2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
 
         float[][] vectors =
                 new float[][] {
@@ -234,8 +245,8 @@ public class VectorGlobalIndexTest {
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("vector.nlist", 2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
 
         float[][] vectors =
                 new float[][] {
@@ -276,8 +287,8 @@ public class VectorGlobalIndexTest {
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("vector.nlist", 2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
 
         float[][] vectors =
                 new float[][] {
@@ -322,8 +333,8 @@ public class VectorGlobalIndexTest {
 
         int dimension = 2;
         Options options = createDefaultOptions(dimension);
-        options.setInteger("vector.nlist", 2);
-        options.setInteger("vector.pq.m", 1);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
 
         float[][] vectors =
                 new float[][] {
@@ -334,7 +345,10 @@ public class VectorGlobalIndexTest {
 
         VectorGlobalIndexer indexer =
                 new VectorGlobalIndexer(
-                        vectorType, options, VectorIndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
+                        vectorType,
+                        VectorGlobalIndexerFactory.nativeOptions(
+                                vectorType, options, IVF_PQ_IDENTIFIER),
+                        IVF_PQ_IDENTIFIER);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = (VectorGlobalIndexWriter) indexer.createWriter(fileWriter);
@@ -357,25 +371,17 @@ public class VectorGlobalIndexTest {
     private VectorGlobalIndexWriter createIvfPqWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
         return new VectorGlobalIndexWriter(
-                fileWriter, fieldType, options, VectorIndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
+                fileWriter,
+                fieldType,
+                VectorGlobalIndexerFactory.nativeOptions(fieldType, options, IVF_PQ_IDENTIFIER),
+                IVF_PQ_IDENTIFIER);
     }
 
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
-        options.setInteger("vector.index.dimension", dimension);
-        options.setString("vector.distance.metric", "l2");
+        options.setInteger("ivf-pq.dimension", dimension);
+        options.setString("ivf-pq.metric", "l2");
         return options;
-    }
-
-    private Map<String, String> metaOptions(Options options) {
-        Map<String, String> meta = new LinkedHashMap<>();
-        meta.put(
-                VectorIndexMeta.KEY_NPROBE,
-                String.valueOf(options.getInteger("vector.nprobe", 16)));
-        meta.put(
-                VectorIndexMeta.KEY_EF_SEARCH,
-                String.valueOf(options.getInteger("vector.hnsw.ef-search", 0)));
-        return meta;
     }
 
     private GlobalIndexFileWriter createFileWriter(Path path) {

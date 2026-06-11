@@ -107,31 +107,34 @@ CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
     index_type => 'ivf-pq',
-    options => 'vector.distance.metric=cosine,vector.nlist=256,vector.pq.m=16'
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
 );
 ```
 
-For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `vector.index.dimension`.
+For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-type>.dimension`.
 For `VECTOR<FLOAT>` columns, Paimon uses the dimension from the column type.
 
 Supported vector index options:
 
 | Option | Default | Description |
 |---|---|---|
-| `vector.index.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
-| `vector.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
-| `vector.nlist` | `256` | Number of IVF clusters used during index build. |
-| `vector.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. |
-| `vector.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
-| `vector.hnsw.m` | `20` | HNSW graph out-degree for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `vector.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `vector.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `vector.nprobe` | `16` | Number of IVF clusters to probe during search. |
-| `vector.hnsw.ef-search` | `0` | HNSW search width during search. `0` uses the native library default. |
-| `vector.train.sample-ratio` | `1.0` | Ratio of vectors sampled for index training. Must be in `(0, 1.0]`. |
-| `vector.add.batch-size` | `10000` | Batch size used when adding vectors to the native index writer. |
+| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
+| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.nlist` | `256` | Number of IVF clusters used during index build. |
+| `<index-type>.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. |
+| `<index-type>.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
+| `<index-type>.hnsw.m` | `20` | HNSW graph out-degree for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
+| `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
+| `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 
 **Vector Search**
+
+Search-time options are passed with each vector search request:
+
+| Option | Default | Description |
+|---|---|---|
+| `ivf.nprobe` | `16` | Number of IVF clusters to probe during search. |
+| `hnsw.ef_search` | `0` | HNSW search width during search. `0` uses the native library default. |
 
 <Tabs groupId="vector-search">
 
@@ -181,6 +184,7 @@ GlobalIndexResult result = table.newVectorSearchBuilder()
         .withVector(queryVector)
         .withLimit(5)
         .withVectorColumn("embedding")
+        .withOption("ivf.nprobe", "16")
         .executeLocal();
 
 // Step 2: Read matching rows using the search result

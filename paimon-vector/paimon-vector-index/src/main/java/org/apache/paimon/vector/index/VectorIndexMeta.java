@@ -23,52 +23,33 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Metadata for a vector index file.
  *
- * <p>Serialized as a flat JSON {@code Map<String, String>} storing Paimon search parameters that
- * are not part of the native vector index file metadata.
+ * <p>Serialized as an empty JSON {@code Map<String, String>}. Search-time parameters are passed
+ * through {@link org.apache.paimon.predicate.VectorSearch#options()}.
  */
 public class VectorIndexMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    static final String KEY_NPROBE = "nprobe";
-    static final String KEY_EF_SEARCH = "ef_search";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private static final TypeReference<LinkedHashMap<String, String>> MAP_TYPE_REF =
             new TypeReference<LinkedHashMap<String, String>>() {};
 
-    private final Map<String, String> params;
-
-    VectorIndexMeta(Map<String, String> params) {
-        this.params = new LinkedHashMap<>(params);
-    }
-
-    public int nprobe() {
-        return intValue(KEY_NPROBE, 16);
-    }
-
-    public int efSearch() {
-        return intValue(KEY_EF_SEARCH, 0);
-    }
+    VectorIndexMeta() {}
 
     public byte[] serialize() throws IOException {
-        return OBJECT_MAPPER.writeValueAsBytes(params);
+        return OBJECT_MAPPER.writeValueAsBytes(Collections.<String, String>emptyMap());
     }
 
     public static VectorIndexMeta deserialize(byte[] data) throws IOException {
-        Map<String, String> map = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
-        return new VectorIndexMeta(map);
-    }
-
-    private int intValue(String key, int defaultValue) {
-        String val = params.get(key);
-        return val == null ? defaultValue : Integer.parseInt(val);
+        Map<String, String> ignored = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
+        return new VectorIndexMeta();
     }
 }

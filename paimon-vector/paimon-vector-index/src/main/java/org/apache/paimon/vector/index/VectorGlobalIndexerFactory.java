@@ -22,14 +22,80 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.VectorType;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Factory for creating vector indexes backed by paimon-vector-index. */
 public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
-    protected abstract VectorIndexType indexType();
+    private static final int DEFAULT_DIMENSION = 128;
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        return new VectorGlobalIndexer(field.type(), options, indexType(), identifier());
+        String identifier = identifier();
+        return new VectorGlobalIndexer(
+                field.type(), nativeOptions(field.type(), options, identifier), identifier);
+    }
+
+    static Map<String, String> nativeOptions(
+            DataType fieldType, Options tableOptions, String identifier) {
+        Map<String, String> nativeOptions = new LinkedHashMap<>();
+        String optionPrefix = identifier + ".";
+        for (Map.Entry<String, String> entry : tableOptions.toMap().entrySet()) {
+            String optionKey = entry.getKey();
+            if (optionKey.startsWith(optionPrefix)) {
+                String nativeKey = nativeOptionKey(optionKey.substring(optionPrefix.length()));
+                if (nativeKey != null) {
+                    nativeOptions.put(nativeKey, entry.getValue());
+                }
+            }
+        }
+        nativeOptions.put("index.type", identifier.replace('-', '_'));
+        nativeOptions.put(
+                "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
+        return nativeOptions;
+    }
+
+    private static String nativeOptionKey(String optionKey) {
+        switch (optionKey) {
+            case "index.dimension":
+            case "dimension":
+                return "dimension";
+            case "distance.metric":
+            case "metric":
+                return "metric";
+            case "nlist":
+            case "pq.m":
+            case "hnsw.m":
+            case "hnsw.ef-construction":
+            case "hnsw.max-level":
+                return optionKey;
+            case "pq.use-opq":
+            case "use-opq":
+                return "use-opq";
+            default:
+                return null;
+        }
+    }
+
+    private static int dimension(
+            DataType fieldType, Map<String, String> nativeOptions, String identifier) {
+        if (fieldType instanceof VectorType) {
+            return ((VectorType) fieldType).getLength();
+        }
+        String dimension = nativeOptions.get("dimension");
+        int value = dimension == null ? DEFAULT_DIMENSION : Integer.parseInt(dimension);
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    "Invalid value for '"
+                            + identifier
+                            + ".dimension': "
+                            + value
+                            + ". Must be a positive integer.");
+        }
+        return value;
     }
 }

@@ -18,7 +18,10 @@
 
 package org.apache.paimon.vector.index;
 
+import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadUtils;
+import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -38,8 +41,11 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -54,12 +60,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class VectorGlobalIndexReader implements GlobalIndexReader {
 
+    private static final String NPROBE_PARAMETER = "ivf.nprobe";
+    private static final String EF_SEARCH_PARAMETER = "hnsw.ef_search";
+    private static final int DEFAULT_NPROBE = 16;
+    private static final int DEFAULT_EF_SEARCH = 0;
+    private static final int VECTOR_INDEX_MIN_SEEK_FOR_VECTOR_READS = 16 * 1024;
+    private static final int VECTOR_INDEX_PARALLELISM_FOR_VECTOR_READS = 32;
+
     private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final ExecutorService executor;
 
-    private volatile VectorIndexMeta indexMeta;
     private volatile VectorIndexMetadata nativeMeta;
     private volatile VectorIndexReader vectorReader;
     private SeekableInputStream openStream;
@@ -99,7 +111,8 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
-        int nprobe = indexMeta.nprobe();
+        int nprobe = nprobe(vectorSearch.options());
+        int efSearch = efSearch(vectorSearch.options());
         String metric = nativeMeta.metric();
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
@@ -112,11 +125,9 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
             }
             byte[] filterBytes = includeRowIds.serialize();
             int effectiveK = (int) Math.min(limit, cardinality);
-            result =
-                    vectorReader.search(
-                            queryVector, effectiveK, nprobe, indexMeta.efSearch(), filterBytes);
+            result = vectorReader.search(queryVector, effectiveK, nprobe, efSearch, filterBytes);
         } else {
-            result = vectorReader.search(queryVector, limit, nprobe, indexMeta.efSearch());
+            result = vectorReader.search(queryVector, limit, nprobe, efSearch);
         }
 
         long[] ids = result.ids();
@@ -168,6 +179,27 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         throw new IllegalArgumentException("Unknown metric: " + metric);
     }
 
+    static int nprobe(Map<String, String> parameters) {
+        return intParameter(parameters, NPROBE_PARAMETER, DEFAULT_NPROBE);
+    }
+
+    static int efSearch(Map<String, String> parameters) {
+        return intParameter(parameters, EF_SEARCH_PARAMETER, DEFAULT_EF_SEARCH);
+    }
+
+    private static int intParameter(Map<String, String> parameters, String key, int defaultValue) {
+        String value = parameters.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Invalid value for '" + key + "': " + value + ". Must be an integer.", e);
+        }
+    }
+
     private void validateSearchVector(Object vector) {
         if (!(vector instanceof float[])) {
             throw new IllegalArgumentException(
@@ -197,7 +229,6 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         if (vectorReader == null) {
             synchronized (this) {
                 if (vectorReader == null) {
-                    indexMeta = VectorIndexMeta.deserialize(ioMeta.metadata());
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     try {
                         vectorReader =
@@ -251,16 +282,16 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private static class SeekableStreamVectorIndexInput implements VectorIndexInput {
+    static class SeekableStreamVectorIndexInput implements VectorIndexInput {
 
         private final SeekableInputStream input;
 
-        private SeekableStreamVectorIndexInput(SeekableInputStream input) {
+        SeekableStreamVectorIndexInput(SeekableInputStream input) {
             this.input = input;
         }
 
         @Override
-        public synchronized void pread(long[] positions, byte[][] buffers) {
+        public void pread(long[] positions, byte[][] buffers) {
             if (positions.length != buffers.length) {
                 throw new IllegalArgumentException(
                         "positions length "
@@ -269,12 +300,44 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                                 + buffers.length);
             }
             try {
-                for (int i = 0; i < positions.length; i++) {
-                    input.seek(positions[i]);
-                    readFully(input, buffers[i]);
+                if (input instanceof VectoredReadable
+                        && areRangesNonOverlapping(positions, buffers)) {
+                    preadVectored((VectoredReadable) input, positions, buffers);
+                } else {
+                    synchronized (this) {
+                        preadSequential(positions, buffers);
+                    }
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to read vector index", e);
+            }
+        }
+
+        private void preadVectored(VectoredReadable readable, long[] positions, byte[][] buffers)
+                throws IOException {
+            List<FileRange> ranges = new ArrayList<>(positions.length);
+            for (int i = 0; i < positions.length; i++) {
+                ranges.add(FileRange.createFileRange(positions[i], buffers[i].length));
+            }
+
+            VectoredReadUtils.ReadOptions options =
+                    VectoredReadUtils.ReadOptions.from(readable)
+                            .withMinSeekForVectorReads(VECTOR_INDEX_MIN_SEEK_FOR_VECTOR_READS)
+                            .withParallelismForVectorReads(
+                                    VECTOR_INDEX_PARALLELISM_FOR_VECTOR_READS)
+                            .withSequentialReadFallback(false);
+            VectoredReadUtils.readVectored(readable, ranges, options);
+
+            for (int i = 0; i < ranges.size(); i++) {
+                byte[] bytes = ranges.get(i).getData().join();
+                System.arraycopy(bytes, 0, buffers[i], 0, bytes.length);
+            }
+        }
+
+        private void preadSequential(long[] positions, byte[][] buffers) throws IOException {
+            for (int i = 0; i < positions.length; i++) {
+                input.seek(positions[i]);
+                readFully(input, buffers[i]);
             }
         }
 
@@ -287,6 +350,31 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 }
                 offset += read;
             }
+        }
+
+        private static boolean areRangesNonOverlapping(long[] positions, byte[][] buffers) {
+            if (positions.length < 2) {
+                return true;
+            }
+
+            List<Integer> indexes = new ArrayList<>(positions.length);
+            for (int i = 0; i < positions.length; i++) {
+                indexes.add(i);
+            }
+            indexes.sort(Comparator.comparingLong(index -> positions[index]));
+
+            boolean hasPrevious = false;
+            long previousEnd = 0;
+            for (int index : indexes) {
+                long offset = positions[index];
+                long end = offset + buffers[index].length;
+                if (end < offset || (hasPrevious && offset < previousEnd)) {
+                    return false;
+                }
+                previousEnd = end;
+                hasPrevious = true;
+            }
+            return true;
         }
     }
 
