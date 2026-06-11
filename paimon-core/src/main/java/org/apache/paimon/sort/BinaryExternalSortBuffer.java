@@ -59,7 +59,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     private final List<ChannelWithMeta> spillChannelIDs;
     private final MemorySize maxDiskSize;
 
-    private int numRecords = 0;
+    private long numRecords = 0;
 
     public BinaryExternalSortBuffer(
             BinaryRowSerializer serializer,
@@ -122,7 +122,18 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public int size() {
-        return numRecords;
+        if (numRecords >= Integer.MAX_VALUE) {
+            throw new RuntimeException(
+                    "numRecords "
+                            + numRecords
+                            + " exceeds Integer.MAX_VALUE, use isEmpty() instead of size().");
+        }
+        return (int) numRecords;
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return numRecords == 0;
     }
 
     @Override

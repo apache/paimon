@@ -104,7 +104,7 @@ public abstract class Sorter {
             buffer.write(rowWithKey);
         }
 
-        if (buffer.size() > 0) {
+        if (!buffer.isEmpty()) {
             return buffer.sortedIterator();
         } else {
             throw new IllegalStateException("numRecords after sorting is 0.");
