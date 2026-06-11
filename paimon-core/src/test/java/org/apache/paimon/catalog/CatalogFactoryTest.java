@@ -100,8 +100,7 @@ public class CatalogFactoryTest {
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
 
         CatalogContext context =
-                CatalogContext.createWithoutHadoop(
-                        options, new TraceableFileIO.Loader(), null);
+                CatalogContext.createWithoutHadoop(options, new TraceableFileIO.Loader(), null);
 
         assertThat(CatalogFactory.createCatalog(context).listDatabases()).isEmpty();
         assertThatThrownBy(context::hadoopConf)
@@ -114,10 +113,12 @@ public class CatalogFactoryTest {
             throws Exception {
         try (URLClassLoader classLoader = new NoHadoopClassLoader(testClasspathWithoutHadoop())) {
             Class<?> runner =
-                    Class.forName(
-                            NoHadoopCatalogContextRunner.class.getName(), true, classLoader);
+                    Class.forName(NoHadoopCatalogContextRunner.class.getName(), true, classLoader);
             runner.getMethod("run", String.class, ClassLoader.class)
-                    .invoke(null, new Path(path.toUri().toString(), "warehouse").toString(), classLoader);
+                    .invoke(
+                            null,
+                            new Path(path.toUri().toString(), "warehouse").toString(),
+                            classLoader);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof Exception) {
@@ -180,8 +181,7 @@ public class CatalogFactoryTest {
             Options options = new Options();
             options.set("warehouse", warehouse);
             CatalogContext context =
-                    CatalogContext.createWithoutHadoop(
-                            options, new TraceableFileIO.Loader(), null);
+                    CatalogContext.createWithoutHadoop(options, new TraceableFileIO.Loader(), null);
             Catalog catalog = CatalogFactory.createCatalog(context, classLoader);
 
             assertThat(catalog.listDatabases()).isEmpty();
