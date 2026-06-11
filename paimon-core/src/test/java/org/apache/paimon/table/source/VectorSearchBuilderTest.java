@@ -682,8 +682,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThatThrownBy(
                         () ->
                                 table.newVectorSearchBuilder()
-                                        .withVectors(
-                                                new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
                                         .withLimit(2)
                                         .withVectorColumn(VECTOR_FIELD_NAME)
                                         .executeLocal())
