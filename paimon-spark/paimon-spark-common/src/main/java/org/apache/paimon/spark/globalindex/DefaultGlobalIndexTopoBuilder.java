@@ -116,6 +116,10 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             }
         }
 
+        if (taskList.isEmpty()) {
+            return Collections.emptyList();
+        }
+
         List<byte[]> commitMessageBytes =
                 javaSparkContext
                         .parallelize(taskList, taskList.size())

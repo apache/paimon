@@ -117,6 +117,15 @@ public class SparkMultimodalITCase {
                 "\n"
                         + "CALL sys.create_global_index(\n"
                         + "    `table` => 'my_db1.vector_test',\n"
+                        + "    `partitions` => \"date='20260421'\",\n"
+                        + "    `index_column` => 'embs',\n"
+                        + "    `index_type` => 'lumina-vector-ann',\n"
+                        + "    `options` => 'lumina.index.dimension=4'\n"
+                        + ");");
+        spark.sql(
+                "\n"
+                        + "CALL sys.create_global_index(\n"
+                        + "    `table` => 'my_db1.vector_test',\n"
                         + "    `partitions` => \"date='20260420'\",\n"
                         + "    `index_column` => 'embs',\n"
                         + "    `index_type` => 'lumina-vector-ann',\n"
