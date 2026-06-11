@@ -102,5 +102,12 @@ public final class HiveCatalogOptions {
                                                             + "E.g. specifying \"conf:a.b.c\" will add \"a.b.c\" to the key, and so that configurations with different default catalog wouldn't share the same client pool. Multiple conf elements can be specified."))
                                     .build());
 
+    public static final ConfigOption<Boolean> ALTER_TABLE_CASCADE =
+            ConfigOptions.key("alter-table-cascade")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to cascade schema changes to Hive metastore partitions when altering table.");
+
     private HiveCatalogOptions() {}
 }
