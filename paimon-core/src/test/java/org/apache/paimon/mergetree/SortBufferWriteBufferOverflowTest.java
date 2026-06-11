@@ -19,20 +19,22 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.compression.CompressOptions;
-import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.sort.SortBuffer;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.sort.BinaryInMemorySortBuffer;
+import org.apache.paimon.sort.IntNormalizedKeyComputer;
+import org.apache.paimon.sort.IntRecordComparator;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
@@ -49,10 +51,12 @@ public class SortBufferWriteBufferOverflowTest {
     @TempDir Path tempDir;
 
     private IOManager ioManager;
+    private MemorySegmentPool memorySegmentPool;
 
     @BeforeEach
     public void setUp() {
         ioManager = IOManager.create(tempDir.toString());
+        memorySegmentPool = new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024);
     }
 
     @AfterEach
@@ -60,28 +64,42 @@ public class SortBufferWriteBufferOverflowTest {
         ioManager.close();
     }
 
-    private SortBufferWriteBuffer createSpillableWriteBuffer() {
-        RowType keyType = RowType.builder().field("k", DataTypes.INT()).build();
-        RowType valueType = RowType.builder().field("v", DataTypes.INT()).build();
-        return new SortBufferWriteBuffer(
-                keyType,
-                valueType,
-                null,
-                new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
-                true,
-                MemorySize.MAX_VALUE,
+    private BinaryExternalSortBuffer createSortBuffer() {
+        BinaryRowSerializer serializer = new BinaryRowSerializer(1);
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        BinaryInMemorySortBuffer inMemorySortBuffer =
+                BinaryInMemorySortBuffer.createBuffer(
+                        IntNormalizedKeyComputer.INSTANCE,
+                        (AbstractRowDataSerializer) serializer,
+                        IntRecordComparator.INSTANCE,
+                        memorySegmentPool);
+        return new BinaryExternalSortBuffer(
+                serializer,
+                IntRecordComparator.INSTANCE,
+                memorySegmentPool.pageSize(),
+                inMemorySortBuffer,
+                ioManager,
                 128,
                 CompressOptions.defaultOptions(),
-                ioManager);
+                MemorySize.MAX_VALUE);
     }
 
-    private static void setNumRecords(SortBufferWriteBuffer writeBuffer, long numRecords)
+    private static SortBufferWriteBuffer createWriteBuffer(BinaryExternalSortBuffer buffer)
             throws Exception {
+        Field theUnsafeField = Unsafe.class.getDeclaredField("theUnsafe");
+        theUnsafeField.setAccessible(true);
+        Unsafe unsafe = (Unsafe) theUnsafeField.get(null);
+        SortBufferWriteBuffer writeBuffer =
+                (SortBufferWriteBuffer) unsafe.allocateInstance(SortBufferWriteBuffer.class);
+
         Field bufferField = SortBufferWriteBuffer.class.getDeclaredField("buffer");
         bufferField.setAccessible(true);
-        SortBuffer buffer = (SortBuffer) bufferField.get(writeBuffer);
-        assertThat(buffer).isInstanceOf(BinaryExternalSortBuffer.class);
+        bufferField.set(writeBuffer, buffer);
+        return writeBuffer;
+    }
 
+    private static void setNumRecords(BinaryExternalSortBuffer buffer, long numRecords)
+            throws Exception {
         Field numRecordsField = BinaryExternalSortBuffer.class.getDeclaredField("numRecords");
         numRecordsField.setAccessible(true);
         numRecordsField.setLong(buffer, numRecords);
@@ -89,19 +107,19 @@ public class SortBufferWriteBufferOverflowTest {
 
     @Test
     public void testIsEmptyWorksWhenNumRecordsExceedsIntMax() throws Exception {
-        SortBufferWriteBuffer writeBuffer = createSpillableWriteBuffer();
-        writeBuffer.put(1L, RowKind.INSERT, GenericRow.of(1), GenericRow.of(100));
+        BinaryExternalSortBuffer buffer = createSortBuffer();
+        SortBufferWriteBuffer writeBuffer = createWriteBuffer(buffer);
 
-        assertThat(writeBuffer.size()).isEqualTo(1);
+        assertThat(writeBuffer.size()).isEqualTo(0);
+        assertThat(writeBuffer.isEmpty()).isTrue();
+
+        setNumRecords(buffer, Integer.MAX_VALUE);
+        assertThat(writeBuffer.size()).isEqualTo(Integer.MAX_VALUE);
         assertThat(writeBuffer.isEmpty()).isFalse();
 
-        setNumRecords(writeBuffer, (long) Integer.MAX_VALUE + 1);
+        setNumRecords(buffer, (long) Integer.MAX_VALUE + 1);
 
-        // isEmpty() should still work without throwing — this is the key behavior
-        // that MergeTreeWriter.flushWriteBuffer relies on
         assertThat(writeBuffer.isEmpty()).isFalse();
-
-        // size() should throw
         assertThatThrownBy(writeBuffer::size)
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("exceeds Integer.MAX_VALUE");

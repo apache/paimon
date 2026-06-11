@@ -122,7 +122,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public int size() {
-        if (numRecords >= Integer.MAX_VALUE) {
+        if (numRecords > Integer.MAX_VALUE) {
             throw new RuntimeException(
                     "numRecords "
                             + numRecords
