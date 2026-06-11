@@ -24,11 +24,10 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.index.ivfpq.Metric;
-import org.apache.paimon.index.ivfpq.VectorIndexInput;
-import org.apache.paimon.index.ivfpq.VectorIndexMetadata;
-import org.apache.paimon.index.ivfpq.VectorIndexReader;
-import org.apache.paimon.index.ivfpq.VectorSearchResult;
+import org.apache.paimon.index.vector.VectorIndexInput;
+import org.apache.paimon.index.vector.VectorIndexMetadata;
+import org.apache.paimon.index.vector.VectorIndexReader;
+import org.apache.paimon.index.vector.VectorSearchResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -101,7 +100,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         int nprobe = indexMeta.nprobe();
-        Metric metric = nativeMeta.metric();
+        String metric = nativeMeta.metric();
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
         VectorSearchResult result;
@@ -158,17 +157,15 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 });
     }
 
-    private static float convertDistanceToScore(float distance, Metric metric) {
-        switch (metric) {
-            case L2:
-                return 1.0f / (1.0f + distance);
-            case COSINE:
-                return 1.0f - distance;
-            case INNER_PRODUCT:
-                return distance;
-            default:
-                throw new IllegalArgumentException("Unknown metric: " + metric);
+    private static float convertDistanceToScore(float distance, String metric) {
+        if ("l2".equals(metric)) {
+            return 1.0f / (1.0f + distance);
+        } else if ("cosine".equals(metric)) {
+            return 1.0f - distance;
+        } else if ("inner_product".equals(metric)) {
+            return distance;
         }
+        throw new IllegalArgumentException("Unknown metric: " + metric);
     }
 
     private void validateSearchVector(Object vector) {

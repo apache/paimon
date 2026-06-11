@@ -18,8 +18,6 @@
 
 package org.apache.paimon.vector.index;
 
-import org.apache.paimon.index.ivfpq.IndexType;
-
 /** Factory for the {@code ivf-hnsw-flat} vector index identifier. */
 public class IvfHnswFlatVectorGlobalIndexerFactory extends VectorGlobalIndexerFactory {
 
@@ -31,7 +29,7 @@ public class IvfHnswFlatVectorGlobalIndexerFactory extends VectorGlobalIndexerFa
     }
 
     @Override
-    protected IndexType indexType() {
-        return IndexType.IVF_HNSW_FLAT;
+    protected VectorIndexType indexType() {
+        return VectorIndexType.IVF_HNSW_FLAT;
     }
 }

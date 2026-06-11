@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.paimon.index.ivfpq;
+package org.apache.paimon.index.vector;
 
 public final class VectorIndexReader implements AutoCloseable {
 
@@ -54,7 +54,7 @@ public final class VectorIndexReader implements AutoCloseable {
         }
     }
 
-    public IndexType indexType() {
+    public String indexType() {
         return metadata().indexType();
     }
 

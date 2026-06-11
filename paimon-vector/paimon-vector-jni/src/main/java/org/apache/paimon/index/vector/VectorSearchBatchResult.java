@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.paimon.index.ivfpq;
+package org.apache.paimon.index.vector;
 
 import java.util.Arrays;
 

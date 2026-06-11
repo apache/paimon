@@ -24,8 +24,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.index.ivfpq.IndexType;
-import org.apache.paimon.index.ivfpq.VectorIndexWriter;
+import org.apache.paimon.index.vector.VectorIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -79,7 +78,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     private static final int DEFAULT_ADD_BATCH_SIZE = 10000;
 
     private final GlobalIndexFileWriter fileWriter;
-    private final IndexType indexType;
+    private final VectorIndexType indexType;
     private final String identifier;
     private final int dim;
     private final String metric;
@@ -109,7 +108,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             GlobalIndexFileWriter fileWriter,
             DataType fieldType,
             Options options,
-            IndexType indexType,
+            VectorIndexType indexType,
             String identifier) {
         this.fileWriter = fileWriter;
         this.indexType = indexType;
@@ -414,7 +413,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
 
     private Map<String, String> nativeOptions(int effectiveNlist) {
         Map<String, String> nativeOptions = new LinkedHashMap<>();
-        nativeOptions.put("index.type", nativeIndexType(indexType));
+        nativeOptions.put("index.type", indexType.nativeName());
         nativeOptions.put("dimension", String.valueOf(dim));
         nativeOptions.put("nlist", String.valueOf(effectiveNlist));
         nativeOptions.put("metric", metric);
@@ -445,7 +444,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     private void validateOptions() {
-        if (indexType == IndexType.IVF_PQ && dim % pqM != 0) {
+        if (indexType == VectorIndexType.IVF_PQ && dim % pqM != 0) {
             throw new IllegalArgumentException(
                     String.format("vector.pq.m (%d) must divide vector dimension (%d)", pqM, dim));
         }
@@ -501,21 +500,6 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
 
     private static double doubleOption(Options options, String key, double defaultValue) {
         return options.getDouble(OPTION_PREFIX + key, defaultValue);
-    }
-
-    private static String nativeIndexType(IndexType indexType) {
-        switch (indexType) {
-            case IVF_FLAT:
-                return "ivf_flat";
-            case IVF_PQ:
-                return "ivf_pq";
-            case IVF_HNSW_FLAT:
-                return "ivf_hnsw_flat";
-            case IVF_HNSW_SQ:
-                return "ivf_hnsw_sq";
-            default:
-                throw new IllegalArgumentException("Unsupported vector index type: " + indexType);
-        }
     }
 
     private static void ensureAvailable(ByteBuffer readBuf, FileChannel channel, int minBytes)

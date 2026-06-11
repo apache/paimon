@@ -18,18 +18,20 @@
 
 package org.apache.paimon.vector.index;
 
-/** Factory for the {@code ivf-hnsw-sq} vector index identifier. */
-public class IvfHnswSqVectorGlobalIndexerFactory extends VectorGlobalIndexerFactory {
+/** Vector index type used by the native paimon-vector-index writer. */
+public enum VectorIndexType {
+    IVF_FLAT("ivf_flat"),
+    IVF_PQ("ivf_pq"),
+    IVF_HNSW_FLAT("ivf_hnsw_flat"),
+    IVF_HNSW_SQ("ivf_hnsw_sq");
 
-    public static final String IDENTIFIER = "ivf-hnsw-sq";
+    private final String nativeName;
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+    VectorIndexType(String nativeName) {
+        this.nativeName = nativeName;
     }
 
-    @Override
-    protected VectorIndexType indexType() {
-        return VectorIndexType.IVF_HNSW_SQ;
+    public String nativeName() {
+        return nativeName;
     }
 }

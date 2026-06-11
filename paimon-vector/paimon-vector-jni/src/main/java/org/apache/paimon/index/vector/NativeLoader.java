@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.index.ivfpq;
+package org.apache.paimon.index.vector;
 
 import org.apache.paimon.shade.guava30.com.google.common.io.ByteStreams;
 

@@ -15,14 +15,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.paimon.index.ivfpq;
+package org.apache.paimon.index.vector;
 
 public final class VectorIndexMetadata {
 
-    private final IndexType indexType;
+    private final String indexType;
     private final int dimension;
     private final int nlist;
-    private final Metric metric;
+    private final String metric;
     private final long totalVectors;
     private final int pqM;
     private final int hnswM;
@@ -30,19 +30,25 @@ public final class VectorIndexMetadata {
     private final int hnswMaxLevel;
 
     public VectorIndexMetadata(
-            int indexType,
+            String indexType,
             int dimension,
             int nlist,
-            int metric,
+            String metric,
             long totalVectors,
             int pqM,
             int hnswM,
             int efConstruction,
             int maxLevel) {
-        this.indexType = IndexType.fromCode(indexType);
+        if (indexType == null) {
+            throw new NullPointerException("indexType");
+        }
+        if (metric == null) {
+            throw new NullPointerException("metric");
+        }
+        this.indexType = indexType;
         this.dimension = dimension;
         this.nlist = nlist;
-        this.metric = metricFromCode(metric);
+        this.metric = metric;
         this.totalVectors = totalVectors;
         this.pqM = pqM;
         this.hnswM = hnswM;
@@ -50,7 +56,7 @@ public final class VectorIndexMetadata {
         this.hnswMaxLevel = maxLevel;
     }
 
-    public IndexType indexType() {
+    public String indexType() {
         return indexType;
     }
 
@@ -62,7 +68,7 @@ public final class VectorIndexMetadata {
         return nlist;
     }
 
-    public Metric metric() {
+    public String metric() {
         return metric;
     }
 
@@ -84,14 +90,5 @@ public final class VectorIndexMetadata {
 
     public int hnswMaxLevel() {
         return hnswMaxLevel;
-    }
-
-    private static Metric metricFromCode(int code) {
-        for (Metric metric : Metric.values()) {
-            if (metric.code() == code) {
-                return metric;
-            }
-        }
-        throw new IllegalArgumentException("unknown metric code: " + code);
     }
 }

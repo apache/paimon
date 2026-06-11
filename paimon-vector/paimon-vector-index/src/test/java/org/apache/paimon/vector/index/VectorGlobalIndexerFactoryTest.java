@@ -19,7 +19,6 @@
 package org.apache.paimon.vector.index;
 
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
-import org.apache.paimon.index.ivfpq.IndexType;
 
 import org.junit.jupiter.api.Test;
 
@@ -52,12 +51,12 @@ public class VectorGlobalIndexerFactoryTest {
     @Test
     public void testFactoryIndexType() {
         assertThat(new IvfFlatVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(IndexType.IVF_FLAT);
+                .isEqualTo(VectorIndexType.IVF_FLAT);
         assertThat(new IvfPqAlgorithmVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(IndexType.IVF_PQ);
+                .isEqualTo(VectorIndexType.IVF_PQ);
         assertThat(new IvfHnswFlatVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(IndexType.IVF_HNSW_FLAT);
+                .isEqualTo(VectorIndexType.IVF_HNSW_FLAT);
         assertThat(new IvfHnswSqVectorGlobalIndexerFactory().indexType())
-                .isEqualTo(IndexType.IVF_HNSW_SQ);
+                .isEqualTo(VectorIndexType.IVF_HNSW_SQ);
     }
 }

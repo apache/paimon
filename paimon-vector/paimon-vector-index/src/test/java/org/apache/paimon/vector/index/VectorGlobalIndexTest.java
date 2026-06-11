@@ -27,8 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.index.ivfpq.IndexType;
-import org.apache.paimon.index.ivfpq.NativeLoader;
+import org.apache.paimon.index.vector.NativeLoader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -334,7 +333,8 @@ public class VectorGlobalIndexTest {
                 };
 
         VectorGlobalIndexer indexer =
-                new VectorGlobalIndexer(vectorType, options, IndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
+                new VectorGlobalIndexer(
+                        vectorType, options, VectorIndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = (VectorGlobalIndexWriter) indexer.createWriter(fileWriter);
@@ -357,7 +357,7 @@ public class VectorGlobalIndexTest {
     private VectorGlobalIndexWriter createIvfPqWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
         return new VectorGlobalIndexWriter(
-                fileWriter, fieldType, options, IndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
+                fileWriter, fieldType, options, VectorIndexType.IVF_PQ, IVF_PQ_IDENTIFIER);
     }
 
     private Options createDefaultOptions(int dimension) {
