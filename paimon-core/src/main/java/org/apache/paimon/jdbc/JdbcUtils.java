@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 
@@ -40,6 +41,7 @@ import java.util.stream.Stream;
 /** Util for jdbc catalog. */
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
+    private static final String UNIQUE_CONSTRAINT_VIOLATION_STATE = "23505";
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
     public static final String CATALOG_KEY = "catalog_key";
     public static final String TABLE_DATABASE = "database_name";
@@ -483,9 +485,7 @@ public class JdbcUtils {
         int updatedRecords =
                 execute(
                         err -> {
-                            if (err instanceof SQLIntegrityConstraintViolationException
-                                    || (err.getMessage() != null
-                                            && err.getMessage().contains("constraint failed"))) {
+                            if (isUniqueConstraintViolation(err)) {
                                 throw new RuntimeException(
                                         String.format("Table already exists: %s", toTable));
                             }
@@ -806,13 +806,11 @@ public class JdbcUtils {
                         sql.setString(1, storeKey);
                         sql.setString(2, databaseName);
                         sql.setString(3, viewName);
-                        ResultSet rs = sql.executeQuery();
-                        if (rs.next()) {
-                            String schema = rs.getString(VIEW_SCHEMA);
-                            rs.close();
-                            return schema;
+                        try (ResultSet rs = sql.executeQuery()) {
+                            if (rs.next()) {
+                                return rs.getString(VIEW_SCHEMA);
+                            }
                         }
-                        rs.close();
                         return null;
                     }
                 });
@@ -828,9 +826,7 @@ public class JdbcUtils {
         int insertedRecords =
                 execute(
                         err -> {
-                            if (err instanceof SQLIntegrityConstraintViolationException
-                                    || (err.getMessage() != null
-                                            && err.getMessage().contains("constraint failed"))) {
+                            if (isUniqueConstraintViolation(err)) {
                                 throw new RuntimeException(
                                         String.format(
                                                 "View already exists: %s.%s",
@@ -884,9 +880,7 @@ public class JdbcUtils {
         int updatedRecords =
                 execute(
                         err -> {
-                            if (err instanceof SQLIntegrityConstraintViolationException
-                                    || (err.getMessage() != null
-                                            && err.getMessage().contains("constraint failed"))) {
+                            if (isUniqueConstraintViolation(err)) {
                                 throw new RuntimeException(
                                         String.format("View already exists: %s", toView));
                             }
@@ -908,5 +902,13 @@ public class JdbcUtils {
                     "Rename operation affected {} rows: the view table's primary key assumption has been violated",
                     updatedRecords);
         }
+    }
+
+    @VisibleForTesting
+    static boolean isUniqueConstraintViolation(SQLException err) {
+        String message = err.getMessage();
+        return err instanceof SQLIntegrityConstraintViolationException
+                || UNIQUE_CONSTRAINT_VIOLATION_STATE.equals(err.getSQLState())
+                || (message != null && message.contains("constraint failed"));
     }
 }

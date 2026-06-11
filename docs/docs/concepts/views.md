@@ -36,6 +36,8 @@ View metadata is persisted only when the catalog implementation supports it:
 - **Hive metastore catalog** – view metadata is stored together with table metadata inside the
   metastore warehouse.
 - **REST catalog** – view metadata is kept in the REST backend and exposed through the catalog API.
+- **JDBC catalog** – view metadata is stored in the catalog database in the `paimon_views`
+  metadata table. The table is created automatically when the JDBC catalog is initialized.
 
 File-system catalogs do not currently support views because they lack persistent metadata storage.
 
@@ -56,6 +58,10 @@ view using their native dialect.
 
 Use `CREATE VIEW` or `CREATE OR REPLACE VIEW` to register a view. Paimon assigns a UUID, writes the
 first metadata file, and records version `1`.
+
+The catalog stores the view definition. It does not resolve or validate referenced tables when the
+view is created, so missing or cross-database table references are checked by the compute engine when
+the view is queried.
 
 ```sql
 CREATE VIEW sales_view AS

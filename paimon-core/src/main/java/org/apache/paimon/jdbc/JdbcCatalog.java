@@ -20,6 +20,7 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -71,9 +72,12 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
@@ -137,51 +141,66 @@ public class JdbcCatalog extends AbstractCatalog {
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
-                            dbMeta.getTables(null, null, JdbcUtils.CATALOG_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                    try (ResultSet tableExists =
+                            dbMeta.getTables(null, null, JdbcUtils.CATALOG_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_CATALOG_TABLE).execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_CATALOG_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // Check and create database properties table.
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
+                    try (ResultSet tableExists =
                             dbMeta.getTables(
-                                    null, null, JdbcUtils.DATABASE_PROPERTIES_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                                    null, null, JdbcUtils.DATABASE_PROPERTIES_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_DATABASE_PROPERTIES_TABLE)
-                            .execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_DATABASE_PROPERTIES_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // Check and create table properties table.
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
+                    try (ResultSet tableExists =
                             dbMeta.getTables(
-                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE).execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // Check and create view table.
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
-                            dbMeta.getTables(null, null, JdbcUtils.VIEW_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                    try (ResultSet tableExists =
+                            dbMeta.getTables(null, null, JdbcUtils.VIEW_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_VIEW_TABLE).execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_VIEW_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // if lock enabled, Check and create distributed lock table.
@@ -244,6 +263,26 @@ public class JdbcCatalog extends AbstractCatalog {
             createProps.put(DB_LOCATION_PROP, databasePath.toString());
         }
         insertProperties(connections, catalogKey, name, createProps);
+    }
+
+    @Override
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
+        checkNotSystemDatabase(name);
+        try {
+            getDatabase(name);
+        } catch (DatabaseNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+
+        if (!cascade && (!listTables(name).isEmpty() || !listViews(name).isEmpty())) {
+            throw new DatabaseNotEmptyException(name);
+        }
+
+        dropDatabaseImpl(name);
     }
 
     @Override
@@ -310,6 +349,55 @@ public class JdbcCatalog extends AbstractCatalog {
                 JdbcUtils.LIST_TABLES_SQL,
                 catalogKey,
                 databaseName);
+    }
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotBranch(identifier, "createTable");
+        checkNotSystemTable(identifier, "createTable");
+        validateCreateTable(schema, false);
+        validateCustomTablePath(schema.options());
+
+        getDatabase(identifier.getDatabaseName());
+
+        try {
+            getTable(identifier);
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new TableAlreadyExistException(identifier);
+        } catch (TableNotExistException ignored) {
+        }
+
+        if (JdbcUtils.viewExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new TableAlreadyExistException(identifier);
+        }
+
+        copyTableDefaultOptions(schema.options());
+
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        switch (tableType) {
+            case TABLE:
+            case MATERIALIZED_TABLE:
+                createTableImpl(identifier, schema);
+                break;
+            case FORMAT_TABLE:
+                createFormatTable(identifier, schema);
+                break;
+            case OBJECT_TABLE:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s cannot support object tables.",
+                                this.getClass().getName()));
+        }
     }
 
     @Override
@@ -390,6 +478,37 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
+    }
+
+    @Override
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        checkNotBranch(fromTable, "renameTable");
+        checkNotBranch(toTable, "renameTable");
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
+
+        try {
+            getTable(fromTable);
+        } catch (TableNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(fromTable);
+        }
+
+        try {
+            getTable(toTable);
+            throw new TableAlreadyExistException(toTable);
+        } catch (TableNotExistException ignored) {
+        }
+
+        if (JdbcUtils.viewExists(
+                connections, catalogKey, toTable.getDatabaseName(), toTable.getObjectName())) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        renameTableImpl(fromTable, toTable);
     }
 
     @Override
@@ -598,6 +717,19 @@ public class JdbcCatalog extends AbstractCatalog {
         return options.get(CatalogOptions.SYNC_ALL_PROPERTIES);
     }
 
+    private void copyTableDefaultOptions(Map<String, String> tableOptions) {
+        tableDefaultOptions.forEach(tableOptions::putIfAbsent);
+    }
+
+    private void validateCustomTablePath(Map<String, String> tableOptions) {
+        if (!allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The current catalog %s does not support specifying the table path when creating a table.",
+                            this.getClass().getSimpleName()));
+        }
+    }
+
     private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
         Map<String, String> properties = new HashMap<>();
         if (!tableSchema.primaryKeys().isEmpty()) {
@@ -705,6 +837,17 @@ public class JdbcCatalog extends AbstractCatalog {
             getDatabase(identifier.getDatabaseName());
         } catch (DatabaseNotExistException e) {
             throw e;
+        }
+
+        if (JdbcUtils.tableExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new ViewAlreadyExistException(identifier);
         }
 
         // Check if view already exists
@@ -840,6 +983,14 @@ public class JdbcCatalog extends AbstractCatalog {
         if (JdbcUtils.viewExists(
                 connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
             throw new ViewAlreadyExistException(toView);
+        }
+        if (JdbcUtils.tableExists(
+                connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
+            throw new ViewAlreadyExistException(toView);
+        }
+        if (!JdbcUtils.databaseExists(connections, catalogKey, toView.getDatabaseName())) {
+            throw new IllegalArgumentException(
+                    String.format("Database %s does not exist.", toView.getDatabaseName()));
         }
 
         // Rename view

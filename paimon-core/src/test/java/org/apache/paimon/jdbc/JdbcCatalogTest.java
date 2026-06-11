@@ -45,6 +45,7 @@ import java.io.ObjectOutputStream;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLIntegrityConstraintViolationException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -160,6 +161,22 @@ public class JdbcCatalogTest extends CatalogTestBase {
     @Override
     protected boolean supportsView() {
         return true;
+    }
+
+    @Test
+    public void testUniqueConstraintViolationDetection() {
+        assertThat(
+                        JdbcUtils.isUniqueConstraintViolation(
+                                new SQLIntegrityConstraintViolationException("duplicate entry")))
+                .isTrue();
+        assertThat(
+                        JdbcUtils.isUniqueConstraintViolation(
+                                new SQLException("duplicate key", "23505")))
+                .isTrue();
+        assertThat(JdbcUtils.isUniqueConstraintViolation(new SQLException("constraint failed")))
+                .isTrue();
+        assertThat(JdbcUtils.isUniqueConstraintViolation(new SQLException("syntax error")))
+                .isFalse();
     }
 
     @Test
@@ -733,6 +750,24 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testDropDatabaseWithoutCascadeRejectsViewOnlyDatabase() throws Exception {
+        String databaseName = "view_only_db";
+        Identifier identifier = Identifier.create(databaseName, "view_name");
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createView(identifier, createView(identifier), false);
+
+        assertThatThrownBy(() -> catalog.dropDatabase(databaseName, false, false))
+                .isInstanceOf(Catalog.DatabaseNotEmptyException.class)
+                .hasMessage("Database " + databaseName + " is not empty.");
+        assertThat(catalog.getView(identifier).fullName()).isEqualTo(identifier.getFullName());
+
+        catalog.dropDatabase(databaseName, false, true);
+        assertThatThrownBy(() -> catalog.getDatabase(databaseName))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+    }
+
+    @Test
     public void testRenameViewAcrossDatabases() throws Exception {
         String sourceDatabase = "source_view_db";
         String targetDatabase = "target_view_db";
@@ -750,6 +785,62 @@ public class JdbcCatalogTest extends CatalogTestBase {
         assertThat(catalog.getView(target).fullName()).isEqualTo(target.getFullName());
         assertThat(catalog.listViews(sourceDatabase)).isEmpty();
         assertThat(catalog.listViews(targetDatabase)).containsExactly("view_name");
+    }
+
+    @Test
+    public void testRenameViewRejectsMissingTargetDatabase() throws Exception {
+        String sourceDatabase = "source_view_db";
+        Identifier source = Identifier.create(sourceDatabase, "view_name");
+        Identifier target = Identifier.create("missing_view_db", "view_name");
+
+        catalog.createDatabase(sourceDatabase, false);
+        catalog.createView(source, createView(source), false);
+
+        assertThatThrownBy(() -> catalog.renameView(source, target, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Database missing_view_db does not exist.");
+        assertThat(catalog.getView(source).fullName()).isEqualTo(source.getFullName());
+        assertThatThrownBy(() -> catalog.getView(target))
+                .isInstanceOf(Catalog.ViewNotExistException.class);
+    }
+
+    @Test
+    public void testTableAndViewCannotShareName() throws Exception {
+        String databaseName = "shared_name_db";
+        Identifier tableFirst = Identifier.create(databaseName, "table_first");
+        Identifier viewFirst = Identifier.create(databaseName, "view_first");
+
+        catalog.createDatabase(databaseName, false);
+
+        catalog.createTable(tableFirst, DEFAULT_TABLE_SCHEMA, false);
+        assertThatThrownBy(() -> catalog.createView(tableFirst, createView(tableFirst), false))
+                .isInstanceOf(Catalog.ViewAlreadyExistException.class);
+        catalog.createView(tableFirst, createView(tableFirst), true);
+        assertThat(catalog.listViews(databaseName)).doesNotContain(tableFirst.getObjectName());
+
+        catalog.createView(viewFirst, createView(viewFirst), false);
+        assertThatThrownBy(() -> catalog.createTable(viewFirst, DEFAULT_TABLE_SCHEMA, false))
+                .isInstanceOf(Catalog.TableAlreadyExistException.class);
+        catalog.createTable(viewFirst, DEFAULT_TABLE_SCHEMA, true);
+        assertThat(catalog.listTables(databaseName)).doesNotContain(viewFirst.getObjectName());
+    }
+
+    @Test
+    public void testRenameRejectsTableViewNameCollision() throws Exception {
+        String databaseName = "rename_collision_db";
+        Identifier table = Identifier.create(databaseName, "table_name");
+        Identifier view = Identifier.create(databaseName, "view_name");
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(table, DEFAULT_TABLE_SCHEMA, false);
+        catalog.createView(view, createView(view), false);
+
+        assertThatThrownBy(() -> catalog.renameTable(table, view, false))
+                .isInstanceOf(Catalog.TableAlreadyExistException.class);
+        assertThatThrownBy(() -> catalog.renameView(view, table, false))
+                .isInstanceOf(Catalog.ViewAlreadyExistException.class);
+        assertThat(catalog.listTables(databaseName)).containsExactly(table.getObjectName());
+        assertThat(catalog.listViews(databaseName)).containsExactly(view.getObjectName());
     }
 
     @Test
