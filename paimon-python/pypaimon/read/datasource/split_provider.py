@@ -85,7 +85,7 @@ class CatalogSplitProvider(SplitProvider):
         limit: Optional[int] = None,
         snapshot_id: Optional[int] = None,
         tag_name: Optional[str] = None,
-        dynamic_table_options: Optional[Dict[str, str]] = None,
+        dynamic_options: Optional[Dict[str, str]] = None,
     ):
         if not table_identifier:
             raise ValueError("table_identifier is required")
@@ -99,17 +99,17 @@ class CatalogSplitProvider(SplitProvider):
                 "snapshot_id and tag_name cannot be set at the same time"
             )
 
-        if dynamic_table_options:
-            dynamic_tt_keys = scan_keys & dynamic_table_options.keys()
+        if dynamic_options:
+            dynamic_tt_keys = scan_keys & dynamic_options.keys()
             if (snapshot_id is not None or tag_name is not None) and dynamic_tt_keys:
                 raise ValueError(
-                    "snapshot_id/tag_name and dynamic_table_options "
+                    "snapshot_id/tag_name and dynamic_options "
                     "time-travel keys cannot be set at the same time, "
                     "got: {}".format(", ".join(sorted(dynamic_tt_keys)))
                 )
             if len(dynamic_tt_keys) > 1:
                 raise ValueError(
-                    "dynamic_table_options contains multiple time-travel "
+                    "dynamic_options contains multiple time-travel "
                     "keys which are mutually exclusive: {}".format(
                         ", ".join(sorted(dynamic_tt_keys)))
                 )
@@ -120,7 +120,7 @@ class CatalogSplitProvider(SplitProvider):
         self._limit = limit
         self._snapshot_id = snapshot_id
         self._tag_name = tag_name
-        self._dynamic_table_options = dynamic_table_options
+        self._dynamic_options = dynamic_options
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
@@ -135,8 +135,8 @@ class CatalogSplitProvider(SplitProvider):
                 dynamic_options["scan.snapshot-id"] = str(self._snapshot_id)
             if self._tag_name is not None:
                 dynamic_options["scan.tag-name"] = self._tag_name
-            if self._dynamic_table_options:
-                dynamic_options.update(self._dynamic_table_options)
+            if self._dynamic_options:
+                dynamic_options.update(self._dynamic_options)
             if dynamic_options:
                 table = table.copy(dynamic_options)
             self._table_cached = table

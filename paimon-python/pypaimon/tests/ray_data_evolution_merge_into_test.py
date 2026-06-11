@@ -621,7 +621,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             name,
             self.catalog_options,
             projection=['id', 'payload'],
-            dynamic_table_options={'blob-as-descriptor': 'true'},
+            dynamic_options={'blob-as-descriptor': 'true'},
         )
 
         matched = input_ids.join(
