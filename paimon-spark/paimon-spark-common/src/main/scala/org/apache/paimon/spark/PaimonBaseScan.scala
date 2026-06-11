@@ -89,6 +89,7 @@ abstract class PaimonBaseScan(table: InnerTable)
       .withVector(vectorSearch.vector())
       .withVectorColumn(vectorSearch.fieldName())
       .withLimit(vectorSearch.limit())
+      .withOptions(vectorSearch.options())
     if (pushedPartitionFilters.nonEmpty) {
       vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
