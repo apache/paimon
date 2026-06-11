@@ -200,7 +200,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         BatchVectorSearch batchVectorSearch =
-                new BatchVectorSearch(vectors, limit, vectorColumn.name())
+                new BatchVectorSearch(vectors, limit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitBatchVectorSearch(batchVectorSearch)

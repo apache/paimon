@@ -23,6 +23,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.Map;
 
 /** Batch vector similarity search. */
 public class BatchVectorSearch implements Serializable {
@@ -32,10 +34,16 @@ public class BatchVectorSearch implements Serializable {
     private final float[][] vectors;
     private final String fieldName;
     private final int limit;
+    private final Map<String, String> options;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
     public BatchVectorSearch(float[][] vectors, int limit, String fieldName) {
+        this(vectors, limit, fieldName, Collections.emptyMap());
+    }
+
+    public BatchVectorSearch(
+            float[][] vectors, int limit, String fieldName, Map<String, String> options) {
         if (vectors == null || vectors.length == 0) {
             throw new IllegalArgumentException("Search vectors cannot be null or empty");
         }
@@ -53,6 +61,7 @@ public class BatchVectorSearch implements Serializable {
         this.vectors = vectors;
         this.limit = limit;
         this.fieldName = fieldName;
+        this.options = options == null ? Collections.emptyMap() : options;
     }
 
     /** Query vectors in input order. */
@@ -65,11 +74,15 @@ public class BatchVectorSearch implements Serializable {
     }
 
     public VectorSearch forIndex(int i) {
-        VectorSearch vectorSearch = new VectorSearch(vectors[i], limit, fieldName);
+        VectorSearch vectorSearch = new VectorSearch(vectors[i], limit, fieldName, options);
         if (includeRowIds != null) {
             vectorSearch.withIncludeRowIds(includeRowIds);
         }
         return vectorSearch;
+    }
+
+    public Map<String, String> options() {
+        return options;
     }
 
     public int limit() {
@@ -91,7 +104,7 @@ public class BatchVectorSearch implements Serializable {
 
     public BatchVectorSearch offsetRange(long from, long to) {
         if (includeRowIds != null) {
-            BatchVectorSearch target = new BatchVectorSearch(vectors, limit, fieldName);
+            BatchVectorSearch target = new BatchVectorSearch(vectors, limit, fieldName, options);
             target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
             return target;
         }
