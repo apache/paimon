@@ -121,9 +121,7 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
 
       checkAnswer(
         sql("SELECT id, `__paimon_raw_blob_placeholder_0`, picture FROM t ORDER BY id"),
-        Seq(
-          Row(1, "new_marker_name", Array[Byte](78, 69, 87)),
-          Row(2, "kept", Array[Byte](2)))
+        Seq(Row(1, "new_marker_name", Array[Byte](78, 69, 87)), Row(2, "kept", Array[Byte](2)))
       )
     }
   }

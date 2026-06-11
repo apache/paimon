@@ -376,9 +376,10 @@ case class MergeIntoPaimonDataEvolutionTable(
       rawBlobMarkerNamesAvoiding(
         rawBlobUpdateColumns.size,
         updateColumnsSorted.map(_.name) ++ sourceTable.output.map(_.name))
-    val rawBlobMarkerNamesByColumn = rawBlobUpdateColumns.zip(rawBlobMarkerNames).map {
-      case (attr, markerName) => attr.name -> markerName
-    }.toMap
+    val rawBlobMarkerNamesByColumn = rawBlobUpdateColumns
+      .zip(rawBlobMarkerNames)
+      .map { case (attr, markerName) => attr.name -> markerName }
+      .toMap
     val rawBlobMarkerAttributes = rawBlobUpdateColumns.map(
       attr =>
         AttributeReference(rawBlobMarkerNamesByColumn(attr.name), BooleanType, nullable = false)())
