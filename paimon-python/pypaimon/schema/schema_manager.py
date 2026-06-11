@@ -181,8 +181,20 @@ def _handle_update_column_comment(
     _update_nested_column(new_fields, change.field_names, update_func)
 
 
+def _assert_nullability_change(old_nullability: bool, new_nullability: bool,
+                               field_name: str, disable_null_to_not_null: bool):
+    if disable_null_to_not_null and old_nullability and not new_nullability:
+        raise ValueError(
+            "Cannot update column type from nullable to non nullable for {}. "
+            "You can set table configuration option "
+            "'alter-column-null-to-not-null.disabled' = 'false' "
+            "to allow converting null columns to not null".format(field_name)
+        )
+
+
 def _handle_update_column_nullability(
-    change: UpdateColumnNullability, new_fields: List[DataField]
+    change: UpdateColumnNullability, new_fields: List[DataField],
+    disable_null_to_not_null: bool
 ):
     from pypaimon.schema.data_types import DataTypeParser
     field_names = change.field_names
@@ -190,6 +202,9 @@ def _handle_update_column_nullability(
 
     def update_func(field: DataField, depth: int) -> DataField:
         source_root = _get_root_type(field.type, depth, max_depth)
+        _assert_nullability_change(
+            source_root.nullable, change.new_nullability,
+            '.'.join(field_names), disable_null_to_not_null)
         new_root = DataTypeParser.parse_data_type(source_root.to_dict())
         new_root.nullable = change.new_nullability
         new_type = _get_array_map_type_with_target_type_root(
@@ -652,6 +667,10 @@ class SchemaManager:
         # Get add_column_before_partition option
         add_column_before_partition = CoreOptions(Options(old_table_schema.options)).add_column_before_partition()
         partition_keys = old_table_schema.partition_keys
+        # Converting a nullable column to NOT NULL is unsafe for existing
+        # data and is disabled by default; the table option below opts in.
+        disable_null_to_not_null = str(old_table_schema.options.get(
+            'alter-column-null-to-not-null.disabled', 'true')).lower() != 'false'
 
         for change in changes:
             if isinstance(change, SetOption):
@@ -688,7 +707,8 @@ class SchemaManager:
                     _assert_not_updating_primary_keys(
                         old_table_schema, change.field_names, "change nullability of"
                     )
-                _handle_update_column_nullability(change, new_fields)
+                _handle_update_column_nullability(
+                    change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnComment):
                 _handle_update_column_comment(change, new_fields)
             elif isinstance(change, UpdateColumnPosition):

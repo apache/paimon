@@ -26,8 +26,9 @@ widening (e.g. INT -> BIGINT, any numeric -> DECIMAL/DOUBLE), while an
 applies the conversion leniently.
 """
 
-from pypaimon.schema.data_types import (ArrayType, AtomicType, MapType,
-                                        MultisetType, RowType, VectorType)
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataTypeParser,
+                                        MapType, MultisetType, RowType,
+                                        VectorType)
 
 # ---- Type roots --------------------------------------------------------------
 
@@ -164,9 +165,25 @@ def supports_cast(source_type, target_type, allow_explicit: bool = True) -> bool
     if source_type.nullable and not target_type.nullable and not allow_explicit:
         return False
     if source_root == target_root:
+        if source_root in CONSTRUCTED:
+            # A constructed type is only castable to an (ignoring outer
+            # nullability) identical constructed type. Reshaping is done
+            # through sub-field / 'element' / 'value' paths instead: a whole
+            # ROW replacement would carry caller-supplied nested field ids
+            # that corrupt the id model, and there is no runtime conversion
+            # between differently-shaped constructed values.
+            return _equals_ignore_nullable(source_type, target_type)
         return True
     if source_root in _IMPLICIT_RULES.get(target_root, set()):
         return True
     if allow_explicit and source_root in _EXPLICIT_RULES.get(target_root, set()):
         return True
     return False
+
+
+def _equals_ignore_nullable(source_type, target_type) -> bool:
+    source_copy = DataTypeParser.parse_data_type(source_type.to_dict())
+    target_copy = DataTypeParser.parse_data_type(target_type.to_dict())
+    source_copy.nullable = True
+    target_copy.nullable = True
+    return source_copy == target_copy

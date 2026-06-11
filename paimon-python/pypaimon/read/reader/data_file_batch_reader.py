@@ -37,6 +37,18 @@ def _is_character_string_type(data_type) -> bool:
     return t == 'STRING' or t.startswith('VARCHAR') or t.startswith('CHAR')
 
 
+def _unslice(array):
+    """Re-materialize a sliced array so offsets/buffers start at zero.
+
+    The list/map rebuilds below read ``offsets``/raw buffers directly; on a
+    sliced array those still point into the parent storage, which either
+    errors (list rebuild with a null mask) or silently misaligns rows (map
+    rebuild from raw buffers)."""
+    if array.offset == 0:
+        return array
+    return pa.concat_arrays([array])
+
+
 def _to_string_values(array, data_type) -> list:
     """Render *array* as a list of per-row strings (None for NULL rows)."""
     if isinstance(data_type, (RowType, ArrayType, MapType)):
@@ -49,6 +61,7 @@ def _constructed_to_string_array(array, file_type):
     ROW -> ``{v1, v2}``, ARRAY -> ``[e1, e2]``, MAP -> ``{k1 -> v1, k2 -> v2}``.
     Sub-values are rendered recursively; a NULL sub-value renders as the
     literal ``null`` while a NULL container row stays NULL."""
+    array = _unslice(array)
     valid = pc.is_valid(array).to_pylist()
     out = []
     if isinstance(file_type, RowType):
@@ -194,11 +207,13 @@ class DataFileBatchReader(RecordBatchReader):
             return pa.StructArray.from_arrays(
                 children, fields=pa_fields, mask=pc.is_null(array))
         if isinstance(target_type, ArrayType) and isinstance(file_type, ArrayType):
+            array = _unslice(array)
             aligned_values = self._align_array_by_id(
                 array.values, file_type.element, target_type.element)
             return pa.ListArray.from_arrays(
                 array.offsets, aligned_values, mask=pc.is_null(array))
         if isinstance(target_type, MapType) and isinstance(file_type, MapType):
+            array = _unslice(array)
             aligned_items = self._align_array_by_id(
                 array.items, file_type.value, target_type.value)
             # MapArray.from_arrays cannot carry a null mask (a null map would

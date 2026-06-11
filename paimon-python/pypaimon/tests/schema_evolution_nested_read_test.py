@@ -343,6 +343,31 @@ class SchemaEvolutionNestedSubfieldTest(_NestedBase):
                 'default.nsub_dropall',
                 [SchemaChange.drop_column(['mv', 'latest_version'])], False)
 
+    def test_null_to_not_null_disabled_by_default(self):
+        # Converting nullable -> NOT NULL is unsafe for existing data and is
+        # rejected unless the table opts in via
+        # 'alter-column-null-to-not-null.disabled' = 'false'.
+        self._create_struct_table('nsub_nullability')
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(
+                'default.nsub_nullability',
+                [SchemaChange.update_column_nullability(
+                    ['mv', 'latest_value'], False)], False)
+        self.assertIn('nullable to non nullable', str(cm.exception))
+        # Opt-in makes the same change succeed.
+        self.catalog.alter_table(
+            'default.nsub_nullability',
+            [SchemaChange.set_option(
+                'alter-column-null-to-not-null.disabled', 'false')], False)
+        self.catalog.alter_table(
+            'default.nsub_nullability',
+            [SchemaChange.update_column_nullability(
+                ['mv', 'latest_value'], False)], False)
+        schema = self.catalog.get_table('default.nsub_nullability').table_schema
+        mv = next(f for f in schema.fields if f.name == 'mv')
+        lv = next(sf for sf in mv.type.fields if sf.name == 'latest_value')
+        self.assertFalse(lv.type.nullable)
+
     def test_unsupported_subfield_cast_rejected(self):
         self._create_struct_table('nsub_badcast')
         with self.assertRaises(RuntimeError) as cm:
@@ -475,6 +500,65 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
             'default.ntok_arr',
             [SchemaChange.add_column(['arr', 'element', 'c'], AtomicType('INT'))],
             False)
+
+    def test_array_element_type_update(self):
+        # The canonical path for promoting an array's element type descends
+        # through the 'element' token; old files are cast at read time.
+        s0 = pa.schema([('id', pa.int64()), ('a2', pa.list_(pa.int32()))])
+        table = self._create('nelem_type', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'a2': [1, 2]}], schema=s0))
+        self.catalog.alter_table(
+            'default.nelem_type',
+            [SchemaChange.update_column_type(['a2', 'element'], AtomicType('BIGINT'))],
+            False)
+        table = self.catalog.get_table('default.nelem_type')
+        s1 = pa.schema([('id', pa.int64()), ('a2', pa.list_(pa.int64()))])
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 2, 'a2': [3]}], schema=s1))
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        arrow = rb.new_read().to_arrow(splits)
+        self.assertEqual(arrow.schema.field('a2').type, pa.list_(pa.int64()))
+        rows = sorted(arrow.to_pylist(), key=lambda r: r['id'])
+        self.assertEqual(rows, [{'id': 1, 'a2': [1, 2]}, {'id': 2, 'a2': [3]}])
+
+    def test_whole_struct_type_replacement_rejected(self):
+        # Replacing a whole ROW type would carry caller-supplied nested ids
+        # that corrupt the id model; it must be rejected at alter time.
+        elem = pa.struct([('a', pa.int32()), ('b', pa.string())])
+        s0 = pa.schema([('id', pa.int64()), ('mv', elem)])
+        self._create('nrow_replace', s0)
+        new_row = _paimon_type(pa.struct([('a', pa.int64()), ('c', pa.string())]))
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(
+                'default.nrow_replace',
+                [SchemaChange.update_column_type('mv', new_row)], False)
+        self.assertIn('cannot be converted', str(cm.exception))
+
+    def test_align_handles_sliced_arrays(self):
+        # The list/map rebuilds read offsets/raw buffers; a sliced input
+        # must be re-materialized, not read through stale parent offsets.
+        from pypaimon.read.reader.data_file_batch_reader import \
+            DataFileBatchReader
+        reader = DataFileBatchReader.__new__(DataFileBatchReader)
+        sliced_list = pa.array(
+            [[1, 2], [3], [4, 5, 6], None], type=pa.list_(pa.int32())).slice(1, 3)
+        out = reader._align_array_by_id(
+            sliced_list,
+            ArrayType(True, AtomicType('INT')),
+            ArrayType(True, AtomicType('BIGINT')))
+        self.assertEqual(out.to_pylist(), [[3], [4, 5, 6], None])
+        self.assertEqual(out.type, pa.list_(pa.int64()))
+
+        sliced_map = pa.array(
+            [[('a', 1)], [('b', 2)], None],
+            type=pa.map_(pa.string(), pa.int32())).slice(1, 2)
+        out = reader._align_array_by_id(
+            sliced_map,
+            MapType(True, AtomicType('STRING'), AtomicType('INT')),
+            MapType(True, AtomicType('STRING'), AtomicType('BIGINT')))
+        self.assertEqual(out.to_pylist(), [[('b', 2)], None])
 
     def test_map_wrapper_token_validated(self):
         # The token consumed when descending through a MAP must be 'value'.
@@ -656,6 +740,24 @@ class SupportsCastTest(unittest.TestCase):
         ms = MultisetType(True, AtomicType('INT'))
         for src in (vec, ms):
             self.assertFalse(supports_cast(src, AtomicType('STRING')), str(src))
+
+    def test_constructed_to_differently_shaped_constructed_rejected(self):
+        # Reshaping a constructed type must go through sub-field /
+        # 'element' / 'value' paths; a whole-type replacement would carry
+        # caller-supplied nested ids that corrupt the id model.
+        self.assertFalse(supports_cast(
+            RowType(True, [DataField(0, 'a', AtomicType('INT'))]),
+            RowType(True, [DataField(0, 'a', AtomicType('BIGINT'))])))
+        self.assertFalse(supports_cast(
+            ArrayType(True, AtomicType('INT')),
+            ArrayType(True, AtomicType('BIGINT'))))
+        self.assertFalse(supports_cast(
+            VectorType(True, AtomicType('FLOAT'), 3),
+            VectorType(True, AtomicType('FLOAT'), 5)))
+        # Only the outer nullability differing is still an identity cast.
+        self.assertTrue(supports_cast(
+            RowType(True, [DataField(2, 'a', AtomicType('INT'))]),
+            RowType(False, [DataField(2, 'a', AtomicType('INT'))])))
 
 
 if __name__ == '__main__':
