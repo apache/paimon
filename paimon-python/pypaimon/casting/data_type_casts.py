@@ -70,6 +70,11 @@ PREDEFINED = {
     DATE, TIME, TIMESTAMP, TIMESTAMP_LTZ,
 }
 CONSTRUCTED = {ARRAY, MAP, MULTISET, ROW, VECTOR}
+# Constructed types the read path can render as a character string
+# ('{v1, v2}' / '[e1, e2]' / '{k -> v}'). VECTOR and MULTISET have no string
+# rendering, so a type change from them to CHAR/VARCHAR is rejected here
+# rather than failing when an old file is read.
+STRING_RENDERABLE_CONSTRUCTED = {ARRAY, MAP, ROW}
 
 
 def _root(data_type) -> str:
@@ -124,8 +129,8 @@ def _build_rules():
         implicit[target] |= set(implicit_from or set())
         explicit[target] |= set(explicit_from or set())
 
-    rule(CHAR, {CHAR}, PREDEFINED | CONSTRUCTED)
-    rule(VARCHAR, CHARACTER_STRING, PREDEFINED | CONSTRUCTED)
+    rule(CHAR, {CHAR}, PREDEFINED | STRING_RENDERABLE_CONSTRUCTED)
+    rule(VARCHAR, CHARACTER_STRING, PREDEFINED | STRING_RENDERABLE_CONSTRUCTED)
     rule(BOOLEAN, {BOOLEAN}, CHARACTER_STRING | INTEGER_NUMERIC)
     rule(BINARY, {BINARY}, CHARACTER_STRING | {VARBINARY})
     rule(VARBINARY, BINARY_STRING, CHARACTER_STRING | {BINARY})

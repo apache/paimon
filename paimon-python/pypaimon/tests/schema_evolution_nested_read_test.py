@@ -37,9 +37,10 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.casting.data_type_casts import supports_cast
-from pypaimon.schema.data_types import (AtomicInteger, AtomicType, DataField,
+from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
+                                        DataField, MapType, MultisetType,
                                         PyarrowFieldParser, RowType,
-                                        collect_field_ids,
+                                        VectorType, collect_field_ids,
                                         current_highest_field_id,
                                         reassign_field_id)
 from pypaimon.schema.schema_change import SchemaChange
@@ -457,6 +458,40 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         rows = self._read_sorted(table)
         self.assertEqual(rows[0]['m'], [('k', {'a': 1, 'b': 'x', 'c': None})])
 
+    def test_array_wrapper_token_validated(self):
+        # The token consumed when descending through an ARRAY must be
+        # 'element'; an unknown step must not silently mutate the schema.
+        elem = pa.struct([('a', pa.int64())])
+        s0 = pa.schema([('id', pa.int64()), ('arr', pa.list_(elem))])
+        self._create('ntok_arr', s0)
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(
+                'default.ntok_arr',
+                [SchemaChange.add_column(['arr', 'wrong', 'c'], AtomicType('INT'))],
+                False)
+        self.assertIn('arr.wrong.c', str(cm.exception))
+        # The canonical token still works.
+        self.catalog.alter_table(
+            'default.ntok_arr',
+            [SchemaChange.add_column(['arr', 'element', 'c'], AtomicType('INT'))],
+            False)
+
+    def test_map_wrapper_token_validated(self):
+        # The token consumed when descending through a MAP must be 'value'.
+        val = pa.struct([('a', pa.int64())])
+        s0 = pa.schema([('id', pa.int64()), ('m', pa.map_(pa.string(), val))])
+        self._create('ntok_map', s0)
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(
+                'default.ntok_map',
+                [SchemaChange.add_column(['m', 'wrong', 'c'], AtomicType('INT'))],
+                False)
+        self.assertIn('m.wrong.c', str(cm.exception))
+        self.catalog.alter_table(
+            'default.ntok_map',
+            [SchemaChange.add_column(['m', 'value', 'c'], AtomicType('INT'))],
+            False)
+
 
 class SchemaEvolutionConstructedToStringTest(_NestedBase):
     """update column type from ROW/ARRAY/MAP to STRING: old files must be
@@ -524,6 +559,24 @@ class SchemaEvolutionConstructedToStringTest(_NestedBase):
         self.assertIsNone(rows[0]['mv'])
         self.assertEqual(rows[1]['mv'], '{null, x}')
 
+    def test_vector_to_string_rejected(self):
+        # There is no read-time string rendering for vectors, so the type
+        # change must be rejected at alter time instead of failing on read.
+        s0 = pa.schema([('id', pa.int64()),
+                        ('embed', pa.list_(pa.float32(), 3))])
+        table = self._create('c2s_vec', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'embed': [1.0, 2.0, 3.0]}], schema=s0))
+        with self.assertRaises(RuntimeError) as cm:
+            self.catalog.alter_table(
+                'default.c2s_vec',
+                [SchemaChange.update_column_type('embed', AtomicType('STRING'))],
+                False)
+        self.assertIn('cannot be converted', str(cm.exception))
+        # The vector column itself still reads fine.
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['embed'], [1.0, 2.0, 3.0])
+
     def test_nested_subfield_row_to_string(self):
         inner = pa.struct([('a', pa.int32())])
         s0 = pa.schema([('id', pa.int64()),
@@ -590,6 +643,19 @@ class SupportsCastTest(unittest.TestCase):
         for src, dst in [('BIGINT', 'DATE'), ('BOOLEAN', 'DATE')]:
             self.assertFalse(supports_cast(AtomicType(src), AtomicType(dst)),
                              '{} -> {}'.format(src, dst))
+
+    def test_constructed_to_string(self):
+        # ROW/ARRAY/MAP have a read-time string rendering; vector and
+        # multiset do not, so their type change must be rejected.
+        row = RowType(True, [DataField(0, 'a', AtomicType('INT'))])
+        arr = ArrayType(True, AtomicType('INT'))
+        m = MapType(True, AtomicType('STRING'), AtomicType('INT'))
+        for src in (row, arr, m):
+            self.assertTrue(supports_cast(src, AtomicType('STRING')), str(src))
+        vec = VectorType(True, AtomicType('FLOAT'), 3)
+        ms = MultisetType(True, AtomicType('INT'))
+        for src in (vec, ms):
+            self.assertFalse(supports_cast(src, AtomicType('STRING')), str(src))
 
 
 if __name__ == '__main__':

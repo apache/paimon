@@ -46,20 +46,34 @@ def _find_field_index(fields: List[DataField], field_name: str) -> Optional[int]
     return None
 
 
-def _extract_row_data_fields(data_type, out_fields: List[DataField]) -> int:
+def _extract_row_data_fields(data_type, out_fields: List[DataField],
+                             field_names: List[str], token_pos: int) -> int:
     """Collect the immediate sub-fields reachable from *data_type* into
     *out_fields* and return the path depth consumed. A ROW contributes its
     fields (depth 1); an ARRAY/MAP is transparent and descends into its
-    element/value (consuming the ``element``/``value`` path token); anything
-    else contributes nothing (depth 1)."""
+    element/value, consuming the ``element``/``value`` path token -- the
+    consumed token is validated so an unknown step cannot silently mutate
+    the schema; anything else contributes nothing (depth 1)."""
     if isinstance(data_type, RowType):
         out_fields.extend(data_type.fields)
         return 1
     if isinstance(data_type, ArrayType):
-        return _extract_row_data_fields(data_type.element, out_fields) + 1
+        _assert_wrapper_token(field_names, token_pos, 'element')
+        return _extract_row_data_fields(
+            data_type.element, out_fields, field_names, token_pos + 1) + 1
     if isinstance(data_type, MapType):
-        return _extract_row_data_fields(data_type.value, out_fields) + 1
+        _assert_wrapper_token(field_names, token_pos, 'value')
+        return _extract_row_data_fields(
+            data_type.value, out_fields, field_names, token_pos + 1) + 1
     return 1
+
+
+def _assert_wrapper_token(field_names: List[str], token_pos: int, expected: str):
+    # A path that ends inside the wrappers (token_pos out of range) is the
+    # update-the-wrapped-type-itself case, handled by the caller's overflow
+    # branch; only a present-but-wrong token is rejected.
+    if token_pos < len(field_names) and field_names[token_pos] != expected:
+        raise ColumnNotExistException('.'.join(field_names))
 
 
 def _wrap_new_row_type(data_type, nested_fields: List[DataField]):
@@ -123,7 +137,8 @@ def _update_intermediate_column(new_fields, previous_fields, depth, prev_depth,
         if field.name != field_names[depth]:
             continue
         nested_fields: List[DataField] = []
-        new_depth = depth + _extract_row_data_fields(field.type, nested_fields)
+        new_depth = depth + _extract_row_data_fields(
+            field.type, nested_fields, field_names, depth + 1)
         _update_intermediate_column(
             nested_fields, new_fields, new_depth, depth, field_names, update_last_fn)
         field = new_fields[i]
