@@ -55,16 +55,6 @@ public class RowRangeIndex {
         return Collections.unmodifiableList(ranges);
     }
 
-    public boolean contains(long start, long end) {
-        int candidate = lowerBound(ends, start);
-        return candidate < starts.length && starts[candidate] <= start && ends[candidate] >= end;
-    }
-
-    public boolean containsExactly(long start, long end) {
-        int candidate = lowerBound(starts, start);
-        return candidate < starts.length && starts[candidate] == start && ends[candidate] == end;
-    }
-
     public boolean intersects(long start, long end) {
         int candidate = lowerBound(ends, start);
         return candidate < starts.length && starts[candidate] <= end;
@@ -75,6 +65,13 @@ public class RowRangeIndex {
         return candidate < starts.length
                 && starts[candidate] <= range.from
                 && ends[candidate] >= range.to;
+    }
+
+    public boolean containsExactly(Range range) {
+        int candidate = lowerBound(starts, range.from);
+        return candidate < starts.length
+                && starts[candidate] == range.from
+                && ends[candidate] == range.to;
     }
 
     public List<Range> intersectedRanges(long start, long end) {

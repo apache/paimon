@@ -644,11 +644,11 @@ public class ConflictDetection {
         RowRangeIndex existingIndex = RowRangeIndex.create(existingRanges, false);
 
         for (SimpleFileEntry entry : filesToCheck) {
-            long rowRangeEnd = entry.firstRowId() + entry.rowCount() - 1;
+            Range rowRange = entry.nonNullRowIdRange();
             boolean exists =
                     dedicatedStorageFile(entry.fileName())
-                            ? existingIndex.contains(entry.firstRowId(), rowRangeEnd)
-                            : existingIndex.containsExactly(entry.firstRowId(), rowRangeEnd);
+                            ? existingIndex.contains(rowRange)
+                            : existingIndex.containsExactly(rowRange);
             if (!exists) {
                 return Optional.of(
                         new RuntimeException(
