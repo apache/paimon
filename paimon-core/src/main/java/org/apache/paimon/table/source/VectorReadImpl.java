@@ -32,8 +32,8 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.IOUtils;
@@ -67,7 +67,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
     private final Predicate filter;
     protected final int limit;
     protected final DataField vectorColumn;
-    protected final float[] vector;
+    protected final float[][] vectors;
     protected final Map<String, String> options;
 
     public VectorReadImpl(
@@ -75,8 +75,8 @@ public class VectorReadImpl implements VectorRead, Serializable {
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector) {
-        this(table, filter, limit, vectorColumn, vector, Collections.emptyMap());
+            float[][] vectors) {
+        this(table, filter, limit, vectorColumn, vectors, Collections.emptyMap());
     }
 
     public VectorReadImpl(
@@ -84,13 +84,13 @@ public class VectorReadImpl implements VectorRead, Serializable {
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector,
+            float[][] vectors,
             Map<String, String> options) {
         this.table = table;
         this.filter = filter;
         this.limit = limit;
         this.vectorColumn = vectorColumn;
-        this.vector = vector;
+        this.vectors = vectors;
         this.options =
                 options == null
                         ? Collections.emptyMap()
@@ -99,8 +99,22 @@ public class VectorReadImpl implements VectorRead, Serializable {
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+        if (vectors.length > 1) {
+            throw new IllegalStateException(
+                    "read() supports single vector only; use readBatch() for multiple vectors");
+        }
+        return readBatch(splits).get(0);
+    }
+
+    @Override
+    public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        int n = vectors.length;
         if (splits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
+            List<GlobalIndexResult> empty = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                empty.add(GlobalIndexResult.createEmpty());
+            }
+            return empty;
         }
 
         RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
@@ -114,11 +128,11 @@ public class VectorReadImpl implements VectorRead, Serializable {
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
         ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
 
-        List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
+        List<CompletableFuture<List<Optional<ScoredGlobalIndexResult>>>> futures =
                 new ArrayList<>(splits.size());
         for (VectorSearchSplit split : splits) {
             futures.add(
-                    eval(
+                    evalBatch(
                             globalIndexer,
                             indexPathFactory,
                             split.rowRangeStart(),
@@ -130,15 +144,25 @@ public class VectorReadImpl implements VectorRead, Serializable {
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
-            Optional<ScoredGlobalIndexResult> next = f.join();
-            if (next.isPresent()) {
-                result = result.or(next.get());
+        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            merged[i] = ScoredGlobalIndexResult.createEmpty();
+        }
+
+        for (CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> future : futures) {
+            List<Optional<ScoredGlobalIndexResult>> splitResults = future.join();
+            for (int i = 0; i < n; i++) {
+                if (splitResults.get(i).isPresent()) {
+                    merged[i] = merged[i].or(splitResults.get(i).get());
+                }
             }
         }
 
-        return result.topK(limit);
+        List<GlobalIndexResult> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(merged[i].topK(limit));
+        }
+        return results;
     }
 
     protected Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
@@ -160,7 +184,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
         }
     }
 
-    protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+    protected CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalBatch(
             GlobalIndexer globalIndexer,
             IndexPathFactory indexPathFactory,
             long rowRangeStart,
@@ -168,6 +192,23 @@ public class VectorReadImpl implements VectorRead, Serializable {
             List<IndexFileMeta> vectorIndexFiles,
             @Nullable RoaringNavigableMap64 includeRowIds,
             ExecutorService executor) {
+        List<GlobalIndexIOMeta> indexIOMetaList =
+                buildIOMetaList(indexPathFactory, vectorIndexFiles);
+        @SuppressWarnings("resource")
+        FileIO fileIO = table.fileIO();
+        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
+        GlobalIndexReader reader =
+                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+        BatchVectorSearch batchVectorSearch =
+                new BatchVectorSearch(vectors, limit, vectorColumn.name())
+                        .withIncludeRowIds(includeRowIds);
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                .visitBatchVectorSearch(batchVectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+    }
+
+    private List<GlobalIndexIOMeta> buildIOMetaList(
+            IndexPathFactory indexPathFactory, List<IndexFileMeta> vectorIndexFiles) {
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : vectorIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -177,16 +218,6 @@ public class VectorReadImpl implements VectorRead, Serializable {
                             indexFile.fileSize(),
                             meta.indexMeta()));
         }
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
-        VectorSearch vectorSearch =
-                new VectorSearch(vector, limit, vectorColumn.name(), options)
-                        .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitVectorSearch(vectorSearch)
-                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+        return indexIOMetaList;
     }
 }

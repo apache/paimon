@@ -16,26 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.read;
+package org.apache.paimon.predicate;
 
-import org.apache.paimon.table.InnerTable;
-import org.apache.paimon.table.source.VectorRead;
-import org.apache.paimon.table.source.VectorSearchBuilderImpl;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
-/**
- * Spark-aware {@link VectorSearchBuilderImpl} which produces a {@link SparkVectorReadImpl} so the
- * per-split vector index evaluation is dispatched through Spark instead of the local thread pool.
- */
-public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
+/** Utilities for vector search. */
+class VectorSearchUtils {
 
-    private static final long serialVersionUID = 1L;
-
-    public SparkVectorSearchBuilderImpl(InnerTable table) {
-        super(table);
+    static RoaringNavigableMap64 offsetRowIds(RoaringNavigableMap64 rowIds, long from, long to) {
+        RoaringNavigableMap64 range = new RoaringNavigableMap64();
+        range.addRange(new Range(from, to));
+        RoaringNavigableMap64 filtered = RoaringNavigableMap64.and(range, rowIds);
+        RoaringNavigableMap64 offsetRowIds = new RoaringNavigableMap64();
+        for (long rowId : filtered) {
+            offsetRowIds.add(rowId - from);
+        }
+        return offsetRowIds;
     }
 
-    @Override
-    public VectorRead newVectorRead() {
-        return new SparkVectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
-    }
+    private VectorSearchUtils() {}
 }

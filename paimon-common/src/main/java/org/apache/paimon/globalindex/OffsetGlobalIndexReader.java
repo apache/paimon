@@ -18,11 +18,13 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -143,6 +145,21 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
             FullTextSearch fullTextSearch) {
         return wrapped.visitFullTextSearch(fullTextSearch)
                 .thenApply(opt -> opt.map(r -> r.offset(offset)));
+    }
+
+    @Override
+    public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch) {
+        return wrapped.visitBatchVectorSearch(batchVectorSearch.offsetRange(this.offset, this.to))
+                .thenApply(
+                        results -> {
+                            List<Optional<ScoredGlobalIndexResult>> offsetResults =
+                                    new ArrayList<>(results.size());
+                            for (Optional<ScoredGlobalIndexResult> result : results) {
+                                offsetResults.add(result.map(r -> r.offset(offset)));
+                            }
+                            return offsetResults;
+                        });
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {

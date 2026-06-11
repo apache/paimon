@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorSearchBuilder}. */
 public class VectorSearchBuilderImpl implements VectorSearchBuilder {
@@ -41,7 +42,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected Predicate filter;
     protected int limit;
     protected DataField vectorColumn;
-    protected float[] vector;
+    protected float[][] vectors;
     protected Map<String, String> options = new HashMap<>();
 
     public VectorSearchBuilderImpl(InnerTable table) {
@@ -80,7 +81,13 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withVector(float[] vector) {
-        this.vector = vector;
+        this.vectors = new float[][] {vector};
+        return this;
+    }
+
+    @Override
+    public VectorSearchBuilder withVectors(float[][] vectors) {
+        this.vectors = vectors;
         return this;
     }
 
@@ -105,6 +112,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vector, options);
+        checkNotNull(vectors, "vectors must be set via withVector() or withVectors()");
+        return new VectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
     }
 }
