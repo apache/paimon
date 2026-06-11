@@ -25,9 +25,72 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.schema.data_types import (ArrayType, DataField, MapType,
-                                        PyarrowFieldParser, RowType)
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
+                                        MapType, PyarrowFieldParser, RowType)
 from pypaimon.table.special_fields import SpecialFields
+
+
+def _is_character_string_type(data_type) -> bool:
+    if not isinstance(data_type, AtomicType):
+        return False
+    t = data_type.type.upper()
+    return t == 'STRING' or t.startswith('VARCHAR') or t.startswith('CHAR')
+
+
+def _to_string_values(array, data_type) -> list:
+    """Render *array* as a list of per-row strings (None for NULL rows)."""
+    if isinstance(data_type, (RowType, ArrayType, MapType)):
+        return _constructed_to_string_array(array, data_type).to_pylist()
+    return array.cast(pa.string(), safe=False).to_pylist()
+
+
+def _constructed_to_string_array(array, file_type):
+    """Render a struct/list/map array in the engine's string form:
+    ROW -> ``{v1, v2}``, ARRAY -> ``[e1, e2]``, MAP -> ``{k1 -> v1, k2 -> v2}``.
+    Sub-values are rendered recursively; a NULL sub-value renders as the
+    literal ``null`` while a NULL container row stays NULL."""
+    valid = pc.is_valid(array).to_pylist()
+    out = []
+    if isinstance(file_type, RowType):
+        children = [
+            _to_string_values(array.field(i), sub.type)
+            for i, sub in enumerate(file_type.fields)
+        ]
+        for i in range(len(array)):
+            if not valid[i]:
+                out.append(None)
+                continue
+            vals = [c[i] if c[i] is not None else 'null' for c in children]
+            out.append('{' + ', '.join(vals) + '}')
+    elif isinstance(file_type, ArrayType):
+        values = _to_string_values(array.values, file_type.element)
+        offsets = array.offsets.to_pylist()
+        for i in range(len(array)):
+            if not valid[i]:
+                out.append(None)
+                continue
+            elems = [v if v is not None else 'null'
+                     for v in values[offsets[i]:offsets[i + 1]]]
+            out.append('[' + ', '.join(elems) + ']')
+    elif isinstance(file_type, MapType):
+        keys = _to_string_values(array.keys, file_type.key)
+        items = _to_string_values(array.items, file_type.value)
+        offsets = array.offsets.to_pylist()
+        for i in range(len(array)):
+            if not valid[i]:
+                out.append(None)
+                continue
+            entries = [
+                '{} -> {}'.format(
+                    keys[j] if keys[j] is not None else 'null',
+                    items[j] if items[j] is not None else 'null')
+                for j in range(offsets[i], offsets[i + 1])
+            ]
+            out.append('{' + ', '.join(entries) + '}')
+    else:
+        raise ValueError(
+            'Unsupported constructed type for string rendering: {}'.format(file_type))
+    return pa.array(out, type=pa.string())
 
 
 class DataFileBatchReader(RecordBatchReader):
@@ -147,6 +210,12 @@ class DataFileBatchReader(RecordBatchReader):
                 fields=[target_pa.key_field, target_pa.item_field])
             return pa.Array.from_buffers(
                 target_pa, len(array), array.buffers()[:2], children=[entries])
+        # A constructed type changed to a character string: pyarrow cannot
+        # cast struct/list/map to utf8 directly, so render the engine's
+        # string form instead.
+        if (isinstance(file_type, (RowType, ArrayType, MapType))
+                and _is_character_string_type(target_type)):
+            return _constructed_to_string_array(array, file_type)
         # Leaf / non-nested: cast to the target type when it differs.
         target_pa_type = PyarrowFieldParser.from_paimon_type(target_type)
         if array.type != target_pa_type:

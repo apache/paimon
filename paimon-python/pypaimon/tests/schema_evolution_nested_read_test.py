@@ -458,6 +458,88 @@ class SchemaEvolutionNestedContainerTest(_NestedBase):
         self.assertEqual(rows[0]['m'], [('k', {'a': 1, 'b': 'x', 'c': None})])
 
 
+class SchemaEvolutionConstructedToStringTest(_NestedBase):
+    """update column type from ROW/ARRAY/MAP to STRING: old files must be
+    materialized as the engine's string rendering at read time."""
+
+    def test_row_to_string(self):
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('a', pa.int32()), ('b', pa.string())]))])
+        table = self._create('c2s_row', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'a': 1, 'b': 'x'}}], schema=s0))
+        self.catalog.alter_table(
+            'default.c2s_row',
+            [SchemaChange.update_column_type('mv', AtomicType('STRING'))], False)
+        table = self.catalog.get_table('default.c2s_row')
+        s1 = pa.schema([('id', pa.int64()), ('mv', pa.string())])
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 2, 'mv': 's2'}], schema=s1))
+
+        rows = self._read_sorted(table)
+        self.assertEqual(rows, [
+            {'id': 1, 'mv': '{1, x}'},
+            {'id': 2, 'mv': 's2'},
+        ])
+
+    def test_array_to_string(self):
+        s0 = pa.schema([('id', pa.int64()), ('arr', pa.list_(pa.int32()))])
+        table = self._create('c2s_arr', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'arr': [1, 2, 3]}], schema=s0))
+        self.catalog.alter_table(
+            'default.c2s_arr',
+            [SchemaChange.update_column_type('arr', AtomicType('STRING'))], False)
+        table = self.catalog.get_table('default.c2s_arr')
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['arr'], '[1, 2, 3]')
+
+    def test_map_to_string(self):
+        s0 = pa.schema([('id', pa.int64()),
+                        ('m', pa.map_(pa.string(), pa.int32()))])
+        table = self._create('c2s_map', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'm': [('k', 7)]}], schema=s0))
+        self.catalog.alter_table(
+            'default.c2s_map',
+            [SchemaChange.update_column_type('m', AtomicType('STRING'))], False)
+        table = self.catalog.get_table('default.c2s_map')
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['m'], '{k -> 7}')
+
+    def test_row_to_string_null_semantics(self):
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('a', pa.int32()), ('b', pa.string())]))])
+        table = self._create('c2s_null', s0)
+        self._write(table, pa.Table.from_pylist([
+            {'id': 1, 'mv': None},
+            {'id': 2, 'mv': {'a': None, 'b': 'x'}},
+        ], schema=s0))
+        self.catalog.alter_table(
+            'default.c2s_null',
+            [SchemaChange.update_column_type('mv', AtomicType('STRING'))], False)
+        table = self.catalog.get_table('default.c2s_null')
+        rows = self._read_sorted(table)
+        # A NULL container stays NULL; a NULL sub-value renders as 'null'.
+        self.assertIsNone(rows[0]['mv'])
+        self.assertEqual(rows[1]['mv'], '{null, x}')
+
+    def test_nested_subfield_row_to_string(self):
+        inner = pa.struct([('a', pa.int32())])
+        s0 = pa.schema([('id', pa.int64()),
+                        ('mv', pa.struct([('inner', inner)]))])
+        table = self._create('c2s_nested', s0)
+        self._write(table, pa.Table.from_pylist(
+            [{'id': 1, 'mv': {'inner': {'a': 1}}}], schema=s0))
+        self.catalog.alter_table(
+            'default.c2s_nested',
+            [SchemaChange.update_column_type(['mv', 'inner'], AtomicType('STRING'))],
+            False)
+        table = self.catalog.get_table('default.c2s_nested')
+        rows = self._read_sorted(table)
+        self.assertEqual(rows[0]['mv'], {'inner': '{1}'})
+
+
 class NestedFieldIdModelTest(unittest.TestCase):
     """Globally-unique nested field ids, mirrored from the engine id model."""
 
