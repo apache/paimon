@@ -26,6 +26,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+
 import static org.apache.paimon.CoreOptions.PAGE_SIZE;
 
 /** Cache {@link Segments}. */
@@ -37,18 +39,41 @@ public class SegmentsCache<T> {
     private final Cache<T, Segments> cache;
     private final MemorySize maxMemorySize;
     private final long maxElementSize;
+    @Nullable private final Duration expireAfterAccess;
+    private final boolean softValues;
 
     public SegmentsCache(int pageSize, MemorySize maxMemorySize, long maxElementSize) {
+        this(pageSize, maxMemorySize, maxElementSize, null, true);
+    }
+
+    public SegmentsCache(
+            int pageSize,
+            MemorySize maxMemorySize,
+            long maxElementSize,
+            @Nullable Duration expireAfterAccess,
+            boolean softValues) {
         this.pageSize = pageSize;
-        this.cache =
+        Caffeine<T, Segments> builder =
                 Caffeine.newBuilder()
-                        .softValues()
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
-                        .executor(Runnable::run)
-                        .build();
+                        .executor(Runnable::run);
+        // No idle TTL is applied unless one is explicitly supplied, preserving the original
+        // behaviour where entries are only evicted by weight (or GC, when soft values are on).
+        if (expireAfterAccess != null) {
+            builder.expireAfterAccess(expireAfterAccess);
+        }
+        // When soft values are enabled, entries may be reclaimed by the GC under memory pressure,
+        // which can trigger a cache-thrash spiral. Disabling them pins the working set with strong
+        // references, breaking the spiral at the cost of deterministic heap occupancy.
+        if (softValues) {
+            builder.softValues();
+        }
+        this.cache = builder.build();
         this.maxMemorySize = maxMemorySize;
         this.maxElementSize = maxElementSize;
+        this.expireAfterAccess = expireAfterAccess;
+        this.softValues = softValues;
     }
 
     public int pageSize() {
@@ -61,6 +86,15 @@ public class SegmentsCache<T> {
 
     public long maxElementSize() {
         return maxElementSize;
+    }
+
+    @Nullable
+    public Duration ttl() {
+        return expireAfterAccess;
+    }
+
+    public boolean softValues() {
+        return softValues;
     }
 
     @Nullable
@@ -84,11 +118,22 @@ public class SegmentsCache<T> {
     @Nullable
     public static <T> SegmentsCache<T> create(
             int pageSize, MemorySize maxMemorySize, long maxElementSize) {
+        return create(pageSize, maxMemorySize, maxElementSize, null, true);
+    }
+
+    @Nullable
+    public static <T> SegmentsCache<T> create(
+            int pageSize,
+            MemorySize maxMemorySize,
+            long maxElementSize,
+            @Nullable Duration expireAfterAccess,
+            boolean softValues) {
         if (maxMemorySize.getBytes() == 0) {
             return null;
         }
 
-        return new SegmentsCache<>(pageSize, maxMemorySize, maxElementSize);
+        return new SegmentsCache<>(
+                pageSize, maxMemorySize, maxElementSize, expireAfterAccess, softValues);
     }
 
     public long estimatedSize() {
