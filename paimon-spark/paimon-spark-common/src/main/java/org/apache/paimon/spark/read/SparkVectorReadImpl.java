@@ -39,6 +39,7 @@ import org.apache.spark.broadcast.Broadcast;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -60,6 +61,16 @@ public class SparkVectorReadImpl extends VectorReadImpl {
             DataField vectorColumn,
             float[] vector) {
         super(table, filter, limit, vectorColumn, vector);
+    }
+
+    public SparkVectorReadImpl(
+            FileStoreTable table,
+            Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            Map<String, String> options) {
+        super(table, filter, limit, vectorColumn, vector, options);
     }
 
     @Override

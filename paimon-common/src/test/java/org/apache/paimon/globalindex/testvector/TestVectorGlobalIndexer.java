@@ -55,9 +55,15 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
     /** Option key for distance metric. */
     public static final String OPT_METRIC = "test.vector.metric";
 
+    public static final String OPT_REQUIRED_OPTION_KEY = "test.vector.required-option.key";
+
+    public static final String OPT_REQUIRED_OPTION_VALUE = "test.vector.required-option.value";
+
     private final DataType fieldType;
     private final int dimension;
     private final String metric;
+    private final String requiredOptionKey;
+    private final String requiredOptionValue;
 
     public TestVectorGlobalIndexer(DataType fieldType, Options options) {
         checkArgument(
@@ -67,6 +73,8 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
         this.fieldType = fieldType;
         this.dimension = options.getInteger(OPT_DIMENSION, 0);
         this.metric = options.getString(OPT_METRIC, "l2");
+        this.requiredOptionKey = options.getString(OPT_REQUIRED_OPTION_KEY, null);
+        this.requiredOptionValue = options.getString(OPT_REQUIRED_OPTION_VALUE, null);
     }
 
     @Override
@@ -80,7 +88,8 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
         checkArgument(files.size() == 1, "Expected exactly one index file per shard");
-        return new TestVectorGlobalIndexReader(fileReader, files.get(0), metric);
+        return new TestVectorGlobalIndexReader(
+                fileReader, files.get(0), metric, requiredOptionKey, requiredOptionValue);
     }
 
     public int dimension() {

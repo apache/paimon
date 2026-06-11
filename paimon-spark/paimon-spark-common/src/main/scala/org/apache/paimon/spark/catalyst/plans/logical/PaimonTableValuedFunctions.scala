@@ -30,11 +30,13 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistryBase
 import org.apache.spark.sql.catalyst.analysis.TableFunctionRegistry.TableFunctionBuilder
-import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateArray, Expression, ExpressionInfo, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateArray, CreateMap, Expression, ExpressionInfo, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan}
+import org.apache.spark.sql.catalyst.util.MapData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.JavaConverters._
 
@@ -292,11 +294,12 @@ case class IncrementalToAutoTag(override val args: Seq[Expression])
 /**
  * Plan for the [[VECTOR_SEARCH]] table-valued function.
  *
- * Usage: vector_search(table_name, column_name, query_vector, limit)
+ * Usage: vector_search(table_name, column_name, query_vector, limit[, options])
  *   - table_name: the Paimon table to search
  *   - column_name: the vector column name
  *   - query_vector: array of floats representing the query vector
  *   - limit: the number of top results to return
+ *   - options: optional options as a map or semicolon-separated key-value string
  *
  * Example: SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
  */
@@ -311,9 +314,10 @@ case class VectorSearchQuery(override val args: Seq[Expression])
   def createVectorSearch(
       innerTable: InnerTable,
       argsWithoutTable: Seq[Expression]): VectorSearch = {
-    if (argsWithoutTable.size != 3) {
+    if (argsWithoutTable.size != 3 && argsWithoutTable.size != 4) {
       throw new RuntimeException(
-        s"$VECTOR_SEARCH needs three parameters after table_name: column_name, query_vector, limit. " +
+        s"$VECTOR_SEARCH needs three or four parameters after table_name: " +
+          s"column_name, query_vector, limit[, options]. " +
           s"Got ${argsWithoutTable.size} parameters after table_name."
       )
     }
@@ -325,7 +329,13 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     }
     val queryVector = extractQueryVector(argsWithoutTable(1))
     val limit = parsePositiveLimit(argsWithoutTable(2).eval())
-    new VectorSearch(queryVector, limit, columnName)
+    val options: Map[String, String] =
+      if (argsWithoutTable.size == 4) {
+        extractOptions(argsWithoutTable(3))
+      } else {
+        Map.empty[String, String]
+      }
+    new VectorSearch(queryVector, limit, columnName, options.asJava)
   }
 
   private def extractQueryVector(expr: Expression): Array[Float] = {
@@ -344,6 +354,69 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       case _ =>
         throw new RuntimeException(s"Cannot extract query vector from expression: $expr")
     }
+  }
+
+  private def extractOptions(expr: Expression): Map[String, String] = {
+    expr match {
+      case CreateMap(children, _) if children != null =>
+        children
+          .grouped(2)
+          .map {
+            case Seq(keyExpr, valueExpr) => (extractString(keyExpr), extractString(valueExpr))
+            case other =>
+              throw new RuntimeException(s"Invalid options map entries: $other")
+          }
+          .toMap
+      case _ =>
+        expr.eval() match {
+          case null => Map.empty
+          case options: MapData => mapDataToStringMap(options)
+          case options: java.util.Map[_, _] =>
+            options.asScala.map {
+              case (key, value) => (stringValue(key), stringValue(value))
+            }.toMap
+          case options: String => parseOptionsString(options)
+          case options: UTF8String => parseOptionsString(options.toString)
+          case other =>
+            throw new RuntimeException(
+              s"Invalid options type: ${other.getClass.getName}. " +
+                "Expected a map or semicolon-separated key-value string.")
+        }
+    }
+  }
+
+  private def mapDataToStringMap(mapData: MapData): Map[String, String] = {
+    val keys = mapData.keyArray().array
+    val values = mapData.valueArray().array
+    keys.indices.map(i => (stringValue(keys(i)), stringValue(values(i)))).toMap
+  }
+
+  private def parseOptionsString(options: String): Map[String, String] = {
+    if (options == null || options.trim.isEmpty) {
+      Map.empty
+    } else {
+      options
+        .split(";")
+        .map {
+          kvString =>
+            val kv = kvString.split("=", 2)
+            if (kv.length != 2) {
+              throw new IllegalArgumentException(
+                s"Invalid option '$kvString'. Please use format 'key=value'.")
+            }
+            (kv(0).trim, kv(1).trim)
+        }
+        .toMap
+    }
+  }
+
+  private def extractString(expr: Expression): String = stringValue(expr.eval())
+
+  private def stringValue(value: Any): String = {
+    if (value == null) {
+      throw new IllegalArgumentException("Option key and value cannot be null.")
+    }
+    value.toString
   }
 }
 

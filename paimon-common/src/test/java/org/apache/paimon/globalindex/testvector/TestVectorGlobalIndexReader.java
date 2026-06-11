@@ -56,6 +56,8 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final GlobalIndexIOMeta ioMeta;
     private final String metric;
+    private final String requiredOptionKey;
+    private final String requiredOptionValue;
 
     private float[][] vectors;
     private int dimension;
@@ -63,9 +65,20 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
 
     public TestVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, GlobalIndexIOMeta ioMeta, String metric) {
+        this(fileReader, ioMeta, metric, null, null);
+    }
+
+    public TestVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            GlobalIndexIOMeta ioMeta,
+            String metric,
+            String requiredOptionKey,
+            String requiredOptionValue) {
         this.fileReader = fileReader;
         this.ioMeta = ioMeta;
         this.metric = metric;
+        this.requiredOptionKey = requiredOptionKey;
+        this.requiredOptionValue = requiredOptionValue;
     }
 
     @Override
@@ -78,6 +91,18 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
         }
 
         float[] queryVector = vectorSearch.vector();
+        if (requiredOptionKey != null) {
+            String actual = vectorSearch.options().get(requiredOptionKey);
+            if (!requiredOptionValue.equals(actual)) {
+                throw new IllegalArgumentException(
+                        "Required option "
+                                + requiredOptionKey
+                                + " expected "
+                                + requiredOptionValue
+                                + " but got "
+                                + actual);
+            }
+        }
         if (queryVector.length != dimension) {
             throw new IllegalArgumentException(
                     String.format(
