@@ -36,11 +36,18 @@ LUMINA_IDENTIFIERS = (LUMINA_IDENTIFIER, LUMINA_VECTOR_ANN_IDENTIFIER)
 MIN_SEARCH_LIST_SIZE = 16
 
 
-def _ensure_search_list_size(search_options, top_k):
+def _ensure_search_list_size(options, top_k):
     """Set diskann.search.list_size when not explicitly configured."""
-    if "diskann.search.list_size" not in search_options:
+    if "diskann.search.list_size" not in options:
         list_size = max(int(top_k * 1.5), MIN_SEARCH_LIST_SIZE)
-        search_options["diskann.search.list_size"] = str(list_size)
+        options["diskann.search.list_size"] = str(list_size)
+
+
+def _merge_options(base_options, index_options, query_options):
+    options = dict(base_options)
+    options.update(index_options)
+    options.update(query_options or {})
+    return options
 
 
 class LuminaVectorGlobalIndexReader(GlobalIndexReader):
@@ -51,10 +58,10 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._file_io = file_io
         self._index_path = index_path
         self._io_meta = io_metas[0]
-        self._options = options or {}
+        self._table_options = dict(options or {})
+        self._options = {}
         self._searcher = None
         self._index_meta = None
-        self._search_options = None
         self._stream = None
         self._load_lock = threading.Lock()
 
@@ -78,19 +85,22 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             return _completed_future(None)
 
         include_row_ids = vector_search.include_row_ids
+        query_options = vector_search.options
 
         if include_row_ids is not None:
             filter_id_list = list(include_row_ids)
             if len(filter_id_list) == 0:
                 return _completed_future(None)
             effective_k = min(effective_k, len(filter_id_list))
-            search_opts = dict(self._search_options)
+            search_opts = _merge_options(
+                self._options, {}, query_options)
             search_opts["search.thread_safe_filter"] = "true"
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_with_filter_list(
                 query_flat, 1, effective_k, filter_id_list, search_opts)
         else:
-            search_opts = dict(self._search_options)
+            search_opts = _merge_options(
+                self._options, {}, query_options)
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_list(
                 query_flat, 1, effective_k, search_opts)
@@ -123,16 +133,18 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             )
 
             self._index_meta = LuminaIndexMeta.deserialize(self._io_meta.metadata)
-            searcher_options = strip_lumina_options(self._options)
-            searcher_options.update(self._index_meta.options)
-            self._search_options = searcher_options
+            self._options = _merge_options(
+                strip_lumina_options(self._table_options),
+                self._index_meta.options,
+                {},
+            )
 
             file_path = (self._io_meta.external_path
                          if self._io_meta.external_path
                          else os.path.join(self._index_path, self._io_meta.file_name))
             stream = self._file_io.new_input_stream(file_path)
             try:
-                self._searcher = LuminaSearcher(searcher_options)
+                self._searcher = LuminaSearcher(self._options)
                 self._searcher.open_stream(stream, self._io_meta.file_size)
                 self._stream = stream
             except Exception:

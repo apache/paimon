@@ -44,8 +44,11 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -65,6 +68,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
     protected final int limit;
     protected final DataField vectorColumn;
     protected final float[] vector;
+    protected final Map<String, String> options;
 
     public VectorReadImpl(
             FileStoreTable table,
@@ -72,11 +76,25 @@ public class VectorReadImpl implements VectorRead, Serializable {
             int limit,
             DataField vectorColumn,
             float[] vector) {
+        this(table, filter, limit, vectorColumn, vector, Collections.emptyMap());
+    }
+
+    public VectorReadImpl(
+            FileStoreTable table,
+            Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            Map<String, String> options) {
         this.table = table;
         this.filter = filter;
         this.limit = limit;
         this.vectorColumn = vectorColumn;
         this.vector = vector;
+        this.options =
+                options == null
+                        ? Collections.emptyMap()
+                        : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
     @Override
@@ -165,7 +183,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         VectorSearch vectorSearch =
-                new VectorSearch(vector, limit, vectorColumn.name())
+                new VectorSearch(vector, limit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitVectorSearch(vectorSearch)

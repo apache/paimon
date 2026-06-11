@@ -39,6 +39,10 @@ class PaimonScanBuilderTest extends PaimonSparkTestBase {
       rows =
         spark.sql("select id, embs from vector_search('T', 'embs', array(1.0f, 2.0f, 3.0f), 5)")
       assert(rows.isEmpty)
+      rows = spark.sql(
+        "select id, embs from vector_search(" +
+          "'T', 'embs', array(1.0f, 2.0f, 3.0f), 5, map('ivf.nprobe', '16'))")
+      assert(rows.isEmpty)
     }
   }
 }

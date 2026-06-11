@@ -25,6 +25,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
 
 /** Implementation for {@link VectorSearchBuilder}. */
@@ -39,6 +42,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected int limit;
     protected DataField vectorColumn;
     protected float[] vector;
+    protected Map<String, String> options = new HashMap<>();
 
     public VectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
@@ -81,12 +85,26 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     @Override
+    public VectorSearchBuilder withOptions(Map<String, String> options) {
+        if (options != null) {
+            this.options.putAll(options);
+        }
+        return this;
+    }
+
+    @Override
+    public VectorSearchBuilder withOption(String key, String value) {
+        this.options.put(key, value);
+        return this;
+    }
+
+    @Override
     public VectorScan newVectorScan() {
         return new VectorScanImpl(table, partitionFilter, filter, vectorColumn);
     }
 
     @Override
     public VectorRead newVectorRead() {
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vector);
+        return new VectorReadImpl(table, filter, limit, vectorColumn, vector, options);
     }
 }

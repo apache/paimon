@@ -141,19 +141,25 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             effectiveK = Math.min(effectiveK, scopedIds.length);
             distances = new float[effectiveK];
             labels = new long[effectiveK];
-            Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
-            searchOptions.put("search.thread_safe_filter", "true");
-            ensureSearchListSize(searchOptions, effectiveK);
+            Map<String, String> mergedOptions =
+                    mergeOptions(
+                            this.options.toLuminaOptions(),
+                            indexMeta.options(),
+                            vectorSearch.options());
+            mergedOptions.put("search.thread_safe_filter", "true");
+            ensureSearchListSize(mergedOptions, effectiveK);
             index.searchWithFilter(
-                    queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
+                    queryVector, 1, effectiveK, distances, labels, scopedIds, mergedOptions);
         } else {
             distances = new float[effectiveK];
             labels = new long[effectiveK];
-            Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
-            ensureSearchListSize(searchOptions, effectiveK);
-            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+            Map<String, String> mergedOptions =
+                    mergeOptions(
+                            this.options.toLuminaOptions(),
+                            indexMeta.options(),
+                            vectorSearch.options());
+            ensureSearchListSize(mergedOptions, effectiveK);
+            index.search(queryVector, 1, effectiveK, distances, labels, mergedOptions);
         }
 
         // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
@@ -170,10 +176,20 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
-    private static void ensureSearchListSize(Map<String, String> searchOptions, int topK) {
-        if (!searchOptions.containsKey("diskann.search.list_size")) {
+    static Map<String, String> mergeOptions(
+            Map<String, String> baseOptions,
+            Map<String, String> indexOptions,
+            Map<String, String> queryOptions) {
+        Map<String, String> options = new HashMap<>(baseOptions);
+        options.putAll(indexOptions);
+        options.putAll(queryOptions);
+        return options;
+    }
+
+    private static void ensureSearchListSize(Map<String, String> options, int topK) {
+        if (!options.containsKey("diskann.search.list_size")) {
             int listSize = Math.max((int) (topK * 1.5), MIN_SEARCH_LIST_SIZE);
-            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            options.put("diskann.search.list_size", String.valueOf(listSize));
         }
     }
 
