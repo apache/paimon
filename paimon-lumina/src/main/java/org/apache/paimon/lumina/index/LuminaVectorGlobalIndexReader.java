@@ -180,7 +180,8 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         LuminaVectorMetric indexMetric = indexMeta.metric();
         List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            results.add(buildScoredResult(distances, labels, i * effectiveK, effectiveK, indexMetric));
+            results.add(
+                    buildScoredResult(distances, labels, i * effectiveK, effectiveK, indexMetric));
         }
         return results;
     }
