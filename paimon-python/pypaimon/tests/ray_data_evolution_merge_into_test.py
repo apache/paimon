@@ -523,7 +523,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ('feature', pa.int32()),
         ])
         name = f'default.tbl_{uuid.uuid4().hex[:8]}'
-        schema = Schema.from_pyarrow_schema(blob_schema, options=self.de_options)
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
         self.catalog.create_table(name, schema, False)
         self._write(
             name,
@@ -585,6 +586,84 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(metrics, {
             'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
         })
+
+    def test_blob_descriptor_resolve_and_merge(self):
+        from pypaimon.table.row.blob import BlobDescriptor, Blob
+        from pypaimon.common.uri_reader import UriReaderFactory
+
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+            ('feature', pa.int32()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'payload': [b'aa', b'bbb', b'cccc'],
+                    'feature': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=blob_schema,
+            ),
+        )
+
+        num_partitions = _TEST_NUM_PARTITIONS
+        input_ids = ray.data.from_arrow(pa.Table.from_pydict({
+            'id': pa.array([1, 3], type=pa.int32()),
+        }))
+
+        target_rows = read_paimon(
+            name,
+            self.catalog_options,
+            projection=['id', 'payload'],
+            dynamic_table_options={'blob-as-descriptor': 'true'},
+        )
+
+        matched = input_ids.join(
+            target_rows, join_type='inner',
+            num_partitions=num_partitions, on=['id'],
+        )
+
+        uri_factory = UriReaderFactory(self.catalog_options)
+
+        def resolve_and_compute(batch):
+            features = []
+            for desc_bytes in batch['payload'].to_pylist():
+                desc = BlobDescriptor.deserialize(desc_bytes)
+                reader = uri_factory.create(desc.uri)
+                data = Blob.from_descriptor(reader, desc).to_data()
+                features.append(len(data) * 100)
+            return pa.Table.from_pydict({
+                'id': batch['id'],
+                'new_feature': pa.array(features, type=pa.int32()),
+            })
+
+        updates = matched.map_batches(
+            resolve_and_compute, batch_format='pyarrow')
+        metrics = merge_into(
+            target=name,
+            source=updates,
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[
+                WhenMatched(update={'feature': source_col('new_feature')})
+            ],
+            num_partitions=num_partitions,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['feature'], [200, 20, 400])
+        self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
+        self.assertEqual(metrics['num_matched'], 2)
 
     def test_combined_writes_single_snapshot(self):
         target = self._create_table()

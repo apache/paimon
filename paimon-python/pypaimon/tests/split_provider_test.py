@@ -253,14 +253,17 @@ class SplitProviderTest(unittest.TestCase):
         args = dict(table_identifier=self.identifier,
                     catalog_options=self.catalog_options)
         with self.assertRaises(ValueError):
-            CatalogSplitProvider(**args, snapshot_id=1,
-                                dynamic_table_options={'scan.tag-name': 'v1'})
+            CatalogSplitProvider(
+                **args, snapshot_id=1,
+                dynamic_table_options={'scan.tag-name': 'v1'})
         with self.assertRaises(ValueError):
-            CatalogSplitProvider(**args, tag_name='v1',
-                                dynamic_table_options={'scan.snapshot-id': '1'})
+            CatalogSplitProvider(
+                **args, tag_name='v1',
+                dynamic_table_options={'scan.snapshot-id': '1'})
         with self.assertRaises(ValueError):
-            CatalogSplitProvider(**args, dynamic_table_options={
-                'scan.snapshot-id': '1', 'scan.tag-name': 'v1'})
+            CatalogSplitProvider(
+                **args, dynamic_table_options={
+                    'scan.snapshot-id': '1', 'scan.tag-name': 'v1'})
 
     def test_pre_resolved_provider_returns_inputs(self):
         """PreResolvedSplitProvider just hands back what it was given."""
