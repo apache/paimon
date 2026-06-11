@@ -21,6 +21,7 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.RowHelper;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
@@ -80,19 +81,6 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         return row;
     }
 
-    /**
-     * Maximum retained reuse buffer size in bytes. Buffers exceeding this cap are eligible for
-     * shrinking when the shrink ratio condition is also met.
-     */
-    private static final int MAX_RETAINED_REUSE_BUFFER_SIZE = 4 * 1024 * 1024; // 4MB
-
-    /**
-     * Shrink ratio. The buffer is reallocated only when its size exceeds {@link
-     * #MAX_RETAINED_REUSE_BUFFER_SIZE} AND is more than {@code SHRINK_RATIO} times the current
-     * record length.
-     */
-    private static final int SHRINK_RATIO = 4;
-
     public BinaryRow deserialize(BinaryRow reuse, DataInputView source) throws IOException {
         MemorySegment[] segments = reuse.getSegments();
         checkArgument(
@@ -103,8 +91,8 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         if (segments == null || segments[0].size() < length) {
             // Need a larger buffer
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
-        } else if (segments[0].size() > MAX_RETAINED_REUSE_BUFFER_SIZE
-                && segments[0].size() > (long) length * SHRINK_RATIO) {
+        } else if (segments[0].size() > RowHelper.MAX_RETAINED_REUSE_BUFFER_SIZE
+                && segments[0].size() > (long) length * RowHelper.SHRINK_RATIO) {
             segments = new MemorySegment[] {MemorySegment.wrap(new byte[length])};
         }
         source.readFully(segments[0].getArray(), 0, length);
