@@ -80,7 +80,8 @@ class AsyncStreamingTableScan:
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
         consumer_id: Optional[str] = None,
-        query_auth=None
+        query_auth=None,
+        read_type=None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -110,6 +111,7 @@ class AsyncStreamingTableScan:
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
         self._query_auth = query_auth
+        self._read_type = read_type
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -272,7 +274,7 @@ class AsyncStreamingTableScan:
     def _apply_auth(self, plan) -> 'Plan':
         if self._query_auth is None:
             return plan
-        read_type = getattr(self, '_read_type', None)
+        read_type = self._read_type
         select = [f.name for f in read_type] if read_type else None
         auth_result = self._query_auth(select)
         if auth_result is not None:

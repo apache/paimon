@@ -155,8 +155,7 @@ def _apply_leaf_function(function: str, value_array: pa.Array, literals: list, b
         return pc.match_substring(value_array, converted[0])
     elif function == "LIKE":
         raw = literals[0]
-        escaped = re.escape(raw)
-        pattern = escaped.replace("%", ".*").replace("_", ".")
+        pattern = _sql_to_regex_like(raw)
         return pc.match_substring_regex(value_array, f"^{pattern}$")
     elif function == "TRUE":
         return pa.array([True] * batch_len, type=pa.bool_())
@@ -257,6 +256,39 @@ def _timestamp_precision_to_unit(precision: int) -> str:
         return "us"
     else:
         return "ns"
+
+
+def _sql_to_regex_like(sql_pattern: str, escape_char: str = '\\') -> str:
+    regex_meta = set('[]()|^-+*?{}$\\.')
+    result = []
+    i = 0
+    length = len(sql_pattern)
+    while i < length:
+        c = sql_pattern[i]
+        if c == escape_char:
+            if i == length - 1:
+                raise RuntimeError(
+                    f"Invalid escape sequence '{sql_pattern}', {i}")
+            next_char = sql_pattern[i + 1]
+            if next_char not in ('_', '%', escape_char):
+                raise RuntimeError(
+                    f"Invalid escape sequence '{sql_pattern}', {i}")
+            if next_char in regex_meta:
+                result.append('\\')
+            result.append(next_char)
+            i += 2
+        elif c == '_':
+            result.append('.')
+            i += 1
+        elif c == '%':
+            result.append('(?s:.*)')
+            i += 1
+        else:
+            if c in regex_meta:
+                result.append('\\')
+            result.append(c)
+            i += 1
+    return ''.join(result)
 
 
 def extract_referenced_fields(json_str: str) -> set:

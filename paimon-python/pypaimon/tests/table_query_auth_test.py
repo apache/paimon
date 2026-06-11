@@ -60,8 +60,9 @@ class _FakeSplit:
 
 
 class _FakePlan:
-    def __init__(self, splits):
+    def __init__(self, splits, snapshot_id=None):
         self._splits = splits
+        self.snapshot_id = snapshot_id
 
     def splits(self):
         return self._splits
@@ -245,6 +246,42 @@ class TestQueryAuthSplitRawConvertible(unittest.TestCase):
         self.assertFalse(auth_split.raw_convertible)
 
 
+class TestQueryAuthSplitAttributeDelegation(unittest.TestCase):
+
+    def test_file_size_delegated(self):
+        inner = _FakeSplit()
+        inner.file_size = 12345
+        auth_split = QueryAuthSplit(inner, TableQueryAuthResult(None, None))
+        self.assertEqual(auth_split.file_size, 12345)
+
+    def test_file_paths_delegated(self):
+        inner = _FakeSplit()
+        inner.file_paths = ["/data/file1.parquet", "/data/file2.parquet"]
+        auth_split = QueryAuthSplit(inner, TableQueryAuthResult(None, None))
+        self.assertEqual(auth_split.file_paths, ["/data/file1.parquet", "/data/file2.parquet"])
+
+    def test_data_deletion_files_delegated(self):
+        inner = _FakeSplit()
+        inner.data_deletion_files = [None, "dv-1"]
+        auth_split = QueryAuthSplit(inner, TableQueryAuthResult(None, None))
+        self.assertEqual(auth_split.data_deletion_files, [None, "dv-1"])
+
+    def test_unknown_attr_raises(self):
+        inner = _FakeSplit()
+        auth_split = QueryAuthSplit(inner, TableQueryAuthResult(None, None))
+        with self.assertRaises(AttributeError):
+            _ = auth_split.completely_nonexistent_attr
+
+    def test_pickle_roundtrip(self):
+        import pickle
+        inner = _FakeSplit()
+        inner.file_size = 999
+        auth_split = QueryAuthSplit(inner, TableQueryAuthResult(None, None))
+        restored = pickle.loads(pickle.dumps(auth_split))
+        self.assertEqual(restored.file_size, 999)
+        self.assertEqual(restored.row_count, 100)
+
+
 class TestCoreOptionsQueryAuth(unittest.TestCase):
 
     def test_disabled_by_default(self):
@@ -262,3 +299,32 @@ class TestCoreOptionsQueryAuth(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConvertPlanPreservesSnapshotId(unittest.TestCase):
+
+    def test_convert_plan_preserves_snapshot_id(self):
+        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+        from pypaimon.read.plan import Plan
+        from unittest.mock import MagicMock
+
+        split = MagicMock()
+        original_plan = Plan([split], snapshot_id=42)
+        auth_result = TableQueryAuthResult(
+            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF","fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'],
+            column_masking=None)
+        converted = auth_result.convert_plan(original_plan)
+        assert converted.snapshot_id == 42
+
+    def test_convert_plan_preserves_none_snapshot_id(self):
+        from pypaimon.catalog.table_query_auth import TableQueryAuthResult
+        from pypaimon.read.plan import Plan
+        from unittest.mock import MagicMock
+
+        split = MagicMock()
+        original_plan = Plan([split], snapshot_id=None)
+        auth_result = TableQueryAuthResult(
+            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF","fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'],
+            column_masking=None)
+        converted = auth_result.convert_plan(original_plan)
+        assert converted.snapshot_id is None

@@ -57,3 +57,8 @@ class QueryAuthSplit(Split):
         if self._auth_result.filter:
             return None
         return self._split.merged_row_count()
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        return getattr(self._split, name)

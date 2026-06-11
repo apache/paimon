@@ -458,5 +458,62 @@ class TestLikeEdgeCases(unittest.TestCase):
         self.assertEqual(f(batch).to_pylist(), [True, True, True, False])
 
 
+class TestLikeEscapeSemantics(unittest.TestCase):
+
+    def _make_like_batch(self, values):
+        return pa.RecordBatch.from_pydict(
+            {"name": values}, schema=pa.schema([("name", pa.string())]))
+
+    def _make_like_predicate(self, pattern):
+        return json.dumps({
+            "kind": "LEAF",
+            "transform": {"name": "FIELD_REF", "fieldRef": {"name": "name"}},
+            "function": "LIKE",
+            "literals": [pattern]
+        })
+
+    def test_like_simple_percent(self):
+        batch = self._make_like_batch(["admin", "admin_foo", "user"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("admin%"))
+        self.assertEqual(fn(batch).to_pylist(), [True, True, False])
+
+    def test_like_simple_underscore(self):
+        batch = self._make_like_batch(["ab", "abc", "a"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("a_"))
+        self.assertEqual(fn(batch).to_pylist(), [True, False, False])
+
+    def test_like_escaped_underscore(self):
+        batch = self._make_like_batch(["admin_foo", "adminXfoo", "admin"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("admin\\_%"))
+        self.assertEqual(fn(batch).to_pylist(), [True, False, False])
+
+    def test_like_escaped_percent(self):
+        batch = self._make_like_batch(["100%", "100X", "100"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("100\\%"))
+        self.assertEqual(fn(batch).to_pylist(), [True, False, False])
+
+    def test_like_escaped_backslash(self):
+        batch = self._make_like_batch(["a\\b", "a/b", "ab"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("a\\\\b"))
+        self.assertEqual(fn(batch).to_pylist(), [True, False, False])
+
+    def test_like_regex_special_chars(self):
+        batch = self._make_like_batch(["a.b", "axb", "a..b"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("a.b"))
+        self.assertEqual(fn(batch).to_pylist(), [True, False, False])
+
+    def test_like_percent_matches_newline(self):
+        batch = self._make_like_batch(["hello\nworld", "hello"])
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("hello%"))
+        self.assertEqual(fn(batch).to_pylist(), [True, True])
+
+    def test_like_invalid_escape_sequence(self):
+        import pytest
+        fn = parse_predicate_to_batch_filter(self._make_like_predicate("admin\\x"))
+        batch = self._make_like_batch(["admin"])
+        with pytest.raises(RuntimeError, match="Invalid escape sequence"):
+            fn(batch)
+
+
 if __name__ == "__main__":
     unittest.main()

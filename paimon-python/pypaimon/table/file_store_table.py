@@ -410,11 +410,13 @@ class FileStoreTable(Table):
             else:
                 return BucketMode.HASH_FIXED
 
-    def new_read_builder(self) -> 'ReadBuilder':
-        return ReadBuilder(self, query_auth=self._query_auth_fn)
+    def new_read_builder(self, *, _skip_auth=False) -> 'ReadBuilder':
+        auth = None if _skip_auth else self._query_auth_fn
+        return ReadBuilder(self, query_auth=auth)
 
-    def new_stream_read_builder(self) -> 'StreamReadBuilder':
-        return StreamReadBuilder(self, query_auth=self._query_auth_fn)
+    def new_stream_read_builder(self, *, _skip_auth=False) -> 'StreamReadBuilder':
+        auth = None if _skip_auth else self._query_auth_fn
+        return StreamReadBuilder(self, query_auth=auth)
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)

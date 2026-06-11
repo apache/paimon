@@ -297,7 +297,7 @@ class TableUpsertByKey:
                              Pass an empty dict (or None) for non-partitioned tables.
             input_key_set:   Set of composite key tuples from the input data.
         """
-        read_builder = self.table.new_read_builder()
+        read_builder = self.table.new_read_builder(_skip_auth=True)
 
         if partition_spec:
             predicate_builder = read_builder.new_predicate_builder()

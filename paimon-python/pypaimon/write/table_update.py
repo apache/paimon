@@ -238,7 +238,7 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        scanner = self.table.new_read_builder().new_scan()
+        scanner = self.table.new_read_builder(_skip_auth=True).new_scan()
         plan = scanner.plan()
         self.snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         splits = plan.splits()
@@ -260,7 +260,7 @@ class ShardTableUpdator:
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
-        read_builder = self.table.new_read_builder()
+        read_builder = self.table.new_read_builder(_skip_auth=True)
         read_builder.with_projection(self.projection)
         return read_builder.new_read().to_arrow_batch_reader(self.splits)
 

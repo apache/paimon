@@ -31,36 +31,56 @@ from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
 class RecordReaderToBatchAdapter(RecordBatchReader):
 
-    def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536):
+    def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536, include_row_kind: bool = False):
         self._inner = inner
         self._schema = schema
         self._chunk_size = chunk_size
         self._exhausted = False
+        self._pending_iterator = None
+        self._include_row_kind = include_row_kind
 
     def read_arrow_batch(self) -> Optional[pa.RecordBatch]:
         if self._exhausted:
             return None
         row_tuples = []
+        row_kinds = []
         while len(row_tuples) < self._chunk_size:
+            if self._pending_iterator is not None:
+                row = self._pending_iterator.next()
+                while row is not None:
+                    row_tuples.append(
+                        row.row_tuple[row.offset:row.offset + row.arity])
+                    if self._include_row_kind:
+                        row_kinds.append(row.get_row_kind().to_string())
+                    if len(row_tuples) >= self._chunk_size:
+                        return self._flush(row_tuples, row_kinds)
+                    row = self._pending_iterator.next()
+                self._pending_iterator = None
+
             row_iterator = self._inner.read_batch()
             if row_iterator is None:
                 self._exhausted = True
                 break
-            row = row_iterator.next()
-            while row is not None:
-                row_tuples.append(
-                    row.row_tuple[row.offset:row.offset + row.arity])
-                if len(row_tuples) >= self._chunk_size:
-                    break
-                row = row_iterator.next()
+            self._pending_iterator = row_iterator
+
         if not row_tuples:
             return None
+        return self._flush(row_tuples, row_kinds)
+
+    def _flush(self, row_tuples, row_kinds=None):
         columns_data = list(zip(*row_tuples))
         pydict = {
             name: list(col)
             for name, col in zip(self._schema.names, columns_data)
         }
-        return pa.RecordBatch.from_pydict(pydict, schema=self._schema)
+        batch = pa.RecordBatch.from_pydict(pydict, schema=self._schema)
+        if row_kinds:
+            row_kind_array = pa.array(row_kinds, type=pa.string())
+            row_kind_field = pa.field("_row_kind", pa.string())
+            new_schema = pa.schema([row_kind_field] + list(batch.schema))
+            columns = [row_kind_array] + [batch.column(i) for i in range(batch.num_columns)]
+            batch = pa.RecordBatch.from_arrays(columns, schema=new_schema)
+        return batch
 
     def close(self):
         self._inner.close()
@@ -111,9 +131,11 @@ class AuthMaskingReader(RecordBatchReader):
                 target_col_type = original_batch.schema.field(col_idx).type
                 masked_columns[col_idx] = self._apply_transform(transform, original_batch, target_col_type)
         for col_idx, masked_array in masked_columns.items():
-            original_field = batch.schema.field(col_idx)
-            new_field = pa.field(original_field.name, masked_array.type, nullable=True)
-            batch = batch.set_column(col_idx, new_field, masked_array)
+            original_field = original_batch.schema.field(col_idx)
+            if masked_array.type != original_field.type:
+                masked_array = pc.cast(masked_array, original_field.type)
+            batch = batch.set_column(
+                col_idx, pa.field(original_field.name, original_field.type, nullable=True), masked_array)
         return batch
 
     def close(self):
@@ -189,7 +211,10 @@ class ColumnProjectReader(RecordBatchReader):
         batch = self._inner.read_arrow_batch()
         if batch is None:
             return None
-        return batch.select(self._columns)
+        columns = self._columns
+        if "_row_kind" in batch.schema.names and "_row_kind" not in columns:
+            columns = ["_row_kind"] + list(columns)
+        return batch.select(columns)
 
     def close(self):
         self._inner.close()

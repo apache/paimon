@@ -65,7 +65,11 @@ class TableScan:
         Only used by :meth:`ReadBuilder.explain`; the regular read path
         keeps going through :meth:`plan`.
         """
-        return self.file_scanner.scan_with_stats()
+        auth_result = self._auth_query()
+        plan, stats = self.file_scanner.scan_with_stats()
+        if auth_result is not None:
+            plan = auth_result.convert_plan(plan)
+        return plan, stats
 
     def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options

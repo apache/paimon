@@ -253,6 +253,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
             splits_all_above_l0 += 1
 
         if verbose:
+            from pypaimon.read.query_auth_split import QueryAuthSplit
             split_infos.append(ExplainSplitInfo(
                 partition=_format_partition(split, table),
                 bucket=int(getattr(split, 'bucket', -1)),
@@ -265,6 +266,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
                 level_histogram=per_split_levels,
                 deletion_file_count=dv_count_here,
                 file_paths=list(getattr(split, 'file_paths', []) or []),
+                has_auth=isinstance(split, QueryAuthSplit),
             ))
 
     fps_min, fps_max, fps_avg = _min_max_avg(files_per_split)

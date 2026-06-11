@@ -102,7 +102,7 @@ class TableUpdateByRowId:
         id (a single id may belong to multiple files when data evolution has
         split a logical row range).
         """
-        plan = self.table.new_read_builder().new_scan().plan()
+        plan = self.table.new_read_builder(_skip_auth=True).new_scan().plan()
         splits = plan.splits()
 
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}

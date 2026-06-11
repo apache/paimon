@@ -64,6 +64,7 @@ class ExplainSplitInfo:
     level_histogram: Dict[int, int]
     deletion_file_count: int
     file_paths: List[str]
+    has_auth: bool = False
 
 
 @dataclass

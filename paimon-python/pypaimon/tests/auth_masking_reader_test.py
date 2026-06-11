@@ -220,6 +220,25 @@ class TestAuthMaskingReaderTransforms(unittest.TestCase):
         self.assertEqual(result.column("age").type, pa.int64())
         self.assertEqual(result.column("age").to_pylist(), [25, 30, 35])
 
+    def test_cast_transform_preserves_original_schema(self):
+        batch = pa.RecordBatch.from_pydict(
+            {"id": pa.array([1, 2, 3], type=pa.int32())},
+            schema=pa.schema([("id", pa.int32())]),
+        )
+        fields = [_FakeField("id")]
+        result = self._apply_masking(
+            {"id": json.dumps({
+                "name": "CAST",
+                "fieldRef": {"index": 0, "name": "id", "type": "INT"},
+                "type": "BIGINT",
+            })},
+            batch=batch,
+            fields=fields,
+        )
+        self.assertEqual(result.column("id").type, pa.int32())
+        self.assertEqual(result.column("id").to_pylist(), [1, 2, 3])
+        self.assertEqual(result.schema, batch.schema)
+
     def test_concat_transform(self):
         result = self._apply_masking({
             "name": json.dumps({
@@ -394,6 +413,111 @@ class TestColumnProjectReader(unittest.TestCase):
     def test_returns_none_at_end(self):
         reader = ColumnProjectReader(_FakeBatchReader([]), ["a"])
         self.assertIsNone(reader.read_arrow_batch())
+
+
+class TestRecordReaderToBatchAdapterDataLoss(unittest.TestCase):
+
+    def test_no_data_loss_when_batch_exceeds_chunk_size(self):
+        total_rows = 100
+        chunk_size = 30
+
+        all_rows = [_FakeOffsetRow((i, f"name_{i}"), 2) for i in range(total_rows)]
+        row_iter = iter(all_rows)
+
+        class MockBatchIterator:
+            def next(self_inner):
+                return next(row_iter, None)
+
+        call_count = [0]
+
+        class MockRecordReader:
+            closed = False
+
+            def read_batch(self):
+                if call_count[0] == 0:
+                    call_count[0] = 1
+                    return MockBatchIterator()
+                return None
+
+            def close(self):
+                self.closed = True
+
+        inner = MockRecordReader()
+        schema = pa.schema([("id", pa.int64()), ("name", pa.string())])
+        adapter = RecordReaderToBatchAdapter(inner, schema, chunk_size=chunk_size)
+
+        collected_rows = 0
+        while True:
+            batch = adapter.read_arrow_batch()
+            if batch is None:
+                break
+            collected_rows += batch.num_rows
+
+        self.assertEqual(
+            collected_rows, total_rows,
+            f"Expected {total_rows} rows, got {collected_rows} (data loss!)")
+
+
+class TestRecordReaderToBatchAdapterRowKind(unittest.TestCase):
+
+    def test_include_row_kind_captures_kind(self):
+        row1 = _FakeOffsetRow((1, "alice"), 2)
+        row1.row_kind_byte = 0  # +I
+        row2 = _FakeOffsetRow((2, "bob"), 2)
+        row2.row_kind_byte = 3  # -D
+
+        class FakeRowKindRow:
+            def __init__(self, row):
+                self.row_tuple = row.row_tuple
+                self.offset = row.offset
+                self.arity = row.arity
+                self._row_kind_byte = row.row_kind_byte
+
+            def get_row_kind(self):
+                from pypaimon.table.row.row_kind import RowKind
+                return RowKind(self._row_kind_byte)
+
+        rows = [FakeRowKindRow(row1), FakeRowKindRow(row2)]
+        inner = _FakeRecordReader([rows])
+        schema = pa.schema([("id", pa.int64()), ("name", pa.string())])
+        adapter = RecordReaderToBatchAdapter(inner, schema, include_row_kind=True)
+
+        batch = adapter.read_arrow_batch()
+        self.assertIsNotNone(batch)
+        self.assertIn("_row_kind", batch.schema.names)
+        self.assertEqual(batch.column("_row_kind").to_pylist(), ["+I", "-D"])
+        self.assertEqual(batch.column("id").to_pylist(), [1, 2])
+        self.assertEqual(batch.column("name").to_pylist(), ["alice", "bob"])
+
+    def test_no_row_kind_by_default(self):
+        rows = [_FakeOffsetRow((1,), 1)]
+        inner = _FakeRecordReader([[rows[0]]])
+        schema = pa.schema([("id", pa.int64())])
+        adapter = RecordReaderToBatchAdapter(inner, schema)
+
+        batch = adapter.read_arrow_batch()
+        self.assertNotIn("_row_kind", batch.schema.names)
+
+
+class TestColumnProjectReaderRowKind(unittest.TestCase):
+
+    def test_preserves_row_kind_column(self):
+        batch = pa.RecordBatch.from_pydict({
+            "_row_kind": ["+I", "-D"],
+            "a": [1, 2],
+            "b": ["x", "y"],
+            "c": [3.0, 4.0],
+        })
+        reader = ColumnProjectReader(_FakeBatchReader([batch]), ["a", "c"])
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.schema.names, ["_row_kind", "a", "c"])
+        self.assertEqual(result.column("_row_kind").to_pylist(), ["+I", "-D"])
+
+    def test_no_row_kind_no_change(self):
+        batch = pa.RecordBatch.from_pydict({"a": [1], "b": [2]})
+        reader = ColumnProjectReader(_FakeBatchReader([batch]), ["a"])
+        result = reader.read_arrow_batch()
+        self.assertEqual(result.schema.names, ["a"])
 
 
 if __name__ == "__main__":
