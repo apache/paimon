@@ -373,8 +373,12 @@ case class MergeIntoPaimonDataEvolutionTable(
     // The final output is composed by updated columns, metadata columns and blob marker columns.
     // Marker columns are used to mark whether a blob field should be written with placeholder
     val rawBlobUpdateColumns = updateColumnsSorted.filter(isRawBlobUpdateColumn)
-    val rawBlobMarkerNamesByColumn = rawBlobUpdateColumns.zipWithIndex.map {
-      case (attr, index) => attr.name -> rawBlobMarkerName(index)
+    val rawBlobMarkerNames =
+      rawBlobMarkerNamesAvoiding(
+        rawBlobUpdateColumns.size,
+        updateColumnsSorted.map(_.name) ++ sourceTable.output.map(_.name))
+    val rawBlobMarkerNamesByColumn = rawBlobUpdateColumns.zip(rawBlobMarkerNames).map {
+      case (attr, markerName) => attr.name -> markerName
     }.toMap
     val rawBlobMarkerAttributes = rawBlobUpdateColumns.map(
       attr =>
@@ -830,6 +834,22 @@ object MergeIntoPaimonDataEvolutionTable {
 
   private[commands] def rawBlobMarkerName(index: Int): String = {
     RAW_BLOB_PLACEHOLDER_MARKER_PREFIX + index
+  }
+
+  private[commands] def rawBlobMarkerNamesAvoiding(
+      count: Int,
+      reservedNames: Seq[String]): Seq[String] = {
+    var nextIndex = 0
+    (0 until count).map {
+      _ =>
+        var markerName = rawBlobMarkerName(nextIndex)
+        while (reservedNames.exists(reservedName => resolver(reservedName, markerName))) {
+          nextIndex += 1
+          markerName = rawBlobMarkerName(nextIndex)
+        }
+        nextIndex += 1
+        markerName
+    }
   }
 
   private def quotedColumn(name: String) = {

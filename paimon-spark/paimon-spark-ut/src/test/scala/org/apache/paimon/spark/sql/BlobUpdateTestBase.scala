@@ -99,6 +99,35 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into raw-data BLOB marker name does not collide with target column") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, `__paimon_raw_blob_placeholder_0` STRING, picture BINARY) " +
+          "TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql("INSERT INTO t VALUES (1, 'old_marker_name', X'01'), (2, 'kept', X'02')")
+
+      sql("CREATE TABLE s (id INT, `__paimon_raw_blob_placeholder_0` STRING, picture BINARY)")
+      sql("INSERT INTO s VALUES (1, 'new_marker_name', X'4E4557')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET
+            |  t.`__paimon_raw_blob_placeholder_0` = s.`__paimon_raw_blob_placeholder_0`,
+            |  t.picture = s.picture
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, `__paimon_raw_blob_placeholder_0`, picture FROM t ORDER BY id"),
+        Seq(
+          Row(1, "new_marker_name", Array[Byte](78, 69, 87)),
+          Row(2, "kept", Array[Byte](2)))
+      )
+    }
+  }
+
   test("Blob: self merge updates raw-data BLOB column") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
