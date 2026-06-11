@@ -210,7 +210,8 @@ public class ContainsLevelsTest {
                         4096,
                         new CompressOptions("none", 1)),
                 rowCount -> BloomFilter.builder(rowCount, 0.01),
-                LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
+                LookupFile.createCache(Duration.ofHours(1), maxDiskSize),
+                DeletionVector.emptyFactory());
     }
 
     private KeyValue kv(int key, int value) {

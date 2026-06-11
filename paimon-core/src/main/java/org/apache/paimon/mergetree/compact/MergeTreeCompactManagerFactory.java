@@ -309,7 +309,12 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             }
             LookupLevels<?> lookupLevels =
                     createLookupLevels(
-                            partition, bucket, levels, processorFactory, lookupReaderFactory);
+                            partition,
+                            bucket,
+                            levels,
+                            processorFactory,
+                            lookupReaderFactory,
+                            dvFactory);
             RemoteLookupFileManager<?> remoteLookupFileManager = null;
             if (options.lookupRemoteFileEnabled()) {
                 remoteLookupFileManager =
@@ -351,7 +356,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             int bucket,
             Levels levels,
             PersistProcessor.Factory<T> processorFactory,
-            FileReaderFactory<KeyValue> readerFactory) {
+            FileReaderFactory<KeyValue> readerFactory,
+            DeletionVector.Factory dvFactory) {
         if (ioManager == null) {
             throw new RuntimeException(
                     "Can not use lookup, there is no temp disk directory to use.");
@@ -384,7 +390,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                                 .getPathFile(),
                 lookupStoreFactory,
                 bfGenerator(options),
-                lookupFileCache);
+                lookupFileCache,
+                dvFactory);
     }
 
     @Override
