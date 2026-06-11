@@ -2627,6 +2627,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to process distributed vector search.");
 
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE =
+            key("vector-search.lateral-join.batch-size")
+                    .intType()
+                    .defaultValue(256)
+                    .withDescription(
+                            "The batch size for lateral vector search. Each batch executes vector "
+                                    + "topK search and table lookup for multiple query vectors.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4118,6 +4126,10 @@ public class CoreOptions implements Serializable {
 
     public boolean vectorSearchDistributeEnabled() {
         return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
+    }
+
+    public int vectorSearchLateralJoinBatchSize() {
+        return options.get(VECTOR_SEARCH_LATERAL_JOIN_BATCH_SIZE);
     }
 
     /** Specifies the merge engine for table with primary key. */

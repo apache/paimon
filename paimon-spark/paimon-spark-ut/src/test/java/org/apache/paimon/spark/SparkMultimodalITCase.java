@@ -171,6 +171,29 @@ public class SparkMultimodalITCase {
         spark.close();
 
         spark = builder.getOrCreate();
+        spark.sql("SET `spark.paimon.vector-search.distribute.enabled`=`false`");
+        rows =
+                spark.sql(
+                                "SELECT q.gid AS query_gid, q.embs AS query_embs, r.gid AS result_gid FROM my_db1.vector_test AS q, LATERAL (SELECT gid  FROM vector_search('my_db1.vector_test', 'embs', q.embs, 5)) AS r WHERE q.`date` = '20260420';")
+                        .collectAsList();
+        assertThat(rows).hasSize(40);
+        assertThat(
+                        rows.stream()
+                                .collect(
+                                        Collectors.groupingBy(
+                                                row -> row.getLong(0), Collectors.counting())))
+                .hasSize(8)
+                .containsEntry(1L, 5L)
+                .containsEntry(2L, 5L)
+                .containsEntry(3L, 5L)
+                .containsEntry(4L, 5L)
+                .containsEntry(5L, 5L)
+                .containsEntry(6L, 5L)
+                .containsEntry(7L, 5L)
+                .containsEntry(8L, 5L);
+        spark.close();
+
+        spark = builder.getOrCreate();
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`vector_test`;");
         spark.close();
     }

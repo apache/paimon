@@ -910,6 +910,24 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.max-rewrite-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.partition-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -938,24 +956,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">30</td>
             <td>Integer</td>
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.<br />Note: when 'manifest-sort.enabled' is true, this minimum-count gate is only applied to the trailing sub-segment of a section that exceeds 'manifest-sort.max-rewrite-size'. Small under-budget sections are sorted and rewritten directly, so two small manifest files may be merged into one even when their count is below this threshold and full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.partition-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.max-rewrite-size</h5></td>
-            <td style="word-wrap: break-word;">256 mb</td>
-            <td>MemorySize</td>
-            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
@@ -1663,6 +1663,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to process distributed vector search.</td>
         </tr>
         <tr>
+            <td><h5>vector-search.lateral-join.batch-size</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>The batch size for lateral vector search. Each batch executes vector topK search and table lookup for multiple query vectors.</td>
+        </tr>
+        <tr>
             <td><h5>vector.file.format</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1729,12 +1735,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
         </tr>
         <tr>
-            <td><h5>write.sequence-number-init-mode</h5></td>
-            <td style="word-wrap: break-word;">scan</td>
-            <td><p>Enum</p></td>
-            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>write.batch-memory</h5></td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
@@ -1745,6 +1745,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
             <td>Write batch size for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>write.sequence-number-init-mode</h5></td>
+            <td style="word-wrap: break-word;">scan</td>
+            <td><p>Enum</p></td>
+            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>
