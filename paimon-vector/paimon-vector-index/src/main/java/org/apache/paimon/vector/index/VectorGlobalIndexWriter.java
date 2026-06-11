@@ -40,6 +40,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -313,7 +314,14 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                         batchVectors[i * dim + d] = readBuf.getFloat();
                     }
                 }
-                writer.addVectors(batchIds, batchVectors, thisBatch);
+                if (thisBatch == ADD_BATCH_SIZE) {
+                    writer.addVectors(batchIds, batchVectors, thisBatch);
+                } else {
+                    writer.addVectors(
+                            Arrays.copyOf(batchIds, thisBatch),
+                            Arrays.copyOf(batchVectors, thisBatch * dim),
+                            thisBatch);
+                }
                 remaining -= thisBatch;
 
                 int percent = (int) ((count - remaining) * 100 / count);
