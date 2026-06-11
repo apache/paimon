@@ -57,12 +57,9 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -636,20 +633,22 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        NavigableMap<Long, Long> existingRanges = new TreeMap<>();
-        for (SimpleFileEntry base : baseEntries) {
-            if (base.firstRowId() != null && !dedicatedStorageFile(base.fileName())) {
-                existingRanges.put(base.firstRowId(), base.rowCount());
-            }
-        }
+        List<Range> existingRanges =
+                baseEntries.stream()
+                        .filter(
+                                base ->
+                                        base.firstRowId() != null
+                                                && !dedicatedStorageFile(base.fileName()))
+                        .map(SimpleFileEntry::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        RowRangeIndex existingIndex = RowRangeIndex.create(existingRanges, false);
 
         for (SimpleFileEntry entry : filesToCheck) {
+            long rowRangeEnd = entry.firstRowId() + entry.rowCount() - 1;
             boolean exists =
                     dedicatedStorageFile(entry.fileName())
-                            ? rowIdRangeCovered(
-                                    existingRanges, entry.firstRowId(), entry.rowCount())
-                            : rowIdRangeExists(
-                                    existingRanges, entry.firstRowId(), entry.rowCount());
+                            ? existingIndex.contains(entry.firstRowId(), rowRangeEnd)
+                            : existingIndex.containsExactly(entry.firstRowId(), rowRangeEnd);
             if (!exists) {
                 return Optional.of(
                         new RuntimeException(
@@ -666,20 +665,6 @@ public class ConflictDetection {
             }
         }
         return Optional.empty();
-    }
-
-    private static boolean rowIdRangeCovered(
-            NavigableMap<Long, Long> ranges, long firstRowId, long rowCount) {
-        Entry<Long, Long> range = ranges.floorEntry(firstRowId);
-        return range != null
-                && range.getKey() <= firstRowId
-                && range.getKey() + range.getValue() >= firstRowId + rowCount;
-    }
-
-    private static boolean rowIdRangeExists(
-            NavigableMap<Long, Long> ranges, long firstRowId, long rowCount) {
-        Long existingRowCount = ranges.get(firstRowId);
-        return existingRowCount != null && existingRowCount == rowCount;
     }
 
     private static boolean dedicatedStorageFile(String fileName) {
