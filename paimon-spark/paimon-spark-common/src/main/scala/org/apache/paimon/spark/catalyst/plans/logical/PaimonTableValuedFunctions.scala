@@ -54,6 +54,23 @@ object PaimonTableValuedFunctions {
       VECTOR_SEARCH,
       FULL_TEXT_SEARCH)
 
+  def parsePositiveLimit(value: Any): Int = {
+    val limit = value match {
+      case i: Int => i
+      case l: Long if l <= Int.MaxValue => l.toInt
+      case l: Long =>
+        throw new IllegalArgumentException(
+          s"Limit must be no greater than ${Int.MaxValue}, but got: $l")
+      case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
+    }
+    if (limit <= 0) {
+      throw new IllegalArgumentException(
+        s"Limit must be a positive integer, but got: $limit"
+      )
+    }
+    limit
+  }
+
   private type TableFunctionDescription = (FunctionIdentifier, ExpressionInfo, TableFunctionBuilder)
 
   def getTableValueFunctionInjection(fnName: String): TableFunctionDescription = {
@@ -307,16 +324,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       )
     }
     val queryVector = extractQueryVector(argsWithoutTable(1))
-    val limit = argsWithoutTable(2).eval() match {
-      case i: Int => i
-      case l: Long => l.toInt
-      case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
-    }
-    if (limit <= 0) {
-      throw new IllegalArgumentException(
-        s"Limit must be a positive integer, but got: $limit"
-      )
-    }
+    val limit = parsePositiveLimit(argsWithoutTable(2).eval())
     new VectorSearch(queryVector, limit, columnName)
   }
 
@@ -374,16 +382,7 @@ case class FullTextSearchQuery(override val args: Seq[Expression])
       )
     }
     val queryText = argsWithoutTable(1).eval().toString
-    val limit = argsWithoutTable(2).eval() match {
-      case i: Int => i
-      case l: Long => l.toInt
-      case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
-    }
-    if (limit <= 0) {
-      throw new IllegalArgumentException(
-        s"Limit must be a positive integer, but got: $limit"
-      )
-    }
+    val limit = parsePositiveLimit(argsWithoutTable(2).eval())
     new FullTextSearch(queryText, limit, columnName)
   }
 }
