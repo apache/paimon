@@ -20,11 +20,13 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.datagen.DataGenerator;
@@ -193,6 +195,22 @@ public class InternalRowUtilsTest {
         assertThat(InternalRowUtils.equals(row1, row2, rowType)).isTrue();
         assertThat(InternalRowUtils.hash(row1, rowType))
                 .isEqualTo(InternalRowUtils.hash(row2, rowType));
+    }
+
+    @Test
+    public void testCopyVector() {
+        RowType rowType =
+                RowType.builder().field("v", DataTypes.VECTOR(3, DataTypes.FLOAT())).build();
+        BinaryVector vector = BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f});
+        GenericRow row = GenericRow.of(vector);
+
+        GenericRow copied = (GenericRow) InternalRowUtils.copyInternalRow(row, rowType);
+        InternalVector copiedVector = copied.getVector(0);
+        assertThat(copiedVector).isNotSameAs(vector);
+        assertThat(copiedVector.toFloatArray()).containsExactly(1.0f, 2.0f, 3.0f);
+        assertThat(InternalRowUtils.equals(row, copied, rowType)).isTrue();
+        assertThat(InternalRowUtils.hash(row, rowType))
+                .isEqualTo(InternalRowUtils.hash(copied, rowType));
     }
 
     @Test
