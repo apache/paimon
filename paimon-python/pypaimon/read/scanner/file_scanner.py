@@ -233,12 +233,8 @@ class FileScanner:
         )
 
     def _schema_fields(self, schema_id: int):
-        """Resolve schema fields, short-circuiting current table schema id to
-        avoid filesystem access (REST catalog would get 403).
-
-        For historical schemas, delegates to schema_manager.get_schema().
-
-        Reference: AbstractFileStoreScan.scanTableSchema() in Java
+        """Resolve schema fields, short-circuiting current table schema id to avoid
+        filesystem access (REST catalog would get 403).
         """
         if schema_id == self.table.table_schema.id:
             return self.table.table_schema.fields
