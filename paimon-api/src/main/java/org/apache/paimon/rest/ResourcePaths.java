@@ -43,6 +43,7 @@ public class ResourcePaths {
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String ID = "id";
+    protected static final String VIA = "via";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -92,6 +93,19 @@ public class ResourcePaths {
                 encodeString(databaseName),
                 TABLES,
                 encodeString(objectName));
+    }
+
+    public String tableVia(String databaseName, String objectName, String viaDb, String viaObject) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                VIA,
+                encodeString(viaDb),
+                encodeString(viaObject));
     }
 
     public String renameTable() {

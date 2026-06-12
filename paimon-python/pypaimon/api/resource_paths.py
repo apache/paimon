@@ -34,6 +34,7 @@ class ResourcePaths:
     BRANCHES = "branches"
     RENAME = "rename"
     FORWARD = "forward"
+    VIA = "via"
 
     def __init__(self, prefix: str):
         self.base_path = "/{}/{}".format(self.V1, prefix).rstrip("/")
@@ -70,6 +71,12 @@ class ResourcePaths:
     def table_token(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/token".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def table_via(self, database_name: str, table_name: str, via_db: str, via_object: str) -> str:
+        return "{}/{}/{}/{}/{}/{}/{}/{}".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name), self.VIA,
+            RESTUtil.encode_string(via_db), RESTUtil.encode_string(via_object))
 
     def rename_table(self) -> str:
         return "{}/{}/rename".format(self.base_path, self.TABLES)

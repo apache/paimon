@@ -368,6 +368,38 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIsNotNone(table_snapshot)
         self.assertEqual(table_snapshot.snapshot.id, 3)
 
+    def test_get_table_via(self):
+        """Test get table via view (view penetration)."""
+        table_name = "default.table_for_via"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+
+        table_identifier = Identifier.from_string(table_name)
+        view_identifier = Identifier.from_string("default.some_view")
+
+        table = self.rest_catalog.get_table_via(table_identifier, view_identifier)
+        self.assertIsNotNone(table)
+
+    def test_get_table_via_with_string_identifier(self):
+        """Test get table via view using string identifiers."""
+        table_name = "default.table_for_via_str"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+
+        table = self.rest_catalog.get_table_via(table_name, "default.some_view")
+        self.assertIsNotNone(table)
+
+    def test_get_table_via_not_exist(self):
+        """Test get table via view when table does not exist."""
+        from pypaimon.catalog.catalog_exception import TableNotExistException
+        table_identifier = Identifier.from_string("default.non_exist_via")
+        view_identifier = Identifier.from_string("default.some_view")
+
+        with self.assertRaises(TableNotExistException):
+            self.rest_catalog.get_table_via(table_identifier, view_identifier)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -225,6 +225,23 @@ class RESTCatalog(Catalog):
             return self._load_system_table(identifier)
         return self._load_data_table(identifier)
 
+    def get_table_via(self, table: Union[str, Identifier], via: Union[str, Identifier]):
+        """Get table via a view (view penetration).
+
+        This API can only be called by trusted engines. The server must authenticate
+        whether the caller is a trusted engine.
+        """
+        if not isinstance(table, Identifier):
+            table = Identifier.from_string(table)
+        if not isinstance(via, Identifier):
+            via = Identifier.from_string(via)
+        return self.load_table(
+            table,
+            lambda path: self.file_io_for_data(path, table),
+            self.file_io_from_options,
+            lambda i: self._load_table_metadata_via(i, via),
+        )
+
     def _load_data_table(self, identifier: Identifier):
         return self.load_table(
             identifier,
@@ -623,6 +640,15 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def _load_table_metadata_via(self, table: Identifier, via: Identifier) -> TableMetadata:
+        try:
+            response = self.rest_api.get_table_via(table, via)
+            return self.to_table_metadata(table.get_database_name(), response)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(table) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(table) from e
 
     def to_table_metadata(self, db: str, response: GetTableResponse) -> TableMetadata:
         schema = TableSchema.from_schema(response.schema_id, response.get_schema())

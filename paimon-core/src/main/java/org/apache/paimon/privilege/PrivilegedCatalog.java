@@ -159,6 +159,17 @@ public class PrivilegedCatalog extends DelegateCatalog {
     }
 
     @Override
+    public Table getTableVia(Identifier table, Identifier via) throws TableNotExistException {
+        Table result = wrapped.getTableVia(table, via);
+        if (result instanceof FileStoreTable) {
+            return PrivilegedFileStoreTable.wrap(
+                    (FileStoreTable) result, privilegeManager.getPrivilegeChecker(), table);
+        } else {
+            return result;
+        }
+    }
+
+    @Override
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         privilegeManager.getPrivilegeChecker().assertCanInsert(identifier);

@@ -740,6 +740,69 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/via/{viaDatabase}/{viaObject}:
+    post:
+      tags:
+        - table
+      summary: Get table via view (view penetration)
+      description: >
+        Get the table metadata accessed via a view. If the caller has permission
+        on the view, they can access the underlying table referenced by the view.
+        This API can only be called by trusted engines. The server must
+        authenticate whether the caller is a trusted engine.
+      operationId: getTableVia
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: viaDatabase
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Database name of the view through which access is granted
+        - name: viaObject
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Name of the view through which access is granted
+      responses:
+        "200":
+          description: Table metadata accessed via the view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        404:
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/auth:
     post:
       tags:

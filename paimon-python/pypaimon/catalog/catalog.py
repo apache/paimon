@@ -89,6 +89,15 @@ class Catalog(ABC):
     def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
         """Get paimon table identified by the given Identifier."""
 
+    def get_table_via(self, table: Union[str, Identifier], via: Union[str, Identifier]) -> 'Table':
+        """Get table via a view (view penetration).
+
+        If the caller has permission on the view, they can access the underlying table.
+        This API can only be called by trusted engines. The server must authenticate
+        whether the caller is a trusted engine.
+        """
+        return self.get_table(table)
+
     @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         """Create table with schema."""
