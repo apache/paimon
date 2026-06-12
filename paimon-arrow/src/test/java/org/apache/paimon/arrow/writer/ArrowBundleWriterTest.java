@@ -18,8 +18,10 @@
 
 package org.apache.paimon.arrow.writer;
 
+import org.apache.paimon.arrow.ArrowBundleRecords;
 import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
@@ -45,6 +47,38 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ArrowBundleWriter}. */
 public class ArrowBundleWriterTest {
+
+    @Test
+    public void testWriteBundlePreservesProjectedArrowRoot() throws IOException {
+        RowType rowType =
+                RowType.builder()
+                        .field("f0", DataTypes.INT())
+                        .field("f1", DataTypes.INT())
+                        .field("f2", DataTypes.INT())
+                        .build();
+        RowType projectedRowType = rowType.project(new int[] {0, 2});
+
+        try (ArrowFormatWriter sourceWriter = new ArrowFormatWriter(rowType, 16, true);
+                ArrowFormatCWriter cWriter = new ArrowFormatCWriter(projectedRowType, 16, true)) {
+            sourceWriter.write(GenericRow.of(1, 2, 3));
+            sourceWriter.write(GenericRow.of(4, 5, 6));
+            sourceWriter.flush();
+
+            CapturingArrowBundleWriter writer =
+                    new CapturingArrowBundleWriter(
+                            new NoOpPositionOutputStream(), cWriter, new NoOpNativeWriter());
+            try {
+                writer.writeBundle(
+                        new ArrowBundleRecords(sourceWriter.getVectorSchemaRoot(), rowType, true)
+                                .project(new int[] {0, 2}));
+            } finally {
+                writer.close();
+            }
+
+            assertThat(writer.fieldNames).containsExactly("f0", "f2");
+            assertThat(writer.rows).containsExactly("1,3", "4,6");
+        }
+    }
 
     @Test
     public void testAddBatchWithoutDeletionVector() throws IOException {
@@ -616,6 +650,46 @@ public class ArrowBundleWriterTest {
                 this.objectColumns = objectColumns;
             }
         }
+    }
+
+    private static class CapturingArrowBundleWriter extends ArrowBundleWriter {
+
+        private final List<String> fieldNames = new ArrayList<>();
+        private final List<String> rows = new ArrayList<>();
+
+        CapturingArrowBundleWriter(
+                PositionOutputStream outputStream,
+                ArrowFormatCWriter arrowFormatWriter,
+                NativeWriter nativeWriter) {
+            super(outputStream, arrowFormatWriter, nativeWriter);
+        }
+
+        @Override
+        public void add(VectorSchemaRoot vsr) {
+            for (int i = 0; i < vsr.getSchema().getFields().size(); i++) {
+                fieldNames.add(vsr.getSchema().getFields().get(i).getName());
+            }
+
+            IntVector first = (IntVector) vsr.getVector(0);
+            IntVector second = (IntVector) vsr.getVector(1);
+            for (int i = 0; i < vsr.getRowCount(); i++) {
+                rows.add(first.get(i) + "," + second.get(i));
+            }
+        }
+    }
+
+    private static class NoOpNativeWriter extends NativeWriter {
+
+        @Override
+        public long nativeMemoryUsed() {
+            return 0;
+        }
+
+        @Override
+        public void writeIpcBytes(long arrayAddress, long schemaAddress) {}
+
+        @Override
+        public void close() {}
     }
 
     private static class NoOpPositionOutputStream extends PositionOutputStream {
