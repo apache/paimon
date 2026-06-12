@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -273,5 +274,13 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         }
 
         this.inputs.clear();
+    }
+
+    public static boolean isEndInputCommit(List<ManifestCommittable> committables) {
+        return committables != null
+                && !committables.isEmpty()
+                && committables.stream()
+                        .allMatch(
+                                committable -> committable.identifier() == END_INPUT_CHECKPOINT_ID);
     }
 }

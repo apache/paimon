@@ -77,7 +77,8 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
                                     .ignoreEmptyCommit(!context.streamingCheckpointEnabled())
                                     // Need to check conflict
                                     .appendCommitCheckConflict(true),
-                            context);
+                            context,
+                            overwritePartition);
         } else {
             // When overwriting, the postpone bucket files need to be deleted, so using a postpone
             // bucket table commit here
@@ -89,7 +90,8 @@ public class PostponeFixedBucketSink extends FlinkWriteSink<InternalRow> {
                                     .newCommit(context.commitUser())
                                     .withOverwrite(overwritePartition)
                                     .ignoreEmptyCommit(!context.streamingCheckpointEnabled()),
-                            context);
+                            context,
+                            overwritePartition);
         }
     }
 }

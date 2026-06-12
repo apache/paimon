@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.WriteRestore;
 
 /** Inner {@link TableWrite} contains overwrite setter. */
@@ -26,4 +27,7 @@ public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
     InnerTableWrite withWriteRestore(WriteRestore writeRestore);
 
     InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
+
+    /** Write an empty data file for the given partition and bucket. */
+    void writeEmptyFile(BinaryRow partition, int bucket) throws Exception;
 }

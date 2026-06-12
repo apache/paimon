@@ -49,6 +49,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import java.io.IOException
+import java.util.{Map => JMap}
 import java.util.Collections.singletonMap
 
 import scala.collection.JavaConverters._
@@ -56,7 +57,8 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    staticOverwritePartition: JMap[String, String] = null)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -94,12 +96,12 @@ case class PaimonSparkWriter(
   }
 
   def writeOnly(): PaimonSparkWriter = {
-    PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
+    copy(table = table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
   def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowTracking = true)
+      copy(writeRowTracking = true)
     } else {
       this
     }
@@ -424,14 +426,19 @@ case class PaimonSparkWriter(
       writeBuilder
     }
     val tableCommit = finalWriteBuilder.newCommit()
+    var finalCommitMessages = commitMessages
     try {
-      tableCommit.commit(commitMessages.toList.asJava)
+      finalCommitMessages = EmptyPartitionCommitMessages
+        .appendIfNeeded(table, writeBuilder, staticOverwritePartition, commitMessages.toList.asJava)
+        .asScala
+        .toSeq
+      tableCommit.commit(finalCommitMessages.toList.asJava)
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {
       tableCommit.close()
     }
-    postCommit(commitMessages)
+    postCommit(finalCommitMessages)
   }
 
   /** Bootstrap and repartition for cross partition mode. */

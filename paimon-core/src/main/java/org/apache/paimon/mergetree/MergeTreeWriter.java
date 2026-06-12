@@ -199,6 +199,20 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        dataWriter.writeEmptyFile();
+        dataWriter.close();
+        List<DataFileMeta> dataMetas = dataWriter.result();
+        if (dataMetas == null || dataMetas.size() != 1 || dataMetas.get(0) == null) {
+            throw new IllegalStateException(
+                    "Data writer should generate one and only one file, but got " + dataMetas);
+        }
+        newFiles.add(dataMetas.get(0));
+    }
+
+    @Override
     public void flushMemory() throws Exception {
         boolean success = writeBuffer.flushMemory();
         if (!success) {

@@ -165,6 +165,14 @@ public class PostponeBucketWriter implements RecordWriter<KeyValue>, MemoryOwner
     }
 
     @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<KeyValue, DataFileMeta> writer = createRollingRowWriter();
+        writer.writeEmptyFile();
+        writer.close();
+        files.addAll(writer.result());
+    }
+
+    @Override
     public void flushMemory() throws Exception {
         boolean success = sinkWriter.flushMemory();
         if (!success) {

@@ -73,6 +73,7 @@ public abstract class KeyValueDataFileWriter
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
     private long deleteRecordCount = 0;
+    private final boolean writeEmptyPartitionEnable;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -103,6 +104,7 @@ public abstract class KeyValueDataFileWriter
         this.dataFileIndexWriter =
                 DataFileIndexWriter.create(
                         fileIO, dataFileToFileIndexPath(path), valueType, fileIndexOptions);
+        this.writeEmptyPartitionEnable = options.writeEmptyPartitionEnable();
     }
 
     @Override
@@ -141,7 +143,7 @@ public abstract class KeyValueDataFileWriter
     @Override
     @Nullable
     public DataFileMeta result() throws IOException {
-        if (recordCount() == 0) {
+        if (recordCount() == 0 && !writeEmptyPartitionEnable) {
             return null;
         }
 
@@ -163,8 +165,10 @@ public abstract class KeyValueDataFileWriter
                 path.getName(),
                 fileSize,
                 recordCount(),
-                minKey,
-                keyKeeper.copiedRow(),
+                minKey == null && writeEmptyPartitionEnable ? DataFileMeta.EMPTY_MIN_KEY : minKey,
+                minKey == null && writeEmptyPartitionEnable
+                        ? DataFileMeta.EMPTY_MAX_KEY
+                        : keyKeeper.copiedRow(),
                 keyStats,
                 valueStatsPair.getValue(),
                 minSeqNumber,

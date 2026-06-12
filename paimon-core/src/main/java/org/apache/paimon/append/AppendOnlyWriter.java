@@ -207,6 +207,14 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     @Override
+    public void writeEmptyFile() throws Exception {
+        RollingFileWriter<InternalRow, DataFileMeta> writer = createRollingRowWriter();
+        writer.writeEmptyFile();
+        writer.close();
+        newFiles.addAll(writer.result());
+    }
+
+    @Override
     public void writeBundle(BundleRecords bundle) throws Exception {
         if (sinkWriter instanceof BufferedSinkWriter) {
             for (InternalRow row : bundle) {

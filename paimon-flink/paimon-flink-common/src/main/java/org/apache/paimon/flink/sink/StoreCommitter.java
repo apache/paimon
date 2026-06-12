@@ -27,6 +27,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.EmptyPartitionCommitMessages;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
 
@@ -42,13 +43,25 @@ import java.util.Map;
 /** {@link Committer} for dynamic store. */
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
+    private final FileStoreTable table;
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     private final CommitListeners commitListeners;
     private final boolean allowLogOffsetDuplicate;
+    @Nullable private final Map<String, String> overwritePartition;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
+        this(table, commit, context, null);
+    }
+
+    public StoreCommitter(
+            FileStoreTable table,
+            TableCommit commit,
+            Context context,
+            @Nullable Map<String, String> overwritePartition) {
+        this.table = table;
         this.commit = (TableCommitImpl) commit;
+        this.overwritePartition = overwritePartition;
 
         if (context.metricGroup() != null) {
             this.commit.withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
@@ -98,6 +111,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
+        appendEmptyPartitionIfNeeded(committables);
         commit.commitMultiple(committables, false);
         calcNumBytesAndRecordsOut(committables);
         commitListeners.notifyCommittable(committables);
@@ -108,12 +122,36 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             List<ManifestCommittable> globalCommittables,
             boolean checkAppendFiles,
             boolean partitionMarkDoneRecoverFromState) {
+        appendEmptyPartitionIfNeeded(globalCommittables);
         int committed = commit.filterAndCommitMultiple(globalCommittables, checkAppendFiles);
         // update bytes/records metrics for filter-and-commit path as well
         calcNumBytesAndRecordsOut(globalCommittables);
         commitListeners.notifyCommittable(globalCommittables, partitionMarkDoneRecoverFromState);
 
         return committed;
+    }
+
+    private void appendEmptyPartitionIfNeeded(List<ManifestCommittable> committables) {
+        if (!CommitterOperator.isEndInputCommit(committables)) {
+            return;
+        }
+
+        ManifestCommittable committable = committables.get(0);
+        List<CommitMessage> commitMessages = committable.fileCommittables();
+        try {
+            List<CommitMessage> updatedCommitMessages =
+                    EmptyPartitionCommitMessages.appendIfNeeded(
+                            table,
+                            table.newBatchWriteBuilder(),
+                            overwritePartition,
+                            commitMessages);
+            if (updatedCommitMessages != commitMessages) {
+                commitMessages.clear();
+                commitMessages.addAll(updatedCommitMessages);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to prepare empty partition commit messages.", e);
+        }
     }
 
     @Override

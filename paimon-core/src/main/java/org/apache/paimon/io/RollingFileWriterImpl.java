@@ -116,6 +116,24 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         }
     }
 
+    @Override
+    public void writeEmptyFile() throws IOException {
+        try {
+            if (currentWriter == null) {
+                openCurrentWriter();
+            }
+            closeCurrentWriter();
+        } catch (Throwable e) {
+            LOG.warn(
+                    "Exception occurs when writing file "
+                            + (currentWriter == null ? null : currentWriter.path())
+                            + ". Cleaning up.",
+                    e);
+            abort();
+            throw e;
+        }
+    }
+
     private void openCurrentWriter() {
         currentWriter = writerFactory.get();
     }
