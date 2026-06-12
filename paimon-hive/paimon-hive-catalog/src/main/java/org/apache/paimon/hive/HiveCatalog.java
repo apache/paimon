@@ -114,6 +114,7 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.format.csv.CsvOptions.FIELD_DELIMITER;
+import static org.apache.paimon.hive.HiveCatalogOptions.ALTER_TABLE_CASCADE;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
@@ -1298,7 +1299,11 @@ public class HiveCatalog extends AbstractCatalog {
                 .execute(
                         client ->
                                 HiveAlterTableUtils.alterTable(
-                                        client, identifier, table, skipUpdateStats));
+                                        client,
+                                        identifier,
+                                        table,
+                                        skipUpdateStats,
+                                        options.get(ALTER_TABLE_CASCADE)));
     }
 
     @Override
