@@ -34,6 +34,7 @@ import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,17 +46,25 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.BlobType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.Pair;
@@ -78,6 +87,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -827,7 +837,8 @@ public class AppendOnlyWriterTest {
                         true,
                         false,
                         options.dataEvolutionEnabled(),
-                        BlobFileContext.create(writeSchema, options));
+                        BlobFileContext.create(writeSchema, options),
+                        options);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -879,5 +890,56 @@ public class AppendOnlyWriterTest {
 
     private InternalRow createBlobRow(int id, String name, byte[] blobData) {
         return GenericRow.of(id, BinaryString.fromString(name), new BlobData(blobData));
+    }
+
+    @Test
+    public void testSortedBufferedSinkWriter() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CLUSTERING_COLUMNS.key(), "id");
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL.key(), "true");
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE.key(), "true");
+        options.put(CoreOptions.CLUSTERING_INCREMENTAL_MODE.key(), "local-sort");
+        options.put(CoreOptions.WRITE_BUFFER_FOR_APPEND.key(), "true");
+
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.options(options);
+        for (DataField dataField : SCHEMA.getFields()) {
+            schemaBuilder.column(dataField.name(), dataField.type());
+        }
+        Schema schema = schemaBuilder.build();
+
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = pathFactory.newPath(UUID.randomUUID().toString());
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        TableSchema tableSchema = TableSchema.create(0, schema);
+        schemaManager.commit(tableSchema);
+        AppendOnlyFileStoreTable table =
+                (AppendOnlyFileStoreTable)
+                        FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+        TableWriteImpl<InternalRow> writer = table.newWrite("test");
+        // Write unordered data
+        writer.write(row(3, "Name3", PART));
+        writer.write(row(1, "Name1", PART));
+        writer.write(row(4, "Name4", PART));
+        writer.write(row(2, "Name2", PART));
+        writer.write(row(5, "Name5", PART));
+
+        // Commit
+        List<CommitMessage> commitMessageList = writer.prepareCommit();
+        TableCommitImpl committer = table.newCommit("test");
+        committer.commit(commitMessageList);
+        committer.close();
+        writer.close();
+
+        InnerTableRead tableRead = table.newRead();
+        RecordReader<InternalRow> reader = tableRead.createReader(table.newScan().plan());
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            List<Integer> ids = new ArrayList<>();
+            while (iterator.hasNext()) {
+                ids.add(iterator.next().getInt(0));
+            }
+            // Verify the data is ordered by id ascending
+            assertThat(ids).containsExactly(1, 2, 3, 4, 5);
+        }
     }
 }
