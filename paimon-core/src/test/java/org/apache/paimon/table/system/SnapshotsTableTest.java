@@ -118,7 +118,9 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.deltaRecordCount(),
                             snapshot.changelogRecordCount(),
                             snapshot.watermark(),
-                            snapshot.nextRowId()));
+                            snapshot.nextRowId(),
+                            snapshot.totalFileSize(),
+                            snapshot.totalDataFiles()));
         }
 
         return expectedRow;

@@ -80,6 +80,8 @@ public class Tag extends Snapshot {
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) Map<String, String> properties,
             @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_TOTAL_FILE_SIZE) @Nullable Long totalFileSize,
+            @JsonProperty(FIELD_TOTAL_DATA_FILES) @Nullable Long totalDataFiles,
             @JsonProperty(FIELD_TAG_CREATE_TIME) @Nullable LocalDateTime tagCreateTime,
             @JsonProperty(FIELD_TAG_TIME_RETAINED) @Nullable Duration tagTimeRetained) {
         super(
@@ -103,7 +105,9 @@ public class Tag extends Snapshot {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                totalFileSize,
+                totalDataFiles);
         this.tagCreateTime = tagCreateTime;
         this.tagTimeRetained = tagTimeRetained;
     }
@@ -142,6 +146,8 @@ public class Tag extends Snapshot {
                 snapshot.statistics(),
                 snapshot.properties(),
                 snapshot.nextRowId(),
+                snapshot.totalFileSize(),
+                snapshot.totalDataFiles(),
                 tagCreateTime,
                 tagTimeRetained);
     }
@@ -168,7 +174,9 @@ public class Tag extends Snapshot {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                totalFileSize,
+                totalDataFiles);
     }
 
     @Override

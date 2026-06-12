@@ -137,6 +137,8 @@ public class RenamingSnapshotCommitTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
     }
 

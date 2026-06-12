@@ -69,6 +69,8 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_STATISTICS = "statistics";
     protected static final String FIELD_PROPERTIES = "properties";
     protected static final String FIELD_NEXT_ROW_ID = "nextRowId";
+    protected static final String FIELD_TOTAL_FILE_SIZE = "totalFileSize";
+    protected static final String FIELD_TOTAL_DATA_FILES = "totalDataFiles";
 
     // version of snapshot
     @JsonProperty(FIELD_VERSION)
@@ -181,6 +183,16 @@ public class Snapshot implements Serializable {
     @Nullable
     protected final Long nextRowId;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_TOTAL_FILE_SIZE)
+    @Nullable
+    protected final Long totalFileSize;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_TOTAL_DATA_FILES)
+    @Nullable
+    protected final Long totalDataFiles;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -201,7 +213,9 @@ public class Snapshot implements Serializable {
             @Nullable Long watermark,
             @Nullable String statistics,
             @Nullable Map<String, String> properties,
-            @Nullable Long nextRowId) {
+            @Nullable Long nextRowId,
+            @Nullable Long totalFileSize,
+            @Nullable Long totalDataFiles) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -223,7 +237,9 @@ public class Snapshot implements Serializable {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                totalFileSize,
+                totalDataFiles);
     }
 
     @JsonCreator
@@ -249,7 +265,9 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
-            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId) {
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_TOTAL_FILE_SIZE) @Nullable Long totalFileSize,
+            @JsonProperty(FIELD_TOTAL_DATA_FILES) @Nullable Long totalDataFiles) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -271,6 +289,8 @@ public class Snapshot implements Serializable {
         this.statistics = statistics;
         this.properties = properties;
         this.nextRowId = nextRowId;
+        this.totalFileSize = totalFileSize;
+        this.totalDataFiles = totalDataFiles;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -388,6 +408,18 @@ public class Snapshot implements Serializable {
         return nextRowId;
     }
 
+    @JsonGetter(FIELD_TOTAL_FILE_SIZE)
+    @Nullable
+    public Long totalFileSize() {
+        return totalFileSize;
+    }
+
+    @JsonGetter(FIELD_TOTAL_DATA_FILES)
+    @Nullable
+    public Long totalDataFiles() {
+        return totalDataFiles;
+    }
+
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -415,7 +447,9 @@ public class Snapshot implements Serializable {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                totalFileSize,
+                totalDataFiles);
     }
 
     @Override
@@ -447,7 +481,9 @@ public class Snapshot implements Serializable {
                 && Objects.equals(watermark, that.watermark)
                 && Objects.equals(statistics, that.statistics)
                 && Objects.equals(properties, that.properties)
-                && Objects.equals(nextRowId, that.nextRowId);
+                && Objects.equals(nextRowId, that.nextRowId)
+                && Objects.equals(totalFileSize, that.totalFileSize)
+                && Objects.equals(totalDataFiles, that.totalDataFiles);
     }
 
     /** Type of changes in this snapshot. */
