@@ -29,6 +29,9 @@ import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.data.RowData;
 
+import javax.annotation.Nullable;
+
+import java.util.Optional;
 import java.util.function.Function;
 
 /**
@@ -41,16 +44,27 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider, Lin
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
     private final String name;
     private final Table table;
+    @Nullable private final Integer parallelism;
 
     public PaimonDataStreamScanProvider(
             boolean isBounded,
             Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
             String name,
             Table table) {
+        this(isBounded, producer, name, table, null);
+    }
+
+    public PaimonDataStreamScanProvider(
+            boolean isBounded,
+            Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
+            String name,
+            Table table,
+            @Nullable Integer parallelism) {
         this.isBounded = isBounded;
         this.producer = producer;
         this.name = name;
         this.table = table;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -62,6 +76,11 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider, Lin
     @Override
     public boolean isBounded() {
         return isBounded;
+    }
+
+    @Override
+    public Optional<Integer> getParallelism() {
+        return Optional.ofNullable(parallelism);
     }
 
     @Override
