@@ -18,14 +18,17 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -624,5 +627,403 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         tableName))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Failed to insert table");
+    }
+
+    private Schema schemaWithCustomPath(String customPath) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), customPath);
+        return new Schema(
+                Lists.newArrayList(
+                        new DataField(0, "pk", DataTypes.INT()),
+                        new DataField(1, "col1", DataTypes.STRING())),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    @Test
+    public void testCreateTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_location/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "custom_table");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify schema exists at custom location
+        Path customPath = new Path(customDir);
+        SchemaManager sm = new SchemaManager(fileIO, customPath);
+        assertThat(sm.listAllIds()).isNotEmpty();
+
+        // Verify getTableLocation returns the custom path
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(customPath);
+
+        // Verify path is stored in JDBC table properties
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "custom_table");
+        assertThat(storedProps).containsEntry(CoreOptions.PATH.key(), customPath.toString());
+
+        // Verify table is loadable
+        assertDoesNotThrow(() -> jdbcCatalog.getTable(identifier));
+    }
+
+    @Test
+    public void testCreateTableWithCustomPathSyncDisabled() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(false);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_nosync/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "nosync_table");
+
+        // Custom path requires syncTableProperties=true
+        assertThatThrownBy(() -> jdbcCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testDropTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_drop/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "drop_custom");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify data exists at custom location
+        Path customPath = new Path(customDir);
+        assertThat(fileIO.exists(customPath)).isTrue();
+
+        // Drop the table
+        jdbcCatalog.dropTable(identifier, false);
+
+        // Verify JDBC metadata is cleaned up
+        assertThatThrownBy(() -> jdbcCatalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "drop_custom");
+        assertThat(storedProps).isEmpty();
+
+        // Verify data is NOT deleted (external table keeps its data)
+        assertThat(fileIO.exists(customPath)).isTrue();
+    }
+
+    @Test
+    public void testDropTableWithDefaultPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "drop_default");
+        jdbcCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        Path tablePath = jdbcCatalog.getTableLocation(identifier);
+        assertThat(fileIO.exists(tablePath)).isTrue();
+
+        jdbcCatalog.dropTable(identifier, false);
+
+        // Data SHOULD be deleted for default-path tables
+        assertThat(fileIO.exists(tablePath)).isFalse();
+    }
+
+    @Test
+    public void testRenameTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_rename/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier fromTable = Identifier.create("test_db", "rename_from");
+
+        jdbcCatalog.createTable(fromTable, schema, false);
+
+        Identifier toTable = Identifier.create("test_db", "rename_to");
+        jdbcCatalog.renameTable(fromTable, toTable, false);
+
+        // Verify old table is gone
+        assertThatThrownBy(() -> jdbcCatalog.getTable(fromTable))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // Verify new table is accessible and still points to the custom path
+        assertThat(jdbcCatalog.getTableLocation(toTable)).isEqualTo(new Path(customDir));
+
+        // Verify the path property was moved
+        Map<String, String> storedProps = fetchTableProperties(jdbcCatalog, "test_db", "rename_to");
+        assertThat(storedProps)
+                .containsEntry(CoreOptions.PATH.key(), new Path(customDir).toString());
+
+        // Verify old name has no properties
+        Map<String, String> oldProps = fetchTableProperties(jdbcCatalog, "test_db", "rename_from");
+        assertThat(oldProps).isEmpty();
+    }
+
+    @Test
+    public void testAlterTableWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_alter/my_table";
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), customDir);
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Lists.newArrayList("pk"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "alter_custom");
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Alter: add a new option
+        jdbcCatalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.setOption("file.format", "orc")),
+                false);
+
+        // Verify path is preserved after alter
+        Map<String, String> storedProps =
+                fetchTableProperties(jdbcCatalog, "test_db", "alter_custom");
+        assertThat(storedProps)
+                .containsEntry(CoreOptions.PATH.key(), new Path(customDir).toString());
+        assertThat(storedProps).containsEntry("file.format", "orc");
+        assertThat(storedProps).containsEntry("bucket", "4");
+
+        // Verify getTableLocation still returns custom path
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(new Path(customDir));
+    }
+
+    @Test
+    public void testLoadTableSchemaWithCustomPath() throws Exception {
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
+        jdbcCatalog.createDatabase("test_db", false);
+
+        String customDir = warehouse + "/custom_load/my_table";
+        Schema schema = schemaWithCustomPath(customDir);
+        Identifier identifier = Identifier.create("test_db", "load_custom");
+
+        jdbcCatalog.createTable(identifier, schema, false);
+
+        // Verify schema loads from custom location
+        Table table = jdbcCatalog.getTable(identifier);
+        assertThat(table).isNotNull();
+        assertThat(table.name()).isEqualTo("load_custom");
+    }
+
+    @Test
+    public void testGetTableLocationFallback() throws Exception {
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        jdbcCatalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "default_table");
+        jdbcCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Verify getTableLocation returns default when no stored path
+        Path expected = new Path(new Path(warehouse, "test_db.db"), "default_table");
+        assertThat(jdbcCatalog.getTableLocation(identifier)).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCrossWarehouseTableAccess() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "cross_warehouse.db");
+
+        // Catalog A: producer with warehouse_a
+        String warehouseA = new Path(warehouse, "warehouse_a").toString();
+        JdbcCatalog catalogA = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        catalogA.createDatabase("mydb", false);
+        catalogA.createTable(Identifier.create("mydb", "mytable"), DEFAULT_TABLE_SCHEMA, false);
+
+        // Catalog B: reader WITHOUT warehouse (same JDBC) resolves from DB properties
+        JdbcCatalog catalogB = initCatalogWithoutWarehouse(sharedUri, true);
+
+        // Catalog B resolves table location from database properties
+        Path tableLocation = catalogB.getTableLocation(Identifier.create("mydb", "mytable"));
+        assertThat(tableLocation.toString()).contains("warehouse_a");
+
+        // Catalog B can load the table
+        Table table = catalogB.getTable(Identifier.create("mydb", "mytable"));
+        assertThat(table).isNotNull();
+    }
+
+    @Test
+    public void testNoWarehouseCatalogReadsTable() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "no_warehouse_read.db");
+
+        // Producer creates table with warehouse
+        String warehouseA = new Path(warehouse, "warehouse_a_nw").toString();
+        JdbcCatalog producer = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        producer.createDatabase("mydb", false);
+        producer.createTable(Identifier.create("mydb", "mytable"), DEFAULT_TABLE_SCHEMA, false);
+
+        // Reader has no warehouse
+        JdbcCatalog reader = initCatalogWithoutWarehouse(sharedUri, true);
+
+        // Reader can resolve and load the table
+        Table table = reader.getTable(Identifier.create("mydb", "mytable"));
+        assertThat(table).isNotNull();
+    }
+
+    @Test
+    public void testNoWarehouseCatalogCreatesTable() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "no_warehouse_write.db");
+
+        // Producer creates database (requires warehouse to set location)
+        String warehouseA = new Path(warehouse, "warehouse_a_write").toString();
+        JdbcCatalog producer = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        producer.createDatabase("mydb", false);
+
+        // Writer has no warehouse but creates a new table in existing database
+        JdbcCatalog writer = initCatalogWithoutWarehouse(sharedUri, true);
+        Identifier newTable = Identifier.create("mydb", "new_table");
+        writer.createTable(newTable, DEFAULT_TABLE_SCHEMA, false);
+
+        // Table location should be resolved from database location property
+        Path tableLocation = writer.getTableLocation(newTable);
+        assertThat(tableLocation.toString()).contains("warehouse_a_write");
+        assertThat(tableLocation.toString()).contains("mydb.db/new_table");
+
+        // Table is readable
+        Table table = writer.getTable(newTable);
+        assertThat(table).isNotNull();
+    }
+
+    @Test
+    public void testNoWarehouseCatalogDropsTable() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "no_warehouse_drop.db");
+
+        // Producer creates database and table
+        String warehouseA = new Path(warehouse, "warehouse_a_drop").toString();
+        JdbcCatalog producer = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        producer.createDatabase("mydb", false);
+        Identifier identifier = Identifier.create("mydb", "mytable");
+        producer.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Verify data exists on filesystem
+        Path tablePath = producer.getTableLocation(identifier);
+        assertThat(fileIO.exists(tablePath)).isTrue();
+
+        // No-warehouse catalog drops the table
+        JdbcCatalog reader = initCatalogWithoutWarehouse(sharedUri, true);
+        reader.dropTable(identifier, false);
+
+        // Verify metadata is gone
+        assertThatThrownBy(() -> reader.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // Verify filesystem data is deleted
+        assertThat(fileIO.exists(tablePath)).isFalse();
+    }
+
+    @Test
+    public void testNoWarehouseCatalogRenamesTable() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "no_warehouse_rename.db");
+
+        // Producer creates database and table
+        String warehouseA = new Path(warehouse, "warehouse_a_rename").toString();
+        JdbcCatalog producer = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        producer.createDatabase("mydb", false);
+        Identifier fromTable = Identifier.create("mydb", "old_name");
+        producer.createTable(fromTable, DEFAULT_TABLE_SCHEMA, false);
+
+        Path fromPath = producer.getTableLocation(fromTable);
+        assertThat(fileIO.exists(fromPath)).isTrue();
+
+        // No-warehouse catalog renames the table
+        JdbcCatalog writer = initCatalogWithoutWarehouse(sharedUri, true);
+        Identifier toTable = Identifier.create("mydb", "new_name");
+        writer.renameTable(fromTable, toTable, false);
+
+        // Old name is gone
+        assertThatThrownBy(() -> writer.getTable(fromTable))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // New name is accessible
+        Table table = writer.getTable(toTable);
+        assertThat(table).isNotNull();
+
+        // Filesystem directory was renamed
+        Path toPath = writer.getTableLocation(toTable);
+        assertThat(toPath.toString()).contains("mydb.db/new_name");
+        assertThat(fileIO.exists(toPath)).isTrue();
+        assertThat(fileIO.exists(fromPath)).isFalse();
+    }
+
+    @Test
+    public void testNoWarehouseCannotCreateDatabase() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "no_warehouse_create.db");
+        JdbcCatalog reader = initCatalogWithoutWarehouse(sharedUri, true);
+
+        assertThatThrownBy(() -> reader.createDatabase("newdb", false))
+                .hasMessageContaining("warehouse");
+    }
+
+    @Test
+    public void testFactoryCreatesNoWarehouseCatalog() throws Exception {
+        String sharedUri = "jdbc:sqlite:" + new Path(warehouse, "factory.db");
+
+        // Producer creates database and table via direct constructor (with warehouse)
+        String warehouseA = new Path(warehouse, "warehouse_factory").toString();
+        JdbcCatalog producer = initCatalogWithWarehouseAndUri(warehouseA, sharedUri, true);
+        producer.createDatabase("mydb", false);
+        producer.createTable(Identifier.create("mydb", "mytable"), DEFAULT_TABLE_SCHEMA, false);
+
+        // Reader created via factory with no warehouse option
+        Map<String, String> readerProps = Maps.newHashMap();
+        readerProps.put(CatalogOptions.URI.key(), sharedUri);
+        readerProps.put(CatalogOptions.METASTORE.key(), "jdbc");
+        readerProps.put(JdbcCatalogOptions.CATALOG_KEY.key(), "test-jdbc-catalog");
+        readerProps.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
+        readerProps.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
+        readerProps.put(CatalogOptions.LOCK_ENABLED.key(), "true");
+        readerProps.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        readerProps.put(CatalogOptions.SYNC_ALL_PROPERTIES.key(), "true");
+        CatalogContext readerContext = CatalogContext.create(Options.fromMap(readerProps));
+        JdbcCatalog reader = (JdbcCatalog) new JdbcCatalogFactory().create(readerContext);
+
+        assertThat(reader.warehouse()).isNull();
+
+        // Reader can load the table via factory-created catalog
+        Table table = reader.getTable(Identifier.create("mydb", "mytable"));
+        assertThat(table).isNotNull();
+    }
+
+    private JdbcCatalog initCatalogWithWarehouseAndUri(
+            String catalogWarehouse, String jdbcUri, boolean syncAllProperties) {
+        Map<String, String> properties = Maps.newHashMap();
+        properties.put(CatalogOptions.URI.key(), jdbcUri);
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
+        properties.put(CatalogOptions.WAREHOUSE.key(), catalogWarehouse);
+        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        properties.put(CatalogOptions.SYNC_ALL_PROPERTIES.key(), String.valueOf(syncAllProperties));
+        return new JdbcCatalog(
+                fileIO,
+                "test-jdbc-catalog",
+                CatalogContext.create(Options.fromMap(properties)),
+                catalogWarehouse);
+    }
+
+    private JdbcCatalog initCatalogWithoutWarehouse(String jdbcUri, boolean syncAllProperties) {
+        Map<String, String> properties = Maps.newHashMap();
+        properties.put(CatalogOptions.URI.key(), jdbcUri);
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
+        properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
+        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
+        properties.put(CatalogOptions.SYNC_ALL_PROPERTIES.key(), String.valueOf(syncAllProperties));
+        return new JdbcCatalog(
+                fileIO,
+                "test-jdbc-catalog",
+                CatalogContext.create(Options.fromMap(properties)),
+                null);
     }
 }

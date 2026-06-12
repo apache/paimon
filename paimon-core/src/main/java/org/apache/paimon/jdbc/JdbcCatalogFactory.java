@@ -23,7 +23,12 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
 
 /** Factory to create {@link JdbcCatalog}. */
 public class JdbcCatalogFactory implements CatalogFactory {
@@ -33,6 +38,28 @@ public class JdbcCatalogFactory implements CatalogFactory {
     @Override
     public String identifier() {
         return IDENTIFIER;
+    }
+
+    @Override
+    public Catalog create(CatalogContext context) {
+        Options options = context.options();
+        String catalogKey = options.get(JdbcCatalogOptions.CATALOG_KEY);
+        String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
+
+        if (warehouseStr != null) {
+            Path warehousePath = new Path(warehouseStr);
+            try {
+                FileIO fileIO = FileIO.get(warehousePath, context);
+                fileIO.checkOrMkdirs(warehousePath);
+                return new JdbcCatalog(fileIO, catalogKey, context, warehouseStr);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        ResolvingFileIO fileIO = new ResolvingFileIO();
+        fileIO.configure(context);
+        return new JdbcCatalog(fileIO, catalogKey, context, null);
     }
 
     @Override
