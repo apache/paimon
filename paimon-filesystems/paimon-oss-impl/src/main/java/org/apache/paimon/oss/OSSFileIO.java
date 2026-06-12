@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StorageType;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
@@ -39,9 +40,11 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -126,6 +129,37 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                 new OSSMultiPartUpload((org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem) fs),
                 hadoopPath,
                 path);
+    }
+
+    @Override
+    public Optional<Path> archive(Path path, StorageType type) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        OSSArchiveOperations.changeStorageClass(
+                (AliyunOSSFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                OSSArchiveOperations.archiveStorageClass(type),
+                "archive");
+        return Optional.empty();
+    }
+
+    @Override
+    public void restoreArchive(Path path, Duration duration) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        OSSArchiveOperations.restoreArchive(
+                (AliyunOSSFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                OSSArchiveOperations.restoreDays(duration));
+    }
+
+    @Override
+    public Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        OSSArchiveOperations.changeStorageClass(
+                (AliyunOSSFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                OSSArchiveOperations.unarchiveStorageClass(type),
+                "unarchive");
+        return Optional.empty();
     }
 
     public Options hadoopOptions() {
