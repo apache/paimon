@@ -80,6 +80,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
             for (DeletionVectorMeta deletionVectorMeta : deletionVectorMetas.values()) {
+                inputStream.seek(deletionVectorMeta.offset());
                 deletionVectors.put(
                         deletionVectorMeta.dataFileName(),
                         DeletionVector.read(dataInputStream, (long) deletionVectorMeta.length()));

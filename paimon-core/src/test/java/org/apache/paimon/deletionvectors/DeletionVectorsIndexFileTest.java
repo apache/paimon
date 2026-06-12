@@ -34,7 +34,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -258,6 +261,59 @@ public class DeletionVectorsIndexFileTest {
         Map<String, DeletionVector> dvs2 =
                 v2DeletionVectorsIndexFile.readAllDeletionVectors(totalIndexFiles);
         assertThat(dvs2.size()).isEqualTo(100000);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testReadAllDeletionVectorsWithOutOfOrderDvRanges(boolean bitmap64) {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, bitmap64);
+
+        // write multiple DVs so they are stored sequentially in the index file
+        HashMap<String, DeletionVector> deleteMap = new HashMap<>();
+        Map<String, Integer> expected = new HashMap<>();
+        for (int i = 0; i < 10; i++) {
+            DeletionVector dv = createEmptyDV(bitmap64);
+            dv.delete(i * 100);
+            dv.delete(i * 100 + 1);
+            deleteMap.put("file" + i + ".parquet", dv);
+            expected.put("file" + i + ".parquet", i * 100);
+        }
+
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
+        IndexFileMeta original = indexFiles.get(0);
+
+        // build a new IndexFileMeta with dvRanges in reverse offset order,
+        // simulating compaction merging dvRanges from multiple sources
+        LinkedHashMap<String, DeletionVectorMeta> originalRanges = original.dvRanges();
+        List<Map.Entry<String, DeletionVectorMeta>> entries =
+                new ArrayList<>(originalRanges.entrySet());
+        Collections.reverse(entries);
+        LinkedHashMap<String, DeletionVectorMeta> reversedRanges = new LinkedHashMap<>();
+        for (Map.Entry<String, DeletionVectorMeta> entry : entries) {
+            reversedRanges.put(entry.getKey(), entry.getValue());
+        }
+
+        IndexFileMeta reordered =
+                new IndexFileMeta(
+                        original.indexType(),
+                        original.fileName(),
+                        original.fileSize(),
+                        original.rowCount(),
+                        reversedRanges,
+                        original.externalPath());
+
+        // read with out-of-order dvRanges — this would fail without the seek fix
+        Map<String, DeletionVector> result =
+                deletionVectorsIndexFile.readAllDeletionVectors(reordered);
+        assertThat(result).hasSize(10);
+        for (Map.Entry<String, Integer> e : expected.entrySet()) {
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue())).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 1)).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 2)).isFalse();
+        }
     }
 
     @ParameterizedTest
