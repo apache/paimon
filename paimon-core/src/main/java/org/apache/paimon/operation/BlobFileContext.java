@@ -37,6 +37,7 @@ public class BlobFileContext {
     private final Set<String> blobInlineFields;
     private final Set<String> blobExternalStorageFields;
     @Nullable private final String blobExternalStoragePath;
+    private final boolean writeNullOnMissingFile;
 
     private @Nullable BlobConsumer blobConsumer;
 
@@ -44,11 +45,13 @@ public class BlobFileContext {
             Set<String> blobDescriptorFields,
             Set<String> blobInlineFields,
             Set<String> blobExternalStorageFields,
-            @Nullable String blobExternalStoragePath) {
+            @Nullable String blobExternalStoragePath,
+            boolean writeNullOnMissingFile) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
         this.blobExternalStorageFields = blobExternalStorageFields;
         this.blobExternalStoragePath = blobExternalStoragePath;
+        this.writeNullOnMissingFile = writeNullOnMissingFile;
     }
 
     @Nullable
@@ -74,7 +77,11 @@ public class BlobFileContext {
             return null;
         }
         return new BlobFileContext(
-                descriptorFields, inlineFields, externalStorageField, externalStoragePath);
+                descriptorFields,
+                inlineFields,
+                externalStorageField,
+                externalStoragePath,
+                options.blobWriteNullOnMissingFile());
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -109,5 +116,9 @@ public class BlobFileContext {
     @Nullable
     public BlobConsumer blobConsumer() {
         return blobConsumer;
+    }
+
+    public boolean writeNullOnMissingFile() {
+        return writeNullOnMissingFile;
     }
 }
