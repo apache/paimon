@@ -42,7 +42,7 @@ def build_index_delete_msgs(entries) -> list:
             )
         )
     return [
-        CommitMessage(partition=key, bucket=0, new_files=[], index_deletes=dels)
+        CommitMessage(partition=key, bucket=0, index_deletes=dels)
         for key, dels in by_partition.items()
     ]
 

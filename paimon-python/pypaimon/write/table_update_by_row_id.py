@@ -32,6 +32,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.file_store_write import FileStoreWrite
 from pypaimon.write.writer.blob_writer import BlobWriter
 
@@ -424,7 +425,7 @@ class TableUpdateByRowId:
                     CommitMessage(
                         partition=partition_tuple,
                         bucket=0,
-                        new_files=new_files,
+                        data_increment=DataIncrement(new_files=new_files),
                         check_from_snapshot=self.snapshot_id,
                     )
                 )

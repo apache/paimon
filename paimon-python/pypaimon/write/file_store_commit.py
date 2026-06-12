@@ -114,9 +114,21 @@ class FileStoreCommit:
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        """Commit the given commit messages in normal append mode."""
+        """Commit write-side messages (data_increment only).
+
+        Compaction results (compact_before / compact_after) must be committed
+        through commit_compact() instead — they produce a separate snapshot kind
+        and skip row-id assignment.
+        """
         if not commit_messages:
             return
+
+        for msg in commit_messages:
+            if not msg.compact_increment.is_empty():
+                raise ValueError(
+                    "commit() rejects messages carrying compact_increment; "
+                    "use commit_compact() for compaction results."
+                )
 
         # Extract the minimum check_from_snapshot from commit messages
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
@@ -129,17 +141,7 @@ class FileStoreCommit:
             self.table.identifier,
             len(commit_messages),
         )
-        commit_entries = []
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        commit_entries = self._build_commit_entries(commit_messages)
         changelog_entries = self._collect_changelog_entries(commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
@@ -188,6 +190,98 @@ class FileStoreCommit:
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes)
+
+    def commit_compact(self, commit_messages: List[CommitMessage], commit_identifier: int):
+        """Commit compaction-only messages.
+
+        Each message must carry no new_files; compact_before → DELETE entries,
+        compact_after → ADD entries; snapshot kind = COMPACT. Skips row-id
+        assignment and conflict detection (a compaction never produces new rows).
+        """
+        if not commit_messages:
+            return
+
+        for msg in commit_messages:
+            if msg.new_files:
+                raise ValueError(
+                    "commit_compact rejects messages with new_files; use commit() instead."
+                )
+
+        logger.info(
+            "Ready to commit compact to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
+        commit_entries = self._build_commit_entries(commit_messages)
+        if not commit_entries:
+            return
+
+        logger.info("Finished collecting compact changes: %d entries", len(commit_entries))
+
+        self._try_commit(
+            commit_kind="COMPACT",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: commit_entries,
+            detect_conflicts=False,
+            allow_rollback=False,
+        )
+
+    def _build_commit_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        # new_files / compact_before / compact_after become delta manifest entries
+        # here; data_increment.changelog_files is handled separately by
+        # _collect_changelog_entries (written to the changelog manifest, not the
+        # delta). Reject the remaining unwired slots loudly so a future writer
+        # that starts filling them cannot silently lose data at commit time.
+        for msg in commit_messages:
+            di = msg.data_increment
+            if (di.deleted_files
+                    or di.new_index_files or di.deleted_index_files):
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle DataIncrement.deleted_files / "
+                    "new_index_files / deleted_index_files; these slots "
+                    "will be wired in by the feature that first needs each one."
+                )
+            ci = msg.compact_increment
+            if (ci.changelog_files or ci.new_index_files or ci.deleted_index_files):
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle CompactIncrement.changelog_files / "
+                    "new_index_files / deleted_index_files; these slots will be wired in by "
+                    "the feature that first needs each one."
+                )
+
+        entries: List[ManifestEntry] = []
+        for msg in commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            # Prefer the message's total_buckets (captured when the plan was
+            # built) over the current table value, so a plan that survived a
+            # bucket rescale is not silently rewritten with the new count.
+            total_buckets = msg.total_buckets if msg.total_buckets is not None \
+                else self.table.total_buckets
+            for file in msg.new_files:
+                entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file,
+                ))
+            for file in msg.compact_before:
+                entries.append(ManifestEntry(
+                    kind=1,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file,
+                ))
+            for file in msg.compact_after:
+                entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=total_buckets,
+                    file=file,
+                ))
+        return entries
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
