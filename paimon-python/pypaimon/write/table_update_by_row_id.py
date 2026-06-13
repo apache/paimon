@@ -167,6 +167,12 @@ class TableUpdateByRowId:
         if SpecialFields.ROW_ID.name not in data.column_names:
             raise ValueError(f"Input data must contain {SpecialFields.ROW_ID.name} column")
 
+        blob_cols = [c for c in column_names if self._is_blob_column(c)]
+        if blob_cols:
+            raise ValueError(
+                f"update-by-row-id does not support updating blob columns: {blob_cols}. "
+                f"Remove blob columns from the update list.")
+
         for col_name in column_names:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
