@@ -19,12 +19,16 @@
 package org.apache.paimon.resource;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -38,18 +42,21 @@ public abstract class AbstractResource implements Resource {
     private final String uri;
     private final long size;
     private final long lastModifiedTime;
+    private final UriReaderFactory uriReaderFactory;
 
     protected AbstractResource(
             Identifier identifier,
             @Nullable String comment,
             String uri,
             long size,
-            long lastModifiedTime) {
+            long lastModifiedTime,
+            UriReaderFactory uriReaderFactory) {
         this.identifier = identifier;
         this.comment = comment;
         this.uri = uri;
         this.size = size;
         this.lastModifiedTime = lastModifiedTime;
+        this.uriReaderFactory = uriReaderFactory;
     }
 
     @JsonGetter("name")
@@ -100,6 +107,20 @@ public abstract class AbstractResource implements Resource {
     @JsonGetter("resourceType")
     public String resourceTypeValue() {
         return resourceType().getValue();
+    }
+
+    @Override
+    public byte[] toBytes() {
+        try {
+            return IOUtils.readFully(newInputStream(), true);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public SeekableInputStream newInputStream() throws IOException {
+        return uriReaderFactory.create(uri).newInputStream(uri);
     }
 
     @Override

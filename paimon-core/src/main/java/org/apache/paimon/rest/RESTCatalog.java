@@ -44,6 +44,7 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.resource.Resource;
 import org.apache.paimon.resource.ResourceChange;
+import org.apache.paimon.resource.ResourceType;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -69,6 +70,7 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.UriReaderFactory;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -928,7 +930,7 @@ public class RESTCatalog implements Catalog {
     public Resource getResource(Identifier identifier) throws ResourceNotExistException {
         try {
             GetResourceResponse response = api.getResource(identifier);
-            return response.toResource(identifier);
+            return toResource(identifier, response);
         } catch (NoSuchResourceException e) {
             throw new ResourceNotExistException(identifier, e);
         } catch (ForbiddenException e) {
@@ -941,7 +943,11 @@ public class RESTCatalog implements Catalog {
             throws ResourceAlreadyExistException, DatabaseNotExistException {
         RESTFunctionValidator.checkFunctionName(identifier.getObjectName());
         try {
-            api.createResource(identifier, resource);
+            api.createResource(
+                    identifier,
+                    resource.comment().orElse(null),
+                    resource.uri(),
+                    resource.resourceType());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
         } catch (AlreadyExistsException e) {
@@ -1010,12 +1016,23 @@ public class RESTCatalog implements Catalog {
                             databaseName, maxResults, pageToken, resourceNamePattern);
             return new PagedList<>(
                     resources.getElements().stream()
-                            .map(r -> r.toResource(Identifier.create(databaseName, r.name())))
+                            .map(r -> toResource(Identifier.create(databaseName, r.name()), r))
                             .collect(Collectors.toList()),
                     resources.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
+    }
+
+    private Resource toResource(Identifier identifier, GetResourceResponse response) {
+        return Resource.toResource(
+                ResourceType.fromValue(response.resourceType()),
+                identifier,
+                response.comment(),
+                response.uri(),
+                response.size(),
+                response.lastModifiedTime(),
+                new UriReaderFactory(context));
     }
 
     @Override

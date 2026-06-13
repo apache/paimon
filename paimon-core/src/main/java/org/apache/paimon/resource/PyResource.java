@@ -19,25 +19,27 @@
 package org.apache.paimon.resource;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import javax.annotation.Nullable;
 
-/** A {@link Resource} implementation for JAR resources. */
-public class JarResource extends AbstractResource {
+/** A {@link Resource} implementation for Python resources. */
+public class PyResource extends AbstractResource {
 
     private static final long serialVersionUID = 1L;
 
-    public JarResource(
+    public PyResource(
             Identifier identifier,
             @Nullable String comment,
             String uri,
             long size,
-            long lastModifiedTime) {
-        super(identifier, comment, uri, size, lastModifiedTime);
+            long lastModifiedTime,
+            UriReaderFactory uriReaderFactory) {
+        super(identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
     }
 
     @Override
     public ResourceType resourceType() {
-        return ResourceType.JAR;
+        return ResourceType.PY;
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.resource;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import javax.annotation.Nullable;
 
@@ -32,8 +33,9 @@ public class ArchiveResource extends AbstractResource {
             @Nullable String comment,
             String uri,
             long size,
-            long lastModifiedTime) {
-        super(identifier, comment, uri, size, lastModifiedTime);
+            long lastModifiedTime,
+            UriReaderFactory uriReaderFactory) {
+        super(identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
     }
 
     @Override

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.resource.Resource;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -57,13 +56,6 @@ public class CreateResourceRequest implements RESTRequest {
         this.comment = comment;
         this.uri = uri;
         this.resourceType = resourceType;
-    }
-
-    public CreateResourceRequest(Resource resource) {
-        this.name = resource.name();
-        this.comment = resource.comment().orElse(null);
-        this.uri = resource.uri();
-        this.resourceType = resource.resourceType().getValue();
     }
 
     @JsonGetter(FIELD_NAME)

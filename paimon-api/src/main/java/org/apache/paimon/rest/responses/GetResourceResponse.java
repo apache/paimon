@@ -18,10 +18,6 @@
 
 package org.apache.paimon.rest.responses;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.resource.Resource;
-import org.apache.paimon.resource.ResourceType;
-
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -106,15 +102,5 @@ public class GetResourceResponse extends AuditRESTResponse {
     @JsonGetter(FIELD_RESOURCE_TYPE)
     public String resourceType() {
         return resourceType;
-    }
-
-    public Resource toResource(Identifier identifier) {
-        return Resource.toResource(
-                ResourceType.fromValue(resourceType),
-                identifier,
-                comment,
-                uri,
-                size,
-                lastModifiedTime);
     }
 }

@@ -20,11 +20,12 @@ package org.apache.paimon.resource;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Optional;
 
@@ -35,7 +36,6 @@ import java.util.Optional;
  * @since 0.4.0
  */
 @Public
-@JsonDeserialize(using = ResourceDeserializer.class)
 public interface Resource extends Serializable {
 
     /** A name to identify this resource. */
@@ -59,6 +59,12 @@ public interface Resource extends Serializable {
     /** The type of this resource. */
     ResourceType resourceType();
 
+    /** Returns the contents of this resource as bytes. */
+    byte[] toBytes();
+
+    /** Opens a new input stream for this resource. */
+    SeekableInputStream newInputStream() throws IOException;
+
     /**
      * Creates a {@link Resource} instance based on the given {@link ResourceType}.
      *
@@ -68,6 +74,7 @@ public interface Resource extends Serializable {
      * @param uri the URI pointing to the resource location
      * @param size the size of the resource in bytes
      * @param lastModifiedTime the last modified time in milliseconds since epoch
+     * @param uriReaderFactory factory to read the resource URI
      * @return a concrete {@link Resource} instance
      */
     static Resource toResource(
@@ -76,25 +83,30 @@ public interface Resource extends Serializable {
             @Nullable String comment,
             String uri,
             long size,
-            long lastModifiedTime) {
+            long lastModifiedTime,
+            UriReaderFactory uriReaderFactory) {
         String name = identifier.getObjectName();
         switch (resourceType) {
             case FILE:
-                return new FileResource(identifier, comment, uri, size, lastModifiedTime);
+                return new FileResource(
+                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
             case ARCHIVE:
-                return new ArchiveResource(identifier, comment, uri, size, lastModifiedTime);
+                return new ArchiveResource(
+                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
             case JAR:
                 if (!name.endsWith(".jar")) {
                     throw new IllegalArgumentException(
                             "JAR resource name must end with '.jar', but got: " + name);
                 }
-                return new JarResource(identifier, comment, uri, size, lastModifiedTime);
+                return new JarResource(
+                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
             case PY:
                 if (!name.endsWith(".py")) {
                     throw new IllegalArgumentException(
                             "PY resource name must end with '.py', but got: " + name);
                 }
-                return new PyResource(identifier, comment, uri, size, lastModifiedTime);
+                return new PyResource(
+                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
             default:
                 throw new IllegalArgumentException("Unknown resource type: " + resourceType);
         }

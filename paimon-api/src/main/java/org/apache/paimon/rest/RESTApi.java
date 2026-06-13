@@ -29,6 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.resource.ResourceChange;
+import org.apache.paimon.resource.ResourceType;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
@@ -1644,14 +1645,20 @@ public class RESTApi {
      * Create a resource.
      *
      * @param identifier database name and resource name.
-     * @param resource the resource to be created
+     * @param comment optional comment describing the resource
+     * @param uri the URI pointing to the resource location
+     * @param resourceType the type of resource
      * @throws AlreadyExistsException if a resource already exists
      */
     public void createResource(
-            Identifier identifier, org.apache.paimon.resource.Resource resource) {
+            Identifier identifier,
+            @Nullable String comment,
+            String uri,
+            ResourceType resourceType) {
         client.post(
                 resourcePaths.resources(identifier.getDatabaseName()),
-                new CreateResourceRequest(resource),
+                new CreateResourceRequest(
+                        identifier.getObjectName(), comment, uri, resourceType.getValue()),
                 restAuthFunction);
     }
 
