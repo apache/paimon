@@ -49,6 +49,7 @@ import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
+import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
 import org.apache.paimon.operation.commit.RowIdColumnConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.StrictModeChecker;
@@ -958,6 +959,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String indexManifest = null;
         List<ManifestFileMeta> mergeBeforeManifests = new ArrayList<>();
         List<ManifestFileMeta> mergeAfterManifests = new ArrayList<>();
+        boolean skipManifestMergeOnRetry = false;
         long nextRowIdStart = firstRowIdStart;
         try {
             long previousTotalRecordCount = 0L;
@@ -977,9 +979,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             // try to merge old manifest files to create base manifest list
-            mergeAfterManifests =
-                    ManifestFileMerger.merge(
-                            mergeBeforeManifests, manifestFile, partitionType, options);
+            ManifestMergeReuse manifestMergeReuse =
+                    tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
+            skipManifestMergeOnRetry = manifestMergeReuse == null && retryResult != null;
+            if (manifestMergeReuse != null) {
+                mergeBeforeManifests = manifestMergeReuse.preservedManifests;
+                mergeAfterManifests = manifestMergeReuse.mergeAfterManifests;
+            } else if (skipManifestMergeOnRetry) {
+                mergeAfterManifests = mergeBeforeManifests;
+            } else {
+                mergeAfterManifests =
+                        ManifestFileMerger.merge(
+                                mergeBeforeManifests, manifestFile, partitionType, options);
+            }
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (options.rowTrackingEnabled()) {
@@ -1087,7 +1099,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn("Retry commit for exception.", e);
-            return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e);
+            return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e, null);
         }
 
         if (!success) {
@@ -1101,7 +1113,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     identifier,
                     commitKind.name(),
                     commitTime);
-            return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, null);
+            return RetryCommitResult.forCommitFail(
+                    latestSnapshot,
+                    baseDataFiles,
+                    null,
+                    skipManifestMergeOnRetry
+                            ? null
+                            : new ManifestMergeResult(mergeBeforeManifests, mergeAfterManifests));
         }
 
         LOG.info(
@@ -1121,6 +1139,81 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
         commitCallbacks.forEach(callback -> callback.call(context));
         return new SuccessCommitResult();
+    }
+
+    @Nullable
+    private ManifestMergeReuse tryReuseManifestMergeResult(
+            @Nullable RetryCommitResult retryResult, List<ManifestFileMeta> currentManifests) {
+        if (!(retryResult instanceof CommitFailRetryResult)) {
+            return null;
+        }
+
+        CommitFailRetryResult commitFailRetry = (CommitFailRetryResult) retryResult;
+        ManifestMergeResult previous = commitFailRetry.manifestMergeResult;
+        if (previous == null) {
+            return null;
+        }
+        if (previous.mergeBeforeManifests.isEmpty() && !currentManifests.isEmpty()) {
+            return null;
+        }
+
+        List<ManifestFileMeta> mergeAfterManifests =
+                replaceMergedManifests(
+                        currentManifests,
+                        previous.mergeBeforeManifests,
+                        previous.mergeAfterManifests);
+        if (mergeAfterManifests == null) {
+            return null;
+        }
+
+        return new ManifestMergeReuse(currentManifests, mergeAfterManifests);
+    }
+
+    @Nullable
+    private List<ManifestFileMeta> replaceMergedManifests(
+            List<ManifestFileMeta> currentManifests,
+            List<ManifestFileMeta> mergeBeforeManifests,
+            List<ManifestFileMeta> mergedManifests) {
+        List<ManifestFileMeta> remainingMergeBefore = new ArrayList<>(mergeBeforeManifests);
+        List<ManifestFileMeta> replacementManifests =
+                new ArrayList<>(
+                        Math.max(
+                                0,
+                                currentManifests.size()
+                                        - mergeBeforeManifests.size()
+                                        + mergedManifests.size()));
+        boolean insertedMergeAfter = false;
+        for (ManifestFileMeta currentManifest : currentManifests) {
+            int mergeBeforeIndex = remainingMergeBefore.indexOf(currentManifest);
+            if (mergeBeforeIndex < 0) {
+                replacementManifests.add(currentManifest);
+                continue;
+            }
+
+            remainingMergeBefore.remove(mergeBeforeIndex);
+            if (!insertedMergeAfter) {
+                replacementManifests.addAll(mergedManifests);
+                insertedMergeAfter = true;
+            }
+        }
+
+        if (!remainingMergeBefore.isEmpty()) {
+            return null;
+        }
+        return replacementManifests;
+    }
+
+    private static class ManifestMergeReuse {
+
+        private final List<ManifestFileMeta> preservedManifests;
+        private final List<ManifestFileMeta> mergeAfterManifests;
+
+        private ManifestMergeReuse(
+                List<ManifestFileMeta> preservedManifests,
+                List<ManifestFileMeta> mergeAfterManifests) {
+            this.preservedManifests = preservedManifests;
+            this.mergeAfterManifests = mergeAfterManifests;
+        }
     }
 
     public boolean replaceManifestList(
