@@ -33,7 +33,7 @@ Global Index is a powerful indexing mechanism for Data Evolution (append) tables
 without full-table scans. Paimon supports multiple global index types:
 
 - **BTree Index**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
-- **Vector Index**: An approximate nearest neighbor (ANN) index powered by DiskANN for vector similarity search.
+- **Vector Index**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
 - **Full-Text Index**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
@@ -87,25 +87,54 @@ SELECT * FROM my_table WHERE name IN ('a200', 'a300');
 
 ## Vector Index
 
-Vector Index provides approximate nearest neighbor (ANN) search based on the DiskANN algorithm. It is suitable for
-vector similarity search scenarios such as recommendation systems, image retrieval, and RAG (Retrieval Augmented
-Generation) applications.
+Vector Index provides approximate nearest neighbor (ANN) search for vector similarity search scenarios such as
+recommendation systems, image retrieval, and RAG (Retrieval Augmented Generation) applications.
+
+Supported vector index types:
+
+| Index Type | Description |
+|---|---|
+| `ivf-flat` | IVF index with flat vector storage. |
+| `ivf-pq` | IVF index with product quantization. |
+| `ivf-hnsw-flat` | IVF index with HNSW flat quantizer. |
+| `ivf-hnsw-sq` | IVF index with HNSW scalar quantizer. |
 
 **Build Vector Index**
 
 ```sql
--- Create Lumina vector index on 'embedding' column
+-- Create IVF-PQ vector index on 'embedding' column
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
-    index_type => 'lumina',
-    options => 'lumina.index.dimension=128'
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
 );
 ```
 
-The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
+For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-type>.dimension`.
+For `VECTOR<FLOAT>` columns, Paimon uses the dimension from the column type.
+
+Supported vector index options:
+
+| Option | Default | Description |
+|---|---|---|
+| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
+| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.nlist` | `256` | Number of IVF clusters used during index build. |
+| `<index-type>.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. |
+| `<index-type>.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
+| `<index-type>.hnsw.m` | `20` | HNSW graph out-degree for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
+| `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
+| `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 
 **Vector Search**
+
+Search-time options are passed with each vector search request:
+
+| Option | Default | Description |
+|---|---|---|
+| `ivf.nprobe` | `16` | Number of IVF clusters to probe during search. |
+| `hnsw.ef_search` | `0` | HNSW search width during search. `0` uses the native library default. |
 
 <Tabs groupId="vector-search">
 
@@ -155,6 +184,7 @@ GlobalIndexResult result = table.newVectorSearchBuilder()
         .withVector(queryVector)
         .withLimit(5)
         .withVectorColumn("embedding")
+        .withOption("ivf.nprobe", "16")
         .executeLocal();
 
 // Step 2: Read matching rows using the search result

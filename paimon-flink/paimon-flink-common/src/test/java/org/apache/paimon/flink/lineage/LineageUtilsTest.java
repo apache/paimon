@@ -153,8 +153,30 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testResolveNameByMetastoreUsesCatalogKeyForJdbcMetastore() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        assertThat(LineageUtils.resolveNameByMetastore(table, "paimon.db.src"))
+                .isEqualTo("jdbc-warehouse." + table.fullName());
+    }
+
+    @Test
+    void testResolveNameByMetastoreIgnoresCatalogKeyForNonJdbcMetastore() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("catalog-key", "jdbc-warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        assertThat(LineageUtils.resolveNameByMetastore(table, "paimon.db.src"))
+                .isEqualTo("paimon.db.src");
+    }
+
+    @Test
     void testDataStreamSourceLineageVertexUsesCatalogKey() throws Exception {
         Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
         catalogOptions.put("catalog-key", "jdbc-warehouse");
         FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
 
@@ -181,6 +203,7 @@ class LineageUtilsTest {
     @Test
     void testDataStreamSinkLineageVertexUsesCatalogKey() throws Exception {
         Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("metastore", "jdbc");
         catalogOptions.put("catalog-key", "jdbc-warehouse");
         FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
 
@@ -293,7 +316,7 @@ class LineageUtilsTest {
         SourceLineageVertex vertex = (SourceLineageVertex) source.getLineageVertex();
         assertThat(vertex.boundedness()).isEqualTo(Boundedness.BOUNDED);
         assertThat(vertex.datasets()).hasSize(1);
-        assertThat(vertex.datasets().get(0).name()).isEqualTo(table.fullName());
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon." + table.fullName());
     }
 
     @Test
@@ -310,6 +333,6 @@ class LineageUtilsTest {
         SourceLineageVertex vertex = (SourceLineageVertex) source.getLineageVertex();
         assertThat(vertex.boundedness()).isEqualTo(Boundedness.CONTINUOUS_UNBOUNDED);
         assertThat(vertex.datasets()).hasSize(1);
-        assertThat(vertex.datasets().get(0).name()).isEqualTo(table.fullName());
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon." + table.fullName());
     }
 }

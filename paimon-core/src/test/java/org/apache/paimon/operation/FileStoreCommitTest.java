@@ -31,8 +31,11 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -1009,6 +1012,48 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testGlobalIndexCommitChecksExistingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        assertThat(dataSnapshot.nextRowId()).isEqualTo(1L);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "existing-index", 0, 0), false);
+        }
+
+        Snapshot latest = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latest.indexManifest()).isNotNull();
+    }
+
+    @Test
+    public void testGlobalIndexCommitFailsForMissingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        long missingRowId = checkNotNull(dataSnapshot.nextRowId());
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(
+                                                    partition,
+                                                    "missing-index",
+                                                    missingRowId,
+                                                    missingRowId),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("missing-index")
+                    .hasMessageContaining("[" + missingRowId + ", " + missingRowId + "]");
+        }
+    }
+
+    @Test
     public void testCommitTwiceWithDifferentKind() throws Exception {
         TestFileStore store = createStore(false);
         try (FileStoreCommitImpl commit = store.newCommit()) {
@@ -1082,6 +1127,20 @@ public class FileStoreCommitTest {
 
     private FileStoreCommitImpl newCommitWithSnapshotCommit(
             TestFileStore store, String commitUser, SnapshotCommit snapshotCommit) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                store.options(),
+                store.options().dataEvolutionEnabled());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -1090,7 +1149,7 @@ public class FileStoreCommitTest {
                 tableName,
                 commitUser,
                 store.partitionType(),
-                store.options(),
+                options,
                 store.pathFactory(),
                 store.snapshotManager(),
                 store.manifestFileFactory(),
@@ -1109,13 +1168,35 @@ public class FileStoreCommitTest {
                                 store.pathFactory(),
                                 store.newKeyComparator(),
                                 store.bucketMode(),
-                                store.options().deletionVectorsEnabled(),
-                                store.options().dataEvolutionEnabled(),
-                                store.options().pkClusteringOverride(),
+                                options.deletionVectorsEnabled(),
+                                dataEvolutionEnabled,
+                                options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
                                 scanner),
                 null);
+    }
+
+    private ManifestCommittable indexCommittable(
+            BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(
+                                Collections.singletonList(
+                                        new IndexFileMeta(
+                                                "btree",
+                                                fileName,
+                                                1,
+                                                1,
+                                                new GlobalIndexMeta(
+                                                        rowRangeStart, rowRangeEnd, 0, null, null),
+                                                null))),
+                        CompactIncrement.emptyIncrement()));
+        return committable;
     }
 
     private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
@@ -1153,6 +1234,13 @@ public class FileStoreCommitTest {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
     }
 
+    private TestFileStore createRowTrackingDataEvolutionStore() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return createStore(false, -1, CoreOptions.ChangelogProducer.NONE, options);
+    }
+
     private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
@@ -1179,14 +1267,18 @@ public class FileStoreCommitTest {
                         ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
+        List<String> primaryKeys =
+                Boolean.parseBoolean(options.get(CoreOptions.ROW_TRACKING_ENABLED.key()))
+                        ? Collections.emptyList()
+                        : TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
-                                TestKeyValueGenerator.getPrimaryKeys(
-                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                                primaryKeys,
                                 options,
                                 null));
         return new TestFileStore.Builder(

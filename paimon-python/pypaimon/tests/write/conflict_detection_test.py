@@ -127,6 +127,42 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
 
+    def test_no_conflict_when_blob_file_range_is_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=20, row_count=10)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_conflict_when_blob_file_range_is_not_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=95, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
+    def test_no_conflict_when_blob_file_range_is_covered_by_multiple_files(self):
+        detection = self._make_detection()
+        base = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=50),
+            _make_entry("f2", kind=0, first_row_id=50, row_count=50),
+        ]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=25, row_count=50)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
+    def test_conflict_when_blob_file_range_is_only_covered_by_base_blob_file(self):
+        detection = self._make_detection()
+        base = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=50),
+            _make_entry("p0.blob", kind=0, first_row_id=50, row_count=50),
+        ]
+        delta = [_make_entry("p1.blob", kind=0, first_row_id=60, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
     def test_skip_newly_appended_files(self):
         detection = self._make_detection()
         base = []

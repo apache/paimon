@@ -296,14 +296,19 @@ class FileIO(ABC):
         import os as _os
         from urllib.parse import urlparse
 
+        from pypaimon.common.options.config import CatalogOptions
+
+        opts = catalog_options or Options({})
+        if opts.get(CatalogOptions.RESOLVING_FILE_IO_ENABLED):
+            from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+            return ResolvingFileIO(opts)
+
         uri = urlparse(path)
         scheme = uri.scheme
 
         if not scheme or scheme == "file":
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
-
-        opts = catalog_options or Options({})
 
         if scheme in ("hdfs", "viewfs"):
             from pypaimon.common.options.config import HdfsOptions
@@ -321,7 +326,8 @@ class FileIO(ABC):
             impl = impl_value.lower()
             if impl == "native":
                 try:
-                    from pypaimon.filesystem.hdfs_native_file_io import HdfsNativeFileIO
+                    from pypaimon.filesystem.hdfs_native_file_io import \
+                        HdfsNativeFileIO
                     return HdfsNativeFileIO(path, opts)
                 except (ImportError, RuntimeError) as e:
                     fallback = opts.get(HdfsOptions.HDFS_CLIENT_FALLBACK_TO_PYARROW)

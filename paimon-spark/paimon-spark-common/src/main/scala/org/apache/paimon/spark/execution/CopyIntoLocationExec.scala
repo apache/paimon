@@ -28,10 +28,21 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.unsafe.types.UTF8String
 
+/** The source to export from: either a Paimon table or an inline read-only query. */
+sealed trait CopyIntoSource
+
+object CopyIntoSource {
+
+  /** Export an existing Paimon table identified by `catalog`/`ident`. */
+  case class TableSource(catalog: TableCatalog, ident: Identifier) extends CopyIntoSource
+
+  /** Export the result of an inline `FROM (<query>)` read-only query. */
+  case class QuerySource(query: String) extends CopyIntoSource
+}
+
 case class CopyIntoLocationExec(
     spark: SparkSession,
-    catalog: TableCatalog,
-    ident: Identifier,
+    source: CopyIntoSource,
     targetPath: String,
     fileFormat: CopyFileFormat,
     overwrite: Boolean,
@@ -43,14 +54,21 @@ case class CopyIntoLocationExec(
   override protected def run(): Seq[InternalRow] = {
     fileFormat.validateForExport()
 
-    val tableName = CopyIntoUtils.quoteIdentifier(catalog.name(), ident)
-    val df = spark.table(tableName)
-
-    val rowCount = df.count()
+    val df = source match {
+      case CopyIntoSource.QuerySource(query) => CopyIntoUtils.queryToDataFrame(spark, query)
+      case CopyIntoSource.TableSource(catalog, ident) =>
+        spark.table(CopyIntoUtils.quoteIdentifier(catalog.name(), ident))
+    }
 
     val writerOptions = fileFormat.toSparkWriterOptions
     val saveMode = if (overwrite) SaveMode.Overwrite else SaveMode.ErrorIfExists
 
+    // `rows_written` is counted by a separate `count()` action before the write. The DataFrame is
+    // lazy and not cached, so the write re-executes the query a second time; for a non-deterministic
+    // query (e.g. `rand()`, `current_timestamp()`, or a volatile source) the two runs can yield
+    // different rows, so this count may not match the files (see the docs). We accept this rather
+    // than stage the whole result to disk just to make the count exact.
+    val rowCount = df.count()
     fileFormat.formatType match {
       case FileFormatType.JSON =>
         df.write.options(writerOptions).mode(saveMode).json(targetPath)
@@ -63,8 +81,9 @@ case class CopyIntoLocationExec(
     val hadoopConf = spark.sessionState.newHadoopConf()
     val fsPath = new Path(targetPath)
     val fs = fsPath.getFileSystem(hadoopConf)
+    // Count only data files (part-*); committer side files such as _SUCCESS are not data output.
     val fileCount = if (fs.exists(fsPath)) {
-      fs.listStatus(fsPath).count(_.isFile)
+      fs.listStatus(fsPath).count(s => s.isFile && s.getPath.getName.startsWith("part-"))
     } else {
       0
     }

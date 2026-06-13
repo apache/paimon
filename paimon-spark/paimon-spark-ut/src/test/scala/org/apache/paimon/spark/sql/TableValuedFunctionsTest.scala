@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
@@ -29,6 +30,16 @@ import java.time.LocalDateTime
 import java.util.Collections
 
 class TableValuedFunctionsTest extends PaimonHiveTestBase {
+
+  test("parse positive limit rejects overflowing long") {
+    val longValue: Long = 4294967297L
+    assert(longValue.toInt > 0)
+
+    val error = intercept[IllegalArgumentException] {
+      PaimonTableValuedFunctions.parsePositiveLimit(longValue)
+    }
+    assert(error.getMessage.contains("Limit must be no greater than"))
+  }
 
   withPk.foreach {
     hasPk =>

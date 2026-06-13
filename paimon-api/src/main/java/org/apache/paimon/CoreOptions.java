@@ -290,6 +290,7 @@ public class CoreOptions implements Serializable {
     public static final String FILE_FORMAT_CSV = "csv";
     public static final String FILE_FORMAT_TEXT = "text";
     public static final String FILE_FORMAT_JSON = "json";
+    public static final String FILE_FORMAT_MOSAIC = "mosaic";
 
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
@@ -544,7 +545,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "The legacy partition name is using `toString` fpr all types. If false, using "
+                            "The legacy partition name is using `toString` for all types. If false, using "
                                     + "cast to string for all types.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
@@ -2597,6 +2598,12 @@ public class CoreOptions implements Serializable {
                                                     + " Default is the same as TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> VECTOR_SEARCH_DISTRIBUTE_ENABLED =
+            key("vector-search.distribute.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to process distributed vector search.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -2896,6 +2903,7 @@ public class CoreOptions implements Serializable {
                     return "snappy";
                 case FILE_FORMAT_AVRO:
                 case FILE_FORMAT_ORC:
+                case FILE_FORMAT_MOSAIC:
                     return "zstd";
                 case FILE_FORMAT_CSV:
                 case FILE_FORMAT_TEXT:
@@ -4075,6 +4083,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean vectorSearchDistributeEnabled() {
+        return options.get(VECTOR_SEARCH_DISTRIBUTE_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

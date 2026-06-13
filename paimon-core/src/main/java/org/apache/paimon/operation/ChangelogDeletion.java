@@ -85,7 +85,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             }
         }
 
-        // the index and statics manifest list should handle by snapshot deletion.
+        // the index and statistics manifest list should handle by snapshot deletion.
     }
 
     @Override

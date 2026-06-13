@@ -228,6 +228,39 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchThreadsOptions() throws Exception {
+        catalog.createTable(
+                identifier("options_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                        .option("test.vector.metric", "l2")
+                        .option("test.vector.required-option.key", "ivf.nprobe")
+                        .option("test.vector.required-option.value", "16")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("options_table"));
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withOption("ivf.nprobe", "16")
+                        .executeLocal();
+
+        assertThat(result.results().isEmpty()).isFalse();
+    }
+
+    @Test
     public void testVectorSearchWithMultipleIndexFiles() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

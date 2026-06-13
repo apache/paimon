@@ -43,12 +43,14 @@ class VectorSearchRead(ABC):
 class VectorSearchReadImpl(VectorSearchRead):
     """Implementation for VectorSearchRead."""
 
-    def __init__(self, table, limit, vector_column, query_vector, filter_=None):
+    def __init__(self, table, limit, vector_column, query_vector, filter_=None,
+                 options=None):
         self._table = table
         self._limit = limit
         self._vector_column = vector_column
         self._query_vector = query_vector
         self._filter = filter_
+        self._options = dict(options or {})
 
     def read(self, splits):
         # type: (List[VectorSearchSplit]) -> GlobalIndexResult
@@ -136,7 +138,8 @@ class VectorSearchReadImpl(VectorSearchRead):
         vector_search = VectorSearch(
             vector=self._query_vector,
             limit=self._limit,
-            field_name=self._vector_column.name
+            field_name=self._vector_column.name,
+            options=self._options,
         )
         if include_row_ids is not None:
             vector_search = vector_search.with_include_row_ids(include_row_ids)

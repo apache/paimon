@@ -58,7 +58,7 @@ public class BTreeIndexOptions {
     public static final ConfigOption<Long> BTREE_INDEX_RECORDS_PER_RANGE =
             ConfigOptions.key("btree-index.records-per-range")
                     .longType()
-                    .defaultValue(1000_000L)
+                    .defaultValue(10_000_000L)
                     .withDescription("The expected number of records per BTree Index File.");
 
     public static final ConfigOption<Integer> BTREE_INDEX_BUILD_MAX_PARALLELISM =

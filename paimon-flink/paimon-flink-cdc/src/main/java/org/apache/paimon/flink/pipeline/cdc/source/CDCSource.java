@@ -50,7 +50,7 @@ import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -130,18 +130,41 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
 
     /** A manager for information related to the tables. */
     public static class TableManager {
-        private final Map<Identifier, FileStoreTable> tableMap = new HashMap<>();
-        private final Map<Tuple2<Identifier, Long>, TableSchema> tableSchemaMap = new HashMap<>();
-        private final Map<Tuple2<Identifier, Long>, TableRead> tableReadMap = new HashMap<>();
+        private static final int TABLE_CACHE_SIZE = 256;
+        private static final int TABLE_SCHEMA_CACHE_SIZE = 1024;
+        private static final int TABLE_READ_CACHE_SIZE = 1024;
+
+        private final Map<Identifier, FileStoreTable> tableMap;
+        private final Map<Tuple2<Identifier, Long>, TableSchema> tableSchemaMap;
+        private final Map<Tuple2<Identifier, Long>, TableRead> tableReadMap;
         private final Catalog catalog;
         private final IOManager ioManager;
         private final SourceReaderMetricGroup metricGroup;
 
         protected TableManager(
                 Catalog catalog, IOManager ioManager, SourceReaderMetricGroup metricGroup) {
+            this(
+                    catalog,
+                    ioManager,
+                    metricGroup,
+                    TABLE_CACHE_SIZE,
+                    TABLE_SCHEMA_CACHE_SIZE,
+                    TABLE_READ_CACHE_SIZE);
+        }
+
+        protected TableManager(
+                Catalog catalog,
+                IOManager ioManager,
+                SourceReaderMetricGroup metricGroup,
+                int tableCacheSize,
+                int tableSchemaCacheSize,
+                int tableReadCacheSize) {
             this.catalog = catalog;
             this.ioManager = ioManager;
             this.metricGroup = metricGroup;
+            this.tableMap = newBoundedMap(tableCacheSize);
+            this.tableSchemaMap = newBoundedMap(tableSchemaCacheSize);
+            this.tableReadMap = newBoundedMap(tableReadCacheSize);
         }
 
         public @Nullable TableSchema getTableSchema(
@@ -155,8 +178,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                 return tableSchemaMap.get(cacheKey);
             }
 
-            FileStoreTable table = getTable(identifier);
-            TableSchema tableSchema = table.schemaManager().schema(schemaId);
+            TableSchema tableSchema = loadTableSchema(identifier, schemaId);
             tableSchemaMap.put(cacheKey, tableSchema);
             return tableSchema;
         }
@@ -167,12 +189,7 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
                 return tableReadMap.get(cacheKey);
             }
 
-            FileStoreTable table = getTable(identifier).copy(schema);
-            TableRead tableRead =
-                    table.newReadBuilder()
-                            .newRead()
-                            .withIOManager(ioManager)
-                            .withMetricRegistry(new FlinkMetricRegistry(metricGroup));
+            TableRead tableRead = loadTableRead(identifier, schema);
             tableReadMap.put(cacheKey, tableRead);
             return tableRead;
         }
@@ -205,6 +222,27 @@ public class CDCSource implements Source<Event, TableAwareFileStoreSourceSplit, 
             // and be a FileStoreTable.
             tableMap.put(identifier, (FileStoreTable) table);
             return (FileStoreTable) table;
+        }
+
+        private TableSchema loadTableSchema(Identifier identifier, long schemaId) {
+            return getTable(identifier).schemaManager().schema(schemaId);
+        }
+
+        private TableRead loadTableRead(Identifier identifier, TableSchema schema) {
+            FileStoreTable table = getTable(identifier).copy(schema);
+            return table.newReadBuilder()
+                    .newRead()
+                    .withIOManager(ioManager)
+                    .withMetricRegistry(new FlinkMetricRegistry(metricGroup));
+        }
+
+        private static <K, V> Map<K, V> newBoundedMap(int maxSize) {
+            return new LinkedHashMap<K, V>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+                    return size() > maxSize;
+                }
+            };
         }
     }
 }

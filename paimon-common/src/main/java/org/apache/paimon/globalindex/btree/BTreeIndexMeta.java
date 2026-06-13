@@ -30,6 +30,10 @@ import javax.annotation.Nullable;
  */
 public class BTreeIndexMeta {
 
+    private static final byte FORMAT_VERSION_WITH_NULL_FLAGS = 1;
+    private static final byte FIRST_KEY_IS_NULL = 1;
+    private static final byte LAST_KEY_IS_NULL = 1 << 1;
+
     @Nullable private final byte[] firstKey;
     @Nullable private final byte[] lastKey;
     private final boolean hasNulls;
@@ -61,36 +65,59 @@ public class BTreeIndexMeta {
     private int memorySize() {
         return (firstKey == null ? 0 : firstKey.length)
                 + (lastKey == null ? 0 : lastKey.length)
-                + 9;
+                + 11;
     }
 
     public byte[] serialize() {
         MemorySliceOutput sliceOutput = new MemorySliceOutput(memorySize());
+        byte nullKeyFlags = 0;
         if (firstKey != null) {
             sliceOutput.writeInt(firstKey.length);
             sliceOutput.writeBytes(firstKey);
         } else {
             sliceOutput.writeInt(0);
+            nullKeyFlags |= FIRST_KEY_IS_NULL;
         }
         if (lastKey != null) {
             sliceOutput.writeInt(lastKey.length);
             sliceOutput.writeBytes(lastKey);
         } else {
             sliceOutput.writeInt(0);
+            nullKeyFlags |= LAST_KEY_IS_NULL;
         }
         sliceOutput.writeByte(hasNulls ? 1 : 0);
+        sliceOutput.writeByte(FORMAT_VERSION_WITH_NULL_FLAGS);
+        sliceOutput.writeByte(nullKeyFlags);
         return sliceOutput.toSlice().getHeapMemory();
     }
 
     public static BTreeIndexMeta deserialize(byte[] data) {
         MemorySliceInput sliceInput = MemorySlice.wrap(data).toInput();
         int firstKeyLength = sliceInput.readInt();
-        byte[] firstKey =
-                firstKeyLength == 0 ? null : sliceInput.readSlice(firstKeyLength).copyBytes();
+        byte[] firstKey = readKey(sliceInput, firstKeyLength);
         int lastKeyLength = sliceInput.readInt();
-        byte[] lastKey =
-                lastKeyLength == 0 ? null : sliceInput.readSlice(lastKeyLength).copyBytes();
+        byte[] lastKey = readKey(sliceInput, lastKeyLength);
         boolean hasNulls = sliceInput.readByte() == 1;
+
+        if (sliceInput.available() >= 2) {
+            int formatVersion = sliceInput.readByte();
+            if (formatVersion == FORMAT_VERSION_WITH_NULL_FLAGS) {
+                int nullKeyFlags = sliceInput.readByte();
+                firstKey = (nullKeyFlags & FIRST_KEY_IS_NULL) != 0 ? null : firstKey;
+                lastKey = (nullKeyFlags & LAST_KEY_IS_NULL) != 0 ? null : lastKey;
+            }
+        } else if (firstKeyLength == 0 && lastKeyLength == 0 && hasNulls) {
+            // Compatibility with old metadata which used zero length to represent null keys.
+            // A legacy all-null index file can be identified by both key lengths being zero with
+            // null bitmap. When only one length is zero, the zero-length key is a valid serialized
+            // key, for example an empty string.
+            firstKey = null;
+            lastKey = null;
+        }
         return new BTreeIndexMeta(firstKey, lastKey, hasNulls);
+    }
+
+    private static byte[] readKey(MemorySliceInput sliceInput, int keyLength) {
+        return sliceInput.readSlice(keyLength).copyBytes();
     }
 }

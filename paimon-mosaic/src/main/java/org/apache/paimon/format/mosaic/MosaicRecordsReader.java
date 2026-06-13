@@ -60,6 +60,8 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
     private final BufferAllocator allocator;
     private final int numRowGroups;
     private final RowType dataSchemaRowType;
+    private final int projectedFieldCount;
+    private final boolean allProjectedColumnsMissing;
     @Nullable private final List<Predicate> predicates;
 
     private int currentRowGroup;
@@ -73,38 +75,69 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             RowType projectedRowType,
             @Nullable List<Predicate> predicates,
             Path filePath) {
+        this(
+                inputFileAdapter,
+                fileSize,
+                dataSchemaRowType,
+                projectedRowType,
+                predicates,
+                filePath,
+                new RootAllocator(),
+                MosaicReader::open);
+    }
+
+    MosaicRecordsReader(
+            MosaicInputFileAdapter inputFileAdapter,
+            long fileSize,
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> predicates,
+            Path filePath,
+            BufferAllocator allocator,
+            NativeReaderOpener nativeReaderOpener) {
         this.filePath = filePath;
         this.inputFileAdapter = inputFileAdapter;
         this.dataSchemaRowType = dataSchemaRowType;
+        this.projectedFieldCount = projectedRowType.getFieldCount();
         this.predicates = predicates;
-        this.allocator = new RootAllocator();
+        this.allocator = allocator;
 
+        MosaicReader createdReader = null;
+        int createdNumRowGroups;
+        ArrowBatchReader createdArrowBatchReader;
+        boolean createdAllProjectedColumnsMissing = false;
         try {
-            this.reader = MosaicReader.open(inputFileAdapter, fileSize, allocator);
-        } catch (Exception e) {
-            allocator.close();
-            throw e;
-        }
+            createdReader = nativeReaderOpener.open(inputFileAdapter, fileSize, allocator);
 
-        Schema fileSchema = reader.getSchema();
-        Set<String> fileColumnNames = new HashSet<>();
-        for (Field field : fileSchema.getFields()) {
-            fileColumnNames.add(field.getName());
-        }
-        List<String> projectedNames = projectedRowType.getFieldNames();
-        List<String> existingColumns = new ArrayList<>();
-        for (String name : projectedNames) {
-            if (fileColumnNames.contains(name)) {
-                existingColumns.add(name);
+            Schema fileSchema = createdReader.getSchema();
+            Set<String> fileColumnNames = new HashSet<>();
+            for (Field field : fileSchema.getFields()) {
+                fileColumnNames.add(field.getName());
             }
-        }
-        if (!existingColumns.isEmpty()) {
-            reader.project(existingColumns.toArray(new String[0]));
+            List<String> projectedNames = projectedRowType.getFieldNames();
+            List<String> existingColumns = new ArrayList<>();
+            for (String name : projectedNames) {
+                if (fileColumnNames.contains(name)) {
+                    existingColumns.add(name);
+                }
+            }
+            createdAllProjectedColumnsMissing = existingColumns.isEmpty();
+            if (!existingColumns.isEmpty()) {
+                createdReader.project(existingColumns.toArray(new String[0]));
+            }
+
+            createdNumRowGroups = createdReader.numRowGroups();
+            createdArrowBatchReader = new ArrowBatchReader(projectedRowType, true);
+        } catch (Throwable t) {
+            closeOnConstructionFailure(t, createdReader, allocator, inputFileAdapter);
+            throw rethrowUnchecked(t);
         }
 
-        this.numRowGroups = reader.numRowGroups();
+        this.reader = createdReader;
+        this.numRowGroups = createdNumRowGroups;
+        this.allProjectedColumnsMissing = createdAllProjectedColumnsMissing;
         this.currentRowGroup = 0;
-        this.arrowBatchReader = new ArrowBatchReader(projectedRowType, true);
+        this.arrowBatchReader = createdArrowBatchReader;
     }
 
     @Nullable
@@ -119,6 +152,11 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             }
 
             releaseCurrentVsr();
+
+            if (allProjectedColumnsMissing) {
+                currentRowGroup++;
+                return allNullIterator(numRows);
+            }
 
             VectorSchemaRoot vsr = reader.readRowGroup(currentRowGroup, allocator);
             currentRowGroup++;
@@ -154,6 +192,37 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
             };
         }
         return null;
+    }
+
+    private FileRecordIterator<InternalRow> allNullIterator(int numRows) {
+        GenericRow row = new GenericRow(projectedFieldCount);
+        return new FileRecordIterator<InternalRow>() {
+            private int position;
+
+            @Override
+            public long returnedPosition() {
+                return returnedPosition;
+            }
+
+            @Override
+            public Path filePath() {
+                return filePath;
+            }
+
+            @Nullable
+            @Override
+            public InternalRow next() {
+                if (position < numRows) {
+                    position++;
+                    returnedPosition++;
+                    return row;
+                }
+                return null;
+            }
+
+            @Override
+            public void releaseBatch() {}
+        };
     }
 
     private boolean matchesRowGroup(int rowGroupIndex, long rowCount) {
@@ -206,9 +275,98 @@ public class MosaicRecordsReader implements FileRecordReader<InternalRow> {
 
     @Override
     public void close() throws IOException {
-        releaseCurrentVsr();
-        reader.close();
-        allocator.close();
-        inputFileAdapter.close();
+        Throwable throwable = null;
+
+        try {
+            releaseCurrentVsr();
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
+        try {
+            reader.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            allocator.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        try {
+            inputFileAdapter.close();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        if (throwable != null) {
+            rethrow(throwable);
+        }
+    }
+
+    private static Throwable addSuppressed(Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
+        throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void rethrow(Throwable throwable) throws IOException {
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
+    }
+
+    private static RuntimeException rethrowUnchecked(Throwable throwable) {
+        if (throwable instanceof RuntimeException) {
+            return (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        return new RuntimeException(throwable);
+    }
+
+    private static void closeOnConstructionFailure(
+            Throwable throwable,
+            @Nullable MosaicReader reader,
+            BufferAllocator allocator,
+            MosaicInputFileAdapter inputFileAdapter) {
+        try {
+            if (reader != null) {
+                reader.close();
+            }
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+
+        try {
+            allocator.close();
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+
+        try {
+            inputFileAdapter.close();
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+    }
+
+    @FunctionalInterface
+    interface NativeReaderOpener {
+
+        MosaicReader open(
+                MosaicInputFileAdapter inputFileAdapter, long fileSize, BufferAllocator allocator);
     }
 }

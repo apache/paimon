@@ -42,9 +42,13 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -55,13 +59,16 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorRead}. */
-public class VectorReadImpl implements VectorRead {
+public class VectorReadImpl implements VectorRead, Serializable {
 
-    private final FileStoreTable table;
+    private static final long serialVersionUID = 1L;
+
+    protected final FileStoreTable table;
     private final Predicate filter;
-    private final int limit;
-    private final DataField vectorColumn;
-    private final float[] vector;
+    protected final int limit;
+    protected final DataField vectorColumn;
+    protected final float[] vector;
+    protected final Map<String, String> options;
 
     public VectorReadImpl(
             FileStoreTable table,
@@ -69,11 +76,25 @@ public class VectorReadImpl implements VectorRead {
             int limit,
             DataField vectorColumn,
             float[] vector) {
+        this(table, filter, limit, vectorColumn, vector, Collections.emptyMap());
+    }
+
+    public VectorReadImpl(
+            FileStoreTable table,
+            Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            Map<String, String> options) {
         this.table = table;
         this.filter = filter;
         this.limit = limit;
         this.vectorColumn = vectorColumn;
         this.vector = vector;
+        this.options =
+                options == null
+                        ? Collections.emptyMap()
+                        : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
     @Override
@@ -120,7 +141,7 @@ public class VectorReadImpl implements VectorRead {
         return result.topK(limit);
     }
 
-    private Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
+    protected Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
         for (VectorSearchSplit split : splits) {
@@ -139,7 +160,7 @@ public class VectorReadImpl implements VectorRead {
         }
     }
 
-    private CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+    protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
             GlobalIndexer globalIndexer,
             IndexPathFactory indexPathFactory,
             long rowRangeStart,
@@ -162,7 +183,7 @@ public class VectorReadImpl implements VectorRead {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         VectorSearch vectorSearch =
-                new VectorSearch(vector, limit, vectorColumn.name())
+                new VectorSearch(vector, limit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitVectorSearch(vectorSearch)

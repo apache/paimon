@@ -47,6 +47,7 @@ class FileStoreWrite:
         self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
+        self.changelog_producer = self.options.changelog_producer()
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
@@ -78,6 +79,7 @@ class FileStoreWrite:
                 options=options,
                 write_cols=self.write_cols,
                 blob_consumer=self.blob_consumer,
+                changelog_producer=self.changelog_producer,
             )
         elif self._has_vector_columns() and options.with_vector_format():
             return DataVectorWriter(
@@ -95,7 +97,8 @@ class FileStoreWrite:
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
                 options=options,
-                merge_function=self._build_pk_merge_function())
+                merge_function=self._build_pk_merge_function(),
+                changelog_producer=self.changelog_producer)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -104,7 +107,8 @@ class FileStoreWrite:
                 bucket=bucket,
                 max_seq_number=seq_number,
                 options=options,
-                write_cols=self.write_cols
+                write_cols=self.write_cols,
+                changelog_producer=self.changelog_producer
             )
 
     def _build_pk_merge_function(self):
@@ -230,11 +234,13 @@ class FileStoreWrite:
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
-            if committed_files:
+            changelog_files = writer.prepare_changelog_commit()
+            if committed_files or changelog_files:
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
-                    new_files=committed_files
+                    new_files=committed_files,
+                    changelog_files=changelog_files,
                 )
                 commit_messages.append(commit_message)
         return commit_messages
@@ -243,6 +249,15 @@ class FileStoreWrite:
         """Close all data writers and clean up resources."""
         for writer in self.data_writers.values():
             writer.close()
+        self.data_writers.clear()
+
+    def abort(self):
+        """Abort all data writers and clean up files produced by this write."""
+        for writer in self.data_writers.values():
+            try:
+                writer.abort()
+            except Exception as e:
+                logger.warning("Failed to abort data writer.", exc_info=e)
         self.data_writers.clear()
 
     def _seq_number_stats(self, partition: Tuple) -> Dict[int, int]:

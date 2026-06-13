@@ -964,7 +964,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
      * Test that sort rewrite correctly eliminates DELETE entries and their corresponding ADD
      * entries. The key condition is that totalDeltaFileSize must reach manifestFullCompactionSize
      * to trigger the full compaction path inside trySortRewrite, which reads deleteEntries and
-     * passes them to sortAndRewriteSection for elimination.
+     * passes them to rewriteSection for elimination.
      *
      * <p>Design:
      *

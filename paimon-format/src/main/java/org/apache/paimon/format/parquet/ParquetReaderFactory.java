@@ -134,8 +134,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     requestedSchema.messageType);
         }
 
+        int actualBatchSize = computeBatchSize(reader, requestedSchema.messageType);
+        Preconditions.checkArgument(
+                actualBatchSize > 0,
+                "Parquet read batch size should be positive: %s",
+                actualBatchSize);
         reader.setRequestedSchema(requestedSchema.messageType);
-        WritableColumnVector[] writableVectors = createWritableVectors();
+        WritableColumnVector[] writableVectors = createWritableVectors(actualBatchSize);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),
@@ -143,7 +148,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 fileSchema,
                 requestedSchema.fields,
                 writableVectors,
-                batchSize,
+                actualBatchSize,
                 context.fileIO());
     }
 
@@ -310,7 +315,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return parquetType.withNewFields(rowGroupFields);
     }
 
-    private WritableColumnVector[] createWritableVectors() {
+    /**
+     * Compute the batch size to use for the given file. Subclasses can override this to implement
+     * dynamic per-file batch sizing based on footer metadata. The default implementation returns
+     * the static {@code batchSize} passed to the constructor.
+     */
+    protected int computeBatchSize(ParquetFileReader reader, MessageType requestedSchema) {
+        return batchSize;
+    }
+
+    private WritableColumnVector[] createWritableVectors(int batchSize) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
             columns[i] = createWritableColumnVector(batchSize, readFields[i].type());

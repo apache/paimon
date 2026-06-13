@@ -58,14 +58,29 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             FileFormatFactory.FormatContext formatContext,
             List<String> statsColumnNames,
             @Nullable Integer numBuckets) {
+        this(
+                outputStream,
+                rowType,
+                formatContext,
+                statsColumnNames,
+                numBuckets,
+                new RootAllocator(),
+                MosaicWriter::new);
+    }
+
+    MosaicRecordsWriter(
+            OutputStream outputStream,
+            RowType rowType,
+            FileFormatFactory.FormatContext formatContext,
+            List<String> statsColumnNames,
+            @Nullable Integer numBuckets,
+            BufferAllocator allocator,
+            NativeWriterFactory nativeWriterFactory) {
         this.statsColumnNames = statsColumnNames;
-        this.allocator = new RootAllocator();
+        this.allocator = allocator;
 
         int writeBatchSize = formatContext.writeBatchSize();
         long writeBatchMemory = formatContext.writeBatchMemory().getBytes();
-
-        this.arrowFormatWriter =
-                new ArrowFormatWriter(rowType, writeBatchSize, true, allocator, writeBatchMemory);
 
         WriterOptions options = new WriterOptions().zstdLevel(formatContext.zstdLevel());
         if (numBuckets != null) {
@@ -79,8 +94,22 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             options.statsColumns(statsColumnNames.toArray(new String[0]));
         }
 
-        Schema arrowSchema = arrowFormatWriter.getVectorSchemaRoot().getSchema();
-        this.nativeWriter = new MosaicWriter(outputStream, arrowSchema, options, allocator);
+        ArrowFormatWriter createdArrowWriter = null;
+        MosaicWriter createdNativeWriter = null;
+        try {
+            createdArrowWriter =
+                    ArrowFormatWriter.forBorrowedAllocator(
+                            rowType, writeBatchSize, true, allocator, writeBatchMemory);
+            Schema arrowSchema = createdArrowWriter.getVectorSchemaRoot().getSchema();
+            createdNativeWriter =
+                    nativeWriterFactory.create(outputStream, arrowSchema, options, allocator);
+        } catch (Throwable t) {
+            closeOnConstructionFailure(t, createdNativeWriter, createdArrowWriter, allocator);
+            throw rethrowUnchecked(t);
+        }
+
+        this.arrowFormatWriter = createdArrowWriter;
+        this.nativeWriter = createdNativeWriter;
     }
 
     @Override
@@ -195,5 +224,53 @@ public class MosaicRecordsWriter implements BundleFormatWriter {
             throw (Error) throwable;
         }
         throw new IOException(throwable);
+    }
+
+    private static RuntimeException rethrowUnchecked(Throwable throwable) {
+        if (throwable instanceof RuntimeException) {
+            return (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        return new RuntimeException(throwable);
+    }
+
+    private static void closeOnConstructionFailure(
+            Throwable throwable,
+            @Nullable MosaicWriter nativeWriter,
+            @Nullable ArrowFormatWriter arrowFormatWriter,
+            BufferAllocator allocator) {
+        try {
+            if (nativeWriter != null) {
+                nativeWriter.close();
+            }
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+
+        try {
+            if (arrowFormatWriter != null) {
+                arrowFormatWriter.close();
+            }
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+
+        try {
+            allocator.close();
+        } catch (Throwable t) {
+            addSuppressed(throwable, t);
+        }
+    }
+
+    @FunctionalInterface
+    interface NativeWriterFactory {
+
+        MosaicWriter create(
+                OutputStream outputStream,
+                Schema arrowSchema,
+                WriterOptions options,
+                BufferAllocator allocator);
     }
 }

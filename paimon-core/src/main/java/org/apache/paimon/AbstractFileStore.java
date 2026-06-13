@@ -566,7 +566,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public List<TagCallback> createTagCallbacks(FileStoreTable table) {
-        List<TagCallback> callbacks = new ArrayList<>(CallbackUtils.loadTagCallbacks(options));
+        List<TagCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadTagCallbacks(options, table));
         String partitionField = options.tagToPartitionField();
 
         if (partitionField != null) {

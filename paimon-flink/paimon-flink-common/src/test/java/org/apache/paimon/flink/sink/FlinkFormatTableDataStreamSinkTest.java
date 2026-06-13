@@ -68,6 +68,6 @@ class FlinkFormatTableDataStreamSinkTest {
         assertThat(sink).isInstanceOf(LineageVertexProvider.class);
         LineageVertex vertex = ((LineageVertexProvider) sink).getLineageVertex();
         assertThat(vertex.datasets()).hasSize(1);
-        assertThat(vertex.datasets().get(0).name()).isEqualTo(table.fullName());
+        assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon." + table.fullName());
     }
 }

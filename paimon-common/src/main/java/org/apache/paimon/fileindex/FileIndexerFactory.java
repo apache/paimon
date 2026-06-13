@@ -27,4 +27,10 @@ public interface FileIndexerFactory {
     String identifier();
 
     FileIndexer create(DataType type, Options options);
+
+    /**
+     * Validate whether the given data type is supported by this index. Throws {@link
+     * UnsupportedOperationException} if not supported.
+     */
+    default void validate(DataType dataType) {}
 }

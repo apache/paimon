@@ -136,11 +136,20 @@ class PaimonDatasink(_DatasinkBase):
 
             commit_messages = table_write.prepare_commit()
             commit_messages_list.extend(commit_messages)
-        finally:
-            if table_write is not None:
-                table_write.close()
 
-        return commit_messages_list
+            table_write.close()
+            table_write = None
+            return commit_messages_list
+        except Exception:
+            if table_write is not None:
+                try:
+                    table_write.abort()
+                except Exception as abort_error:
+                    logger.warning(
+                        f"Error aborting worker-side table_write: {abort_error}",
+                        exc_info=abort_error
+                    )
+            raise
 
     @staticmethod
     def _extract_write_returns(write_result: Any):

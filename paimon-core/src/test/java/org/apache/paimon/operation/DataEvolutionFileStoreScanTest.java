@@ -30,6 +30,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionFileStoreScan.EvolutionStats;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.schema.Schema;
@@ -311,6 +313,53 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
+    public void testEvolutionStatsKeepDedicatedVectorFieldAsUnknown() {
+        Schema schema = createSchema("f0", "f1", "f2");
+        TableSchema tableSchema = TableSchema.create(0L, schema);
+        schemas.put(0L, tableSchema);
+
+        ManifestEntry dataEntry =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-file.parquet",
+                        0L,
+                        new String[] {"f0", "f1"},
+                        new String[] {"f0", "f1"},
+                        createSimpleStats(
+                                GenericRow.of(1, BinaryString.fromString("a")),
+                                GenericRow.of(3, BinaryString.fromString("c")),
+                                createBinaryArray(new int[] {0, 0}),
+                                new int[] {0, 1}));
+
+        ManifestEntry vectorEntry =
+                createManifestEntryWithDifferentColsAndFileName(
+                        "data-file.vector.avro",
+                        0L,
+                        new String[] {"f2"},
+                        new String[] {"f2"},
+                        createSimpleStats(
+                                GenericRow.of(10),
+                                GenericRow.of(30),
+                                createBinaryArray(new int[] {0}),
+                                new int[] {2}));
+
+        EvolutionStats result =
+                DataEvolutionFileStoreScan.evolutionStats(
+                        tableSchema, scanTableSchema, Arrays.asList(dataEntry, vectorEntry));
+
+        DataEvolutionArray nullCounts = (DataEvolutionArray) result.nullCounts();
+        assertThat(nullCounts.isNullAt(2)).isTrue();
+
+        Predicate predicate = new PredicateBuilder(tableSchema.logicalRowType()).isNotNull(2);
+        assertThat(
+                        predicate.test(
+                                result.rowCount(),
+                                result.minValues(),
+                                result.maxValues(),
+                                result.nullCounts()))
+                .isTrue();
+    }
+
+    @Test
     public void testIntersectsRowRanges() {
         List<Range> rowRanges =
                 Arrays.asList(
@@ -366,9 +415,19 @@ public class DataEvolutionFileStoreScanTest {
 
     private ManifestEntry createManifestEntryWithDifferentCols(
             Long schemaId, String[] writeCols, String[] valueStatsCols, SimpleStats stats) {
+        return createManifestEntryWithDifferentColsAndFileName(
+                "test-file.parquet", schemaId, writeCols, valueStatsCols, stats);
+    }
+
+    private ManifestEntry createManifestEntryWithDifferentColsAndFileName(
+            String fileName,
+            Long schemaId,
+            String[] writeCols,
+            String[] valueStatsCols,
+            SimpleStats stats) {
         DataFileMeta fileMeta =
                 DataFileMeta.create(
-                        "test-file.parquet",
+                        fileName,
                         100L,
                         100L,
                         createBinaryRow(1),

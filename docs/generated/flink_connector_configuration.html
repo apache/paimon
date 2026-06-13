@@ -303,10 +303,22 @@ under the License.
             <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
         </tr>
         <tr>
+            <td><h5>sink.writer-coordinator.cache-expire-after-access</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Optional idle TTL for writer coordinator manifest cache entries. Disabled by default. When set, an entry that has not been accessed within this duration is evicted, releasing its heap. The cache stays bounded by 'sink.writer-coordinator.cache-memory' regardless of this setting.</td>
+        </tr>
+        <tr>
             <td><h5>sink.writer-coordinator.cache-memory</h5></td>
             <td style="word-wrap: break-word;">2 gb</td>
             <td>MemorySize</td>
             <td>Controls the cache memory of writer coordinator to cache manifest files in Job Manager.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-coordinator.cache-soft-values</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true (default), writer coordinator manifest cache entries are held with soft references and may be reclaimed by the GC under memory pressure. This can trigger a cache-thrash spiral where reclaimed entries are refetched, spiking heap and forcing further reclamation. Set to false to hold entries with strong references, breaking the spiral; the cache then stays bounded by weight up to 'sink.writer-coordinator.cache-memory' (size the Job Manager total heap memory to at least roughly twice that value).</td>
         </tr>
         <tr>
             <td><h5>sink.writer-coordinator.enabled</h5></td>
@@ -319,6 +331,12 @@ under the License.
             <td style="word-wrap: break-word;">32 kb</td>
             <td>MemorySize</td>
             <td>Controls the page size for one RPC request of writer coordinator.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.writer-coordinator.prefetch-manifests</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the writer coordinator eagerly reads all data manifests of the latest snapshot during refresh to warm the in-Job-Manager manifest cache. This avoids many concurrent cold manifest reads when high-parallelism writers restore at the same time, reducing Job Manager heap pressure at the cost of one full manifest read per refresh.</td>
         </tr>
         <tr>
             <td><h5>sink.writer-cpu</h5></td>

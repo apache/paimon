@@ -271,6 +271,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX));
     }
 
+    @Override
+    public void setTable(FileStoreTable table) {
+        // nothing to do
+    }
+
     private void createMetadata(
             Snapshot snapshot,
             FileChangesCollector fileChangesCollector,

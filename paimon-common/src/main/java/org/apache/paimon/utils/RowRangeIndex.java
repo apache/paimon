@@ -56,6 +56,13 @@ public class RowRangeIndex {
         return candidate < starts.length && starts[candidate] <= end;
     }
 
+    public boolean contains(Range range) {
+        int candidate = lowerBound(ends, range.from);
+        return candidate < starts.length
+                && starts[candidate] <= range.from
+                && ends[candidate] >= range.to;
+    }
+
     public List<Range> intersectedRanges(long start, long end) {
         int left = lowerBound(ends, start);
         if (left >= ranges.size()) {

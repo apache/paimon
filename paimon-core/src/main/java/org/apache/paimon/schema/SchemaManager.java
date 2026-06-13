@@ -510,7 +510,7 @@ public class SchemaManager implements Serializable {
                                             && CastExecutors.resolve(sourceRootType, targetRootType)
                                                     != null,
                                     String.format(
-                                            "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                            "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
                             return new DataField(
                                     field.id(),
@@ -609,14 +609,17 @@ public class SchemaManager implements Serializable {
                         applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
-        return new TableSchema(
-                oldTableSchema.id() + 1,
-                newSchema.fields(),
-                highestFieldId.get(),
-                newSchema.partitionKeys(),
-                newSchema.primaryKeys(),
-                newSchema.options(),
-                newSchema.comment());
+        TableSchema newTableSchema =
+                new TableSchema(
+                        oldTableSchema.id() + 1,
+                        newSchema.fields(),
+                        highestFieldId.get(),
+                        newSchema.partitionKeys(),
+                        newSchema.primaryKeys(),
+                        newSchema.options(),
+                        newSchema.comment());
+        SchemaValidation.validateTableSchema(newTableSchema);
+        return newTableSchema;
     }
 
     // gets the rootType at the defined depth

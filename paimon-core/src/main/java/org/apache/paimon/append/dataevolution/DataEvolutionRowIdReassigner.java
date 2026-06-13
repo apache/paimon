@@ -56,6 +56,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -665,12 +666,21 @@ public class DataEvolutionRowIdReassigner {
                 continue;
             }
 
+            Optional<Range> newRange = mappingIndex.map(globalIndex.rowRange());
+            if (!newRange.isPresent()) {
+                LOG.warn(
+                        "Drop global index file '{}' from table {} during row-id reassignment because its row range {} cannot be rewritten safely.",
+                        indexFile.fileName(),
+                        table.name(),
+                        globalIndex.rowRange());
+                continue;
+            }
+            Range rewrittenRange = newRange.get();
             globalIndexFileCount++;
-            Range newRange = mappingIndex.map(globalIndex.rowRange());
             GlobalIndexMeta newGlobalIndex =
                     new GlobalIndexMeta(
-                            newRange.from,
-                            newRange.to,
+                            rewrittenRange.from,
+                            rewrittenRange.to,
                             globalIndex.indexFieldId(),
                             globalIndex.extraFieldIds(),
                             globalIndex.indexMeta());

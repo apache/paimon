@@ -34,6 +34,9 @@ Ray's built-in Iceberg integration. The lower-level `TableRead.to_ray()` and
 already resolved a `(read_builder, splits)` pair or constructed a
 `table_write` via the regular pypaimon API.
 
+If your application uses Daft DataFrames and only needs Ray as Daft's execution
+backend, see [Running Daft on Ray](./daft#running-daft-on-ray).
+
 ## Read
 
 ### `read_paimon` (recommended)
@@ -386,6 +389,13 @@ columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
   Use `lit()` for literals starting with `s.` or `t.`.
 - `condition`: an optional SQL-style boolean expression. Use `s.<col>` and
   `t.<col>` to reference source and target columns.
+- Multiple clauses are evaluated in order; the first matching condition wins:
+  ```python
+  when_matched=[
+      WhenMatched(update="*", condition="s.ts > t.ts"),
+      WhenMatched(update="*"),  # fallback for unmatched rows
+  ]
+  ```
 
 **Parameters:**
 - `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a
@@ -401,6 +411,9 @@ columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
 **Returns:** `{"num_matched", "num_inserted", "num_unchanged"}`. `num_matched`
 counts the rows actually updated (after condition filtering). `num_unchanged`
 is `0` in the current implementation.
+
+For an end-to-end feature update workflow on Blob tables, see
+[Distributed Feature Backfill with Ray](../learn-paimon/scenario-guide#distributed-feature-backfill-with-ray).
 
 **Notes:**
 - Partition key columns cannot be updated by matched clauses. If the target

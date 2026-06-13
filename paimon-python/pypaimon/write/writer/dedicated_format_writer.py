@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -51,8 +51,10 @@ class DedicatedFormatWriter(DataWriter):
     CHECK_ROLLING_RECORD_CNT = 1000
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None):
-        super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols)
+                 write_cols: Optional[List[str]] = None, blob_consumer: Optional[BlobConsumer] = None,
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
+        super().__init__(table, partition, bucket, max_seq_number, options, write_cols=write_cols,
+                         changelog_producer=changelog_producer)
 
         # Determine blob columns from table schema
         self.blob_column_names = self._get_blob_columns_from_schema()
@@ -250,6 +252,7 @@ class DedicatedFormatWriter(DataWriter):
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
+            raise
         finally:
             self.closed = True
             self.pending_normal_data = None
@@ -262,7 +265,13 @@ class DedicatedFormatWriter(DataWriter):
             self.vector_writer.abort()
         if self._external_storage_writer:
             self._external_storage_writer.abort()
+        committed_non_blob_files = [
+            file_meta for file_meta in self.committed_files
+            if not DataFileMeta.is_blob_file(file_meta.file_name)
+        ]
+        self._delete_committed_files(committed_non_blob_files)
         self.pending_normal_data = None
+        self.pending_data = None
         self.committed_files.clear()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[
@@ -368,6 +377,7 @@ class DedicatedFormatWriter(DataWriter):
         normal_meta = None
         if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
             normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+            self.committed_files.append(normal_meta)
 
         blob_metas = []
         for blob_column in self.blob_file_column_names:
@@ -375,18 +385,15 @@ class DedicatedFormatWriter(DataWriter):
             if normal_meta is not None:
                 self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
+        self.committed_files.extend(blob_metas)
 
         vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
-            self.vector_writer.committed_files.clear()
             if vector_metas and normal_meta is not None:
                 self._validate_consistency(normal_meta, vector_metas, 'vector')
-
-        if normal_meta is not None:
-            self.committed_files.append(normal_meta)
-        self.committed_files.extend(blob_metas)
-        self.committed_files.extend(vector_metas)
+            self.committed_files.extend(vector_metas)
+            self.vector_writer.committed_files.clear()
 
         self.pending_normal_data = None
 
@@ -433,7 +440,7 @@ class DedicatedFormatWriter(DataWriter):
         stats_columns = self.normal_columns if metadata_stats_enabled else []
         value_stats = self._collect_value_stats(data, stats_columns)
 
-        self.sequence_generator.start = self.sequence_generator.current
+        min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
 
         return DataFileMeta.create(
             file_name=file_name,
@@ -443,8 +450,8 @@ class DedicatedFormatWriter(DataWriter):
             max_key=GenericRow([], []),
             key_stats=SimpleStats.empty_stats(),
             value_stats=value_stats,
-            min_sequence_number=-1,
-            max_sequence_number=-1,
+            min_sequence_number=min_seq,
+            max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],

@@ -108,6 +108,16 @@ class CatalogOptions:
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
     SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
         "Sync all table properties to the catalog metastore")
+    RESOLVING_FILE_IO_ENABLED = (
+        ConfigOptions.key("resolving-file-io.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable resolving file IO. When enabled, Paimon dynamically "
+            "selects the appropriate FileIO based on the URI scheme of the given path, "
+            "allowing read/write to external storage paths such as OSS or S3."
+        )
+    )
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
 
 

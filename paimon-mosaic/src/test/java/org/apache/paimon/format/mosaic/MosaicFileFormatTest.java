@@ -85,12 +85,17 @@ class MosaicFileFormatTest {
     }
 
     @Test
-    void testValidateDataFieldsMapUnsupported() {
+    void testValidateDataFieldsArraySupported() {
+        MosaicFileFormat format = createFormat();
+        RowType rowType = DataTypes.ROW(DataTypes.ARRAY(DataTypes.INT()));
+        format.validateDataFields(rowType);
+    }
+
+    @Test
+    void testValidateDataFieldsMapSupported() {
         MosaicFileFormat format = createFormat();
         RowType rowType = DataTypes.ROW(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
-        assertThatThrownBy(() -> format.validateDataFields(rowType))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("MAP");
+        format.validateDataFields(rowType);
     }
 
     @Test

@@ -2362,4 +2362,62 @@ public class SparkChainTableITCase {
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
         spark.close();
     }
+
+    @Test
+    public void testChainTableWithMultiChainKeys(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE `chain_test` (\n"
+                        + "  `t1` BIGINT COMMENT 't1',\n"
+                        + "  `t2` BIGINT COMMENT 't2',\n"
+                        + "  `t3` STRING COMMENT 't3'\n"
+                        + ") PARTITIONED BY (`dt` STRING, `hr` STRING)\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'bucket-key' = 't1',\n"
+                        + "  'primary-key' = 'dt,hr,t1',\n"
+                        + "  'partition.timestamp-pattern' = '$dt $hr:00:00',\n"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',\n"
+                        + "  'chain-table.enabled' = 'true',\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'merge-engine' = 'deduplicate',\n"
+                        + "  'sequence.field' = 't2',\n"
+                        + "  'chain-table.chain-partition-keys' = 'dt,hr'\n"
+                        + ")");
+
+        setupChainTableBranches(spark, "chain_test");
+
+        // Write snapshot branch
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_test$branch_snapshot` PARTITION (dt = '20250809', hr='01') VALUES (3, 1, '3');");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_test$branch_snapshot` PARTITION (dt = '20250809', hr='02') VALUES (4, 1, '4');");
+
+        // Write delta branch
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_test$branch_delta` PARTITION (dt = '20250810', hr='03') VALUES (5, 1, '5');");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_test$branch_delta` PARTITION (dt = '20250810', hr='05') VALUES (6, 1, '6');");
+
+        // Query dt='20250810' and hr='05'
+        // Expected: snapshot(20250809/02) + delta(20250810/05)
+        // Because chain key = (dt, hr), anchor is the nearest earlier (20250809, 02)
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` WHERE dt='20250810' AND hr='05'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[4,1,4,20250810,05]", "[5,1,5,20250810,05]", "[6,1,6,20250810,05]");
+
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
+        spark.close();
+    }
 }

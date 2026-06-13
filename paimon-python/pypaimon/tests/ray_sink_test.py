@@ -65,6 +65,16 @@ class RaySinkTest(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
+    @staticmethod
+    def _data_files_under(table):
+        table_path = table.file_io.to_filesystem_path(table.table_path)
+        data_files = []
+        for root, _, files in os.walk(table_path):
+            for file_name in files:
+                if file_name.endswith(('.parquet', '.blob')) or '.vector.' in file_name:
+                    data_files.append(os.path.join(root, file_name))
+        return data_files
+
     def test_init_and_serialization(self):
         """Test initialization, serialization, and table name."""
         datasink = PaimonDatasink(self.table, overwrite=False)
@@ -272,7 +282,66 @@ class RaySinkTest(unittest.TestCase):
             })
             with self.assertRaises(Exception):
                 datasink.write([data_table], ctx)
-            mock_write.close.assert_called_once()
+            mock_write.abort.assert_called_once()
+            mock_write.close.assert_not_called()
+
+        with patch.object(self.table, 'new_batch_write_builder') as mock_builder:
+            mock_write_builder = Mock()
+            mock_write_builder.overwrite.return_value = mock_write_builder
+            mock_write = Mock()
+            mock_write.prepare_commit.return_value = [Mock(spec=CommitMessage)]
+            mock_write.close.side_effect = Exception("Close error")
+            mock_write_builder.new_write.return_value = mock_write
+            mock_builder.return_value = mock_write_builder
+
+            data_table = pa.table({
+                'id': [1],
+                'name': ['Alice'],
+                'value': [1.1]
+            })
+            with self.assertRaises(Exception):
+                datasink.write([data_table], ctx)
+            mock_write.prepare_commit.assert_called_once()
+            mock_write.abort.assert_called_once()
+
+    def test_write_does_not_return_prepared_messages_when_dedicated_close_aborts(self):
+        from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        table_identifier = "test_db.test_blob_close_failure"
+        self.catalog.create_table(table_identifier, schema, False)
+        table = self.catalog.get_table(table_identifier)
+
+        datasink = PaimonDatasink(table, overwrite=False)
+        datasink.on_write_start()
+        ctx = Mock(spec=TaskContext)
+        data_table = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'payload': [b'a', b'b', b'c'],
+        }, schema=pa_schema)
+
+        original_close_current_writers = DedicatedFormatWriter._close_current_writers
+        close_current_calls = {'count': 0}
+
+        def fail_during_close(writer):
+            close_current_calls['count'] += 1
+            if close_current_calls['count'] == 1:
+                return original_close_current_writers(writer)
+            raise RuntimeError("Close error")
+
+        with patch.object(DedicatedFormatWriter, '_close_current_writers', fail_during_close):
+            with self.assertRaisesRegex(RuntimeError, "Close error"):
+                datasink.write([data_table], ctx)
+
+        self.assertEqual(close_current_calls['count'], 2)
+        self.assertEqual([], self._data_files_under(table))
 
     def test_on_write_complete(self):
         from ray.data.datasource.datasink import WriteResult

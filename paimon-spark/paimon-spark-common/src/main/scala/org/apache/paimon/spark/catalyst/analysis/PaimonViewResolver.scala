@@ -23,7 +23,7 @@ import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.catalog.SupportView
 import org.apache.paimon.view.View
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{PaimonUtils, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal, UnresolvedRelation, UnresolvedTableOrView}
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, UpCast}
 import org.apache.spark.sql.catalyst.parser.ParseException
@@ -91,13 +91,7 @@ case class PaimonViewResolver(spark: SparkSession)
     )
     try {
       CurrentOrigin.withOrigin(origin) {
-        try {
-          spark.sessionState.sqlParser.parseQuery(viewText)
-        } catch {
-          // For compatibility with Spark 3.2 and below
-          case _: NoSuchMethodError =>
-            spark.sessionState.sqlParser.parsePlan(viewText)
-        }
+        PaimonUtils.parseQueryCompat(spark.sessionState.sqlParser, viewText)
       }
     } catch {
       case _: ParseException =>

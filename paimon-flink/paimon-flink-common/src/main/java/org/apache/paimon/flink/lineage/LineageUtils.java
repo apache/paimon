@@ -19,7 +19,13 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.jdbc.JdbcCatalogFactory;
+import org.apache.paimon.jdbc.JdbcCatalogOptions;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -45,7 +51,7 @@ import java.util.stream.Collectors;
 public class LineageUtils {
 
     private static final String PAIMON_DATASET_PREFIX = "paimon://";
-    private static final String CATALOG_KEY = "catalog-key";
+    private static final String DEFAULT_CATALOG_IDENTIFIER = FlinkCatalogFactory.IDENTIFIER;
 
     private static final Set<String> PAIMON_OPTION_KEYS =
             CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
@@ -87,6 +93,25 @@ public class LineageUtils {
         return PAIMON_DATASET_PREFIX + CoreOptions.path(table.options());
     }
 
+    @VisibleForTesting
+    static String resolveNameByMetastore(Table table, @Nullable String defaultName) {
+        CatalogContext ctx = catalogContext(table);
+        if (ctx != null) {
+            Options catalogOptions = ctx.options();
+            // If jdbc metastore is used, use catalog-key as the catalog identifier.
+            if (JdbcCatalogFactory.IDENTIFIER.equals(
+                    catalogOptions.get(CatalogOptions.METASTORE))) {
+                String catalogKeyValue = catalogOptions.get(JdbcCatalogOptions.CATALOG_KEY);
+                if (!StringUtils.isNullOrWhitespaceOnly(catalogKeyValue)) {
+                    return catalogKeyValue + "." + table.fullName();
+                }
+            }
+        }
+        return defaultName != null
+                ? defaultName
+                : DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
+    }
+
     /**
      * Creates a {@link SourceLineageVertex} for a Paimon source table.
      *
@@ -98,22 +123,13 @@ public class LineageUtils {
             String name, boolean isBounded, Table table) {
         LineageDataset dataset =
                 new PaimonLineageDataset(
-                        name, getNamespace(table), buildConfigMap(table), table.rowType());
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table),
+                        buildConfigMap(table),
+                        table.rowType());
         Boundedness boundedness =
                 isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
         return new PaimonSourceLineageVertex(boundedness, Collections.singletonList(dataset));
-    }
-
-    private static String getFullName(Table table) {
-        String name = table.fullName();
-        CatalogContext ctx = catalogContext(table);
-        if (ctx != null) {
-            String catalogKey = ctx.options().toMap().get(CATALOG_KEY);
-            if (!StringUtils.isNullOrWhitespaceOnly(catalogKey)) {
-                name = catalogKey + "." + name;
-            }
-        }
-        return name;
     }
 
     /**
@@ -124,7 +140,7 @@ public class LineageUtils {
      * @param table the Paimon table
      */
     public static SourceLineageVertex sourceLineageVertex(boolean isBounded, Table table) {
-        return sourceLineageVertex(getFullName(table), isBounded, table);
+        return sourceLineageVertex(null, isBounded, table);
     }
 
     /**
@@ -136,7 +152,10 @@ public class LineageUtils {
     public static LineageVertex sinkLineageVertex(String name, Table table) {
         LineageDataset dataset =
                 new PaimonLineageDataset(
-                        name, getNamespace(table), buildConfigMap(table), table.rowType());
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table),
+                        buildConfigMap(table),
+                        table.rowType());
         return new PaimonSinkLineageVertex(Collections.singletonList(dataset));
     }
 
@@ -147,6 +166,6 @@ public class LineageUtils {
      * @param table the Paimon table
      */
     public static LineageVertex sinkLineageVertex(Table table) {
-        return sinkLineageVertex(getFullName(table), table);
+        return sinkLineageVertex(null, table);
     }
 }

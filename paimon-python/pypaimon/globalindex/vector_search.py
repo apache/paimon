@@ -19,7 +19,7 @@
 
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 import numpy as np
 
 
@@ -33,12 +33,14 @@ class VectorSearch:
         limit: Maximum number of results to return
         field_name: Name of the vector field to search
         include_row_ids: Optional bitmap of row IDs to include in search
+        options: Query-time options for vector indexes
     """
 
     vector: Union[List[float], np.ndarray]
     limit: int
     field_name: str
     include_row_ids: Optional['RoaringBitmap64'] = field(default=None)
+    options: Optional[Dict[str, str]] = field(default=None)
 
     def __post_init__(self):
         if self.vector is None:
@@ -51,6 +53,10 @@ class VectorSearch:
         # Convert list to numpy array if needed
         if isinstance(self.vector, list):
             self.vector = np.array(self.vector, dtype=np.float32)
+        if self.options is None:
+            self.options = {}
+        else:
+            self.options = dict(self.options)
 
     def with_include_row_ids(self, include_row_ids: 'RoaringBitmap64') -> 'VectorSearch':
         """Return a new VectorSearch with the specified include_row_ids."""
@@ -58,7 +64,8 @@ class VectorSearch:
             vector=self.vector,
             limit=self.limit,
             field_name=self.field_name,
-            include_row_ids=include_row_ids
+            include_row_ids=include_row_ids,
+            options=self.options
         )
 
     def offset_range(self, from_: int, to: int) -> 'VectorSearch':
@@ -80,7 +87,8 @@ class VectorSearch:
                 vector=self.vector,
                 limit=self.limit,
                 field_name=self.field_name,
-                include_row_ids=offset_bitmap
+                include_row_ids=offset_bitmap,
+                options=self.options
             )
         return self
 

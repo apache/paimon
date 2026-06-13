@@ -31,7 +31,7 @@ import pytest
 pypaimon = pytest.importorskip("pypaimon")
 daft = pytest.importorskip("daft")
 
-from pypaimon.daft.daft_compat import has_file_range_reads
+from pypaimon.daft.daft_compat import file_range_position_field, has_file_range_reads
 from pypaimon.daft.daft_catalog import PaimonTable
 from pypaimon.daft.daft_datasink import PaimonDataSink
 from pypaimon.daft.daft_paimon import _read_table, _write_table
@@ -483,8 +483,9 @@ class TestBlobType:
             assert isinstance(ref, daft.File)
             assert isinstance(ref.path, str)
             assert ".blob" in ref.path
-            assert ref.offset is not None
-            assert ref.length is not None
+            assert getattr(ref, file_range_position_field()) is not None
+            file_size = ref.size() if callable(getattr(ref, "size", None)) else ref.length
+            assert file_size is not None
 
 
 # ---------------------------------------------------------------------------

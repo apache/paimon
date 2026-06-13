@@ -143,6 +143,7 @@ class DataVectorWriter(DataWriter):
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
+            raise
         finally:
             self.closed = True
             self.pending_normal_data = None
@@ -151,7 +152,7 @@ class DataVectorWriter(DataWriter):
         if self.vector_writer is not None:
             self.vector_writer.abort()
         self.pending_normal_data = None
-        self.committed_files.clear()
+        super().abort()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
         normal_data = (
@@ -187,11 +188,11 @@ class DataVectorWriter(DataWriter):
 
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
-            self.vector_writer.committed_files.clear()
             if vector_metas:
                 if normal_meta is not None:
                     self._validate_consistency(normal_meta, vector_metas)
                 self.committed_files.extend(vector_metas)
+            self.vector_writer.committed_files.clear()
 
         self.pending_normal_data = None
 
@@ -226,6 +227,8 @@ class DataVectorWriter(DataWriter):
         stats_columns = self.normal_columns if metadata_stats_enabled else []
         value_stats = self._collect_value_stats(data, stats_columns)
 
+        min_seq, max_seq = self._append_file_sequence_range(data.num_rows)
+
         return DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
@@ -234,8 +237,8 @@ class DataVectorWriter(DataWriter):
             max_key=GenericRow([], []),
             key_stats=SimpleStats.empty_stats(),
             value_stats=value_stats,
-            min_sequence_number=-1,
-            max_sequence_number=-1,
+            min_sequence_number=min_seq,
+            max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],

@@ -36,6 +36,7 @@ from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
@@ -353,6 +354,47 @@ class VectorReaderFactoryTest(unittest.TestCase):
                 self.assertIsInstance(reader, LuminaVectorGlobalIndexReader)
             finally:
                 reader.close()
+
+
+class VectorOptionsTest(unittest.TestCase):
+    """VectorSearch options compatibility."""
+
+    def test_offset_range_preserves_options(self):
+        search = VectorSearch(
+            vector=[1.0, 0.0],
+            limit=1,
+            field_name="embedding",
+            options={"ivf.nprobe": "16", "hnsw.ef_search": "64"},
+        )
+        include_row_ids = RoaringBitmap64()
+        include_row_ids.add_range(100, 200)
+
+        offset = search.with_include_row_ids(include_row_ids).offset_range(60, 150)
+
+        self.assertEqual(
+            {"ivf.nprobe": "16", "hnsw.ef_search": "64"},
+            offset.options,
+        )
+
+
+class LuminaOptionsTest(unittest.TestCase):
+    """Lumina query-time option compatibility."""
+
+    def test_query_options_override_index_options(self):
+        from pypaimon.globalindex.lumina.lumina_vector_global_index_reader import (
+            _merge_options,
+        )
+
+        merged = _merge_options(
+            {"diskann.search.list_size": "16", "search.parallel_number": "2"},
+            {"diskann.search.list_size": "32", "index.dimension": "4"},
+            {"diskann.search.list_size": "64", "hnsw.ef_search": "128"},
+        )
+
+        self.assertEqual("64", merged["diskann.search.list_size"])
+        self.assertEqual("2", merged["search.parallel_number"])
+        self.assertEqual("4", merged["index.dimension"])
+        self.assertEqual("128", merged["hnsw.ef_search"])
 
 
 class TantivyFullTextIndexOptionsTest(unittest.TestCase):
@@ -882,6 +924,39 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(
             {"oss://bucket/vec-0.index", "oss://bucket/vec-1.index"},
             seen_paths)
+
+    def test_read_threads_options_to_vector_search(self):
+        scan_plan = self._builder().new_vector_search_scan().scan()
+
+        captured_searches = []
+
+        def _capture_create(index_type, file_io, index_path,
+                            index_io_meta_list, options=None):
+            class _FakeReader:
+                def visit_vector_search(self_inner, vs):
+                    captured_searches.append(vs)
+                    return _completed_future(ScoredGlobalIndexResult.create_empty())
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_capture_create):
+            (self._builder()
+             .with_option("ivf.nprobe", "16")
+             .with_options({"hnsw.ef_search": "64"})
+             .new_vector_search_read()
+             .read_plan(scan_plan))
+
+        self.assertEqual(2, len(captured_searches))
+        for search in captured_searches:
+            self.assertEqual(
+                {"ivf.nprobe": "16", "hnsw.ef_search": "64"},
+                search.options,
+            )
 
     def test_scanner_threads_external_path_to_btree_reader(self):
         """GlobalIndexScanner (backing _pre_filter) must thread external_path
