@@ -1100,7 +1100,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             table_update.update_by_arrow_with_row_id(update_data)
         self.assertIn('blob', str(ctx.exception).lower())
 
-    def test_update_blob_and_normal_columns_rejected(self):
+    def test_update_blob_and_normal_columns_filters_blob(self):
         from pypaimon import Schema
 
         pa_schema = pa.schema([
@@ -1116,8 +1116,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 'data-evolution.enabled': 'true'
             }
         )
-        self.catalog.create_table('test_db.blob_update_mixed_rejected', schema, False)
-        table = self.catalog.get_table('test_db.blob_update_mixed_rejected')
+        self.catalog.create_table('test_db.blob_update_mixed_filtered', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_mixed_filtered')
 
         initial = pa.Table.from_pydict({
             'id': [1, 2, 3],
@@ -1135,12 +1135,17 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         table_update = update_builder.new_update().with_update_type(['name', 'blob_data'])
         update_data = pa.Table.from_pydict({
             '_ROW_ID': pa.array([1], type=pa.int64()),
-            'name': ['updated'],
+            'name': ['b_updated'],
             'blob_data': pa.array([b'updated-blob'], type=pa.large_binary()),
         })
-        with self.assertRaises(ValueError) as ctx:
-            table_update.update_by_arrow_with_row_id(update_data)
-        self.assertIn('blob', str(ctx.exception).lower())
+        msgs = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(msgs)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        by_id = {row['id']: row for row in result.to_pylist()}
+        self.assertEqual(by_id[2]['name'], 'b_updated')
+        self.assertEqual(by_id[2]['blob_data'], b'blob-2')
 
     def test_update_normal_columns_on_blob_table(self):
         from pypaimon import Schema

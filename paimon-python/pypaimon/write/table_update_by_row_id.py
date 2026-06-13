@@ -16,8 +16,11 @@
 # under the License.
 
 import bisect
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pyarrow as pa
@@ -169,9 +172,14 @@ class TableUpdateByRowId:
 
         blob_cols = [c for c in column_names if self._is_blob_column(c)]
         if blob_cols:
-            raise ValueError(
-                f"update-by-row-id does not support updating blob columns: {blob_cols}. "
-                f"Remove blob columns from the update list.")
+            logger.warning(
+                "update-by-row-id does not support updating blob columns, "
+                "ignoring: %s", blob_cols)
+            column_names = [c for c in column_names if c not in blob_cols]
+            if not column_names:
+                raise ValueError(
+                    "No non-blob columns to update after filtering blob columns: "
+                    f"{blob_cols}")
 
         for col_name in column_names:
             if col_name not in self.table.field_names:
