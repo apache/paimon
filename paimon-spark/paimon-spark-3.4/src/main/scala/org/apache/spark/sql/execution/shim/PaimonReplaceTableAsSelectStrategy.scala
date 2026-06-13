@@ -152,9 +152,10 @@ private[shim] object PaimonReplaceTableStrategyHelper {
 
   /** @see PaimonReplaceTableStrategyHelper in paimon-spark-common for full documentation. */
   def isV1SaveAsTableOverwrite: Boolean = {
-    Thread.currentThread().getStackTrace.exists { e =>
-      val cls = e.getClassName
-      cls.contains("DataFrameWriter") && !cls.contains("DataFrameWriterV2")
+    Thread.currentThread().getStackTrace.exists {
+      e =>
+        val cls = e.getClassName
+        cls.contains("DataFrameWriter") && !cls.contains("DataFrameWriterV2")
     }
   }
 
