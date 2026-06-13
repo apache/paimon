@@ -1236,6 +1236,8 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(by_id[2]['name'], 'b_updated')
         self.assertEqual(by_id[2]['blob_data'], b'blob-2')
         self.assertEqual(by_id[1]['blob_data'], b'blob-1')
+        self.assertEqual(by_id[4]['name'], 'd_new')
+        self.assertIsNone(by_id[4]['blob_data'])
 
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
