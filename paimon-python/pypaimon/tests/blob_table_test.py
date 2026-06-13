@@ -1188,6 +1188,55 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(by_id[2]['name'], 'b_updated')
         self.assertEqual(by_id[2]['blob_data'], b'blob-2')
 
+    def test_upsert_normal_columns_on_blob_table(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_upsert_normal', schema, False)
+        table = self.catalog.get_table('test_db.blob_upsert_normal')
+
+        initial = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+            'blob_data': [b'blob-1', b'blob-2', b'blob-3'],
+        }, schema=pa_schema)
+
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(initial)
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        upsert_data = pa.Table.from_pydict({
+            'id': [2, 4],
+            'name': ['b_updated', 'd_new'],
+        })
+
+        ub = table.new_batch_write_builder()
+        tu = ub.new_update().with_update_type(['name'])
+        msgs = tu.upsert_by_arrow_with_key(upsert_data, upsert_keys=['id'])
+        ub.new_commit().commit(msgs)
+
+        table = self.catalog.get_table('test_db.blob_upsert_normal')
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        by_id = {row['id']: row for row in result.to_pylist()}
+        self.assertEqual(by_id[2]['name'], 'b_updated')
+        self.assertEqual(by_id[2]['blob_data'], b'blob-2')
+        self.assertEqual(by_id[1]['blob_data'], b'blob-1')
+
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema
