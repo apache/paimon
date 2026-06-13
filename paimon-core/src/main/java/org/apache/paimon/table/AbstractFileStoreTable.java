@@ -378,7 +378,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
 
         return copy(newTableSchema);
     }
@@ -387,9 +387,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public FileStoreTable copyWithLatestSchema() {
         Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
-            Map<String, String> options = tableSchema.options();
-            TableSchema newTableSchema = optionalLatestSchema.get();
-            newTableSchema = newTableSchema.copy(options);
+            TableSchema latestSchema = optionalLatestSchema.get();
+            Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
+            mergedOptions.putAll(tableSchema.options());
+            TableSchema newTableSchema = latestSchema.copy(mergedOptions);
             SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);
         } else {

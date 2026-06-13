@@ -25,7 +25,6 @@ from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -40,10 +39,10 @@ class DataFileBatchReader(RecordBatchReader):
                  first_row_id: int,
                  row_tracking_enabled: bool,
                  system_fields: dict,
-                 blob_as_descriptor: bool = False,
-                 blob_descriptor_fields: Optional[set] = None,
                  file_io: Optional[FileIO] = None,
-                 row_id_offsets: Optional[List[int]] = None):
+                 row_id_offsets: Optional[List[int]] = None,
+                 file_data_fields: Optional[List[DataField]] = None,
+                 target_data_fields: Optional[List[DataField]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -55,19 +54,58 @@ class DataFileBatchReader(RecordBatchReader):
         self._row_id_cursor = 0
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
-        self.blob_as_descriptor = blob_as_descriptor
-        self.blob_descriptor_fields = blob_descriptor_fields or set()
         self.file_io = file_io
-        self.blob_field_names = {
-            field.name
-            for field in fields
-            if hasattr(field.type, 'type') and field.type.type == 'BLOB'
-        }
-        self.descriptor_blob_fields = {
-            field_name
-            for field_name in self.blob_descriptor_fields
-            if field_name in self.blob_field_names
-        }
+        # Per-file field-id normalization: map the physically-read columns
+        # (the file's own field order/names) onto the latest read target by
+        # field id, padding missing ids with NULL. ``None`` when there is no
+        # evolution to reconcile (identity) -- the common path stays zero-copy.
+        self._normalize_positions, self._normalize_names = \
+            self._build_normalize_plan(file_data_fields, target_data_fields)
+
+    @staticmethod
+    def _build_normalize_plan(file_data_fields, target_data_fields):
+        """Build a per-file field-id alignment plan.
+
+        Returns ``(positions, names)`` where ``positions[i]`` is the column
+        index in the physically-read batch carrying ``target_data_fields[i]``
+        (matched by field id), or -1 if the file does not contain that id (pad
+        NULL). ``names[i]`` is the latest target name. Returns ``(None, None)``
+        when the plan is the identity (no evolution), so the caller skips
+        normalization and stays zero-copy.
+        """
+        if file_data_fields is None or target_data_fields is None:
+            return None, None
+        file_id_to_pos = {f.id: i for i, f in enumerate(file_data_fields)}
+        positions = []
+        names = []
+        # Identity only when every target maps to the same physical position
+        # AND already carries the same name -- a rename keeps the position but
+        # changes the name, which still requires a relabel pass.
+        identity = len(file_data_fields) == len(target_data_fields)
+        for i, target in enumerate(target_data_fields):
+            pos = file_id_to_pos.get(target.id, -1)
+            positions.append(pos)
+            names.append(target.name)
+            if pos != i or (pos >= 0 and file_data_fields[pos].name != target.name):
+                identity = False
+        if identity:
+            return None, None
+        return positions, names
+
+    def _normalize_batch(self, record_batch: RecordBatch) -> RecordBatch:
+        """Reorder/pad the physically-read batch onto the latest read target by
+        field id, and relabel columns to the latest names. Missing ids become
+        all-NULL columns; types are reconciled later by _align_batch_to_read_schema."""
+        if self._normalize_positions is None:
+            return record_batch
+        num_rows = record_batch.num_rows
+        arrays = []
+        for pos in self._normalize_positions:
+            if pos < 0:
+                arrays.append(pa.nulls(num_rows))
+            else:
+                arrays.append(record_batch.column(pos))
+        return pa.RecordBatch.from_arrays(arrays, names=self._normalize_names)
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -76,8 +114,19 @@ class DataFileBatchReader(RecordBatchReader):
             record_batch = self.format_reader.read_arrow_batch()
         if record_batch is None:
             return None
+        record_batch = self._normalize_batch(record_batch)
 
         if self.partition_info is None and self.index_mapping is None:
+            # A file written under an older schema (e.g. before an INT -> BIGINT
+            # promotion or a DECIMAL precision change) yields columns in the
+            # data file's original types. Without reordering or partition padding
+            # to rebuild the batch, those old types would otherwise leak through
+            # here -- returning a type that depends on whether this read happens
+            # to span newer-schema files, and failing to concatenate when it
+            # does. Align them to the current read schema, mirroring the rebuild
+            # path below.
+            record_batch = self._align_batch_to_read_schema(
+                record_batch.schema.names, record_batch.columns)
             if self.row_tracking_enabled and self.system_fields:
                 record_batch = self._assign_row_tracking(record_batch)
             return record_batch
@@ -122,87 +171,41 @@ class DataFileBatchReader(RecordBatchReader):
             inter_arrays = mapped_arrays
             inter_names = mapped_names
 
-        # to contains 'not null' property
-        final_fields = []
-        for i, name in enumerate(inter_names):
-            array = inter_arrays[i]
-            target_field = self.schema_map.get(name)
-            if not target_field:
-                target_field = pa.field(name, array.type)
-            final_fields.append(target_field)
-        final_schema = pa.schema(final_fields)
-        record_batch = pa.RecordBatch.from_arrays(inter_arrays, schema=final_schema)
+        # Rebuild the batch typed by the read schema (carries 'not null' and
+        # aligns old-schema column types).
+        record_batch = self._align_batch_to_read_schema(inter_names, inter_arrays)
 
         # Handle row tracking fields
         if self.row_tracking_enabled and self.system_fields:
             record_batch = self._assign_row_tracking(record_batch)
 
-        record_batch = self._convert_descriptor_stored_blob_columns(record_batch)
-
         return record_batch
 
-    def _convert_descriptor_stored_blob_columns(self, record_batch: RecordBatch) -> RecordBatch:
-        if isinstance(self.format_reader, FormatBlobReader):
-            return record_batch
-        if not self.descriptor_blob_fields:
-            return record_batch
+    def _align_batch_to_read_schema(self, names: List[str], arrays: list) -> RecordBatch:
+        """Build a record batch for ``names``/``arrays`` typed by the read schema.
 
-        schema_names = set(record_batch.schema.names)
-        target_fields = [f for f in self.descriptor_blob_fields if f in schema_names]
-        if not target_fields:
-            return record_batch
+        Each known field is cast to the current read schema's type, which also
+        carries the 'not null' property; unknown columns keep the array's own
+        type. Columns whose type already matches are reused as-is, keeping the
+        common (non-evolution) path zero-copy.
 
-        arrays = list(record_batch.columns)
-        for field_name in target_fields:
-            field_idx = record_batch.schema.get_field_index(field_name)
-            values = record_batch.column(field_idx).to_pylist()
-
-            if self.blob_as_descriptor:
-                converted = [self._normalize_blob_cell(v) for v in values]
-            else:
-                converted = [self._blob_cell_to_data(v) for v in values]
-            arrays[field_idx] = pa.array(converted, type=pa.large_binary())
-
-        return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
-
-    @staticmethod
-    def _normalize_blob_cell(value):
-        if value is None:
-            return None
-        if hasattr(value, 'as_py'):
-            value = value.as_py()
-        if isinstance(value, str):
-            value = value.encode('utf-8')
-        if isinstance(value, bytearray):
-            value = bytes(value)
-        return value
-
-    def _blob_cell_to_data(self, value):
-        value = self._normalize_blob_cell(value)
-        if value is None:
-            return None
-
-        if not isinstance(value, bytes):
-            return value
-
-        descriptor = self._deserialize_descriptor_or_none(value)
-        if descriptor is None:
-            return value
-
-        try:
-            uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
-            blob = Blob.from_descriptor(uri_reader, descriptor)
-            return blob.to_data()
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to read blob bytes from descriptor URI while converting blob value."
-            ) from e
-
-    @staticmethod
-    def _deserialize_descriptor_or_none(raw: bytes):
-        if not BlobDescriptor.is_blob_descriptor(raw):
-            return None
-        return BlobDescriptor.deserialize(raw)
+        Casts use ``safe=False`` to match Java ``CastExecutors`` semantics for
+        the read-time conversions a user-approved schema evolution implies
+        (e.g. DECIMAL scale-down or DOUBLE -> INT truncate rather than raise).
+        Evolution legality is the writer's concern (``DataTypeCasts``); the read
+        path only materializes the result.
+        """
+        out_arrays = []
+        out_fields = []
+        for name, array in zip(names, arrays):
+            target_field = self.schema_map.get(name)
+            if target_field is None:
+                target_field = pa.field(name, array.type)
+            elif array.type != target_field.type:
+                array = array.cast(target_field.type, safe=False)
+            out_arrays.append(array)
+            out_fields.append(target_field)
+        return pa.RecordBatch.from_arrays(out_arrays, schema=pa.schema(out_fields))
 
     def _assign_row_tracking(self, record_batch: RecordBatch) -> RecordBatch:
         """Assign row tracking meta fields (_ROW_ID and _SEQUENCE_NUMBER)."""

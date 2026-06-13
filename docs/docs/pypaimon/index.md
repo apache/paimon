@@ -50,3 +50,18 @@ pip3 install dist/*.tar.gz
 ```
 
 The command will install the package and core dependencies to your local Python environment.
+
+## Optional Dependencies
+
+PyPaimon supports multiple file formats via optional extras:
+
+```shell
+# Mosaic format (columnar-bucket hybrid, optimized for wide tables)
+pip install pypaimon[mosaic]
+
+# Lance format (optimized for ML / vector search)
+pip install pypaimon[lance]
+
+# Vortex format (requires Python >= 3.11)
+pip install pypaimon[vortex]
+```

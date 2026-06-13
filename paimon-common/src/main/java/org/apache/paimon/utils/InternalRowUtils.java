@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -30,6 +31,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.NestedRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
@@ -42,6 +44,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 
 import javax.annotation.Nullable;
 
@@ -75,11 +78,11 @@ public class InternalRowUtils {
                 if (((InternalArray) data1).size() != ((InternalArray) data2).size()) {
                     return false;
                 }
-                ArrayType arrayType = (ArrayType) dataType;
+                DataType elementType = arrayOrVectorElementType(dataType);
                 for (int i = 0; i < ((InternalArray) data1).size(); i++) {
-                    Object value1 = get((InternalArray) data1, i, arrayType.getElementType());
-                    Object value2 = get((InternalArray) data2, i, arrayType.getElementType());
-                    if (!equals(value1, value2, arrayType.getElementType())) {
+                    Object value1 = get((InternalArray) data1, i, elementType);
+                    Object value2 = get((InternalArray) data2, i, elementType);
+                    if (!equals(value1, value2, elementType)) {
                         return false;
                     }
                 }
@@ -147,11 +150,11 @@ public class InternalRowUtils {
                 result = 37 * result + hash(v, rowType.getTypeAt(i));
             }
         } else if (data instanceof InternalArray) {
-            ArrayType arrayType = (ArrayType) dataType;
+            DataType elementType = arrayOrVectorElementType(dataType);
             int len = ((InternalArray) data).size();
             for (int i = 0; i < len; i++) {
-                Object v = get((InternalArray) data, i, arrayType.getElementType());
-                result = 37 * result + hash(v, arrayType.getElementType());
+                Object v = get((InternalArray) data, i, elementType);
+                result = 37 * result + hash(v, elementType);
             }
         } else if (data instanceof InternalMap) {
             MapType mapType = (MapType) dataType;
@@ -261,6 +264,9 @@ public class InternalRowUtils {
         } else if (o instanceof InternalRow) {
             return copyInternalRow((InternalRow) o, (RowType) type);
         } else if (o instanceof InternalArray) {
+            if (type instanceof VectorType) {
+                return copyVector((InternalVector) o, (VectorType) type);
+            }
             return copyArray((InternalArray) o, ((ArrayType) type).getElementType());
         } else if (o instanceof InternalMap) {
             if (type instanceof MapType) {
@@ -280,6 +286,20 @@ public class InternalRowUtils {
             return ((Decimal) o).copy();
         }
         return o;
+    }
+
+    private static DataType arrayOrVectorElementType(DataType dataType) {
+        return dataType instanceof VectorType
+                ? ((VectorType) dataType).getElementType()
+                : ((ArrayType) dataType).getElementType();
+    }
+
+    private static InternalVector copyVector(InternalVector from, VectorType vectorType) {
+        if (from instanceof BinaryVector) {
+            return ((BinaryVector) from).copy();
+        }
+
+        return BinaryVector.fromInternalArray(from, vectorType.getElementType());
     }
 
     public static Object get(DataGetters dataGetters, int pos, DataType fieldType) {

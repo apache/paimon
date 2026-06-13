@@ -1,3 +1,21 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
 <table class="configuration table table-bordered">
     <thead>
         <tr>
@@ -66,13 +84,19 @@
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, merge the data schema and the table schema automatically before write data.</td>
+            <td>If true, evolve the table schema to accept new columns from the incoming data. Existing column types are preserved and incoming values are cast to them; to also widen existing types, enable 'write.merge-schema.type-widening'.</td>
         </tr>
         <tr>
             <td><h5>write.merge-schema.explicit-cast</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
+            <td>Only effective when 'write.merge-schema.type-widening' is true. If true, also allow lossy type changes between compatible types (e.g. BIGINT -&gt; INT, STRING -&gt; DATE).</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.type-widening</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Only effective when 'write.merge-schema' is true. If true, widen an existing column type when the incoming data has a wider compatible type (e.g. INT -&gt; BIGINT, DECIMAL precision increase). Lossy changes are still rejected unless 'write.merge-schema.explicit-cast' is also true.</td>
         </tr>
         <tr>
             <td><h5>write.use-v2-write</h5></td>

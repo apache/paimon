@@ -461,7 +461,10 @@ Output:
   4  Data lake platforms like Paimon handle large-...
 ```
 
-**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index](../append-table/global-index) for how to create full-text indexes.
+**Note:** The table must have a Tantivy full-text index built on the target column. PyPaimon uses
+the tokenizer settings stored in the index metadata; ngram full-text indexes require a `tantivy-py`
+package with custom tokenizer support, and jieba full-text indexes require the Python `jieba`
+package. See [Global Index](../multimodal-table/global-index) for how to create full-text indexes.
 
 ### Table Drop
 

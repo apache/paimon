@@ -151,6 +151,11 @@ public class SortBufferWriteBuffer implements WriteBuffer {
     }
 
     @Override
+    public boolean isEmpty() {
+        return buffer.isEmpty();
+    }
+
+    @Override
     public long memoryOccupancy() {
         return buffer.getOccupancy();
     }

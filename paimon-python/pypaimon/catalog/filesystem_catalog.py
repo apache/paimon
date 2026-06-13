@@ -142,11 +142,11 @@ class FileSystemCatalog(Catalog):
         table_schema = self.get_table_schema(identifier)
 
         # Create catalog environment for filesystem catalog
-        # Filesystem catalog doesn't support version management by default
+        from pypaimon.catalog.filesystem_catalog_loader import FileSystemCatalogLoader
         catalog_environment = CatalogEnvironment(
             identifier=identifier,
-            uuid=None,  # Filesystem catalog doesn't track table UUIDs
-            catalog_loader=None,  # No catalog loader for filesystem
+            uuid=None,
+            catalog_loader=FileSystemCatalogLoader(self.catalog_context),
             supports_version_management=False
         )
 

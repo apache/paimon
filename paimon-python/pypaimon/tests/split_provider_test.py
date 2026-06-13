@@ -227,6 +227,44 @@ class SplitProviderTest(unittest.TestCase):
         rows = tr.to_arrow(provider.splits()).to_pylist()
         self.assertEqual([r['id'] for r in rows], [11])
 
+    def test_dynamic_options_blob_as_descriptor(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        identifier = 'default.split_provider_blob_desc'
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'blob-as-descriptor': 'false',
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        catalog = CatalogFactory.create(self.catalog_options)
+        catalog.create_table(identifier, schema, False)
+
+        provider = CatalogSplitProvider(
+            table_identifier=identifier,
+            catalog_options=self.catalog_options,
+            dynamic_options={'blob-as-descriptor': 'true'},
+        )
+        table = provider.table()
+        self.assertTrue(table.options.blob_as_descriptor())
+
+    def test_dynamic_options_rejects_tt_conflict(self):
+        args = dict(table_identifier=self.identifier,
+                    catalog_options=self.catalog_options)
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(
+                **args, snapshot_id=1,
+                dynamic_options={'scan.tag-name': 'v1'})
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(
+                **args, tag_name='v1',
+                dynamic_options={'scan.snapshot-id': '1'})
+        with self.assertRaises(ValueError):
+            CatalogSplitProvider(
+                **args, dynamic_options={
+                    'scan.snapshot-id': '1', 'scan.tag-name': 'v1'})
+
     def test_pre_resolved_provider_returns_inputs(self):
         """PreResolvedSplitProvider just hands back what it was given."""
         catalog = CatalogFactory.create(self.catalog_options)

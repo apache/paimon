@@ -18,7 +18,10 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
@@ -38,6 +41,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -329,6 +333,26 @@ class ConflictDetectionTest {
                         DELETION_VECTORS_INDEX, fileName, 11, dvRanges.size(), dvRanges, null));
     }
 
+    private IndexManifestEntry createGlobalIndexEntry(
+            String fileName, FileKind kind, BinaryRow partition, long from, long to) {
+        return createGlobalIndexEntry(fileName, kind, partition, 0, from, to);
+    }
+
+    private IndexManifestEntry createGlobalIndexEntry(
+            String fileName, FileKind kind, BinaryRow partition, int bucket, long from, long to) {
+        return new IndexManifestEntry(
+                kind,
+                partition,
+                bucket,
+                new IndexFileMeta(
+                        "btree",
+                        fileName,
+                        11,
+                        1,
+                        new GlobalIndexMeta(from, to, 0, null, null),
+                        null));
+    }
+
     private void assertConflict(
             List<SimpleFileEntry> baseEntries, List<SimpleFileEntry> deltaEntries) {
         ArrayList<SimpleFileEntry> simpleFileEntryWithDVS = new ArrayList<>(baseEntries);
@@ -374,6 +398,232 @@ class ConflictDetectionTest {
                 .isFalse();
     }
 
+    @Test
+    void testChangedPartitionsIncludesGlobalIndexFiles() {
+        BinaryRow partition = BinaryRow.singleColumn(1);
+
+        assertThat(
+                        ManifestEntryChanges.changedPartitions(
+                                Collections.emptyList(),
+                                Collections.singletonList(
+                                        createGlobalIndexEntry("idx", ADD, partition, 0, 99))))
+                .containsExactly(partition);
+    }
+
+    @Test
+    void testCheckRowIdExistenceNoConflict() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceBaseFileRemoved() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 100L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceBaseFileRewritten() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f2", ADD, 0L, 200L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 200L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        // nextRowId=100: files with firstRowId >= 100 are newly appended, not references
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 100L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        // partial-column update referencing existing rows (firstRowId=0 < nextRowId=100)
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+        // newly appended file (firstRowId=100 >= nextRowId=100), should be skipped
+        deltaEntries.add(createFileEntryWithRowId("new1", ADD, 100L, 50L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsNonPreAssigned() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntry("f1", ADD));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsDeleteEntries() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("f1", DELETE, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 100L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceSkipsWhenNextRowIdNull() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 100L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, null)).isEmpty();
+    }
+
+    private SimpleFileEntry createFileEntryWithRowId(
+            String fileName, FileKind kind, long firstRowId, long rowCount) {
+        return createFileEntryWithRowId(fileName, kind, EMPTY_ROW, 0, firstRowId, rowCount);
+    }
+
+    private SimpleFileEntry createFileEntryWithRowId(
+            String fileName,
+            FileKind kind,
+            BinaryRow partition,
+            int bucket,
+            long firstRowId,
+            long rowCount) {
+        return new SimpleFileEntry(
+                kind,
+                partition,
+                bucket,
+                1,
+                0,
+                fileName,
+                Collections.emptyList(),
+                null,
+                EMPTY_ROW,
+                EMPTY_ROW,
+                null,
+                rowCount,
+                firstRowId);
+    }
+
+    @Test
+    void testCheckGlobalIndexRowIdExistenceNoConflict() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Arrays.asList(
+                                createFileEntryWithRowId("f1", ADD, 0L, 100L),
+                                createFileEntryWithRowId("f2", ADD, 100L, 50L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isNotPresent();
+    }
+
+    @Test
+    void testCheckGlobalIndexRowIdExistenceBaseFileRemoved() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(createFileEntryWithRowId("f1", ADD, 0L, 100L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, BinaryRow.EMPTY_ROW, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
+        assertThat(exception.get())
+                .hasMessageContaining("Global index row ID existence conflict")
+                .hasMessageContaining("idx")
+                .hasMessageContaining("[0, 149]");
+    }
+
+    @Test
+    void testCheckGlobalIndexRowIdExistenceByPartitionAndBucket() {
+        ConflictDetection detection = createConflictDetection();
+        BinaryRow partition0 = BinaryRow.singleColumn(0);
+        BinaryRow partition1 = BinaryRow.singleColumn(1);
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("f1", ADD, partition1, 0, 0L, 150L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, partition0, 0, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
+
+        exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.singletonList(
+                                createFileEntryWithRowId("f1", ADD, partition0, 1, 0L, 150L)),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", ADD, partition0, 0, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isPresent();
+    }
+
+    @Test
+    void testCheckGlobalIndexRowIdExistenceSkipsDeleteIndexEntry() {
+        ConflictDetection detection = createConflictDetection();
+
+        Optional<RuntimeException> exception =
+                detection.checkConflicts(
+                        snapshot(1),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(
+                                createGlobalIndexEntry("idx", DELETE, BinaryRow.EMPTY_ROW, 0, 149)),
+                        null,
+                        Snapshot.CommitKind.APPEND);
+
+        assertThat(exception).isNotPresent();
+    }
+
     private ConflictDetection createConflictDetection() {
         return new ConflictDetection(
                 "test-table",
@@ -385,6 +635,30 @@ class ConflictDetectionTest {
                 false,
                 true,
                 false,
+                null,
+                null,
+                null);
+    }
+
+    private Snapshot snapshot(long id) {
+        return new Snapshot(
+                id,
+                0,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "commit-user",
+                id,
+                Snapshot.CommitKind.APPEND,
+                id,
+                0,
+                0,
+                null,
+                null,
                 null,
                 null,
                 null);

@@ -21,7 +21,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions, ChangelogProducer
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -35,7 +35,8 @@ class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
-                 write_cols: Optional[List[str]] = None):
+                 write_cols: Optional[List[str]] = None,
+                 changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -61,6 +62,12 @@ class DataWriter(ABC):
 
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
+        self.committed_changelog_files: List[DataFileMeta] = []
+        self.changelog_producer = changelog_producer
+        self.changelog_file_format = (
+            self.options.changelog_file_format()
+            or self.file_format
+        )
         self.write_cols = write_cols
         self.blob_as_descriptor = self.options.blob_as_descriptor()
 
@@ -68,8 +75,6 @@ class DataWriter(ABC):
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
             self.partition, self.bucket
         )
-        # Store the current generated external path to preserve scheme in metadata
-        self._current_external_path: Optional[str] = None
         # Variant shredding (static mode) — col_name → (obj_fields, target_arrow_type)
         self._variant_shredding: Dict[str, Tuple] = {}
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET \
@@ -111,6 +116,9 @@ class DataWriter(ABC):
 
         return self.committed_files.copy()
 
+    def prepare_changelog_commit(self) -> List[DataFileMeta]:
+        return self.committed_changelog_files.copy()
+
     def close(self):
         try:
             if self.pending_data is not None and self.pending_data.num_rows > 0:
@@ -130,24 +138,25 @@ class DataWriter(ABC):
         Abort all writers and clean up resources. This method should be called when an error occurs
         during writing. It deletes any files that were written and cleans up resources.
         """
-        # Delete any files that were written
-        for file_meta in self.committed_files:
+        self._delete_committed_files(self.committed_files + self.committed_changelog_files)
+
+        # Clean up resources
+        self.pending_data = None
+        self.committed_files.clear()
+        self.committed_changelog_files.clear()
+
+    def _delete_committed_files(self, file_metas: List[DataFileMeta]):
+        for file_meta in file_metas:
             try:
-                # Use external_path if available (contains full URL scheme), otherwise use file_path
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 if path_to_delete:
                     path_str = str(path_to_delete)
                     self.file_io.delete_quietly(path_str)
             except Exception as e:
-                # Log but don't raise - we want to clean up as much as possible
                 import logging
                 logger = logging.getLogger(__name__)
                 path_to_delete = file_meta.external_path if file_meta.external_path else file_meta.file_path
                 logger.warning(f"Failed to delete file {path_to_delete} during abort: {e}")
-
-        # Clean up resources
-        self.pending_data = None
-        self.committed_files.clear()
 
     @abstractmethod
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
@@ -156,6 +165,16 @@ class DataWriter(ABC):
     @abstractmethod
     def _merge_data(self, existing_data: pa.RecordBatch, new_data: pa.RecordBatch) -> pa.RecordBatch:
         """Merge existing data with new data. Must be implemented by subclasses."""
+
+    def _append_file_sequence_range(self, row_count: int) -> Tuple[int, int]:
+        if row_count <= 0:
+            raise ValueError("row_count must be positive")
+
+        if self.options.data_evolution_enabled(False):
+            # Row-tracking commit stamps this sentinel range with the snapshot id.
+            return 0, row_count - 1
+
+        return -1, -1
 
     def _check_and_roll_if_needed(self):
         while self.pending_data is not None:
@@ -177,11 +196,7 @@ class DataWriter(ABC):
         file_path = self._generate_file_path(file_name)
 
         is_external_path = self.external_path_provider is not None
-        if is_external_path:
-            # Use the stored external path from _generate_file_path to preserve scheme
-            external_path_str = self._current_external_path if self._current_external_path else None
-        else:
-            external_path_str = None
+        external_path_str = file_path if is_external_path else None
 
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
@@ -198,6 +213,10 @@ class DataWriter(ABC):
             self.file_io.write_lance(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
             self.file_io.write_vortex(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+            self.file_io.write_mosaic(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 
@@ -232,6 +251,7 @@ class DataWriter(ABC):
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
+        creation_time = Timestamp.now()
         self.committed_files.append(DataFileMeta.create(
             file_name=file_name,
             file_size=self.file_io.get_file_size(file_path),
@@ -245,16 +265,22 @@ class DataWriter(ABC):
             schema_id=self.table.table_schema.id,
             level=0,
             extra_files=[],
-            creation_time=Timestamp.now(),
+            creation_time=creation_time,
             delete_row_count=0,
             file_source=0,
             value_stats_cols=None if value_stats_enabled else [],
-            external_path=external_path_str,  # Set external path if using external paths
+            external_path=external_path_str,
             first_row_id=None,
             write_cols=self.write_cols,
-            # None means all columns in the table have been written
             file_path=file_path,
         ))
+
+        if self.changelog_producer == ChangelogProducer.INPUT:
+            self._write_changelog_file(
+                data, min_key, max_key, key_stats, value_stats,
+                min_seq, max_seq, creation_time,
+                value_stats_enabled, external_path_str is not None,
+            )
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
@@ -281,11 +307,54 @@ class DataWriter(ABC):
             return data
         return pa.Table.from_arrays(columns, schema=pa.schema(fields))
 
+    def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
+                              min_seq, max_seq, creation_time,
+                              value_stats_enabled, is_external):
+        cl_fmt = self.changelog_file_format
+        changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
+        changelog_file_path = self._generate_file_path(changelog_file_name)
+
+        changelog_external_path = changelog_file_path if is_external else None
+
+        if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
+            self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
+                                       zstd_level=self.zstd_level)
+        elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
+            self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
+                                   zstd_level=self.zstd_level)
+        elif cl_fmt == CoreOptions.FILE_FORMAT_AVRO:
+            self.file_io.write_avro(changelog_file_path, data, compression=self.compression,
+                                    zstd_level=self.zstd_level)
+        else:
+            raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
+                             f"Supported formats: parquet, orc, avro.")
+
+        self.committed_changelog_files.append(DataFileMeta.create(
+            file_name=changelog_file_name,
+            file_size=self.file_io.get_file_size(changelog_file_path),
+            row_count=data.num_rows,
+            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+            key_stats=key_stats,
+            value_stats=value_stats,
+            min_sequence_number=min_seq,
+            max_sequence_number=max_seq,
+            schema_id=self.table.table_schema.id,
+            level=0,
+            extra_files=[],
+            creation_time=creation_time,
+            delete_row_count=0,
+            file_source=0,
+            value_stats_cols=None if value_stats_enabled else [],
+            external_path=changelog_external_path,
+            first_row_id=None,
+            write_cols=self.write_cols,
+            file_path=changelog_file_path,
+        ))
+
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:
-            external_path = self.external_path_provider.get_next_external_data_path(file_name)
-            self._current_external_path = external_path
-            return external_path
+            return self.external_path_provider.get_next_external_data_path(file_name)
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         return f"{bucket_path.rstrip('/')}/{file_name}"

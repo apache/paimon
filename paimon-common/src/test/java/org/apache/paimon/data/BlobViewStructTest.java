@@ -41,6 +41,17 @@ public class BlobViewStructTest {
     }
 
     @Test
+    public void testRejectUnknownDatabase() {
+        BlobViewStruct viewStruct =
+                new BlobViewStruct(Identifier.create(Identifier.UNKNOWN_DATABASE, "source"), 7, 5L);
+
+        assertThatThrownBy(viewStruct::serialize)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Blob view upstream table identifier must include database name");
+    }
+
+    @Test
     public void testRejectUnexpectedVersion() {
         BlobViewStruct viewStruct =
                 new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L);

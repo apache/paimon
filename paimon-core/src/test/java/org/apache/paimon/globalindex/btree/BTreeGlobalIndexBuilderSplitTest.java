@@ -19,17 +19,21 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,6 +67,41 @@ public class BTreeGlobalIndexBuilderSplitTest {
                 .isEqualTo(new Range(0, 199));
         assertThat(BTreeGlobalIndexBuilder.calcRowRange(rebuilt.get(1)))
                 .isEqualTo(new Range(300, 399));
+    }
+
+    @Test
+    public void testGroupSplitsByDiscontiguousRowRangeIndex() {
+        DataFileMeta file1 = createDataFileMeta(4750L, 151L);
+        DataFileMeta file2 = createDataFileMeta(4901L, 1037L);
+        DataFileMeta file3 = createDataFileMeta(5938L, 1662L);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(file1, file2, file3))
+                        .isStreaming(false)
+                        .rawConvertible(false)
+                        .build();
+
+        Map<BinaryRow, Map<Range, List<Split>>> result =
+                BTreeGlobalIndexBuilder.groupSplitsByRange(
+                        RowRangeIndex.create(
+                                Arrays.asList(new Range(4750, 4900), new Range(5938, 7599))),
+                        Collections.singletonList(split));
+
+        assertThat(result).containsOnlyKeys(BinaryRow.EMPTY_ROW);
+        Map<Range, List<Split>> ranges = result.get(BinaryRow.EMPTY_ROW);
+        assertThat(ranges).containsOnlyKeys(new Range(4750, 4900), new Range(5938, 7599));
+        assertIndexedSplitRowRanges(ranges.get(new Range(4750, 4900)), new Range(4750, 4900));
+        assertIndexedSplitRowRanges(ranges.get(new Range(5938, 7599)), new Range(5938, 7599));
+    }
+
+    private static void assertIndexedSplitRowRanges(List<Split> splits, Range rowRange) {
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0)).isInstanceOf(IndexedSplit.class);
+        assertThat(((IndexedSplit) splits.get(0)).rowRanges()).containsExactly(rowRange);
     }
 
     private static DataFileMeta createDataFileMeta(long firstRowId, long rowCount) {

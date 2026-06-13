@@ -24,6 +24,8 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.fileindex.FileIndexerFactory;
+import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -63,6 +65,7 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.DEFAULT_AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
+import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
@@ -78,6 +81,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
@@ -92,7 +96,7 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Validation utils for {@link TableSchema}. */
+/** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
@@ -104,6 +108,18 @@ public class SchemaValidation {
      * @param schema the schema to be validated
      */
     public static void validateTableSchema(TableSchema schema) {
+        validateTableSchema(schema, Collections.emptySet());
+    }
+
+    /**
+     * Validate the {@link TableSchema} and {@link CoreOptions}.
+     *
+     * @param schema the schema to be validated
+     * @param dynamicOptionKeys option keys that are overridden dynamically at runtime (e.g. by
+     *     dedicated compaction jobs) and should therefore be excluded from certain static
+     *     validations such as the {@code write-only} requirement for snapshot ordering
+     */
+    public static void validateTableSchema(TableSchema schema, Set<String> dynamicOptionKeys) {
         CoreOptions options = new CoreOptions(schema.options());
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
@@ -143,6 +159,21 @@ public class SchemaValidation {
                             STREAMING_READ_OVERWRITE.key(),
                             ChangelogProducer.FULL_COMPACTION,
                             ChangelogProducer.LOOKUP));
+        }
+
+        if (options.fullCompactionDeltaCommits() != null
+                && changelogProducer == ChangelogProducer.LOOKUP) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "'%s' is incompatible with '%s'='%s'. "
+                                    + "Use '%s'='%s' to get periodic full compaction with changelog generation, "
+                                    + "or remove '%s'.",
+                            FULL_COMPACTION_DELTA_COMMITS.key(),
+                            CHANGELOG_PRODUCER.key(),
+                            ChangelogProducer.LOOKUP,
+                            CHANGELOG_PRODUCER.key(),
+                            ChangelogProducer.FULL_COMPACTION,
+                            FULL_COMPACTION_DELTA_COMMITS.key()));
         }
 
         checkArgument(
@@ -281,6 +312,14 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
+        } else {
+            checkArgument(
+                    !options.deletionVectorsMergeOnRead(),
+                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
+        }
+
+        if (options.snapshotSequenceOrdering()) {
+            validateSnapshotSequenceOrdering(schema, options, dynamicOptionKeys);
         }
 
         // vector field names must point to vector type
@@ -314,6 +353,8 @@ public class SchemaValidation {
         validateChangelogReadSequenceNumber(schema, options);
 
         validatePkClusteringOverride(options);
+
+        validateManifestSort(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -604,6 +645,48 @@ public class SchemaValidation {
                         columnName,
                         keyType);
             }
+
+            for (String indexType : entry.getValue().keySet()) {
+                FileIndexerFactory factory = FileIndexerFactoryUtils.load(indexType);
+                DataType dataType =
+                        column.isNestedColumn()
+                                ? ((MapType) field.type()).getValueType()
+                                : field.type();
+                try {
+                    factory.validate(dataType);
+                } catch (UnsupportedOperationException e) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Column '%s' with type '%s' is not supported by '%s' index. %s",
+                                    columnName, dataType.asSQLString(), indexType, e.getMessage()));
+                }
+            }
+        }
+    }
+
+    private static void validateSnapshotSequenceOrdering(
+            TableSchema schema, CoreOptions options, Set<String> dynamicOptionKeys) {
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "%s = true requires a primary-key table; append-only tables cannot use "
+                        + "snapshot-based sequence ordering.",
+                CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key());
+        checkArgument(
+                options.sequenceField().isEmpty(),
+                "%s = true is mutually exclusive with %s; the snapshot id is the sole tiebreaker.",
+                CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
+                CoreOptions.SEQUENCE_FIELD.key());
+        // Skip writeOnly check when write-only is dynamically overridden (e.g. by dedicated
+        // compact jobs that override write-only=false at runtime).
+        if (!dynamicOptionKeys.contains(CoreOptions.WRITE_ONLY.key())) {
+            checkArgument(
+                    options.writeOnly(),
+                    "%s = true requires %s = true. Snapshot ordering relies on snapshot id to "
+                            + "determine record order, but inline compaction happens before "
+                            + "snapshot creation — files have not been stamped with the correct "
+                            + "snapshot id yet. Use dedicated compaction job instead.",
+                    CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(),
+                    CoreOptions.WRITE_ONLY.key());
         }
     }
 
@@ -677,7 +760,9 @@ public class SchemaValidation {
         } else if (bucket < 1 && !isPostponeBucketTable(schema, bucket)) {
             throw new RuntimeException("The number of buckets needs to be greater than 0.");
         } else {
-            if (schema.primaryKeys().isEmpty() && schema.bucketKeys().isEmpty()) {
+            if (schema.primaryKeys().isEmpty()
+                    && schema.bucketKeys().isEmpty()
+                    && (bucket != 1 || schema.version() != PAIMON_07_VERSION)) {
                 throw new RuntimeException(
                         "You should define a 'bucket-key' for bucketed append mode.");
             }
@@ -782,6 +867,9 @@ public class SchemaValidation {
         FileFormat vectorFileFormat = vectorFileFormat(options);
         if (vectorFileFormat != null) {
             Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
+            checkArgument(
+                    fields.size() > vectorStoreNames.size(),
+                    "Table with VECTOR type column must have other normal columns.");
             checkArgument(
                     schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
                     "The vector-store columns can not be part of partition keys.");
@@ -940,6 +1028,14 @@ public class SchemaValidation {
                     options.partitionTimestampFormatter() != null,
                     "Partition timestamp formatter is required for chain table.");
 
+            if (options.partitionExpireTime() != null) {
+                Preconditions.checkArgument(
+                        "values-time".equals(options.partitionExpireStrategy()),
+                        "Chain table only supports 'values-time' partition expiration strategy, "
+                                + "but found '%s'.",
+                        options.partitionExpireStrategy());
+            }
+
             // validate chain-table.chain-partition-keys
             List<String> chainPartKeys = options.chainTableChainPartitionKeys();
             if (chainPartKeys != null) {
@@ -1011,6 +1107,24 @@ public class SchemaValidation {
                         "Cannot support changelog producer: "
                                 + changelogProducer
                                 + " in 'pk-clustering-override' mode.");
+            }
+        }
+    }
+
+    private static void validateManifestSort(TableSchema schema, CoreOptions options) {
+        if (options.manifestSortEnabled()) {
+            checkArgument(
+                    !schema.partitionKeys().isEmpty(),
+                    "Cannot enable '%s' for non-partition table.",
+                    CoreOptions.MANIFEST_SORT_ENABLED.key());
+            String sortPartitionField = options.manifestSortPartitionField();
+            if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
+                checkArgument(
+                        schema.partitionKeys().contains(sortPartitionField),
+                        "'%s' = '%s' is not a partition field. Available partition fields: %s.",
+                        CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(),
+                        sortPartitionField,
+                        schema.partitionKeys());
             }
         }
     }

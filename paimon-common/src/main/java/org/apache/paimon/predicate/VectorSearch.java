@@ -18,15 +18,15 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.GlobalIndexReader;
-import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Optional;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /** VectorSearch to perform vector similarity search. * */
 public class VectorSearch implements Serializable {
@@ -36,10 +36,15 @@ public class VectorSearch implements Serializable {
     private final float[] vector;
     private final String fieldName;
     private final int limit;
+    private final Map<String, String> options;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
     public VectorSearch(float[] vector, int limit, String fieldName) {
+        this(vector, limit, fieldName, Collections.emptyMap());
+    }
+
+    public VectorSearch(float[] vector, int limit, String fieldName, Map<String, String> options) {
         if (vector == null) {
             throw new IllegalArgumentException("Search cannot be null");
         }
@@ -52,6 +57,10 @@ public class VectorSearch implements Serializable {
         this.vector = vector;
         this.limit = limit;
         this.fieldName = fieldName;
+        this.options =
+                options == null
+                        ? Collections.emptyMap()
+                        : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
     public float[] vector() {
@@ -64,6 +73,10 @@ public class VectorSearch implements Serializable {
 
     public String fieldName() {
         return fieldName;
+    }
+
+    public Map<String, String> options() {
+        return options == null ? Collections.emptyMap() : options;
     }
 
     public RoaringNavigableMap64 includeRowIds() {
@@ -84,15 +97,11 @@ public class VectorSearch implements Serializable {
             for (long rowId : and64) {
                 roaringNavigableMap64Offset.add(rowId - from);
             }
-            VectorSearch target = new VectorSearch(vector, limit, fieldName);
+            VectorSearch target = new VectorSearch(vector, limit, fieldName, options());
             target.withIncludeRowIds(roaringNavigableMap64Offset);
             return target;
         }
         return this;
-    }
-
-    public Optional<ScoredGlobalIndexResult> visit(GlobalIndexReader visitor) {
-        return visitor.visitVectorSearch(this);
     }
 
     @Override

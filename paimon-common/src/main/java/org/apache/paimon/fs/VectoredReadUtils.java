@@ -51,20 +51,33 @@ public class VectoredReadUtils {
         if (ranges.isEmpty()) {
             return;
         }
+        readVectored(readable, ranges, ReadOptions.from(readable));
+    }
+
+    public static void readVectored(
+            VectoredReadable readable, List<? extends FileRange> ranges, ReadOptions options)
+            throws IOException {
+        if (ranges.isEmpty()) {
+            return;
+        }
+        requireNonNull(readable, "readable is null");
+        requireNonNull(options, "options is null");
 
         List<? extends FileRange> sortRanges = validateAndSortRanges(ranges);
         List<CombinedRange> combinedRanges =
-                mergeSortedRanges(sortRanges, readable.minSeekForVectorReads());
+                mergeSortedRanges(sortRanges, options.minSeekForVectorReads);
 
-        int parallelism = readable.parallelismForVectorReads();
+        int parallelism = options.parallelismForVectorReads;
 
-        if (combinedRanges.size() == 1 && readable instanceof SeekableInputStream) {
+        if (options.sequentialReadFallback
+                && combinedRanges.size() == 1
+                && readable instanceof SeekableInputStream) {
             fallbackToReadSequence((SeekableInputStream) readable, sortRanges);
             return;
         }
 
         BlockingExecutor executor = new BlockingExecutor(IO_THREAD_POOL, parallelism);
-        long batchSize = readable.batchSizeForVectorReads();
+        long batchSize = options.batchSizeForVectorReads;
         for (CombinedRange combinedRange : combinedRanges) {
             if (combinedRange.underlying.size() == 1) {
                 FileRange fileRange = combinedRange.underlying.get(0);
@@ -76,9 +89,92 @@ public class VectoredReadUtils {
                 List<CompletableFuture<byte[]>> futures =
                         splitBatches.stream().map(FileRange::getData).collect(Collectors.toList());
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
-                        .thenAcceptAsync(
-                                unused -> copyToFileRanges(combinedRange, futures), IO_THREAD_POOL);
+                        .whenCompleteAsync(
+                                (unused, throwable) -> {
+                                    if (throwable == null) {
+                                        try {
+                                            copyToFileRanges(combinedRange, futures);
+                                        } catch (Throwable t) {
+                                            completeFileRangesExceptionally(combinedRange, t);
+                                        }
+                                    } else {
+                                        completeFileRangesExceptionally(combinedRange, throwable);
+                                    }
+                                },
+                                IO_THREAD_POOL);
             }
+        }
+    }
+
+    /** Options for vectored reads. */
+    public static class ReadOptions {
+
+        private final int minSeekForVectorReads;
+        private final long batchSizeForVectorReads;
+        private final int parallelismForVectorReads;
+        private final boolean sequentialReadFallback;
+
+        public static ReadOptions from(VectoredReadable readable) {
+            return new ReadOptions(
+                    readable.minSeekForVectorReads(),
+                    readable.batchSizeForVectorReads(),
+                    readable.parallelismForVectorReads(),
+                    true);
+        }
+
+        public ReadOptions(
+                int minSeekForVectorReads,
+                long batchSizeForVectorReads,
+                int parallelismForVectorReads,
+                boolean sequentialReadFallback) {
+            checkArgument(
+                    minSeekForVectorReads >= 0,
+                    "minSeekForVectorReads must be non-negative: %s",
+                    minSeekForVectorReads);
+            checkArgument(
+                    batchSizeForVectorReads > 0,
+                    "batchSizeForVectorReads must be positive: %s",
+                    batchSizeForVectorReads);
+            checkArgument(
+                    parallelismForVectorReads > 0,
+                    "parallelismForVectorReads must be positive: %s",
+                    parallelismForVectorReads);
+            this.minSeekForVectorReads = minSeekForVectorReads;
+            this.batchSizeForVectorReads = batchSizeForVectorReads;
+            this.parallelismForVectorReads = parallelismForVectorReads;
+            this.sequentialReadFallback = sequentialReadFallback;
+        }
+
+        public ReadOptions withMinSeekForVectorReads(int minSeekForVectorReads) {
+            return new ReadOptions(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback);
+        }
+
+        public ReadOptions withBatchSizeForVectorReads(long batchSizeForVectorReads) {
+            return new ReadOptions(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback);
+        }
+
+        public ReadOptions withParallelismForVectorReads(int parallelismForVectorReads) {
+            return new ReadOptions(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback);
+        }
+
+        public ReadOptions withSequentialReadFallback(boolean sequentialReadFallback) {
+            return new ReadOptions(
+                    minSeekForVectorReads,
+                    batchSizeForVectorReads,
+                    parallelismForVectorReads,
+                    sequentialReadFallback);
         }
     }
 
@@ -123,6 +219,13 @@ public class VectoredReadUtils {
                     buffer,
                     fileRange.getLength());
             fileRange.getData().complete(buffer);
+        }
+    }
+
+    private static void completeFileRangesExceptionally(
+            CombinedRange combinedRange, Throwable throwable) {
+        for (FileRange fileRange : combinedRange.underlying) {
+            fileRange.getData().completeExceptionally(throwable);
         }
     }
 

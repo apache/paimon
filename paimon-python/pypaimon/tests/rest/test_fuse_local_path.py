@@ -65,6 +65,7 @@ class TestFuseLocalPath(unittest.TestCase):
         catalog = MagicMock(spec=RESTCatalog)
         catalog.fuse_enabled = enabled
         catalog.data_token_enabled = False
+        catalog._cache_manager = None
         catalog.rest_api = MagicMock()
         catalog.context = MagicMock()
         catalog.context.options = options

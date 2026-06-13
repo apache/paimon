@@ -250,22 +250,30 @@ public class ChainTableUtils {
             RecordComparator chainComparator,
             ChainPartitionProjector projector) {
 
+        sortedTargetPartitions.sort(
+                (a, b) ->
+                        chainComparator.compare(
+                                projector.extractChainPartition(b),
+                                projector.extractChainPartition(a)));
+
         Map<BinaryRow, BinaryRow> partitionMapping = new HashMap<>();
-        int targetIndex = 0;
 
         for (BinaryRow sourceRow : sortedSourcePartitions) {
+            int targetIndex = 0;
             BinaryRow sourceChain = projector.extractChainPartition(sourceRow);
             while (targetIndex < sortedTargetPartitions.size()) {
                 BinaryRow targetChain =
                         projector.extractChainPartition(sortedTargetPartitions.get(targetIndex));
                 if (chainComparator.compare(targetChain, sourceChain) < 0) {
-                    targetIndex++;
-                } else {
                     break;
+                } else {
+                    targetIndex++;
                 }
             }
             BinaryRow firstSmaller =
-                    (targetIndex > 0) ? sortedTargetPartitions.get(targetIndex - 1) : null;
+                    (targetIndex < sortedTargetPartitions.size())
+                            ? sortedTargetPartitions.get(targetIndex)
+                            : null;
             partitionMapping.put(sourceRow, firstSmaller);
         }
         return partitionMapping;

@@ -41,7 +41,7 @@ case class WriteIntoPaimonTable(
     batchId: Option[Long] = None)
   extends RunnableCommand
   with ExpressionHelper
-  with SchemaHelper
+  with SchemaEvolutionHelper
   with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -49,7 +49,7 @@ case class WriteIntoPaimonTable(
       PaimonUtils.createDataset(
         sparkSession,
         ReplacePaimonFunctions(sparkSession)(_data.queryExecution.analyzed))
-    val data = mergeSchema(sparkSession, replacedData, options)
+    mergeSchema(sparkSession, replacedData, options)
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object
@@ -60,7 +60,7 @@ case class WriteIntoPaimonTable(
     if (overwritePartition != null) {
       writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }
-    val commitMessages = writer.write(data)
+    val commitMessages = writer.write(replacedData)
     writer.commit(commitMessages)
 
     Seq.empty

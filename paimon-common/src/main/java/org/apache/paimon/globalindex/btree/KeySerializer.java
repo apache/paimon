@@ -41,9 +41,12 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.util.Comparator;
 
 /** This interface provides core methods to ser/de and compare btree index keys. */
+@ThreadSafe
 public interface KeySerializer {
 
     byte[] serialize(Object key);
@@ -136,11 +139,10 @@ public interface KeySerializer {
 
     /** Serializer for int type. */
     class IntSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(4);
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(4);
             keyOut.writeInt((Integer) key);
             return keyOut.toSlice().copyBytes();
         }
@@ -158,11 +160,10 @@ public interface KeySerializer {
 
     /** Serializer for long type. */
     class BigIntSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(8);
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(8);
             keyOut.writeLong((Long) key);
             return keyOut.toSlice().copyBytes();
         }
@@ -199,11 +200,10 @@ public interface KeySerializer {
 
     /** Serializer for small int type. */
     class SmallIntSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(2);
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(2);
             keyOut.writeShort((Short) key);
             return keyOut.toSlice().copyBytes();
         }
@@ -240,11 +240,10 @@ public interface KeySerializer {
 
     /** Serializer for float type. */
     class FloatSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(4);
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(4);
             keyOut.writeInt(Float.floatToIntBits((Float) key));
             return keyOut.toSlice().copyBytes();
         }
@@ -262,11 +261,10 @@ public interface KeySerializer {
 
     /** Serializer for double type. */
     class DoubleSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(8);
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(8);
             keyOut.writeLong(Double.doubleToLongBits((Double) key));
             return keyOut.toSlice().copyBytes();
         }
@@ -284,7 +282,6 @@ public interface KeySerializer {
 
     /** Serializer for decimal type. */
     class DecimalSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(8);
         private final int precision;
         private final int scale;
 
@@ -296,7 +293,7 @@ public interface KeySerializer {
         @Override
         public byte[] serialize(Object key) {
             if (Decimal.isCompact(precision)) {
-                keyOut.reset();
+                MemorySliceOutput keyOut = new MemorySliceOutput(8);
                 keyOut.writeLong(((Decimal) key).toUnscaledLong());
                 return keyOut.toSlice().copyBytes();
             }
@@ -338,7 +335,6 @@ public interface KeySerializer {
 
     /** Serializer for timestamp. */
     class TimestampSerializer implements KeySerializer {
-        private final MemorySliceOutput keyOut = new MemorySliceOutput(8);
         private final int precision;
 
         public TimestampSerializer(int precision) {
@@ -347,7 +343,7 @@ public interface KeySerializer {
 
         @Override
         public byte[] serialize(Object key) {
-            keyOut.reset();
+            MemorySliceOutput keyOut = new MemorySliceOutput(12);
             if (Timestamp.isCompact(precision)) {
                 keyOut.writeLong(((Timestamp) key).getMillisecond());
             } else {

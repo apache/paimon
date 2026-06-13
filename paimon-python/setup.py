@@ -115,7 +115,7 @@ def _build_dev_package():
 
 atexit.register(_build_dev_package)
 
-PACKAGES = find_packages(include=["pypaimon*"])
+PACKAGES = find_packages(include=["pypaimon*"], exclude=["pypaimon.tests*"])
 
 
 def read_requirements():
@@ -174,12 +174,18 @@ setup(
         'vortex': [
             'vortex-data==0.70.0; python_version>="3.11"',
         ],
+        'mosaic': [
+            'paimon-mosaic>=0.1.0',
+        ],
         'lumina': [
             'lumina-data>=0.1.0'
         ],
         'sql': [
             'pypaimon-rust; python_version>="3.10"',
             'datafusion>=52; python_version>="3.10"',
+        ],
+        'hdfs': [
+            'hdfs-native>=0.13,<1; python_version >= "3.10" and platform_system != "Windows"',
         ],
     },
     description="Apache Paimon Python API",

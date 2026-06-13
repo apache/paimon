@@ -16,22 +16,30 @@
 # under the License.
 
 import collections
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.table.row.blob import Blob
+from pypaimon.utils.range import Range
 
 _MIN_BATCH_SIZE_TO_REFILL = 1024
 
 
 class ConcatBatchReader(RecordBatchReader):
 
-    def __init__(self, reader_suppliers: List[Callable]):
+    def __init__(self, reader_suppliers: List[Callable], file_io=None,
+                 blob_field_indices=None, vector_field_indices=None):
         self.queue: collections.deque[Callable] = collections.deque(reader_suppliers)
         self.current_reader: Optional[RecordBatchReader] = None
+        self.file_io = file_io
+        self.blob_field_indices = blob_field_indices
+        self.vector_field_indices = vector_field_indices
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         while True:
@@ -225,3 +233,127 @@ class DataEvolutionMergeReader(RecordBatchReader):
                     reader.close()
         except Exception as e:
             raise IOError("Failed to close inner readers") from e
+
+
+class BlobFallbackBatchReader(RecordBatchReader):
+    """Resolve blob placeholders by falling back through older blob versions."""
+
+    def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
+                 field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
+                 blob_as_descriptor: bool = False):
+        self._file_reader_suppliers = file_reader_suppliers
+        self._field_name = field_name
+        self._output_type = output_type
+        self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
+        self._blob_as_descriptor = blob_as_descriptor
+        self._returned = False
+        self._readers: List[RecordBatchReader] = []
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        if self._returned:
+            return None
+        self._returned = True
+
+        groups: Dict[int, Dict[int, Tuple[object, bool]]] = {}
+        target_row_ids = self._target_row_ids()
+
+        for file, supplier in self._file_reader_suppliers:
+            row_ids = self._selected_row_ids(file)
+            blob_values = self._read_blob_values(file, supplier)
+            if len(blob_values) != len(row_ids):
+                raise ValueError(
+                    "Blob fallback reader returned an unexpected row count "
+                    f"for {file.file_name}: expect {len(row_ids)}, got {len(blob_values)}."
+                )
+            if not row_ids:
+                continue
+            group = groups.setdefault(file.max_sequence_number, {})
+            for row_id, blob in zip(row_ids, blob_values):
+                if row_id in group:
+                    raise ValueError(
+                        "Blob files within the same max sequence should not overlap."
+                    )
+                if blob is None:
+                    group[row_id] = (None, False)
+                elif blob is Blob.PLACE_HOLDER:
+                    group[row_id] = (None, True)
+                else:
+                    if self._blob_as_descriptor:
+                        group[row_id] = (blob.to_descriptor().serialize(), False)
+                    else:
+                        group[row_id] = (blob.to_data(), False)
+
+        if not groups:
+            return None
+
+        result = []
+        for row_id in target_row_ids:
+            found = False
+            for max_sequence_number in sorted(groups.keys(), reverse=True):
+                candidate = groups[max_sequence_number].get(row_id)
+                if candidate is None:
+                    continue
+                value, is_placeholder = candidate
+                if not is_placeholder:
+                    result.append(value)
+                    found = True
+                    break
+            if not found:
+                raise ValueError("All blob files at the same row id store a placeholder.")
+
+        return pa.RecordBatch.from_arrays(
+            [pa.array(result, type=self._output_type)],
+            names=[self._field_name],
+        )
+
+    def _target_row_ids(self) -> List[int]:
+        file_ranges = [
+            file.row_id_range()
+            for file, _ in self._file_reader_suppliers
+        ]
+        ranges = [
+            Range(
+                min(row_range.from_ for row_range in file_ranges),
+                max(row_range.to for row_range in file_ranges),
+            )
+        ]
+        if self._row_ranges is not None:
+            ranges = Range.and_(ranges, self._row_ranges)
+        return self._expand_ranges(ranges)
+
+    def _selected_row_ids(self, file: DataFileMeta) -> List[int]:
+        ranges = [file.row_id_range()]
+        if self._row_ranges is not None:
+            ranges = Range.and_(ranges, self._row_ranges)
+        return self._expand_ranges(ranges)
+
+    @staticmethod
+    def _expand_ranges(ranges: List[Range]) -> List[int]:
+        return [
+            row_id
+            for row_range in ranges
+            for row_id in range(row_range.from_, row_range.to + 1)
+        ]
+
+    def _read_blob_values(self, file: DataFileMeta, supplier: Callable) -> List[object]:
+        reader = supplier()
+        if reader is None:
+            return []
+        self._readers.append(reader)
+        try:
+            iterator = BlobRecordIterator(
+                reader._file_io,
+                reader.file_path,
+                reader.blob_lengths,
+                reader.blob_offsets,
+                self._field_name,
+                reader._input_stream,
+            )
+            return [row.values[0] for row in iterator]
+        except AttributeError as e:
+            raise TypeError("Blob fallback reader expects FormatBlobReader suppliers.") from e
+
+    def close(self) -> None:
+        for reader in self._readers:
+            reader.close()
+        self._readers = []

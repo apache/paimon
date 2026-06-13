@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -322,6 +323,68 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(result.get(1).getField(0)).isEqualTo(2);
         assertThat(result.get(1).getField(1)).isEqualTo("row2");
         assertThat((byte[]) result.get(1).getField(2)).isEqualTo(new byte[] {89, 69});
+    }
+
+    @Test
+    public void testForwardBlobViewReferenceWithDynamicOption() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE upstream_blob_view_forward (id INT, name STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture')");
+        batchSql("INSERT INTO upstream_blob_view_forward VALUES (1, 'row1', X'48656C6C6F')");
+        batchSql("INSERT INTO upstream_blob_view_forward VALUES (2, 'row2', X'5945')");
+
+        String upstreamFullTableName = tEnv.getCurrentDatabase() + ".upstream_blob_view_forward";
+        tEnv.executeSql(
+                "CREATE TABLE first_downstream_blob_view (id INT, label STRING, image_ref BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-view-field'='image_ref')");
+        batchSql(
+                String.format(
+                        "INSERT INTO first_downstream_blob_view"
+                                + " SELECT id, name, sys.blob_view('%s', 'picture', _ROW_ID)"
+                                + " FROM `upstream_blob_view_forward$row_tracking`",
+                        upstreamFullTableName));
+
+        tEnv.executeSql(
+                "CREATE TABLE second_downstream_blob_view (id INT, label STRING, image_ref BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-view-field'='image_ref')");
+        batchSql(
+                "INSERT INTO second_downstream_blob_view"
+                        + " SELECT id, label, image_ref"
+                        + " FROM first_downstream_blob_view"
+                        + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */");
+
+        assertThat(batchSql("SELECT * FROM second_downstream_blob_view ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, "row1", new byte[] {72, 101, 108, 108, 111}),
+                        Row.of(2, "row2", new byte[] {89, 69}));
+
+        List<Row> originalReferences =
+                batchSql(
+                        "SELECT image_ref"
+                                + " FROM first_downstream_blob_view"
+                                + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */"
+                                + " ORDER BY id");
+        List<Row> forwardedReferences =
+                batchSql(
+                        "SELECT image_ref"
+                                + " FROM second_downstream_blob_view"
+                                + " /*+ OPTIONS('blob-view.resolve.enabled'='false') */"
+                                + " ORDER BY id");
+
+        assertThat(forwardedReferences).hasSize(originalReferences.size());
+        for (int i = 0; i < forwardedReferences.size(); i++) {
+            byte[] originalReference = (byte[]) originalReferences.get(i).getField(0);
+            byte[] forwardedReference = (byte[]) forwardedReferences.get(i).getField(0);
+            assertThat(forwardedReference).isEqualTo(originalReference);
+            assertThat(BlobViewStruct.deserialize(forwardedReference).identifier().getFullName())
+                    .isEqualTo(upstreamFullTableName);
+        }
     }
 
     @Test

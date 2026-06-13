@@ -22,7 +22,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
-import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
+import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
@@ -149,7 +149,7 @@ case class PaimonStrategy(spark: SparkSession)
           partitionPredicate: Option[PartitionPredicate]) =>
       TruncatePaimonTableWithFilterExec(table, partitionPredicate) :: Nil
 
-    case c @ CopyIntoTableCommand(PaimonCatalogAndIdentifier(catalog, ident), _, _, _, _, _) =>
+    case c @ CopyIntoTableCommand(PaimonCatalogAndIdentifier(catalog, ident), _, _, _, _, _, _) =>
       CopyIntoTableExec(
         spark,
         catalog,
@@ -159,13 +159,26 @@ case class PaimonStrategy(spark: SparkSession)
         c.fileFormat,
         c.pattern,
         c.force,
+        c.onError,
         c.output) :: Nil
 
-    case c @ CopyIntoLocationCommand(_, PaimonCatalogAndIdentifier(catalog, ident), _, _) =>
+    case c @ CopyIntoLocationCommand(_, CopyIntoLocationSource.Query(query), _, _) =>
       CopyIntoLocationExec(
         spark,
-        catalog,
-        ident,
+        CopyIntoSource.QuerySource(query),
+        c.targetPath,
+        c.fileFormat,
+        c.overwrite,
+        c.output) :: Nil
+
+    case c @ CopyIntoLocationCommand(
+          _,
+          CopyIntoLocationSource.TableName(PaimonCatalogAndIdentifier(catalog, ident)),
+          _,
+          _) =>
+      CopyIntoLocationExec(
+        spark,
+        CopyIntoSource.TableSource(catalog, ident),
         c.targetPath,
         c.fileFormat,
         c.overwrite,

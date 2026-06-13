@@ -29,14 +29,17 @@ case class CopyIntoTableCommand(
     sourcePath: String,
     fileFormat: CopyFileFormat,
     pattern: Option[String],
-    force: Boolean)
+    force: Boolean,
+    onError: OnErrorMode = OnErrorMode.AbortStatement)
   extends PaimonLeafCommand {
 
   override def output: Seq[Attribute] = Seq(
     AttributeReference("file_name", StringType, nullable = false)(),
     AttributeReference("status", StringType, nullable = false)(),
     AttributeReference("rows_loaded", LongType, nullable = false)(),
-    AttributeReference("rows_parsed", LongType, nullable = false)()
+    AttributeReference("rows_parsed", LongType, nullable = false)(),
+    AttributeReference("errors_seen", LongType, nullable = false)(),
+    AttributeReference("first_error", StringType, nullable = true)()
   )
 
   override def simpleString(maxFields: Int): String = {

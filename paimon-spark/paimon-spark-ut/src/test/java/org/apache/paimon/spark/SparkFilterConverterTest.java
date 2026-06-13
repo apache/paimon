@@ -26,11 +26,15 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.spark.sql.sources.AlwaysFalse;
+import org.apache.spark.sql.sources.AlwaysTrue;
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
@@ -227,6 +231,36 @@ public class SparkFilterConverterTest {
 
         assertThat(dateExpression).isEqualTo(rawExpression);
         assertThat(localDateExpression).isEqualTo(rawExpression);
+    }
+
+    @Test
+    public void testAlwaysTrueFalse() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+
+        assertThat(converter.convert(new AlwaysTrue())).isEqualTo(PredicateBuilder.alwaysTrue());
+        assertThat(converter.convert(new AlwaysFalse())).isEqualTo(PredicateBuilder.alwaysFalse());
+    }
+
+    @Test
+    public void testEqualToNaN() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "f", new FloatType()),
+                                new DataField(1, "d", new DoubleType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        EqualTo eqNaNFloat = EqualTo.apply("f", Float.NaN);
+        assertThat(converter.convert(eqNaNFloat)).isEqualTo(builder.isNaN(0));
+
+        EqualTo eqNaNDouble = EqualTo.apply("d", Double.NaN);
+        assertThat(converter.convert(eqNaNDouble)).isEqualTo(builder.isNaN(1));
+
+        EqualTo eqFloat = EqualTo.apply("f", 1.0f);
+        assertThat(converter.convert(eqFloat)).isEqualTo(builder.equal(0, 1.0f));
     }
 
     @Test

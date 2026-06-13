@@ -16,23 +16,16 @@
 # limitations under the License.
 ################################################################################
 
-"""Pre-repartition a Ray Dataset by (partition, bucket) before writing
-to a Paimon table.
+"""Optional pre-clustering and write guards for Ray writes.
 
-Without this, Ray's default round-robin block distribution scatters rows
-that share the same (partition, bucket) across many Ray tasks. Each
-task then opens its own writer and emits its own data file, producing
-``partitions × buckets × ray_tasks`` files instead of the
-``partitions × buckets`` the writer would naturally produce.
+The legacy ``map_groups`` strategy groups rows by
+``(partition_keys..., bucket)`` so every distinct group lands in a
+single Ray task. This can reduce file count, but Ray requires each
+``map_groups`` group to fit in memory on one node. Keep that strategy
+behind an explicit opt-in.
 
-For HASH_FIXED tables we group rows by ``(partition_keys..., bucket)``
-so every distinct group lands in a single Ray task. ``bucket`` is
-computed using the same ``FixedBucketRowKeyExtractor`` the writer
-uses, so the bucket assignment seen by the groupby is byte-equivalent
-to the writer's. HASH_FIXED writes are always pre-clustered; no user
-opt-in is required.
-
-For any other bucket mode the dataset is returned unchanged.
+For append-only tables in any other bucket mode the dataset is returned
+unchanged.
 """
 
 import uuid
@@ -51,6 +44,14 @@ if TYPE_CHECKING:
 # runtime by ``_pick_bucket_col_name`` so user tables that happen to
 # contain a column with this name still work correctly.
 BUCKET_KEY_COL = "__paimon_bucket__"
+HASH_FIXED_PRECLUSTER_AUTO = "auto"
+HASH_FIXED_PRECLUSTER_OFF = "off"
+HASH_FIXED_PRECLUSTER_MAP_GROUPS = "map_groups"
+HASH_FIXED_PRECLUSTER_MODES = frozenset([
+    HASH_FIXED_PRECLUSTER_AUTO,
+    HASH_FIXED_PRECLUSTER_OFF,
+    HASH_FIXED_PRECLUSTER_MAP_GROUPS,
+])
 
 
 def _pick_bucket_col_name(existing_names) -> str:
@@ -67,14 +68,53 @@ def _pick_bucket_col_name(existing_names) -> str:
 def maybe_apply_repartition(
         dataset: "ray.data.Dataset",
         table: "Table",
+        hash_fixed_precluster: str = HASH_FIXED_PRECLUSTER_AUTO,
 ) -> "ray.data.Dataset":
-    """Cluster rows by ``(partition_keys..., bucket)`` for HASH_FIXED tables.
+    """Optionally cluster rows for HASH_FIXED tables.
 
-    For any other bucket mode the dataset is returned unchanged.
-    HASH_FIXED writes are always pre-clustered, with no user opt-in
-    required.
+    ``auto`` currently behaves like ``off`` for append-only tables
+    because the old ``map_groups`` strategy materializes each
+    ``(partition, bucket)`` group on one Ray node. For primary-key
+    tables, unsafe Ray write plans are rejected because multiple Ray
+    tasks create independent Paimon writers and can assign overlapping
+    sequence numbers.
     """
-    if table.bucket_mode() != BucketMode.HASH_FIXED:
+    if hash_fixed_precluster not in HASH_FIXED_PRECLUSTER_MODES:
+        raise ValueError(
+            "hash_fixed_precluster must be one of {}, got {!r}".format(
+                sorted(HASH_FIXED_PRECLUSTER_MODES),
+                hash_fixed_precluster,
+            )
+        )
+
+    bucket_mode = table.bucket_mode()
+    is_primary_key_table = getattr(table, "is_primary_key_table", False)
+
+    if bucket_mode != BucketMode.HASH_FIXED:
+        if is_primary_key_table and bucket_mode in (
+                BucketMode.HASH_DYNAMIC,
+                BucketMode.CROSS_PARTITION,
+        ):
+            raise ValueError(
+                "{} primary-key Ray writes are not supported. Multiple "
+                "Ray tasks create independent Paimon writers, which can "
+                "assign overlapping buckets or sequence numbers.".format(
+                    bucket_mode.name
+                )
+            )
+        return dataset
+
+    if hash_fixed_precluster in (
+            HASH_FIXED_PRECLUSTER_AUTO,
+            HASH_FIXED_PRECLUSTER_OFF,
+    ):
+        if is_primary_key_table:
+            raise ValueError(
+                "HASH_FIXED primary-key Ray writes require "
+                "hash_fixed_precluster='map_groups'. Direct writes can "
+                "create overlapping sequence numbers when multiple Ray "
+                "tasks write the same bucket."
+            )
         return dataset
 
     partition_keys = list(table.table_schema.partition_keys or [])

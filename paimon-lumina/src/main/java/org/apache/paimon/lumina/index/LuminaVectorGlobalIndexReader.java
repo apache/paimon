@@ -43,6 +43,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -65,6 +67,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
+    private final ExecutorService executor;
 
     private volatile LuminaIndexMeta indexMeta;
     private volatile LuminaIndex index;
@@ -75,8 +78,10 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
-            LuminaVectorIndexOptions options) {
+            LuminaVectorIndexOptions options,
+            ExecutorService executor) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
+        this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
@@ -84,17 +89,22 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
-        try {
-            ensureLoaded();
-            return Optional.ofNullable(search(vectorSearch));
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Failed to search Lumina vector index with fieldName=%s, limit=%d",
-                            vectorSearch.fieldName(), vectorSearch.limit()),
-                    e);
-        }
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        ensureLoaded();
+                        return Optional.ofNullable(search(vectorSearch));
+                    } catch (IOException e) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Failed to search Lumina vector index with fieldName=%s, limit=%d",
+                                        vectorSearch.fieldName(), vectorSearch.limit()),
+                                e);
+                    }
+                },
+                executor);
     }
 
     private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
@@ -131,19 +141,25 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             effectiveK = Math.min(effectiveK, scopedIds.length);
             distances = new float[effectiveK];
             labels = new long[effectiveK];
-            Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
-            searchOptions.put("search.thread_safe_filter", "true");
-            ensureSearchListSize(searchOptions, effectiveK);
+            Map<String, String> mergedOptions =
+                    mergeOptions(
+                            this.options.toLuminaOptions(),
+                            indexMeta.options(),
+                            vectorSearch.options());
+            mergedOptions.put("search.thread_safe_filter", "true");
+            ensureSearchListSize(mergedOptions, effectiveK);
             index.searchWithFilter(
-                    queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
+                    queryVector, 1, effectiveK, distances, labels, scopedIds, mergedOptions);
         } else {
             distances = new float[effectiveK];
             labels = new long[effectiveK];
-            Map<String, String> searchOptions = options.toLuminaOptions();
-            searchOptions.putAll(indexMeta.options());
-            ensureSearchListSize(searchOptions, effectiveK);
-            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+            Map<String, String> mergedOptions =
+                    mergeOptions(
+                            this.options.toLuminaOptions(),
+                            indexMeta.options(),
+                            vectorSearch.options());
+            ensureSearchListSize(mergedOptions, effectiveK);
+            index.search(queryVector, 1, effectiveK, distances, labels, mergedOptions);
         }
 
         // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
@@ -160,10 +176,20 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
-    private static void ensureSearchListSize(Map<String, String> searchOptions, int topK) {
-        if (!searchOptions.containsKey("diskann.search.list_size")) {
+    static Map<String, String> mergeOptions(
+            Map<String, String> baseOptions,
+            Map<String, String> indexOptions,
+            Map<String, String> queryOptions) {
+        Map<String, String> options = new HashMap<>(baseOptions);
+        options.putAll(indexOptions);
+        options.putAll(queryOptions);
+        return options;
+    }
+
+    private static void ensureSearchListSize(Map<String, String> options, int topK) {
+        if (!options.containsKey("diskann.search.list_size")) {
             int listSize = Math.max((int) (topK * 1.5), MIN_SEARCH_LIST_SIZE);
-            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            options.put("diskann.search.list_size", String.valueOf(listSize));
         }
     }
 
@@ -345,73 +371,85 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     // =================== unsupported =====================
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     /**

@@ -1,5 +1,5 @@
 ---
-title: "Table with PK"
+title: "PrimaryKey Table"
 sidebar_position: 2
 ---
 

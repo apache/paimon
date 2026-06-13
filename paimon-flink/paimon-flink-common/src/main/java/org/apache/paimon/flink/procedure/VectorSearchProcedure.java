@@ -106,6 +106,7 @@ public class VectorSearchProcedure extends ProcedureBase {
                         .withVector(queryVector)
                         .withVectorColumn(vectorColumn)
                         .withLimit(topK)
+                        .withOptions(optionsMap)
                         .executeLocal();
 
         RowType tableRowType = table.rowType();

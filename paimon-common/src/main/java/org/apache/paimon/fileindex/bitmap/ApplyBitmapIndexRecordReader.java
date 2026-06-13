@@ -26,6 +26,7 @@ import org.apache.paimon.reader.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** A {@link RecordReader} which apply {@link BitmapIndexResult} to filter record. */
 public class ApplyBitmapIndexRecordReader implements FileRecordReader<InternalRow> {
@@ -33,6 +34,8 @@ public class ApplyBitmapIndexRecordReader implements FileRecordReader<InternalRo
     private final FileRecordReader<InternalRow> reader;
 
     private final BitmapIndexResult fileIndexResult;
+
+    private final AtomicBoolean exhausted = new AtomicBoolean(false);
 
     public ApplyBitmapIndexRecordReader(
             FileRecordReader<InternalRow> reader, BitmapIndexResult fileIndexResult) {
@@ -43,12 +46,16 @@ public class ApplyBitmapIndexRecordReader implements FileRecordReader<InternalRo
     @Nullable
     @Override
     public FileRecordIterator<InternalRow> readBatch() throws IOException {
+        if (exhausted.get()) {
+            return null;
+        }
+
         FileRecordIterator<InternalRow> batch = reader.readBatch();
         if (batch == null) {
             return null;
         }
 
-        return new ApplyBitmapIndexFileRecordIterator(batch, fileIndexResult);
+        return new ApplyBitmapIndexFileRecordIterator(batch, fileIndexResult, exhausted);
     }
 
     @Override

@@ -197,6 +197,75 @@ public class HiveWriteITCase extends HiveTestBase {
     }
 
     @Test
+    public void testInsertStaticPartition() throws Exception {
+        List<InternalRow> sourceData =
+                Arrays.asList(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("Alice"),
+                                5000.0,
+                                BinaryString.fromString("IT")),
+                        GenericRow.of(
+                                2,
+                                BinaryString.fromString("Bob"),
+                                6000.0,
+                                BinaryString.fromString("HR")),
+                        GenericRow.of(
+                                3,
+                                BinaryString.fromString("Charlie"),
+                                5500.0,
+                                BinaryString.fromString("IT")));
+
+        String sourceTableName =
+                createAppendOnlyExternalTable(
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.STRING(),
+                                    DataTypes.DOUBLE(),
+                                    DataTypes.STRING()
+                                },
+                                new String[] {"id", "name", "salary", "department"}),
+                        Collections.emptyList(),
+                        sourceData);
+
+        String tableName =
+                "static_partition_insert_" + UUID.randomUUID().toString().replace('-', '_');
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + folder.newFolder().toURI());
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "  id INT,",
+                                "  name STRING,",
+                                "  salary DOUBLE,",
+                                "  department STRING",
+                                ")",
+                                "PARTITIONED BY (dt STRING)",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key' = 'id,dt',",
+                                "  'bucket' = '2',",
+                                "  'file.format' = 'parquet'",
+                                ")")));
+
+        hiveShell.execute(
+                "INSERT INTO TABLE "
+                        + tableName
+                        + " PARTITION (dt='2026') "
+                        + "SELECT id, name, salary, department FROM "
+                        + sourceTableName);
+
+        List<String> rows = hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY id");
+        assertThat(rows)
+                .containsExactly(
+                        "1\tAlice\t5000.0\tIT\t2026",
+                        "2\tBob\t6000.0\tHR\t2026",
+                        "3\tCharlie\t5500.0\tIT\t2026");
+    }
+
+    @Test
     public void testWriteOnlyWithChangeLogTableOption() throws Exception {
 
         String innerName = "hive_test_table_output";

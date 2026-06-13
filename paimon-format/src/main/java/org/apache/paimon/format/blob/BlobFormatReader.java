@@ -19,6 +19,7 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -94,6 +95,8 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 Blob blob;
                 if (fileMeta.isNull(currentPosition)) {
                     blob = null;
+                } else if (fileMeta.isPlaceHolder(currentPosition)) {
+                    blob = BlobPlaceholder.INSTANCE;
                 } else {
                     long offset = fileMeta.blobOffset(currentPosition) + 4;
                     long length = fileMeta.blobLength(currentPosition) - 16;

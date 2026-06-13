@@ -24,7 +24,10 @@ import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtensio
 
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.Collections;
 import java.util.List;
+
+import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 
 /** Test for {@link BTreeIndexReader} to read a single file. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -37,7 +40,7 @@ public class BTreeIndexReaderTest extends AbstractIndexReaderTest {
     @Override
     protected GlobalIndexReader prepareDataAndCreateReader() throws Exception {
         GlobalIndexIOMeta written = writeData(data);
-
-        return new BTreeIndexReader(keySerializer, fileReader, written, CACHE_MANAGER);
+        return globalIndexer.createReader(
+                fileReader, Collections.singletonList(written), newDirectExecutorService());
     }
 }

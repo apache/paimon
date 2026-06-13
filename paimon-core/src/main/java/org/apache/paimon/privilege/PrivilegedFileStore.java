@@ -219,9 +219,13 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
+    public boolean mergeSchema(
+            RowType rowType,
+            boolean typeWidening,
+            boolean allowExplicitCast,
+            boolean caseSensitive) {
         privilegeChecker.assertCanInsert(identifier);
-        return wrapped.mergeSchema(rowType, allowExplicitCast);
+        return wrapped.mergeSchema(rowType, typeWidening, allowExplicitCast, caseSensitive);
     }
 
     @Override

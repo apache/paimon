@@ -76,8 +76,9 @@ public class CDCSourceSplitReader
     private TableReaderInfo currentTableReaderInfo;
     @Nullable private LazyRecordReader currentReader;
     @Nullable private String currentSplitId;
-    private long currentNumRead;
+    private long currentDataRowsRead;
     private RecordIterator<InternalRow> currentFirstBatch;
+    private final Queue<SchemaChangeEvent> currentSchemaChangeEvents = new LinkedList<>();
 
     private boolean paused;
     private final AtomicBoolean wakeup;
@@ -183,6 +184,7 @@ public class CDCSourceSplitReader
 
     @Override
     public void close() throws Exception {
+        currentSchemaChangeEvents.clear();
         if (currentReader != null) {
             if (currentReader.lazyRecordReader != null) {
                 currentReader.lazyRecordReader.close();
@@ -214,13 +216,17 @@ public class CDCSourceSplitReader
         List<SchemaChangeEvent> schemaChangeEvents =
                 tableManager.generateSchemaChangeEventList(
                         identifier, nextSplit.getLastSchemaId(), nextSplit.getSchemaId());
-        currentTableReaderInfo = new TableReaderInfo(identifier, tableSchema, schemaChangeEvents);
+        currentTableReaderInfo = new TableReaderInfo(identifier, tableSchema);
         currentSplitId = nextSplit.splitId();
         currentReader = createLazyRecordReader(nextSplit.split());
-        currentNumRead = nextSplit.recordsToSkip();
+        currentDataRowsRead = nextSplit.recordsToSkip();
+        currentSchemaChangeEvents.clear();
+        if (currentDataRowsRead == 0) {
+            currentSchemaChangeEvents.addAll(schemaChangeEvents);
+        }
 
-        if (currentNumRead > 0) {
-            seek(currentNumRead);
+        if (currentDataRowsRead > 0) {
+            seek(currentDataRowsRead);
         }
     }
 
@@ -257,6 +263,7 @@ public class CDCSourceSplitReader
             currentReader = null;
         }
 
+        currentSchemaChangeEvents.clear();
         final CDCRecordsWithSplitIds finishRecords =
                 CDCRecordsWithSplitIds.finishedSplit(currentSplitId);
         currentSplitId = null;
@@ -271,33 +278,24 @@ public class CDCSourceSplitReader
                 new MutableRecordAndPosition<>();
 
         private TableReaderInfo tableReaderInfo;
-        private final Queue<SchemaChangeEvent> schemaChangeEventList = new LinkedList<>();
 
         public FileStoreRecordIterator replace(
                 RecordIterator<InternalRow> iterator, TableReaderInfo tableReaderInfo) {
             this.iterator = iterator;
-            this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
+            this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentDataRowsRead);
             this.tableReaderInfo = tableReaderInfo;
-            this.schemaChangeEventList.addAll(tableReaderInfo.schemaChangeEvents);
             return this;
         }
 
         @Nullable
         @Override
         public RecordAndPosition<Event> next() {
-            Event event = nextEvent();
-            if (event == null) {
-                return null;
-            }
-
-            recordAndPosition.setNext(event);
-            currentNumRead++;
-            return recordAndPosition;
-        }
-
-        private Event nextEvent() {
-            if (!schemaChangeEventList.isEmpty()) {
-                return schemaChangeEventList.poll();
+            if (!currentSchemaChangeEvents.isEmpty()) {
+                recordAndPosition.set(
+                        currentSchemaChangeEvents.poll(),
+                        RecordAndPosition.NO_OFFSET,
+                        currentDataRowsRead);
+                return recordAndPosition;
             }
 
             InternalRow row;
@@ -310,11 +308,14 @@ public class CDCSourceSplitReader
                 return null;
             }
 
-            return convertRowToDataChangeEvent(
-                    tableReaderInfo.tableId,
-                    row,
-                    tableReaderInfo.fieldGetters,
-                    tableReaderInfo.generator);
+            recordAndPosition.setNext(
+                    convertRowToDataChangeEvent(
+                            tableReaderInfo.tableId,
+                            row,
+                            tableReaderInfo.fieldGetters,
+                            tableReaderInfo.generator));
+            currentDataRowsRead++;
+            return recordAndPosition;
         }
 
         @Override
@@ -358,19 +359,14 @@ public class CDCSourceSplitReader
         private final Identifier identifier;
         private final TableId tableId;
         private final TableSchema currentSchema;
-        private final List<SchemaChangeEvent> schemaChangeEvents;
         private final BinaryRecordDataGenerator generator;
         private final List<InternalRow.FieldGetter> fieldGetters;
 
-        private TableReaderInfo(
-                Identifier identifier,
-                TableSchema currentSchema,
-                List<SchemaChangeEvent> schemaChangeEvents) {
+        private TableReaderInfo(Identifier identifier, TableSchema currentSchema) {
             this.identifier = identifier;
             this.tableId = TableId.tableId(identifier.getDatabaseName(), identifier.getTableName());
 
             this.currentSchema = currentSchema;
-            this.schemaChangeEvents = schemaChangeEvents;
 
             org.apache.flink.cdc.common.schema.Schema currentCDCSchema =
                     convertPaimonSchemaToFlinkCDCSchema(currentSchema);

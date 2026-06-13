@@ -236,7 +236,6 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         @Override
         public Plan plan() {
             List<Split> splits = new ArrayList<>();
-            PartitionPredicate partitionPredicate = getPartitionPredicate();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
@@ -256,11 +255,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
             Set<BinaryRow> snapshotPartitions =
                     new HashSet<>(
-                            newChainPartitionListingScan(true, partitionPredicate)
+                            newChainPartitionListingScan(true, getMainPartitionPredicate())
                                     .listPartitions());
 
             DataTableScan deltaPartitionScan =
-                    newChainPartitionListingScan(false, partitionPredicate);
+                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
             List<BinaryRow> deltaPartitions =
                     deltaPartitionScan.listPartitions().stream()
                             .filter(p -> !snapshotPartitions.contains(p))
@@ -286,8 +285,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     deltaPartitionsInGroup.sort(
                             (a, b) ->
                                     chainPartitionComparator.compare(
-                                            partitionProjector.chainPartitionForCompare(a),
-                                            partitionProjector.chainPartitionForCompare(b)));
+                                            partitionProjector.extractChainPartition(a),
+                                            partitionProjector.extractChainPartition(b)));
 
                     // Build a targeted snapshot-anchor predicate:
                     //   group fields exact-match  AND  chain < maxChainInGroup
@@ -309,15 +308,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     // List snapshot partitions for this group, sorted by chain dimension.
                     List<BinaryRow> snapshotPartitionsInGroup =
                             newChainPartitionListingScan(true, snapshotAnchorPredicate)
-                                    .listPartitions().stream()
-                                    .sorted(
-                                            (a, b) ->
-                                                    chainPartitionComparator.compare(
-                                                            partitionProjector
-                                                                    .chainPartitionForCompare(a),
-                                                            partitionProjector
-                                                                    .chainPartitionForCompare(b)))
-                                    .collect(Collectors.toList());
+                                    .listPartitions();
 
                     // Find delta → snapshot mapping (for each delta partition, find the nearest
                     // earlier
@@ -433,9 +424,10 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            PartitionPredicate partitionPredicate = getPartitionPredicate();
-            DataTableScan snapshotScan = newChainPartitionListingScan(true, partitionPredicate);
-            DataTableScan deltaScan = newChainPartitionListingScan(false, partitionPredicate);
+            DataTableScan snapshotScan =
+                    newChainPartitionListingScan(true, getMainPartitionPredicate());
+            DataTableScan deltaScan =
+                    newChainPartitionListingScan(false, getFallbackPartitionPredicate());
             List<PartitionEntry> partitionEntries =
                     new ArrayList<>(snapshotScan.listPartitionEntries());
             Set<BinaryRow> partitions =

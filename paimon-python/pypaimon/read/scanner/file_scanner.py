@@ -40,6 +40,10 @@ from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.bucket_select_converter import \
     create_bucket_selector
+from pypaimon.read.scanner.chunk_shuffle_split_generator import (
+    AppendChunkShuffleSplitGenerator,
+    DataEvolutionChunkShuffleSplitGenerator,
+)
 from pypaimon.read.scanner.data_evolution_split_generator import \
     DataEvolutionSplitGenerator
 from pypaimon.read.scanner.primary_key_table_split_generator import \
@@ -204,6 +208,7 @@ class FileScanner:
         self.number_of_para_subtasks = None
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
+        self.chunk_shuffle: Optional[Tuple[int, int]] = None
 
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
@@ -243,7 +248,34 @@ class FileScanner:
     def scan(self) -> Plan:
         start_ms = time.time() * 1000
         # Create appropriate split generator based on table type
-        if self.table.is_primary_key_table:
+        if self.chunk_shuffle is not None:
+            self._validate_chunk_shuffle_compat()
+            seed, chunk_size = self.chunk_shuffle
+            # Both append and DE paths use plan_files() directly: the
+            # predicate is partition-only (enforced by
+            # _validate_chunk_shuffle_compat), so manifest_entry-level
+            # partition pruning in plan_files() is the only filter we
+            # want — no row_id range pushdown, no global index lookup.
+            entries = self.plan_files()
+            if self.data_evolution:
+                split_generator = DataEvolutionChunkShuffleSplitGenerator(
+                    self.table,
+                    self.target_split_size,
+                    self.open_file_cost,
+                    self._deletion_files_map(entries),
+                    seed=seed,
+                    chunk_size=chunk_size,
+                )
+            else:
+                split_generator = AppendChunkShuffleSplitGenerator(
+                    self.table,
+                    self.target_split_size,
+                    self.open_file_cost,
+                    self._deletion_files_map(entries),
+                    seed=seed,
+                    chunk_size=chunk_size,
+                )
+        elif self.table.is_primary_key_table:
             entries = self.plan_files()
             split_generator = PrimaryKeyTableSplitGenerator(
                 self.table,
@@ -285,18 +317,20 @@ class FileScanner:
     def _create_data_evolution_split_generator(self):
         row_ranges = None
         score_getter = None
+        # Fetch snapshot once and share with global index evaluation to avoid
+        # a duplicate /snapshot REST round-trip (#7513).
+        manifest_files, snapshot = self.manifest_scanner()
+        self._scanned_snapshot = snapshot
+        self._scanned_snapshot_id = snapshot.id if snapshot else None
+
         global_index_result = self._global_index_result if self._global_index_result is not None \
-            else self._eval_global_index()
+            else self._eval_global_index(snapshot)
         if global_index_result is not None:
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
         if row_ranges is None and self.predicate is not None:
             row_ranges = _row_ranges_from_predicate(self.predicate)
-
-        manifest_files, snapshot = self.manifest_scanner()
-        self._scanned_snapshot = snapshot
-        self._scanned_snapshot_id = snapshot.id if snapshot else None
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
@@ -324,7 +358,7 @@ class FileScanner:
             return []
         return self.read_manifest_entries(manifest_files)
 
-    def _eval_global_index(self):
+    def _eval_global_index(self, snapshot=None):
         # No filter - nothing to evaluate
         if self.predicate is None:
             return None
@@ -339,7 +373,8 @@ class FileScanner:
             scanner = GlobalIndexScanner.create(
                 self.table,
                 partition_filter=self.partition_key_predicate,
-                predicate=self.predicate
+                predicate=self.predicate,
+                snapshot=snapshot,
             )
             if scanner is None:
                 return None
@@ -437,6 +472,38 @@ class FileScanner:
         self.scan_stats = ScanStats()
         plan = self.scan()
         return plan, self.scan_stats
+
+    def with_chunk_shuffle(self, seed: int, chunk_size: int) -> 'FileScanner':
+        if not isinstance(seed, int):
+            raise ValueError("chunk_shuffle seed must be an int")
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            raise ValueError("chunk_shuffle chunk_size must be a positive int")
+        self.chunk_shuffle = (seed, chunk_size)
+        return self
+
+    def _validate_chunk_shuffle_compat(self) -> None:
+        if self.table.is_primary_key_table:
+            raise ValueError("chunk_shuffle only supports append tables")
+        if self.deletion_vectors_enabled:
+            raise ValueError("chunk_shuffle not supported with deletion vectors")
+        if self.start_pos_of_this_subtask is not None:
+            raise ValueError("chunk_shuffle cannot combine with with_slice")
+        if self.limit is not None:
+            raise ValueError("chunk_shuffle cannot combine with limit")
+        if self._global_index_result is not None:
+            raise ValueError("chunk_shuffle cannot combine with global index")
+        # Only partition predicates are allowed: row-level / column-level
+        # predicates would silently shrink each chunk's effective row count,
+        # breaking the chunk_size contract DataLoader callers expect.
+        if self.predicate is not None:
+            partition_keys = set(self.table.partition_keys or [])
+            non_partition_fields = _get_all_fields(self.predicate) - partition_keys
+            if non_partition_fields:
+                raise ValueError(
+                    "chunk_shuffle predicate must reference only partition keys; "
+                    "got non-partition fields: "
+                    f"{sorted(non_partition_fields)}"
+                )
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         """Mirror Java ``DataTableBatchScan.applyPushDownLimit``: sum the

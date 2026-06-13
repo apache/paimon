@@ -92,6 +92,8 @@ public class SchemaManagerTest {
     private final List<String> primaryKeys = Arrays.asList("f0", "f1");
     private final Map<String, String> options = Collections.singletonMap("key", "value");
     private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
+    private final RowType rowTypeWithSequenceField =
+            RowType.of(new IntType(), new BigIntType(), new VarCharType(), new BigIntType());
     private final Schema schema =
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
@@ -166,6 +168,59 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @Test
+    public void testResetSequenceGroupForAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "sum");
+        options.put("fields.f3.sequence-group", "f2");
+        Schema schema =
+                new Schema(
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.removeOption(
+                                                                "fields.f3.sequence-group"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field f2.");
+    }
+
+    @Test
+    public void testResetSequenceGroupForLastNonNullAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "last_non_null_value");
+        options.put("fields.f3.sequence-group", "f2");
+        Schema schema =
+                new Schema(
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.removeOption("fields.f3.sequence-group")));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(latest.get().options()).doesNotContainKey("fields.f3.sequence-group");
     }
 
     @Test

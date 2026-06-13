@@ -20,6 +20,7 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -35,6 +36,7 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -48,6 +50,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -168,7 +171,10 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public InternalVector getVector(int pos) {
-        throw new UnsupportedOperationException("Not support VectorType yet.");
+        if (row.isNullAt(pos)) {
+            return null;
+        }
+        return toPaimonVector((VectorType) type.getTypeAt(pos), row.get(pos));
     }
 
     @Override
@@ -424,6 +430,94 @@ public class SparkRow implements InternalRow, Serializable {
                 res[i] = getDouble(i);
             }
             return res;
+        }
+    }
+
+    private static InternalVector toPaimonVector(VectorType vectorType, Object vector) {
+        if (vector == null) {
+            return null;
+        }
+        if (vector instanceof boolean[]) {
+            return BinaryVector.fromPrimitiveArray((boolean[]) vector);
+        } else if (vector instanceof byte[]) {
+            return BinaryVector.fromPrimitiveArray((byte[]) vector);
+        } else if (vector instanceof short[]) {
+            return BinaryVector.fromPrimitiveArray((short[]) vector);
+        } else if (vector instanceof int[]) {
+            return BinaryVector.fromPrimitiveArray((int[]) vector);
+        } else if (vector instanceof long[]) {
+            return BinaryVector.fromPrimitiveArray((long[]) vector);
+        } else if (vector instanceof float[]) {
+            return BinaryVector.fromPrimitiveArray((float[]) vector);
+        } else if (vector instanceof double[]) {
+            return BinaryVector.fromPrimitiveArray((double[]) vector);
+        }
+        if (vector instanceof scala.collection.Seq) {
+            vector = JavaConverters.seqAsJavaList((scala.collection.Seq<Object>) vector);
+        } else if (vector.getClass().isArray()) {
+            vector = Arrays.asList((Object[]) vector);
+        }
+        if (!(vector instanceof List)) {
+            throw new UnsupportedOperationException(
+                    "Unsupported vector object: " + vector.getClass().getName());
+        }
+        return toPaimonVector(vectorType, (List<?>) vector);
+    }
+
+    private static InternalVector toPaimonVector(VectorType vectorType, List<?> list) {
+        int expectedLength = vectorType.getLength();
+        if (list.size() != expectedLength) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Vector length mismatch. Expected %d but was %d.",
+                            expectedLength, list.size()));
+        }
+        switch (vectorType.getElementType().getTypeRoot()) {
+            case BOOLEAN:
+                boolean[] booleanValues = new boolean[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    booleanValues[i] = (Boolean) list.get(i);
+                }
+                return BinaryVector.fromPrimitiveArray(booleanValues);
+            case TINYINT:
+                byte[] byteValues = new byte[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    byteValues[i] = ((Number) list.get(i)).byteValue();
+                }
+                return BinaryVector.fromPrimitiveArray(byteValues);
+            case SMALLINT:
+                short[] shortValues = new short[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    shortValues[i] = ((Number) list.get(i)).shortValue();
+                }
+                return BinaryVector.fromPrimitiveArray(shortValues);
+            case INTEGER:
+                int[] intValues = new int[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    intValues[i] = ((Number) list.get(i)).intValue();
+                }
+                return BinaryVector.fromPrimitiveArray(intValues);
+            case BIGINT:
+                long[] longValues = new long[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    longValues[i] = ((Number) list.get(i)).longValue();
+                }
+                return BinaryVector.fromPrimitiveArray(longValues);
+            case FLOAT:
+                float[] floatValues = new float[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    floatValues[i] = ((Number) list.get(i)).floatValue();
+                }
+                return BinaryVector.fromPrimitiveArray(floatValues);
+            case DOUBLE:
+                double[] doubleValues = new double[expectedLength];
+                for (int i = 0; i < expectedLength; i++) {
+                    doubleValues[i] = ((Number) list.get(i)).doubleValue();
+                }
+                return BinaryVector.fromPrimitiveArray(doubleValues);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported element type for vector " + vectorType.getElementType());
         }
     }
 }

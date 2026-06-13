@@ -37,8 +37,6 @@ import java.util.Map;
 import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /** {@link DataTypeFamily#CHARACTER_STRING} to {@link DataTypeRoot#MAP} cast rule. */
 class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
@@ -141,15 +139,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             throw new RuntimeException("Invalid Function map format: odd number of elements");
         }
 
-        return IntStream.range(0, elements.size() / 2)
-                .boxed()
-                .collect(
-                        Collectors.toMap(
-                                i -> parseValue(elements.get(i * 2).trim(), keyCastExecutor),
-                                i ->
-                                        parseValue(
-                                                elements.get(i * 2 + 1).trim(),
-                                                valueCastExecutor)));
+        Map<Object, Object> mapContent = Maps.newHashMap();
+        for (int i = 0; i < elements.size(); i += 2) {
+            mapContent.put(
+                    parseValue(elements.get(i).trim(), keyCastExecutor),
+                    parseValue(elements.get(i + 1).trim(), valueCastExecutor));
+        }
+        return mapContent;
     }
 
     private Map<Object, Object> parseMapEntry(

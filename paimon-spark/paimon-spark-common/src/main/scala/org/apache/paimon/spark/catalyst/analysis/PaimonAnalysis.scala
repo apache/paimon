@@ -18,12 +18,12 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand}
-import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
@@ -35,6 +35,8 @@ import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.TableCapability
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
 
+import scala.collection.JavaConverters._
+
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
   import DataSourceV2Implicits._
   import PaimonAnalysis._
@@ -43,15 +45,19 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     case a @ PaimonV2WriteCommand(table)
         if !paimonWriteResolved(a.query, table) &&
           a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
-      val mergeSchemaEnabled =
-        writeOptions(a).get(SparkConnectorOptions.MERGE_SCHEMA.key()).contains("true") ||
-          OptionUtils.writeMergeSchemaEnabled()
+      val options = Options.fromMap(writeOptions(a).asJava)
+      val mergeSchemaEnabled = SchemaEvolutionHelper.mergeSchemaEnabled(options)
+      val expected = SchemaEvolutionHelper.expectedAttrsForCatalogWrite(
+        table,
+        a.query.schema,
+        options,
+        a.isByName,
+        session)
       val newQuery = PaimonOutputResolver.resolveOutputColumns(
         table.name,
-        table.output,
+        expected,
         a.query,
         a.isByName,
-        conf,
         mergeSchemaEnabled)
       if (newQuery ne a.query) {
         // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.

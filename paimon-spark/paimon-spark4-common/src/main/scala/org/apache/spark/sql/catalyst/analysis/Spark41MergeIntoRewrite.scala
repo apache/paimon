@@ -19,7 +19,7 @@
 package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.catalyst.analysis.{AssignmentAlignmentHelper, MergeSchemaEvolutionHelper, PaimonRelation}
+import org.apache.paimon.spark.catalyst.analysis.{MergeSchemaEvolutionHelper, PaimonRelation}
 
 import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, Exists, Expression, IsNotNull, Literal, MetadataAttribute, MonotonicallyIncreasingID, OuterReference, PredicateHelper, SubqueryExpression}
@@ -38,49 +38,28 @@ import org.apache.spark.sql.types.IntegerType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
- * Spark 4.1-only Resolution-batch rule that rewrites MERGE INTO plans targeting pure append-only
- * Paimon tables (no PK / RT / DE / DV) into the V2 `ReplaceData` / `AppendData` plans — the same
- * forms Spark's built-in `RewriteMergeIntoTable` produces for `SupportsRowLevelOperations` tables
- * that don't implement `SupportsDelta`.
+ * Spark 4.1-only Resolution-batch rule that rewrites MERGE INTO on Paimon tables eligible for V2
+ * copy-on-write (no PK / DE / DV / CHAR) into V2 `ReplaceData` / `AppendData` plans, mirroring
+ * Spark's built-in `RewriteMergeIntoTable` for non-`SupportsDelta` row-level tables.
  *
- * Why this rule exists: Spark 4.1 moved `RewriteMergeIntoTable` into the main Resolution batch AND
- * implemented its `apply` with `plan resolveOperators { ... }`. `AnalysisHelper.resolveOperators*`
- * short-circuits on already-`analyzed` plans, so by the time the rewrite would run the
- * `MergeIntoTable` node has transitioned to `analyzed=true` and the rewrite silently skips. The
- * `MergeIntoTable` then falls through to the physical planner which rejects it with
- * `UNSUPPORTED_FEATURE.TABLE_OPERATION`. This mirrors the `Spark41AppendOnlyRowLevelRewrite`
- * treatment of UPDATE.
+ * In Spark 4.1, `RewriteMergeIntoTable` runs in the Resolution batch via `resolveOperators`, which
+ * short-circuits on `analyzed=true` plans — by the time it would fire, the `MergeIntoTable` is
+ * already marked analyzed and silently skipped, so the planner rejects it with
+ * `UNSUPPORTED_FEATURE.TABLE_OPERATION`. We intercept via `transformDown` under
+ * `allowInvokingTransformsInAnalyzer` and inline the three `ReplaceData`/`AppendData` branches.
+ * `SupportsDelta` is omitted — Paimon is copy-on-write only.
  *
- * Firing in the Resolution batch via `transformDown` guarded by
- * `AnalysisHelper.allowInvokingTransformsInAnalyzer` intercepts the plan before the analyzed flag
- * traps Spark's own rule. The body is a near-verbatim transcription of `RewriteMergeIntoTable`'s
- * three `ReplaceData`/`AppendData` branches (kept in lockstep with Spark 4.1.1) so the produced
- * plans go through Paimon's V2 row-level write path (`PaimonSparkCopyOnWriteOperation` ->
- * `PaimonV2WriteBuilder` -> `PaimonBatchWrite`) exactly like Spark would have produced. The
- * `SupportsDelta` branch is intentionally omitted — Paimon's `PaimonSparkCopyOnWriteOperation` is
- * copy-on-write only.
+ * We fire before `ResolveAssignments`, so `m.aligned` is `false`. The rule pre-aligns each action
+ * list via `PaimonAssignmentUtils.alignActions` (shared with the postHoc `PaimonMergeInto` rule).
  *
- * Like the UPDATE rule, we fire before `ResolveAssignments` has run, so `m.aligned` is still
- * `false` when we see the plan. The rule mixes in `AssignmentAlignmentHelper` and aligns all
- * merge-action assignments itself (same helper the postHoc `PaimonMergeInto` rule uses) before
- * dispatching to the branch logic, which depends on `m.aligned == true`.
- *
- * Scope mirrors `Spark41AppendOnlyRowLevelRewrite`:
- *   - `SPARK_VERSION >= "4.1"`
- *   - pure append-only `FileStoreTable`s (no PK / RT / DE / DV)
- *   - no CHAR columns — Spark's `CharVarcharCodegenUtils.readSidePadding` Project races with the
- *     rewrite and trips CheckAnalysis when intercepting before the padding stabilises; those plans
- *     fall through to Paimon's postHoc `PaimonMergeInto` V1 fallback instead.
- *
- * Tables with PK / row-tracking / data-evolution / deletion-vectors still route to the postHoc
- * `PaimonMergeInto` V1 command (`MergeIntoPaimonTable` / `MergeIntoPaimonDataEvolutionTable`) via
- * `RowLevelHelper.shouldFallbackToV1MergeInto` — the V1 path is feature-complete for those table
- * shapes and this rule leaves them alone.
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite. CHAR columns are excluded —
+ * `readSidePadding` races with the rewrite and trips CheckAnalysis; those plans fall back to the
+ * postHoc `PaimonMergeInto` V1 path, which also owns PK / DE / DV tables via
+ * `RowLevelHelper.shouldFallbackToV1MergeInto`.
  */
 object Spark41MergeIntoRewrite
   extends RewriteRowLevelCommand
   with PredicateHelper
-  with AssignmentAlignmentHelper
   with MergeSchemaEvolutionHelper
   with PureAppendOnlyScope {
 
@@ -93,9 +72,10 @@ object Spark41MergeIntoRewrite
       plan.transformDown {
         case m: MergeIntoTable
             if m.resolved && m.rewritable && !m.needSchemaEvolution &&
-              targetsPureAppendOnly(m.targetTable) =>
-          // Pure append-only tables never reach the postHoc `PaimonMergeIntoBase`, so evolve here.
-          rewrite(alignMergeIntoTable(evolveSchemaIfPaimon(m)))
+              targetsV2CopyOnWriteTable(m.targetTable) =>
+          // Pure append-only tables skip postHoc `PaimonMergeInto`, so evolve schema here.
+          val evolved = evolveSchemaIfPaimon(m)
+          rewrite(alignAllMergeActions(evolved, evolved.targetTable.output))
       }
     }
   }
@@ -108,11 +88,6 @@ object Spark41MergeIntoRewrite
       .map(_._1)
       .getOrElse(m)
   }
-
-  /* ------------------------------------------------------------------------------------------- *
-   * Dispatcher mirroring `RewriteMergeIntoTable.apply`'s three `ReplaceData`/`AppendData`
-   * branches. The `SupportsDelta` branch from Spark is intentionally omitted.
-   * ------------------------------------------------------------------------------------------- */
 
   private def rewrite(m: MergeIntoTable): LogicalPlan = {
     val MergeIntoTable(
@@ -151,27 +126,7 @@ object Spark41MergeIntoRewrite
     }
   }
 
-  /* ------------------------------------------------------------------------------------------- *
-   * Assignment alignment. Spark 4.1's `RewriteMergeIntoTable` gates on `m.aligned`, which is set
-   * by `ResolveAssignments` earlier in the Resolution batch. Because we fire before that rule,
-   * `m.aligned` is still `false`; align manually using the helper `PaimonMergeInto` uses for V1.
-   * ------------------------------------------------------------------------------------------- */
-
-  private def alignMergeIntoTable(m: MergeIntoTable): MergeIntoTable = {
-    val targetOutput = m.targetTable.output
-    m.copy(
-      matchedActions = m.matchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedActions = m.notMatchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedBySourceActions = m.notMatchedBySourceActions.map(alignMergeAction(_, targetOutput))
-    )
-  }
-
-  /* ------------------------------------------------------------------------------------------- *
-   * Fast-path #1: single NOT MATCHED InsertAction, no MATCHED, no NOT MATCHED BY SOURCE. Rewrite
-   * as an append over a left-anti join so Spark can skip the row-level merge machinery.
-   * Transcribed from `RewriteMergeIntoTable.apply` case 1.
-   * ------------------------------------------------------------------------------------------- */
-
+  // Fast-path #1: single NOT MATCHED InsertAction. Append over a left-anti join.
   private def buildSingleInsertAppendPlan(
       r: DataSourceV2Relation,
       source: LogicalPlan,
@@ -190,12 +145,7 @@ object Spark41MergeIntoRewrite
     AppendData.byPosition(r, project)
   }
 
-  /* ------------------------------------------------------------------------------------------- *
-   * Fast-path #2: only NOT MATCHED actions (possibly multiple), no MATCHED, no NOT MATCHED BY
-   * SOURCE. Rewrite as an append over a left-anti join with a `MergeRows` on top to dispatch
-   * between the multiple InsertActions. Transcribed from `RewriteMergeIntoTable.apply` case 2.
-   * ------------------------------------------------------------------------------------------- */
-
+  // Fast-path #2: only NOT MATCHED actions. Append over a left-anti join with `MergeRows`.
   private def buildNotMatchedOnlyAppendPlan(
       r: DataSourceV2Relation,
       source: LogicalPlan,
@@ -224,12 +174,8 @@ object Spark41MergeIntoRewrite
     AppendData.byPosition(r, mergeRows)
   }
 
-  /* ------------------------------------------------------------------------------------------- *
-   * General path producing a `ReplaceData` plan. Transcribed near-verbatim from
-   * `RewriteMergeIntoTable.buildReplaceDataPlan` + `buildReplaceDataMergeRowsPlan`. Kept in
-   * lockstep with Spark 4.1.1.
-   * ------------------------------------------------------------------------------------------- */
-
+  // General path producing a `ReplaceData` plan. Mirrors Spark 4.1.1's
+  // `RewriteMergeIntoTable.buildReplaceDataPlan` + `buildReplaceDataMergeRowsPlan`.
   private def buildReplaceDataPlan(
       relation: DataSourceV2Relation,
       operationTable: RowLevelOperationTable,
@@ -276,9 +222,7 @@ object Spark41MergeIntoRewrite
       metadataAttrs: Seq[Attribute],
       checkCardinality: Boolean): MergeRows = {
 
-    // target records that were read but did not match any MATCHED or NOT MATCHED BY SOURCE
-    // actions must be copied over and included in the new state of the table as groups are being
-    // replaced.
+    // Unmatched target rows must be copied through since groups are being replaced wholesale.
     val carryoverRowsOutput = Literal(WRITE_WITH_METADATA_OPERATION) +: targetTable.output
     val keepCarryoverRowsInstruction = Keep(Copy, TrueLiteral, carryoverRowsOutput)
 
@@ -354,7 +298,6 @@ object Spark41MergeIntoRewrite
     Join(targetTableProj, sourceTableProj, joinType, Some(joinCond), joinHint)
   }
 
-  /** Matches `RewriteMergeIntoTable.shouldCheckCardinality`. */
   private def shouldCheckCardinality(matchedActions: Seq[MergeAction]): Boolean = {
     matchedActions match {
       case Nil => false
@@ -363,10 +306,7 @@ object Spark41MergeIntoRewrite
     }
   }
 
-  /**
-   * Converts a MERGE action into an instruction for the group-based (copy-on-write) plan. Matches
-   * `RewriteMergeIntoTable.toInstruction(action, metadataAttrs)`.
-   */
+  // Mirrors `RewriteMergeIntoTable.toInstruction`.
   private def toInstruction(action: MergeAction, metadataAttrs: Seq[Attribute]): Instruction = {
     action match {
       case UpdateAction(cond, assignments, _) =>
@@ -391,10 +331,7 @@ object Spark41MergeIntoRewrite
     }
   }
 
-  /* ------------------------------------------------------------------------------------------- *
-   * Condition validation. Mirrors `RewriteMergeIntoTable.validateMergeIntoConditions`.
-   * ------------------------------------------------------------------------------------------- */
-
+  // Mirrors `RewriteMergeIntoTable.validateMergeIntoConditions`.
   private def validateMergeIntoConditions(merge: MergeIntoTable): Unit = {
     checkMergeIntoCondition("SEARCH", merge.mergeCondition)
     val actions = merge.matchedActions ++ merge.notMatchedActions ++ merge.notMatchedBySourceActions
@@ -418,7 +355,5 @@ object Spark41MergeIntoRewrite
     }
   }
 
-  // `targetsPureAppendOnly` / `hasCharColumn` are provided by `PureAppendOnlyScope` — kept in
-  // one place so this rule and `Spark41AppendOnlyRowLevelRewrite` can't drift apart on what
-  // qualifies as a "pure append-only" Paimon target.
+  // Scope checks live in `PureAppendOnlyScope`, shared with `Spark41AppendOnlyRowLevelRewrite`.
 }

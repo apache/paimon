@@ -19,7 +19,10 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.csv.CsvOptions;
@@ -43,7 +46,9 @@ import org.apache.paimon.table.format.predicate.PredicateUtils;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
@@ -245,7 +250,8 @@ public class FormatTableScan implements InnerTableScan {
                 Map<String, String> equalityPrefix =
                         extractLeadingEqualityPartitionSpecWhenOnlyAnd(
                                 partitionKeys,
-                                ((DefaultPartitionPredicate) partitionFilter).predicate());
+                                ((DefaultPartitionPredicate) partitionFilter).predicate(),
+                                partitionType);
                 if (!equalityPrefix.isEmpty()) {
                     // Use optimized scan for specific partition path
                     String partitionPath =
@@ -313,7 +319,7 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-            List<String> partitionKeys, Predicate predicate) {
+            List<String> partitionKeys, Predicate predicate, RowType partitionType) {
         List<Predicate> predicates = PredicateBuilder.splitAnd(predicate);
         Map<String, String> equals = new HashMap<>();
         for (Predicate sub : predicates) {
@@ -324,7 +330,10 @@ public class FormatTableScan implements InnerTableScan {
                     LeafFunction function = ((LeafPredicate) sub).function();
                     String field = fieldRef.name();
                     if (function instanceof Equal && partitionKeys.contains(field)) {
-                        equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                        equals.put(
+                                field,
+                                partitionLiteralToString(
+                                        fieldRef.type(), ((LeafPredicate) sub).literals().get(0)));
                     }
                 }
             }
@@ -338,5 +347,17 @@ public class FormatTableScan implements InnerTableScan {
             }
         }
         return result;
+    }
+
+    private static String partitionLiteralToString(DataType type, Object literal) {
+        if (literal == null) {
+            return null;
+        }
+
+        CastExecutor<Object, BinaryString> executor =
+                (CastExecutor<Object, BinaryString>)
+                        CastExecutors.resolve(type, VarCharType.STRING_TYPE);
+        BinaryString value = executor.cast(literal);
+        return value == null ? null : value.toString();
     }
 }

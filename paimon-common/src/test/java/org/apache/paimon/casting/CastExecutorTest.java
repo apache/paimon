@@ -643,6 +643,15 @@ public class CastExecutorTest {
         assertThat(valueArray.getInt(0)).isEqualTo(42);
         assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
         assertThat(valueArray.isNullAt(1)).isTrue();
+
+        result = stringToMap.cast(BinaryString.fromString("MAP(key1, null, key2, 42)"));
+        assertThat(result.size()).isEqualTo(2);
+        keyArray = result.keyArray();
+        valueArray = result.valueArray();
+        assertThat(keyArray.getString(0).toString()).isEqualTo("key2");
+        assertThat(valueArray.getInt(0)).isEqualTo(42);
+        assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
+        assertThat(valueArray.isNullAt(1)).isTrue();
     }
 
     @Test

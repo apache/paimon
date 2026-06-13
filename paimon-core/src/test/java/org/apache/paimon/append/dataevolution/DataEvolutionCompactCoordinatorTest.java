@@ -52,6 +52,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -189,6 +190,24 @@ public class DataEvolutionCompactCoordinatorTest {
                         entries.get(2).file(),
                         entries.get(4).file(),
                         entries.get(5).file());
+    }
+
+    @Test
+    public void testCompactPlannerWithUpdatedBlobFiles() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(makeEntry("file1.parquet", 0L, 3L, 100));
+        entries.add(makeBlobEntry("old.blob", 0L, 3L, 100, 0, "pic"));
+        entries.add(makeBlobEntry("updated.blob", 0L, 3L, 100, 1, "pic"));
+
+        DataEvolutionCompactCoordinator.CompactPlanner planner =
+                blobPlanner(1024, 1, 2, rowType(new DataField(1, "pic", DataTypes.BLOB())));
+
+        List<DataEvolutionCompactTask> tasks = planner.compactPlan(entries);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).isBlobTask()).isTrue();
+        assertThat(tasks.get(0).compactBefore())
+                .containsExactly(entries.get(1).file(), entries.get(2).file());
     }
 
     @Test
@@ -406,6 +425,7 @@ public class DataEvolutionCompactCoordinatorTest {
         when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
         when(table.store()).thenReturn(fileStore);
         when(fileStore.newScan()).thenReturn(scan);
+        when(scan.withPartitionFilter((PartitionPredicate) null)).thenReturn(scan);
 
         ManifestFileMeta metaWithNullRowId =
                 new ManifestFileMeta(
@@ -451,6 +471,87 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
                 .containsExactly(entry1.file().fileName(), entry2.file().fileName());
+    }
+
+    @Test
+    public void testPlanWithPartitionFilterDoesNotCompactOtherPartitions() {
+        FileStoreTable table = mock(FileStoreTable.class);
+        SnapshotReader snapshotReader = mock(SnapshotReader.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        Snapshot snapshot = mock(Snapshot.class);
+        ManifestsReader manifestsReader = mock(ManifestsReader.class);
+        FileStore fileStore = mock(FileStore.class);
+        FileStoreScan scan = mock(FileStoreScan.class);
+        PartitionPredicate partitionPredicate = mock(PartitionPredicate.class);
+        AtomicBoolean entryPartitionFilterApplied = new AtomicBoolean(false);
+
+        Options options = new Options();
+        options.set("target-file-size", "1 kb");
+        options.set("source.split.open-file-cost", "1 b");
+        options.set("compaction.min.file-num", "2");
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+        when(table.newSnapshotReader()).thenReturn(snapshotReader);
+        when(snapshotReader.withPartitionFilter(partitionPredicate)).thenReturn(snapshotReader);
+        when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
+        when(snapshotManager.latestSnapshot()).thenReturn(snapshot);
+        when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
+        when(table.store()).thenReturn(fileStore);
+        when(fileStore.newScan()).thenReturn(scan);
+        when(scan.withPartitionFilter(partitionPredicate))
+                .thenAnswer(
+                        invocation -> {
+                            entryPartitionFilterApplied.set(true);
+                            return scan;
+                        });
+
+        ManifestFileMeta sharedManifest =
+                new ManifestFileMeta(
+                        "shared-manifest",
+                        1L,
+                        4L,
+                        0L,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        399L);
+        when(manifestsReader.read(snapshot, ScanMode.ALL))
+                .thenReturn(
+                        new ManifestsReader.Result(
+                                snapshot,
+                                Collections.singletonList(sharedManifest),
+                                Collections.singletonList(sharedManifest)));
+
+        BinaryRow partitionA = BinaryRow.singleColumn(0);
+        BinaryRow partitionB = BinaryRow.singleColumn(1);
+        ManifestEntry a1 = makeEntry(partitionA, "a-1.parquet", 0L, 100L, 600);
+        ManifestEntry a2 = makeEntry(partitionA, "a-2.parquet", 100L, 100L, 600);
+        ManifestEntry b1 = makeEntry(partitionB, "b-1.parquet", 0L, 100L, 600);
+        ManifestEntry b2 = makeEntry(partitionB, "b-2.parquet", 100L, 100L, 600);
+        when(scan.readFileIterator(Collections.singletonList(sharedManifest)))
+                .thenAnswer(
+                        invocation ->
+                                Arrays.asList(a1, a2, b1, b2).stream()
+                                        .filter(
+                                                entry ->
+                                                        !entryPartitionFilterApplied.get()
+                                                                || partitionPredicate.test(
+                                                                        entry.partition()))
+                                        .iterator());
+        when(partitionPredicate.test(partitionA)).thenReturn(false);
+        when(partitionPredicate.test(partitionB)).thenReturn(true);
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).partition()).isEqualTo(partitionB);
+        assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
+                .containsExactly(b1.file().fileName(), b2.file().fileName());
     }
 
     private ManifestEntry makeEntry(

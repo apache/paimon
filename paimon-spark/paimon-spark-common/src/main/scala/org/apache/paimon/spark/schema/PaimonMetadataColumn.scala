@@ -24,11 +24,16 @@ import org.apache.paimon.types.DataField
 
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
-import org.apache.spark.sql.connector.catalog.MetadataColumn
-import org.apache.spark.sql.types.{DataType, IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{DataType, FloatType, IntegerType, LongType, StringType, StructField, StructType}
 
-case class PaimonMetadataColumn(id: Int, override val name: String, override val dataType: DataType)
-  extends MetadataColumn {
+case class PaimonMetadataColumn(
+    id: Int,
+    override val name: String,
+    override val dataType: DataType,
+    preserveOnDelete: Boolean = true,
+    preserveOnUpdate: Boolean = true,
+    preserveOnReinsert: Boolean = false)
+  extends PaimonMetadataColumnBase {
 
   def toPaimonDataField: DataField = {
     new DataField(id, name, SparkTypeUtils.toPaimonType(dataType));
@@ -51,6 +56,7 @@ object PaimonMetadataColumn {
   val BUCKET_COLUMN = "__paimon_bucket"
   val ROW_ID_COLUMN: String = SpecialFields.ROW_ID.name()
   val SEQUENCE_NUMBER_COLUMN: String = SpecialFields.SEQUENCE_NUMBER.name()
+  val VECTOR_SEARCH_SCORE_COLUMN: String = "__paimon_vector_search_score"
 
   val PATH_AND_INDEX_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
   val PARTITION_AND_BUCKET_META_COLUMNS: Seq[String] = Seq(PARTITION_COLUMN, BUCKET_COLUMN)
@@ -62,7 +68,8 @@ object PaimonMetadataColumn {
     PARTITION_COLUMN,
     BUCKET_COLUMN,
     ROW_ID_COLUMN,
-    SEQUENCE_NUMBER_COLUMN
+    SEQUENCE_NUMBER_COLUMN,
+    VECTOR_SEARCH_SCORE_COLUMN
   )
 
   val ROW_INDEX: PaimonMetadataColumn =
@@ -77,7 +84,13 @@ object PaimonMetadataColumn {
   val ROW_ID: PaimonMetadataColumn =
     PaimonMetadataColumn(Int.MaxValue - 104, ROW_ID_COLUMN, LongType)
   val SEQUENCE_NUMBER: PaimonMetadataColumn =
-    PaimonMetadataColumn(Int.MaxValue - 105, SEQUENCE_NUMBER_COLUMN, LongType)
+    PaimonMetadataColumn(
+      Int.MaxValue - 105,
+      SEQUENCE_NUMBER_COLUMN,
+      LongType,
+      preserveOnUpdate = false)
+  val VECTOR_SEARCH_SCORE: PaimonMetadataColumn =
+    PaimonMetadataColumn(Integer.MAX_VALUE - 106, VECTOR_SEARCH_SCORE_COLUMN, FloatType)
 
   def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
 
@@ -89,6 +102,7 @@ object PaimonMetadataColumn {
       case BUCKET_COLUMN => BUCKET
       case ROW_ID_COLUMN => ROW_ID
       case SEQUENCE_NUMBER_COLUMN => SEQUENCE_NUMBER
+      case VECTOR_SEARCH_SCORE_COLUMN => VECTOR_SEARCH_SCORE
       case _ =>
         throw new IllegalArgumentException(s"$metadataColumn metadata column is not supported.")
     }

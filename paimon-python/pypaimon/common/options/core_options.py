@@ -16,15 +16,16 @@
 # under the License.
 
 import sys
-from enum import Enum
-from typing import Dict, Optional
-
+import warnings
 from datetime import timedelta
+from enum import Enum
+from typing import Dict, List, Optional
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
-from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.config_option import ConfigOption
+from pypaimon.common.options.config_options import ConfigOptions
+from pypaimon.common.options.options_utils import OptionsUtils
 
 
 class ExternalPathStrategy(str, Enum):
@@ -34,6 +35,8 @@ class ExternalPathStrategy(str, Enum):
     NONE = "none"
     ROUND_ROBIN = "round-robin"
     SPECIFIC_FS = "specific-fs"
+    ENTROPY_INJECT = "entropy-inject"
+    WEIGHTED = "weight-robin"
 
 
 class ChangelogProducer(str, Enum):
@@ -56,6 +59,37 @@ class MergeEngine(str, Enum):
     FIRST_ROW = "first-row"
 
 
+class SortOrder(str, Enum):
+    """
+    Specifies the order of ``sequence.field``. Mirrors Java
+    ``CoreOptions.SortOrder``.
+    """
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
+
+
+class StartupMode(str, Enum):
+    """
+    Startup mode for scan operations.
+    """
+    DEFAULT = "default"
+    LATEST_FULL = "latest-full"
+    FULL = "full"
+    LATEST = "latest"
+    COMPACTED_FULL = "compacted-full"
+    FROM_TIMESTAMP = "from-timestamp"
+    FROM_SNAPSHOT = "from-snapshot"
+    FROM_SNAPSHOT_FULL = "from-snapshot-full"
+    FROM_CREATION_TIMESTAMP = "from-creation-timestamp"
+    FROM_FILE_CREATION_TIME = "from-file-creation-time"
+    INCREMENTAL = "incremental"
+
+
+class GlobalIndexColumnUpdateAction(str, Enum):
+    THROW_ERROR = "THROW_ERROR"
+    DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -65,6 +99,8 @@ class CoreOptions:
     FILE_FORMAT_BLOB: str = "blob"
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
+    FILE_FORMAT_ROW: str = "row"
+    FILE_FORMAT_MOSAIC: str = "mosaic"
 
     # Basic options
     AUTO_CREATE: ConfigOption[bool] = (
@@ -210,6 +246,13 @@ class CoreOptions:
         .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
     )
 
+    BLOB_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-descriptor-field")
         .string_type()
@@ -218,6 +261,53 @@ class CoreOptions:
             "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
             "inline in normal data files."
         )
+    )
+
+    BLOB_EXTERNAL_STORAGE_PATH: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "The external storage path where raw BLOB data from fields configured "
+            "by 'blob-external-storage-field' is written at write time. "
+            "Orphan file cleanup is not applied to this path."
+        )
+    )
+
+    BLOB_EXTERNAL_STORAGE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-external-storage-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') "
+            "whose raw data will be written to external storage at write time. "
+            "The external storage path is configured via 'blob-external-storage-path'."
+        )
+    )
+
+    BLOB_VIEW_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-view-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated field names to treat as BLOB view fields.")
+    )
+
+    BLOB_VIEW_RESOLVE_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("blob-view.resolve.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether to resolve blob-view-field values from upstream tables at "
+            "read time. Set to false to preserve BlobViewStruct references when "
+            "forwarding blob view values to another blob-view table."
+        )
+    )
+
+    VECTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("vector-field")
+        .string_type()
+        .no_default_value()
+        .with_description("Comma-separated column names that should be stored as vector type.")
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -233,6 +323,21 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description("The target file size for blob files.")
     )
+
+    VECTOR_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("vector.file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Store VECTOR type columns separately in the specified file format.")
+    )
+
+    VECTOR_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("vector.target-file-size")
+        .memory_type()
+        .no_default_value()
+        .with_description("Target file size for vector data. Default is the same as target-file-size.")
+    )
+
     DATA_FILE_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("data-file.prefix")
         .string_type()
@@ -240,6 +345,21 @@ class CoreOptions:
         .with_description("Specify the file name prefix of data files.")
     )
     # Scan options
+    SCAN_MODE: ConfigOption[StartupMode] = (
+        ConfigOptions.key("scan.mode")
+        .enum_type(StartupMode)
+        .default_value(StartupMode.DEFAULT)
+        .with_description(
+            "Scan startup mode for the table. "
+            "'default' resolves the actual mode from other scan options. "
+            "'latest-full' reads the latest snapshot then streams changes. "
+            "'latest' only streams changes without an initial snapshot. "
+            "'from-timestamp' reads from a specific timestamp. "
+            "'from-snapshot' reads from a specific snapshot. "
+            "'incremental' reads incremental changes between two snapshots/tags."
+        )
+    )
+
     SCAN_FALLBACK_BRANCH: ConfigOption[str] = (
         ConfigOptions.key("scan.fallback-branch")
         .string_type()
@@ -301,6 +421,24 @@ class CoreOptions:
         )
     )
 
+    SCAN_FILE_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.file-creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "After configuring this time, only the data files created after this time will be read."
+        )
+    )
+
+    SCAN_CREATION_TIME_MILLIS: ConfigOption[int] = (
+        ConfigOptions.key("scan.creation-time-millis")
+        .long_type()
+        .no_default_value()
+        .with_description(
+            "Optional timestamp used in case of 'from-creation-timestamp' scan mode."
+        )
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -332,6 +470,14 @@ class CoreOptions:
                           "Options: none, input, full-compaction, lookup.")
     )
 
+    CHANGELOG_FILE_FORMAT: ConfigOption[str] = (
+        ConfigOptions.key("changelog-file.format")
+        .string_type()
+        .no_default_value()
+        .with_description("Specify the file format of changelog files. "
+                          "Currently parquet, avro and orc are supported.")
+    )
+
     MERGE_ENGINE: ConfigOption[MergeEngine] = (
         ConfigOptions.key("merge-engine")
         .enum_type(MergeEngine)
@@ -339,6 +485,30 @@ class CoreOptions:
         .with_description("Specify the merge engine for table with primary key. "
                           "Options: deduplicate, partial-update, aggregation, first-row.")
     )
+
+    IGNORE_DELETE: ConfigOption[bool] = (
+        ConfigOptions.key("ignore-delete")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to ignore delete records.")
+    )
+
+    SEQUENCE_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("sequence.field")
+        .string_type()
+        .no_default_value()
+        .with_description("The field that generates the sequence number for "
+                          "primary key table, the sequence number determines "
+                          "which data is the most recent.")
+    )
+
+    SEQUENCE_FIELD_SORT_ORDER: ConfigOption[SortOrder] = (
+        ConfigOptions.key("sequence.field.sort-order")
+        .enum_type(SortOrder)
+        .default_value(SortOrder.ASCENDING)
+        .with_description("Specify the order of sequence.field.")
+    )
+
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -400,7 +570,10 @@ class CoreOptions:
         ConfigOptions.key("data-file.external-paths.strategy")
         .string_type()
         .default_value(ExternalPathStrategy.NONE)
-        .with_description("Strategy for selecting external paths. Options: none, round-robin, specific-fs.")
+        .with_description(
+            "Strategy for selecting external paths. "
+            "Options: none, round-robin, specific-fs, entropy-inject, weight-robin."
+        )
     )
 
     DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS: ConfigOption[str] = (
@@ -408,6 +581,16 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Specific filesystem for external paths when using specific-fs strategy.")
+    )
+
+    DATA_FILE_EXTERNAL_PATHS_WEIGHTS: ConfigOption[str] = (
+        ConfigOptions.key("data-file.external-paths.weights")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Weights for external paths when strategy is weight-robin. "
+            "Format: comma-separated positive integers corresponding to paths in order."
+        )
     )
 
     # Global Index options
@@ -421,11 +604,17 @@ class CoreOptions:
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
-        .no_default_value()
+        .default_value(32)
         .with_description(
-            "The maximum number of concurrent scanner for global index. "
-            "By default is the number of processors available."
+            "The maximum number of concurrent threads for global index I/O. "
+            "Defaults to 32 for optimal I/O parallelism."
         )
+    )
+
+    GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
+        ConfigOptions.key("global-index.column-update-action")
+        .enum_type(GlobalIndexColumnUpdateAction)
+        .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
     )
 
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
@@ -625,6 +814,21 @@ class CoreOptions:
 
     def blob_descriptor_fields(self, default=None):
         value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_VIEW_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_field(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_view_resolve_enabled(self, default=True):
+        return self.options.get(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED, default)
+
+    @staticmethod
+    def _parse_field_set(value):
         if value is None:
             return set()
         if isinstance(value, str):
@@ -632,6 +836,19 @@ class CoreOptions:
         if isinstance(value, (list, set, tuple)):
             return {str(field).strip() for field in value if str(field).strip()}
         return set()
+
+    def blob_external_storage_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
+
+    def blob_external_storage_path(self, default=None):
+        return self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, default)
 
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
@@ -652,8 +869,58 @@ class CoreOptions:
         else:
             return self.target_file_size(has_primary_key=False)
 
+    def vector_file_format(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_FILE_FORMAT, default)
+
+    def with_vector_format(self) -> bool:
+        return self.options.contains(CoreOptions.VECTOR_FILE_FORMAT)
+
+    def vector_target_file_size(self, default=None):
+        if self.options.contains(CoreOptions.VECTOR_TARGET_FILE_SIZE):
+            return self.options.get(CoreOptions.VECTOR_TARGET_FILE_SIZE, None).get_bytes()
+        elif default is not None:
+            return MemorySize.parse(default).get_bytes()
+        else:
+            return self.target_file_size(has_primary_key=False)
+
     def data_file_prefix(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_PREFIX, default)
+
+    def scan_mode(self, default=None):
+        return self.options.get(CoreOptions.SCAN_MODE, default)
+
+    def startup_mode(self) -> 'StartupMode':
+        """Resolve the effective startup mode, matching Java CoreOptions.startupMode().
+
+        If scan.mode is DEFAULT, auto-detects from other scan options.
+        Maps deprecated FULL to LATEST_FULL.
+        """
+        mode = self.scan_mode()
+        if mode == StartupMode.DEFAULT:
+            if (self.options.contains(CoreOptions.SCAN_TIMESTAMP_MILLIS)
+                    or self.options.contains(CoreOptions.SCAN_TIMESTAMP)):
+                return StartupMode.FROM_TIMESTAMP
+            elif (self.options.contains(CoreOptions.SCAN_SNAPSHOT_ID)
+                  or self.options.contains(CoreOptions.SCAN_TAG_NAME)
+                  or self.options.contains(CoreOptions.SCAN_WATERMARK)):
+                return StartupMode.FROM_SNAPSHOT
+            elif self.options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
+                return StartupMode.INCREMENTAL
+            elif self.options.contains(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS):
+                return StartupMode.FROM_FILE_CREATION_TIME
+            elif self.options.contains(CoreOptions.SCAN_CREATION_TIME_MILLIS):
+                return StartupMode.FROM_CREATION_TIMESTAMP
+            else:
+                return StartupMode.LATEST_FULL
+        elif mode == StartupMode.FULL:
+            warnings.warn(
+                "scan.mode 'full' is deprecated, use 'latest-full' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return StartupMode.LATEST_FULL
+        else:
+            return mode
 
     def scan_fallback_branch(self, default=None):
         return self.options.get(CoreOptions.SCAN_FALLBACK_BRANCH, default)
@@ -691,14 +958,60 @@ class CoreOptions:
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
 
+    def global_index_column_update_action(self, default=None):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION, default)
+
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
 
     def changelog_producer(self, default=None):
         return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
 
+    def changelog_file_format(self, default=None):
+        return self.options.get(CoreOptions.CHANGELOG_FILE_FORMAT, default)
+
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)
+
+    def sequence_field(self) -> List[str]:
+        """User-defined sequence fields, in declaration order. Empty list
+        when ``sequence.field`` is unset. Mirrors Java
+        ``CoreOptions.sequenceField()``.
+        """
+        raw = self.options.get(CoreOptions.SEQUENCE_FIELD)
+        if not raw:
+            return []
+        # Mirror Java ``CoreOptions.sequenceField()``
+        # (``Arrays.stream(s.split(',')).map(String::trim)``): Java's
+        # ``String.split(",")`` drops *trailing* empty segments (so ``'ts,'``
+        # yields ``['ts']``) but keeps interior ones, and each segment is
+        # then trimmed. So an interior empty segment (``'ts,,ts2'``) survives
+        # as an empty field name that ``check_sequence_field_valid`` rejects,
+        # while a trailing comma is tolerated.
+        segments = raw.split(",")
+        while segments and segments[-1] == "":
+            segments.pop()
+        return [name.strip() for name in segments]
+
+    def sequence_field_sort_order_is_ascending(self) -> bool:
+        """Whether ``sequence.field.sort-order`` is ascending (the default).
+        Mirrors Java ``CoreOptions.sequenceFieldSortOrderIsAscending()``.
+        """
+        return (self.options.get(CoreOptions.SEQUENCE_FIELD_SORT_ORDER)
+                == SortOrder.ASCENDING)
+
+    def ignore_delete(self) -> bool:
+        raw = self.options.to_map()
+        fallback_keys = (
+            "ignore-delete", "first-row.ignore-delete",
+            "deduplicate.ignore-delete",
+            "partial-update.ignore-delete",
+        )
+        for key in fallback_keys:
+            val = raw.get(key)
+            if val is not None:
+                return OptionsUtils.convert_to_boolean(val)
+        return False
 
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)
@@ -711,6 +1024,23 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def data_file_external_paths_weights(self, default=None):
+        value = self.options.get(
+            CoreOptions.DATA_FILE_EXTERNAL_PATHS_WEIGHTS, default
+        )
+        if value is None:
+            return None
+        parts = value.split(",")
+        weights = []
+        for part in parts:
+            parsed = int(part.strip())
+            if parsed <= 0:
+                raise ValueError(
+                    f"Weight must be positive, got: {parsed}"
+                )
+            weights.append(parsed)
+        return weights
 
     def commit_max_retries(self) -> int:
         return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)

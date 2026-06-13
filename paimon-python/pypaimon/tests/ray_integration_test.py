@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import ray
@@ -183,10 +184,13 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertLess(limited_count, 10)
 
     def test_read_paimon_empty_table(self):
-        """read_paimon() on a table with no data returns an empty dataset."""
+        """read_paimon() on an empty table preserves the table schema."""
         from pypaimon.ray import read_paimon
 
-        pa_schema = pa.schema([('id', pa.int32())])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
         identifier = 'default.test_read_empty'
         catalog = CatalogFactory.create(self.catalog_options)
         schema = Schema.from_pyarrow_schema(pa_schema)
@@ -194,6 +198,40 @@ class RayIntegrationTest(unittest.TestCase):
 
         ds = read_paimon(identifier, self.catalog_options)
         self.assertEqual(ds.count(), 0)
+        self.assertEqual(ds.schema().names, ['id', 'name'])
+
+    def test_read_paimon_empty_table_with_projection(self):
+        """read_paimon() applies projection to empty table schemas."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+        identifier = 'default.test_read_empty_projection'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+
+        ds = read_paimon(
+            identifier, self.catalog_options, projection=['id', 'value']
+        )
+        self.assertEqual(ds.count(), 0)
+        self.assertEqual(ds.schema().names, ['id', 'value'])
+
+    def test_missing_ray_dependency_has_install_hint(self):
+        """Ray facade surfaces an actionable install hint when Ray is absent."""
+        from pypaimon.ray.ray_paimon import _require_ray_data
+
+        error = ModuleNotFoundError("No module named 'ray'")
+        error.name = 'ray'
+
+        with patch('importlib.import_module', side_effect=error):
+            with self.assertRaises(ImportError) as ctx:
+                _require_ray_data()
+
+        self.assertIn('pip install pypaimon[ray]', str(ctx.exception))
 
     def test_read_paimon_with_snapshot_id(self):
         """read_paimon(snapshot_id=N) time-travels to that snapshot."""
@@ -305,6 +343,82 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(result.count(), 1)
         df = result.to_pandas()
         self.assertEqual(list(df['id']), [3])
+
+    def test_write_paimon_empty_overwrite_unpartitioned(self):
+        """write_paimon(overwrite=True) with empty data clears an unpartitioned table."""
+        from pypaimon.ray import read_paimon, write_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.int64()),
+        ])
+        identifier = 'default.test_write_empty_overwrite_unpartitioned'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        catalog.create_table(identifier, schema, False)
+
+        initial = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [1, 2], 'val': [10, 20]}, schema=pa_schema)
+        )
+        write_paimon(initial, identifier, self.catalog_options)
+        self.assertEqual(read_paimon(identifier, self.catalog_options).count(), 2)
+
+        empty = ray.data.from_arrow(
+            pa.Table.from_pydict({'id': [], 'val': []}, schema=pa_schema)
+        )
+        write_paimon(empty, identifier, self.catalog_options, overwrite=True)
+
+        result = read_paimon(identifier, self.catalog_options)
+        self.assertEqual(result.count(), 0)
+
+    def test_table_write_ray_builder_partition_overwrite(self):
+        """Builder-level partition overwrite is honored by write_ray()."""
+        from pypaimon.ray import read_paimon
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+            ('dt', pa.string()),
+        ])
+        identifier = 'default.test_write_ray_partition_overwrite'
+        catalog = CatalogFactory.create(self.catalog_options)
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['dt'],
+            options={'dynamic-partition-overwrite': 'false'},
+        )
+        catalog.create_table(identifier, schema, False)
+        table = catalog.get_table(identifier)
+
+        initial = pa.Table.from_pydict(
+            {
+                'id': [1, 2, 3],
+                'val': ['old-p1-a', 'old-p1-b', 'old-p2'],
+                'dt': ['p1', 'p1', 'p2'],
+            },
+            schema=pa_schema,
+        )
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        replacement = ray.data.from_arrow(
+            pa.Table.from_pydict(
+                {'id': [4], 'val': ['new-p1'], 'dt': ['p1']},
+                schema=pa_schema,
+            )
+        )
+        writer = table.new_batch_write_builder().overwrite({'dt': 'p1'}).new_write()
+        writer.write_ray(replacement, concurrency=1)
+        writer.close()
+
+        result = read_paimon(identifier, self.catalog_options)
+        df = result.to_pandas().sort_values('id').reset_index(drop=True)
+        self.assertEqual(list(df['id']), [3, 4])
+        self.assertEqual(list(df['val']), ['old-p2', 'new-p1'])
+        self.assertEqual(list(df['dt']), ['p2', 'p1'])
 
     def test_read_paimon_primary_key(self):
         """read_paimon() merges PK rows correctly after an upsert."""

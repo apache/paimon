@@ -238,15 +238,11 @@ public class OperatorSourceTest {
         }
         ArrayList<Object> values = new ArrayList<>(harness.getOutput());
 
-        // In ReadOperator each Split is already counted as one input record. But in this case it
-        // will not happen.
-        // So in this case the result values's size if 3 even if the limit is 2.
-        // The IT case see BatchFileStoreITCase#testBatchReadSourceWithSnapshot.
+        // ReadOperator limit is enforced on emitted records.
         assertThat(values)
                 .containsExactlyInAnyOrder(
                         new StreamRecord<>(GenericRowData.of(1, 1, 1)),
-                        new StreamRecord<>(GenericRowData.of(2, 2, 2)),
-                        new StreamRecord<>(GenericRowData.of(3, 3, 3)));
+                        new StreamRecord<>(GenericRowData.of(2, 2, 2)));
     }
 
     @Test

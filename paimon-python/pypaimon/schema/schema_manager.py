@@ -15,21 +15,25 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, List
+from typing import List, Optional
 
-from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
-from pypaimon.catalog.catalog_exception import ColumnAlreadyExistException, ColumnNotExistException
+from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
+                                                ColumnNotExistException)
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.json_util import JSON
-from pypaimon.common.options import Options, CoreOptions
+from pypaimon.common.options import CoreOptions, Options
+from pypaimon.schema.column_directive_utils import (
+    apply_add_column_directive, apply_directives,
+    remove_dropped_directive_options)
 from pypaimon.schema.data_types import AtomicInteger, DataField
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import (
-    AddColumn, DropColumn, RemoveOption, RenameColumn,
-    SchemaChange, SetOption, UpdateColumnComment,
-    UpdateColumnNullability, UpdateColumnPosition,
-    UpdateColumnType, UpdateComment
-)
+from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
+                                           RenameColumn, SchemaChange,
+                                           SetOption, UpdateColumnComment,
+                                           UpdateColumnNullability,
+                                           UpdateColumnPosition,
+                                           UpdateColumnType, UpdateComment)
 from pypaimon.schema.table_schema import TableSchema
 
 
@@ -49,7 +53,7 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
 
 
 def _handle_update_column_comment(
-        change: UpdateColumnComment, new_fields: List[DataField]
+    change: UpdateColumnComment, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -62,7 +66,7 @@ def _handle_update_column_comment(
 
 
 def _handle_update_column_nullability(
-        change: UpdateColumnNullability, new_fields: List[DataField]
+    change: UpdateColumnNullability, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -79,7 +83,7 @@ def _handle_update_column_nullability(
 
 
 def _handle_update_column_type(
-        change: UpdateColumnType, new_fields: List[DataField]
+    change: UpdateColumnType, new_fields: List[DataField]
 ):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
@@ -106,14 +110,28 @@ def _drop_column_validation(schema: 'TableSchema', change: DropColumn):
         )
 
 
-def _handle_drop_column(change: DropColumn, new_fields: List[DataField]):
+def _handle_drop_column(change: DropColumn, new_fields: List[DataField],
+                        new_options: dict):
     field_name = change.field_names[-1]
     field_index = _find_field_index(new_fields, field_name)
     if field_index is None:
         raise ColumnNotExistException(field_name)
+    if len(change.field_names) == 1:
+        field = new_fields[field_index]
+        type_root = _get_type_root(field.type)
+        remove_dropped_directive_options(field_name, type_root, new_options)
     new_fields.pop(field_index)
     if not new_fields:
         raise ValueError("Cannot drop all fields in table")
+
+
+def _get_type_root(data_type) -> str:
+    from pypaimon.schema.data_types import AtomicType, VectorType
+    if isinstance(data_type, VectorType):
+        return 'VECTOR'
+    if isinstance(data_type, AtomicType) and data_type.type == 'BLOB':
+        return 'BLOB'
+    return getattr(data_type, 'type', '')
 
 
 def _assert_not_updating_partition_keys(
@@ -146,6 +164,113 @@ def _assert_not_renaming_blob_column(
             raise ValueError(
                 f"Cannot rename BLOB column: [{field_name}]"
             )
+
+
+def _validate_blob_fields(fields: List[DataField], options: dict, primary_keys: List[str]):
+    """Validate blob field configurations in the schema."""
+    if options is None:
+        options = {}
+
+    blob_field_names = {
+        field.name for field in fields
+        if getattr(field.type, 'type', None) == 'BLOB'
+    }
+
+    if len(fields) <= len(blob_field_names):
+        raise ValueError(
+            "Table with BLOB type column must have other normal columns."
+        )
+
+    core_options = CoreOptions(Options(options))
+
+    configured_blob_fields = core_options.blob_field()
+    for field in configured_blob_fields:
+        if field not in blob_field_names:
+            raise ValueError(
+                "Field '{}' in '{}' must be a BLOB field in table schema.".format(
+                    field, CoreOptions.BLOB_FIELD.key()
+                )
+            )
+
+    descriptor_fields = core_options.blob_descriptor_fields()
+    view_fields = core_options.blob_view_fields()
+
+    all_inline_fields = descriptor_fields.union(view_fields)
+    non_blob_inline_fields = all_inline_fields.difference(blob_field_names)
+    if non_blob_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' or 'blob-view-field' must be blob fields "
+            "in schema. Non-BLOB fields: {}".format(sorted(non_blob_inline_fields))
+        )
+
+    overlapping_inline_fields = descriptor_fields.intersection(view_fields)
+    if overlapping_inline_fields:
+        raise ValueError(
+            "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
+            "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+        )
+
+    if blob_field_names:
+        required_options = {
+            CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+            CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
+        }
+
+        missing_options = []
+        for key, expected_value in required_options.items():
+            if key not in options or options[key] != expected_value:
+                missing_options.append(f"{key}='{expected_value}'")
+
+        if missing_options:
+            raise ValueError(
+                f"Schema contains Blob type but is missing required options: {', '.join(missing_options)}. "
+                f"Please add these options to the schema."
+            )
+
+        if primary_keys:
+            raise ValueError("Blob type is not supported with primary key.")
+
+
+def _validate_blob_external_storage_fields(fields: List[DataField], options: dict):
+    """Validate blob-external-storage-field configuration.
+
+    Validation order aligned with Java's SchemaValidation.validateBlobExternalStorageFields():
+    1. Field must be a BLOB type in the schema
+    2. Field must be in blob-descriptor-field
+    3. blob-external-storage-path must be configured
+    """
+    core_options = CoreOptions(Options(options))
+    external_fields = core_options.blob_external_storage_fields()
+    if not external_fields:
+        return
+
+    # 1. Configured fields must be BLOB type
+    field_type_map = {f.name: f.type for f in fields}
+    for field_name in external_fields:
+        field_type = field_type_map.get(field_name)
+        if field_type is None or getattr(field_type, 'type', None) != 'BLOB':
+            raise ValueError(
+                f"Field '{field_name}' in "
+                f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' must be a BLOB type field."
+            )
+
+    # 2. Must be a subset of blob-descriptor-field
+    descriptor_fields = core_options.blob_descriptor_fields()
+    not_in_descriptor = external_fields - descriptor_fields
+    if not_in_descriptor:
+        raise ValueError(
+            f"Fields {sorted(not_in_descriptor)} in "
+            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' must also be configured in "
+            f"'{CoreOptions.BLOB_DESCRIPTOR_FIELD.key()}'."
+        )
+
+    # 3. Must configure external-storage-path
+    external_path = core_options.blob_external_storage_path()
+    if not external_path:
+        raise ValueError(
+            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()}' is configured but "
+            f"'{CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key()}' is not set."
+        )
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
@@ -199,7 +324,8 @@ def _handle_add_column(
     new_fields: List[DataField],
     highest_field_id: AtomicInteger,
     partition_keys: List[str],
-    add_column_before_partition: bool
+    add_column_before_partition: bool,
+    new_options: dict
 ):
     if not change.data_type.nullable:
         raise ValueError(
@@ -209,7 +335,20 @@ def _handle_add_column(
     field_name = change.field_names[-1]
     if _find_field_index(new_fields, field_name) is not None:
         raise ColumnAlreadyExistException(field_name)
-    new_field = DataField(field_id, field_name, change.data_type, change.comment)
+
+    data_type = change.data_type
+    comment = change.comment
+    converted = apply_add_column_directive(comment, field_name, data_type, new_options)
+    if converted is not None:
+        if len(change.field_names) > 1:
+            raise ValueError(
+                f"Comment directive cannot be used on a nested column "
+                f"{'.'.join(change.field_names)}."
+            )
+        data_type = converted.type
+        comment = converted.comment
+
+    new_field = DataField(field_id, field_name, data_type, comment)
     if change.move:
         _apply_move(new_fields, new_field, change.move)
     elif (
@@ -279,12 +418,26 @@ class SchemaManager:
             if latest is not None:
                 raise RuntimeError("Schema in filesystem exists, creation is not allowed.")
 
+            fields = list(schema.fields)
+            options = dict(schema.options)
+            apply_directives(fields, options)
+            schema = Schema(
+                fields=fields,
+                partition_keys=schema.partition_keys,
+                primary_keys=schema.primary_keys,
+                options=options,
+                comment=schema.comment,
+            )
+
+            _validate_blob_fields(schema.fields, schema.options, schema.primary_keys)
+            _validate_blob_external_storage_fields(schema.fields, schema.options)
             table_schema = TableSchema.from_schema(schema_id=0, schema=schema)
             success = self.commit(table_schema)
             if success:
                 return table_schema
 
     def commit(self, new_schema: TableSchema) -> bool:
+        _validate_blob_fields(new_schema.fields, new_schema.options, new_schema.primary_keys)
         schema_path = self._to_schema_path(new_schema.id)
         try:
             result = self.file_io.try_to_write_atomic(schema_path, JSON.to_json(new_schema, indent=2))
@@ -375,7 +528,8 @@ class SchemaManager:
             elif isinstance(change, AddColumn):
                 _handle_add_column(
                     change, new_fields, highest_field_id,
-                    partition_keys, add_column_before_partition
+                    partition_keys, add_column_before_partition,
+                    new_options
                 )
             elif isinstance(change, RenameColumn):
                 _assert_not_updating_partition_keys(
@@ -385,7 +539,7 @@ class SchemaManager:
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
                 _drop_column_validation(old_table_schema, change)
-                _handle_drop_column(change, new_fields)
+                _handle_drop_column(change, new_fields, new_options)
             elif isinstance(change, UpdateColumnType):
                 _assert_not_updating_partition_keys(
                     old_table_schema, change.field_names, "update"

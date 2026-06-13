@@ -59,6 +59,11 @@ class GcsOptions:
         .with_description("GCP project ID for GCS requests."))
 
 
+class JdbcCatalogOptions:
+    CATALOG_KEY = ConfigOptions.key("catalog-key").string_type().default_value("jdbc").with_description(
+        "Custom JDBC catalog store key.")
+
+
 class PVFSOptions:
     CACHE_ENABLED = ConfigOptions.key("cache-enabled").boolean_type().default_value("true").with_description(
         "Enable cache")
@@ -101,7 +106,54 @@ class CatalogOptions:
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+    SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
+        "Sync all table properties to the catalog metastore")
+    RESOLVING_FILE_IO_ENABLED = (
+        ConfigOptions.key("resolving-file-io.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable resolving file IO. When enabled, Paimon dynamically "
+            "selects the appropriate FileIO based on the URI scheme of the given path, "
+            "allowing read/write to external storage paths such as OSS or S3."
+        )
+    )
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class HdfsOptions:
+    HDFS_CLIENT_IMPL = (
+        ConfigOptions.key("hdfs.client.impl")
+        .string_type()
+        .default_value("native")
+        .with_description(
+            "HDFS FileIO backend. Supported values: 'native' (default, uses "
+            "hdfs-native protocol client, no Hadoop install required), "
+            "'pyarrow' (legacy, requires HADOOP_HOME / libhdfs / JVM)."
+        )
+    )
+    HDFS_CLIENT_FALLBACK_TO_PYARROW = (
+        ConfigOptions.key("hdfs.client.fallback-to-pyarrow")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "When the native backend fails to initialise (e.g. missing wheel "
+            "or unsupported platform), fall back to the pyarrow backend "
+            "instead of raising."
+        )
+    )
+    HDFS_CONF_DIR = (
+        ConfigOptions.key("hdfs.conf-dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory containing core-site.xml / hdfs-site.xml that the "
+            "native client should load. Defaults to $HADOOP_CONF_DIR."
+        )
+    )
+
+    HDFS_CONFIG_PREFIX = "hdfs.config."
+    HDFS_NATIVE_CONFIG_KEY_PREFIXES = ("dfs.", "fs.", "hadoop.", "ipc.", "io.")
 
 
 class SecurityOptions:

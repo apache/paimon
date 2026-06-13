@@ -1171,7 +1171,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         sql(
-                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'lookup')");
+                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'full-compaction')");
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql("show create table T$branch_stream");

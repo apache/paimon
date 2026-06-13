@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.vortex;
 
-import org.apache.paimon.arrow.vector.ArrowFormatWriter;
+import org.apache.paimon.arrow.vector.ArrowFormatCWriter;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -79,13 +79,7 @@ public class VortexFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new VortexWriterFactory(
-                type,
-                () ->
-                        new ArrowFormatWriter(
-                                type,
-                                formatContext.writeBatchSize(),
-                                true,
-                                formatContext.writeBatchMemory().getBytes()));
+                () -> new ArrowFormatCWriter(type, formatContext.writeBatchSize(), true));
     }
 
     @Override

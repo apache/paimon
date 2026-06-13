@@ -123,6 +123,45 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['city'].to_pylist(),
         )
 
+    def test_update_columns_fall_back_to_data_when_unset(self):
+        table = self._create_seeded_table()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2, 3, 4],
+            'id': [1, 2, 3, 4, 5],
+            'name': ['A', 'B', 'C', 'D', 'E'],
+            'age': [1, 2, 3, 4, 5],
+            'city': ['c0', 'c1', 'c2', 'c3', 'c4'],
+        }), ['id', 'name', 'age', 'city'])
+        result = self._read_all(table)
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+        self.assertEqual([1, 2, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['c0', 'c1', 'c2', 'c3', 'c4'], result['city'].to_pylist())
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_update(tu, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1],
+            'age': [99, 98],
+        }), cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        result = self._read_all(table)
+        self.assertEqual([99, 98, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+
+    def test_update_with_only_row_id_raises(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        with self.assertRaises(ValueError):
+            self._apply_update(tu, pa.Table.from_pydict({
+                '_ROW_ID': [0, 1],
+            }), cid)
+
     def test_partitioned_table_update(self):
         """Updates work on a partitioned table the same as a flat one."""
         table = self._create_table(partition_keys=['city'])
@@ -388,7 +427,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertIn('_ROW_ID column', str(ctx.exception))
 
     def test_invalid_row_id_raises(self):
-        """row_id outside [0, total_row_count) (both directions) raises."""
+        """row_id outside valid row_id ranges raises."""
         table = self._create_seeded_table()
         cases = [
             ('out_of_range_high', [0, 10], [26, 100]),
@@ -401,7 +440,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 bad = pa.Table.from_pydict({'_ROW_ID': row_ids, 'age': ages})
                 with self.assertRaises(ValueError) as ctx:
                     self._apply_update(tu, bad, self._next_commit_id())
-                self.assertIn('out of valid range', str(ctx.exception))
+                self.assertIn('does not belong to any valid range', str(ctx.exception))
 
     def test_duplicate_row_id_raises(self):
         table = self._create_seeded_table()
@@ -417,6 +456,46 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 self._next_commit_id(),
             )
         self.assertIn('duplicate _ROW_ID', str(ctx.exception))
+
+    def test_update_deleted_row_id_raises(self):
+        """Updating a row_id that fell into a hole after truncate raises."""
+        partitioned_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+            ('region', pa.string()),
+        ])
+        table = self._create_table(
+            pa_schema=partitioned_schema,
+            partition_keys=['region'],
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([1, 2, 3], type=pa.int32()),
+            'name': ['A', 'B', 'C'],
+            'age': pa.array([10, 20, 30], type=pa.int32()),
+            'region': ['US', 'US', 'US'],
+        }, schema=partitioned_schema))
+
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([4, 5], type=pa.int32()),
+            'name': ['D', 'E'],
+            'age': pa.array([40, 50], type=pa.int32()),
+            'region': ['EU', 'EU'],
+        }, schema=partitioned_schema))
+
+        wb = table.new_batch_write_builder()
+        tc = wb.new_commit()
+        tc.truncate_partitions([{'region': 'US'}])
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age'])
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_update(
+                tu,
+                pa.Table.from_pydict({'_ROW_ID': [0], 'age': [99]}),
+                self._next_commit_id(),
+            )
+        self.assertIn('does not belong to any valid range', str(ctx.exception))
 
     # ------------------------------------------------------------------
     # Concurrency tests
@@ -490,6 +569,86 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(winner, ages[:3])
         # Rows 3 & 4 must remain at seed values
         self.assertEqual([40, 45], ages[3:])
+
+    def test_update_list_and_map_columns(self):
+        list_map_schema = pa.schema([
+            ('id', pa.int32()),
+            ('tags', pa.list_(pa.string())),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])
+        table = self._create_table(pa_schema=list_map_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'tags': [['a', 'b'], ['c'], ['d', 'e']],
+            'meta': [[('k1', 'v1')], [('k2', 'v2')], [('k3', 'v3')]],
+        }, schema=list_map_schema))
+
+        rb = table.new_read_builder().with_projection(
+            ['id', '_ROW_ID'])
+        rid_result = rb.new_read().to_arrow(
+            rb.new_scan().plan().splits()).sort_by('id')
+        row_ids = rid_result['_ROW_ID'].to_pylist()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                type=pa.int64()),
+            'tags': [['x', 'y'], ['z']],
+            'meta': [[('k1', 'new1')], [('k3', 'new3')]],
+        }), ['tags', 'meta'])
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [['x', 'y'], ['c'], ['z']],
+            result['tags'].to_pylist())
+        self.assertEqual(
+            [[('k1', 'new1')], [('k2', 'v2')], [('k3', 'new3')]],
+            result['meta'].to_pylist())
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[1]], type=pa.int64()),
+            'meta': [{'k2': 'dict_val'}],
+        }), ['meta'])
+        result2 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('k1', 'new1')], [('k2', 'dict_val')], [('k3', 'new3')]],
+            result2['meta'].to_pylist())
+
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                    type=pa.int64()),
+                'meta': [{'a': '1'}, {'b': '2'}],
+            }), ['meta'])
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                type=pa.int64()),
+            'meta': pa.array(
+                [[('a', '1')], [('b', '2')]],
+                type=pa.map_(pa.string(), pa.string())),
+        }), ['meta'])
+        result3 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('a', '1')], [('k2', 'dict_val')], [('b', '2')]],
+            result3['meta'].to_pylist())
+
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+                'meta': [{'a': None}],
+            }), ['meta'])
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+            'meta': [[('a', None)]],
+        }, schema=pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])), ['meta'])
+        result4 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('a', None)], [('k2', 'dict_val')], [('b', '2')]],
+            result4['meta'].to_pylist())
 
 
 # ======================================================================
