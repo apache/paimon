@@ -138,10 +138,13 @@ class TableWriteCoordinatorTest extends TableTestBase {
     @Test
     public void testPrefetchWarmsAllManifestsAfterScan() throws Exception {
         Identifier identifier = new Identifier("db", "table");
-        // a fixed-bucket table so the data spans multiple buckets
+        // a partitioned, fixed-bucket table so the data spans multiple partitions (and multiple
+        // buckets within each partition)
         Schema schema =
                 Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
                         .column("f0", DataTypes.INT())
+                        .partitionKeys("pt")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "f0")
                         .build();
@@ -149,15 +152,22 @@ class TableWriteCoordinatorTest extends TableTestBase {
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = getTable(identifier);
 
-        // write each bucket in its own commit so manifests are confined to a single bucket: a scan
-        // for one bucket must skip the other bucket's manifest at the manifest-file level
-        writeWithBucketAssigner(table, row -> 0, GenericRow.of(1));
-        writeWithBucketAssigner(table, row -> 1, GenericRow.of(2));
+        // write each partition in its own commit so manifests are confined to a single partition: a
+        // scan for one partition must skip the other partition's manifest at the manifest-file
+        // level. Within each commit both buckets are written, so scanning a partition has to load
+        // all of that partition's buckets.
+        writeWithBucketAssigner(
+                table, row -> row.getInt(1) % 2, GenericRow.of(0, 1), GenericRow.of(0, 2));
+        writeWithBucketAssigner(
+                table, row -> row.getInt(1) % 2, GenericRow.of(1, 1), GenericRow.of(1, 2));
 
-        // the scan returns the entries of both buckets, confirming the table spans more than one
+        // the scan returns the entries of both partitions, each spanning both buckets, confirming
+        // the table spans more than one partition and that every partition spans more than one
         // bucket
         Snapshot latest = table.latestSnapshot().get();
         List<ManifestEntry> entries = table.store().newScan().withSnapshot(latest).plan().files();
+        assertThat(entries.stream().map(e -> e.partition().getInt(0)).collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1);
         assertThat(entries.stream().map(ManifestEntry::bucket).collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(0, 1);
 
@@ -174,19 +184,20 @@ class TableWriteCoordinatorTest extends TableTestBase {
         TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
         assertThat(table.getManifestCache().totalCacheBytes()).isZero();
 
-        // a scan request for bucket 0 reads only the bucket-0 manifest, skipping the bucket-1
-        // manifest at the manifest-file level: the cache therefore holds only a single bucket's
-        // manifest, proving the bucket filter is active (and leaving the stale bucket state on the
-        // shared scan)
+        // a scan request for partition 0 reads only the partition-0 manifest, skipping the
+        // partition-1 manifest at the manifest-file level: the cache therefore holds only a single
+        // partition's manifest, proving the partition filter is active (and leaving the stale
+        // partition state on the shared scan)
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(partitionRow(0)), 0, false, false);
         coordinator.scan(request);
         long filteredCacheBytes = table.getManifestCache().totalCacheBytes();
         assertThat(filteredCacheBytes).isGreaterThan(0);
 
         // enable prefetch via reflection (to avoid widening the coordinator's interface) and run a
         // checkpoint refresh; the prefetch must warm the full set of manifests rather than
-        // inheriting the stale bucket state, so the cache grows beyond the single-bucket subset
+        // inheriting the stale partition state, so the cache grows beyond the single-partition
+        // subset
         Field prefetchManifests = TableWriteCoordinator.class.getDeclaredField("prefetchManifests");
         prefetchManifests.setAccessible(true);
         prefetchManifests.setBoolean(coordinator, true);

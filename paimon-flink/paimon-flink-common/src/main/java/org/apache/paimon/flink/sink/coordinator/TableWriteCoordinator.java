@@ -36,6 +36,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caff
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -63,16 +64,12 @@ public class TableWriteCoordinator {
     private final Cache<CoordinationKey, byte[]> pagedCoordination;
 
     private volatile Snapshot snapshot;
-    private volatile PartitionBucketMapping partitionBucketMapping;
 
     public TableWriteCoordinator(FileStoreTable table) {
         this.table = table;
         checkNotNull(table.getManifestCache());
         this.latestCommittedIdentifiers = new ConcurrentHashMap<>();
-        this.scan = table.store().newScan();
-        if (table.coreOptions().manifestDeleteFileDropStats()) {
-            scan.dropStats();
-        }
+        this.scan = newScan();
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.pageSize =
                 (int)
@@ -107,13 +104,8 @@ public class TableWriteCoordinator {
             // warm bytes instead of each performing a cold manifest read. A fresh scan is
             // used so the shared request `scan`'s bucket/partition state never narrows the
             // warm-up.
-            FileStoreScan prefetchScan = table.store().newScan().withSnapshot(snapshot);
-            if (table.coreOptions().manifestDeleteFileDropStats()) {
-                prefetchScan.dropStats();
-            }
-            prefetchScan.plan();
+            newScan().withSnapshot(snapshot).plan();
         }
-        loadPartitionBucketMapping();
     }
 
     public synchronized PagedCoordinationResponse scan(PagedCoordinationRequest request)
@@ -171,8 +163,8 @@ public class TableWriteCoordinator {
 
         List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
         List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
-        Integer totalBuckets =
-                WriteRestore.extractTotalBuckets(entries, partition, partitionBucketMapping);
+        PartitionBucketMapping mapping = singlePartitionBucketMapping(partition);
+        Integer totalBuckets = WriteRestore.extractTotalBuckets(entries, partition, mapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (request.scanDynamicBucketIndex()) {
@@ -204,7 +196,6 @@ public class TableWriteCoordinator {
         if (snapshot == null || latestSnapshotOfUser.id() > snapshot.id()) {
             snapshot = latestSnapshotOfUser;
             scan.withSnapshot(snapshot);
-            loadPartitionBucketMapping();
         }
         return latestSnapshotOfUser.commitIdentifier();
     }
@@ -216,14 +207,21 @@ public class TableWriteCoordinator {
         latestCommittedIdentifiers.clear();
     }
 
-    private void loadPartitionBucketMapping() {
-        int defaultNumBuckets = table.schema().numBuckets();
-        // Note: `scan` is shared between this method (called during refresh/checkpoint) and the
-        // `scan(ScanCoordinationRequest)` method (which calls scan.withPartitionBucket(...)).
-        // Both callers always invoke scan.withSnapshot(...) before using the scan, so the shared
-        // state is safe. The partition-bucket filter set by withPartitionBucket is applied per
-        // plan() call and does not bleed across invocations.
-        this.partitionBucketMapping = PartitionBucketMapping.loadFromScan(scan, defaultNumBuckets);
+    private PartitionBucketMapping singlePartitionBucketMapping(BinaryRow partition) {
+        FileStoreScan partitionScan =
+                newScan()
+                        .withSnapshot(snapshot)
+                        .withPartitionFilter(Collections.singletonList(partition));
+
+        return PartitionBucketMapping.loadFromScan(partitionScan, table.schema().numBuckets());
+    }
+
+    private FileStoreScan newScan() {
+        FileStoreScan newScan = table.store().newScan();
+        if (table.coreOptions().manifestDeleteFileDropStats()) {
+            newScan.dropStats();
+        }
+        return newScan;
     }
 
     private static class CoordinationKey {
