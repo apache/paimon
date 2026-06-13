@@ -144,6 +144,11 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
               .format("paimon")
               .mode("overwrite")
               .saveAsTable("t")
+
+            // Verify table definition is preserved
+            val table = loadTable("t")
+            Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
+            Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
           } else {
             // On Spark 3.2/3.3, saveAsTable with overwrite still requires re-specifying
             // partitionBy and primary-key as the insert-overwrite optimization is not available.
@@ -164,11 +169,6 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             sql("SHOW PARTITIONS t"),
             Seq(Row("pt=p1"))
           )
-
-          // Verify table definition is preserved
-          val table = loadTable("t")
-          Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
-          Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
         }
       }
     }
