@@ -27,6 +27,8 @@ import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
 
+import scala.collection.JavaConverters._
+
 abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
   override protected def sparkConf: SparkConf = {
@@ -132,16 +134,28 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             Seq(Row("pt=p1"), Row("pt=p2"), Row("pt=p3"))
           )
 
-          // saveAsTable with overwrite mode will call replace table internal,
-          // so here we set the props and partitions again.
-          Seq((5, "x5", "p1"))
-            .toDF("a", "b", "pt")
-            .write
-            .format("paimon")
-            .option("primary-key", "a,pt")
-            .partitionBy("pt")
-            .mode("overwrite")
-            .saveAsTable("t")
+          if (gteqSpark3_4) {
+            // On Spark 3.4+, saveAsTable with overwrite mode behaves as INSERT OVERWRITE,
+            // preserving the table definition (partitions, primary keys, properties).
+            // No need to re-specify partitionBy or primary-key.
+            Seq((5, "x5", "p1"))
+              .toDF("a", "b", "pt")
+              .write
+              .format("paimon")
+              .mode("overwrite")
+              .saveAsTable("t")
+          } else {
+            // On Spark 3.2/3.3, saveAsTable with overwrite still requires re-specifying
+            // partitionBy and primary-key as the insert-overwrite optimization is not available.
+            Seq((5, "x5", "p1"))
+              .toDF("a", "b", "pt")
+              .write
+              .format("paimon")
+              .option("primary-key", "a,pt")
+              .partitionBy("pt")
+              .mode("overwrite")
+              .saveAsTable("t")
+          }
           checkAnswer(
             spark.read.format("paimon").table("t").orderBy("a"),
             Seq(Row(5, "x5", "p1"))
@@ -150,8 +164,130 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             sql("SHOW PARTITIONS t"),
             Seq(Row("pt=p1"))
           )
+
+          // Verify table definition is preserved
+          val table = loadTable("t")
+          Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
+          Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
         }
       }
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite preserves table definition and snapshots") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      // Create a partitioned table with primary key and custom properties
+      spark.sql("""CREATE TABLE t (a INT, b STRING, pt STRING)
+                  |USING paimon
+                  |PARTITIONED BY (pt)
+                  |TBLPROPERTIES ('primary-key' = 'a,pt', 'bucket' = '2')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 'old1', 'p1'), (2, 'old2', 'p2')")
+
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      // Overwrite without re-specifying partitionBy or primary-key
+      Seq((3, "new3", "p3"))
+        .toDF("a", "b", "pt")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+
+      // Verify table definition is fully preserved
+      val table = loadTable("t")
+      Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
+      Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
+      Assertions.assertEquals("2", table.options().get("bucket"))
+      Assertions.assertEquals(oldLocation, table.location().toString)
+
+      // Verify data is replaced
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(3, "new3", "p3") :: Nil)
+
+      // Verify old snapshots are still accessible via time travel
+      checkAnswer(
+        sql(s"SELECT * FROM t VERSION AS OF $oldSnapshotId ORDER BY a"),
+        Row(1, "old1", "p1") :: Row(2, "old2", "p2") :: Nil)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite on non-partitioned table") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      Seq((1, "x1"), (2, "x2"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("append")
+        .saveAsTable("t")
+
+      // Overwrite
+      Seq((3, "x3"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(3, "x3") :: Nil)
+      // Verify still non-partitioned
+      Assertions.assertTrue(loadTable("t").partitionKeys().isEmpty)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite creates table when not exists") {
+    assume(gteqSpark3_4)
+    withTable("new_tbl") {
+      Seq((1, "x1"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .option("primary-key", "a")
+        .mode("overwrite")
+        .saveAsTable("new_tbl")
+
+      checkAnswer(sql("SELECT * FROM new_tbl"), Row(1, "x1") :: Nil)
+      Assertions.assertEquals(Seq("a"), loadTable("new_tbl").primaryKeys().asScala.toSeq)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite respects dynamic partition overwrite mode") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      spark.sql("""CREATE TABLE t (a INT, b STRING, pt STRING)
+                  |USING paimon
+                  |PARTITIONED BY (pt)
+                  |TBLPROPERTIES ('primary-key' = 'a,pt')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 'x1', 'p1'), (2, 'x2', 'p2'), (3, 'x3', 'p1')")
+
+      // Dynamic partition overwrite: only p1 should be replaced, p2 untouched
+      withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+        Seq((4, "x4", "p1"))
+          .toDF("a", "b", "pt")
+          .write
+          .format("paimon")
+          .mode("overwrite")
+          .saveAsTable("t")
+      }
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY a"),
+        Row(2, "x2", "p2") :: Row(4, "x4", "p1") :: Nil)
+
+      // Static overwrite (default): all partitions replaced
+      Seq((5, "x5", "p3"))
+        .toDF("a", "b", "pt")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(5, "x5", "p3") :: Nil)
+
+      // Verify table definition is preserved in both cases
+      Assertions.assertEquals(Seq("pt"), loadTable("t").partitionKeys().asScala.toSeq)
+      Assertions.assertEquals(Seq("a", "pt"), loadTable("t").primaryKeys().asScala.toSeq)
     }
   }
 
