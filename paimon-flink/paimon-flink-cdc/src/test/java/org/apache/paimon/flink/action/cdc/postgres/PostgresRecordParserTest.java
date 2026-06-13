@@ -44,7 +44,8 @@ public class PostgresRecordParserTest {
      * <p>PostgreSQL {@code timestamp(n)} columns with {@code n <= 3} are encoded by Debezium using
      * the {@code io.debezium.time.Timestamp} logical type (epoch-millis int64). The JDBC schema
      * path maps the same columns to {@code TIMESTAMP(n)}, so without this fix the two paths
-     * disagree and schema evolution crashes with "Cannot convert field from TIMESTAMP(3) to BIGINT".
+     * disagree and schema evolution crashes with "Cannot convert field from TIMESTAMP(3) to
+     * BIGINT".
      */
     @Test
     public void testTimestampMillisFieldMapsToTimestamp3() throws Exception {
@@ -110,7 +111,9 @@ public class PostgresRecordParserTest {
                 .orElseThrow(
                         () ->
                                 new AssertionError(
-                                        "Field '" + fieldName + "' not found in schema: "
+                                        "Field '"
+                                                + fieldName
+                                                + "' not found in schema: "
                                                 + record.cdcSchema().fields()));
     }
 
