@@ -259,12 +259,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
         }
         if (skippingSet != null) {
-            for (Snapshot snapshot : snapshotsExcludingEnd) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Ready to delete manifests in snapshot #{}", snapshot.id());
-                }
-                snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Ready to delete manifests in snapshots {}",
+                        snapshotsExcludingEnd.stream()
+                                .map(Snapshot::id)
+                                .collect(Collectors.toList()));
             }
+            snapshotDeletion.cleanUnusedManifests(snapshotsExcludingEnd, skippingSet);
         }
 
         // delete snapshot file finally
