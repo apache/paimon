@@ -240,7 +240,7 @@ public class FlinkSourceBuilder {
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
         DataStreamSource<RowData> dataStream =
                 env.fromSource(
-                        source,
+                        new PaimonDataStreamSource<>(source, table),
                         watermarkStrategy == null
                                 ? WatermarkStrategy.noWatermarks()
                                 : watermarkStrategy,
@@ -354,7 +354,8 @@ public class FlinkSourceBuilder {
                         unordered,
                         outerProject(),
                         isBounded,
-                        limit);
+                        limit,
+                        table);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

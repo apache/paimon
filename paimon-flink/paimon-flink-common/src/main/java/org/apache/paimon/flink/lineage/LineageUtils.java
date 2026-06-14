@@ -19,12 +19,24 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.jdbc.JdbcCatalogFactory;
+import org.apache.paimon.jdbc.JdbcCatalogOptions;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -39,9 +51,22 @@ import java.util.stream.Collectors;
 public class LineageUtils {
 
     private static final String PAIMON_DATASET_PREFIX = "paimon://";
+    private static final String DEFAULT_CATALOG_IDENTIFIER = FlinkCatalogFactory.IDENTIFIER;
 
     private static final Set<String> PAIMON_OPTION_KEYS =
             CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
+
+    /** Extracts the {@link CatalogContext} from a table, or null if not available. */
+    @Nullable
+    private static CatalogContext catalogContext(Table table) {
+        if (table instanceof FileStoreTable) {
+            return ((FileStoreTable) table).catalogEnvironment().catalogContext();
+        }
+        if (table instanceof FormatTable) {
+            return ((FormatTable) table).catalogContext();
+        }
+        return null;
+    }
 
     /**
      * Builds the config map for a dataset facet from a {@link Table}. Includes filtered Paimon
@@ -68,6 +93,25 @@ public class LineageUtils {
         return PAIMON_DATASET_PREFIX + CoreOptions.path(table.options());
     }
 
+    @VisibleForTesting
+    static String resolveNameByMetastore(Table table, @Nullable String defaultName) {
+        CatalogContext ctx = catalogContext(table);
+        if (ctx != null) {
+            Options catalogOptions = ctx.options();
+            // If jdbc metastore is used, use catalog-key as the catalog identifier.
+            if (JdbcCatalogFactory.IDENTIFIER.equals(
+                    catalogOptions.get(CatalogOptions.METASTORE))) {
+                String catalogKeyValue = catalogOptions.get(JdbcCatalogOptions.CATALOG_KEY);
+                if (!StringUtils.isNullOrWhitespaceOnly(catalogKeyValue)) {
+                    return catalogKeyValue + "." + table.fullName();
+                }
+            }
+        }
+        return defaultName != null
+                ? defaultName
+                : DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
+    }
+
     /**
      * Creates a {@link SourceLineageVertex} for a Paimon source table.
      *
@@ -78,10 +122,25 @@ public class LineageUtils {
     public static SourceLineageVertex sourceLineageVertex(
             String name, boolean isBounded, Table table) {
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(table), buildConfigMap(table));
+                new PaimonLineageDataset(
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table),
+                        buildConfigMap(table),
+                        table.rowType());
         Boundedness boundedness =
                 isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
         return new PaimonSourceLineageVertex(boundedness, Collections.singletonList(dataset));
+    }
+
+    /**
+     * Creates a {@link SourceLineageVertex} for a Paimon DataStream source table. The table name is
+     * derived from the table's full name, prefixed with the {@code catalog-key} if available.
+     *
+     * @param isBounded whether the source is bounded (batch) or unbounded (streaming)
+     * @param table the Paimon table
+     */
+    public static SourceLineageVertex sourceLineageVertex(boolean isBounded, Table table) {
+        return sourceLineageVertex(null, isBounded, table);
     }
 
     /**
@@ -92,7 +151,21 @@ public class LineageUtils {
      */
     public static LineageVertex sinkLineageVertex(String name, Table table) {
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(table), buildConfigMap(table));
+                new PaimonLineageDataset(
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table),
+                        buildConfigMap(table),
+                        table.rowType());
         return new PaimonSinkLineageVertex(Collections.singletonList(dataset));
+    }
+
+    /**
+     * Creates a {@link LineageVertex} for a Paimon DataStream sink table. The table name is derived
+     * from the table's full name, prefixed with the {@code catalog-key} if available.
+     *
+     * @param table the Paimon table
+     */
+    public static LineageVertex sinkLineageVertex(Table table) {
+        return sinkLineageVertex(null, table);
     }
 }
