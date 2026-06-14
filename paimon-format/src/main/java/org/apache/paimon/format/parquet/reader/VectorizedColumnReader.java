@@ -28,6 +28,8 @@ import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.parquet.CorruptDeltaByteArrays;
 import org.apache.parquet.VersionParser.ParsedVersion;
@@ -115,14 +117,18 @@ public class VectorizedColumnReader {
     }
 
     private boolean isLazyDecodingSupported(
-            PrimitiveType.PrimitiveTypeName typeName, ColumnVector columnVector) {
+            PrimitiveType.PrimitiveTypeName typeName,
+            DataType dataType,
+            ColumnVector columnVector) {
         boolean isSupported = false;
         switch (typeName) {
             case INT32:
                 isSupported = columnVector instanceof IntColumnVector;
                 break;
             case INT64:
-                isSupported = columnVector instanceof LongColumnVector;
+                isSupported =
+                        columnVector instanceof LongColumnVector
+                                && !isLowPrecisionTimestamp(dataType);
                 break;
             case FLOAT:
                 isSupported = columnVector instanceof FloatColumnVector;
@@ -137,6 +143,17 @@ public class VectorizedColumnReader {
                 isSupported = columnVector instanceof BytesColumnVector;
         }
         return isSupported;
+    }
+
+    private static boolean isLowPrecisionTimestamp(DataType dataType) {
+        switch (dataType.getTypeRoot()) {
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return ((TimestampType) dataType).getPrecision() <= 3;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return ((LocalZonedTimestampType) dataType).getPrecision() <= 3;
+            default:
+                return false;
+        }
     }
 
     /** Reads `total` rows from this columnReader into column. */
@@ -198,12 +215,9 @@ public class VectorizedColumnReader {
                             (VectorizedValuesReader) dataColumn);
                 }
 
-                // TIMESTAMP_MILLIS encoded as INT64 can't be lazily decoded as we need to post
-                // process
-                // the values to add microseconds precision.
                 if (column.hasDictionary()
                         || (startRowId == pageFirstRowIndex
-                                && isLazyDecodingSupported(typeName, column))) {
+                                && isLazyDecodingSupported(typeName, type, column))) {
                     column.setDictionary(new ParquetDictionary(dictionary));
                 } else {
                     updater.decodeDictionaryIds(
