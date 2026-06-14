@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.rowops
 
+import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.commands.SparkDataFileMeta
@@ -26,6 +27,7 @@ import org.apache.paimon.spark.read.BaseScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.utils.RangeHelper
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
@@ -76,10 +78,45 @@ case class PaimonCopyOnWriteScan(
     if (table.coreOptions().manifestDeleteFileDropStats()) {
       snapshotReader.dropStats()
     }
-    if (filterApplied) {
+    val isDataEvolution = table.coreOptions().dataEvolutionEnabled()
+    if (filterApplied && !isDataEvolution) {
       snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
     }
-    dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
+    val splits =
+      snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
+    dataSplits = if (filterApplied && isDataEvolution) {
+      splits.flatMap(filterDataEvolutionGroups)
+    } else {
+      splits
+    }
+  }
+
+  /**
+   * A data-evolution logical row is assembled from all files of its row-id group but reports only
+   * one member file as `__paimon_file_path`, and one split may bin-pack several groups. Filtering
+   * at file granularity would tear groups apart and rewrite rows with stale column values, so
+   * regroup the split's files by row-id range and keep or drop whole groups.
+   */
+  private def filterDataEvolutionGroups(split: DataSplit): Option[DataSplit] = {
+    val rangeHelper = new RangeHelper[DataFileMeta](f => f.nonNullRowIdRange())
+    val groups = rangeHelper.mergeOverlappingRanges(split.dataFiles()).asScala
+    val kept = groups.filter(_.asScala.exists(f => filteredFileNames.contains(f.fileName())))
+    if (kept.isEmpty) {
+      None
+    } else if (kept.size == groups.size) {
+      Some(split)
+    } else {
+      val builder = DataSplit
+        .builder()
+        .withSnapshot(split.snapshotId())
+        .withPartition(split.partition())
+        .withBucket(split.bucket())
+        .withBucketPath(split.bucketPath())
+        .withDataFiles(kept.flatMap(_.asScala).asJava)
+        .rawConvertible(split.rawConvertible())
+      Option(split.totalBuckets()).foreach(builder.withTotalBuckets)
+      Some(builder.build())
+    }
   }
 
   def scannedFiles: Seq[SparkDataFileMeta] = {

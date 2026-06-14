@@ -35,4 +35,27 @@ class RowTrackingTest extends RowTrackingTestBase {
       }
     }
   }
+
+  test("Data Evolution: Spark 3.5 keeps data-evolution tables off the V2 row-level path") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, data INT) TBLPROPERTIES " +
+            "('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        assert(!SparkTable.of(loadTable("t")).isInstanceOf[SupportsRowLevelOperations])
+
+        sql("INSERT INTO t VALUES (1, 1), (2, 2)")
+        assert(
+          intercept[RuntimeException] {
+            sql("DELETE FROM t WHERE id = 2")
+          }.getMessage
+            .contains("Delete operation is not supported when data evolution is enabled yet."))
+        assert(
+          intercept[RuntimeException] {
+            sql("UPDATE t SET data = 20 WHERE id = 2")
+          }.getMessage
+            .contains("Update operation is not supported when data evolution is enabled yet."))
+      }
+    }
+  }
 }

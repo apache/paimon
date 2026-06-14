@@ -104,6 +104,10 @@ trait RowLevelHelper extends SQLConfHelper {
     val relation = PaimonRelation.getPaimonRelation(m.targetTable)
     val table = relation.table.asInstanceOf[SparkTable]
     shouldFallbackToV1(table) ||
+    // Data-evolution tables expose V2 row-level ops for DELETE / UPDATE only; MERGE keeps the
+    // V1 `MergeIntoPaimonDataEvolutionTable` command which writes partial-column patch files
+    // instead of rewriting whole rows.
+    table.coreOptions.dataEvolutionEnabled() ||
     !m.rewritable ||
     !m.aligned
   }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
@@ -45,7 +46,15 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
           table.getTable match {
             case paimonTable: FileStoreTable =>
               val relation = PaimonRelation.getPaimonRelation(d.table)
-              if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+              if (
+                paimonTable.coreOptions().dataEvolutionEnabled() &&
+                !OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+                  paimonTable,
+                  condition)
+              ) {
+                // Data-evolution tables only support DELETE through the V2 copy-on-write path
+                // (Spark 4.0+ with V2 write enabled); the V1 command cannot rewrite row-id
+                // groups. Metadata-only DELETE is fine: it just drops whole files.
                 throw new RuntimeException(
                   "Delete operation is not supported when data evolution is enabled yet.")
               }

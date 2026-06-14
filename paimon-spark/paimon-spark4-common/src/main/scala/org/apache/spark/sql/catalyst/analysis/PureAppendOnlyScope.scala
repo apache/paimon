@@ -30,9 +30,14 @@ import org.apache.spark.sql.execution.datasources.v2.ExtractV2Table
  * [[Spark41MergeIntoRewrite]] for MERGE).
  *
  * These rules only intercept operations against Paimon tables that are valid for Spark's V2
- * copy-on-write rewrite: no primary key, data evolution, deletion vectors, or fixed-length
- * `CHAR(n)` columns. Row-tracking-only tables are included; tables that violate any of these
- * constraints go through Paimon's postHoc V1 commands or Spark's built-in analysis path.
+ * copy-on-write rewrite: no primary key, deletion vectors, or fixed-length `CHAR(n)` columns.
+ * Row-tracking-only tables are included. Data-evolution tables (without BLOB or vector-store files)
+ * are included for UPDATE and the metadata-only DELETE restore, but NOT for MERGE: MERGE keeps the
+ * V1 `MergeIntoPaimonDataEvolutionTable` command, which writes partial-column patch files instead
+ * of rewriting whole rows. Tables that violate any of these constraints go through Paimon's postHoc
+ * V1 commands or Spark's built-in analysis path.
+ *
+ * The conditions mirror `SparkTable.supportsV2RowLevelOps`; keep the two in sync.
  *
  * Kept as a mix-in trait so the two rewrite objects stay single-responsibility (one rule per Spark
  * row-level command, mirroring Spark's own `RewriteUpdateTable` / `RewriteMergeIntoTable` layout)
@@ -44,10 +49,28 @@ trait PureAppendOnlyScope {
     targetsPaimonFileStoreTable(aliasedTable) {
       case (sparkTable, fs) =>
         fs.primaryKeys().isEmpty &&
+        supportsDataEvolutionCopyOnWrite(sparkTable, fs) &&
+        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
+    }
+  }
+
+  protected def targetsV2CopyOnWriteMergeTable(aliasedTable: LogicalPlan): Boolean = {
+    targetsPaimonFileStoreTable(aliasedTable) {
+      case (sparkTable, fs) =>
+        fs.primaryKeys().isEmpty &&
         !sparkTable.coreOptions.dataEvolutionEnabled() &&
         !sparkTable.coreOptions.deletionVectorsEnabled() &&
         !SparkTypeUtils.containsCharType(fs.rowType())
     }
+  }
+
+  private def supportsDataEvolutionCopyOnWrite(
+      sparkTable: SparkTable,
+      fs: FileStoreTable): Boolean = {
+    !sparkTable.coreOptions.dataEvolutionEnabled() ||
+    (!SparkTypeUtils.containsBlobType(fs.rowType()) &&
+      !sparkTable.coreOptions.withVectorFormat())
   }
 
   private def targetsPaimonFileStoreTable(aliasedTable: LogicalPlan)(

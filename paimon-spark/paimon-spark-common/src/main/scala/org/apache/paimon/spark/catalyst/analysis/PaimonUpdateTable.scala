@@ -49,11 +49,6 @@ object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with Expr
                 throw new RuntimeException("Can't update the primary key column.")
               }
 
-              if (paimonTable.coreOptions().dataEvolutionEnabled()) {
-                throw new RuntimeException(
-                  "Update operation is not supported when data evolution is enabled yet.")
-              }
-
               // Align against `u.table.output`: for CHAR/VARCHAR columns the analyzer adds a
               // `readSidePadding` Project whose output has different exprIds than `relation`, and
               // the parsed assignment keys reference the Project's attributes. Order matches
@@ -68,8 +63,25 @@ object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with Expr
               val alignedUpdateTable = u.copy(assignments = alignedAssignments)
 
               if (!shouldFallbackToV1Update(table, alignedUpdateTable)) {
+                if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+                  // The rewritten files keep the original row ids, which are derived from the
+                  // file's firstRowId per partition; moving a row to another partition would
+                  // need re-assigned row ids (delete + insert semantics).
+                  val partitionKeys = paimonTable.partitionKeys().asScala.toSeq
+                  if (!validUpdateAssignment(u.table.outputSet, partitionKeys, assignments)) {
+                    throw new RuntimeException(
+                      "Update to partition columns is not supported for data evolution tables.")
+                  }
+                }
                 alignedUpdateTable
               } else {
+                if (paimonTable.coreOptions().dataEvolutionEnabled()) {
+                  // Data-evolution tables only support UPDATE through the V2 copy-on-write
+                  // path (Spark 4.0+ with V2 write enabled); the V1 command cannot rewrite
+                  // row-id groups.
+                  throw new RuntimeException(
+                    "Update operation is not supported when data evolution is enabled yet.")
+                }
                 UpdatePaimonTableCommand(
                   relation,
                   paimonTable,
