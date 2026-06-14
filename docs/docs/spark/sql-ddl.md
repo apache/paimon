@@ -103,6 +103,9 @@ Paimon JDBC Catalog in Spark needs to correctly add the corresponding jar packag
 | mysql         | mysql-connector-java | [Download](https://mvnrepository.com/artifact/mysql/mysql-connector-java)  |
 | postgres      | postgresql           | [Download](https://mvnrepository.com/artifact/org.postgresql/postgresql)   |
 
+JDBC catalog supports persistent Paimon views. View metadata is stored in the automatically created
+`paimon_views` table in the catalog database.
+
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
@@ -375,7 +378,7 @@ CREATE TABLE target_tbl LIKE source_tbl;
 ## View
 
 Views are based on the result-set of an SQL query, when using `org.apache.paimon.spark.SparkCatalog`, views are managed by paimon itself. 
-And in this case, views are supported when the `metastore` type is `hive` or `rest`.
+And in this case, views are supported when the `metastore` type is `hive`, `rest` or `jdbc`.
 
 ### Create Or Replace View
 

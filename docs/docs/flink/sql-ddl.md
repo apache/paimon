@@ -146,6 +146,18 @@ You can also perform logical isolation for databases under multiple catalogs by 
 
 Additionally, when creating a JdbcCatalog, you can specify the maximum length for the lock key by configuring "lock-key-max-length," which defaults to 255. Since this value is a combination of {catalog-key}.{database-name}.{table-name}, please adjust accordingly.
 
+JDBC catalog supports persistent Paimon views. View metadata is stored in the automatically created
+`paimon_views` table in the catalog database. The view SQL is stored as catalog metadata and is not
+resolved when the view is created.
+
+```sql
+CREATE VIEW sales_view AS SELECT name, amount FROM sales WHERE amount > 100;
+
+SHOW VIEWS;
+
+DROP VIEW sales_view;
+```
+
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
 ## Create Table

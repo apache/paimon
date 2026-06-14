@@ -19,12 +19,15 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
@@ -37,8 +40,13 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
+import org.apache.paimon.view.ViewImpl;
+import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -58,14 +66,18 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
+import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
@@ -129,39 +141,66 @@ public class JdbcCatalog extends AbstractCatalog {
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
-                            dbMeta.getTables(null, null, JdbcUtils.CATALOG_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                    try (ResultSet tableExists =
+                            dbMeta.getTables(null, null, JdbcUtils.CATALOG_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_CATALOG_TABLE).execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_CATALOG_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // Check and create database properties table.
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
+                    try (ResultSet tableExists =
                             dbMeta.getTables(
-                                    null, null, JdbcUtils.DATABASE_PROPERTIES_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                                    null, null, JdbcUtils.DATABASE_PROPERTIES_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_DATABASE_PROPERTIES_TABLE)
-                            .execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_DATABASE_PROPERTIES_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // Check and create table properties table.
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
-                    ResultSet tableExists =
+                    try (ResultSet tableExists =
                             dbMeta.getTables(
-                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null);
-                    if (tableExists.next()) {
-                        return true;
+                                    null, null, JdbcUtils.TABLE_PROPERTIES_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
                     }
-                    return conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE).execute();
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_TABLE_PROPERTIES_TABLE)) {
+                        return statement.execute();
+                    }
+                });
+
+        // Check and create view table.
+        connections.run(
+                conn -> {
+                    DatabaseMetaData dbMeta = conn.getMetaData();
+                    try (ResultSet tableExists =
+                            dbMeta.getTables(null, null, JdbcUtils.VIEW_TABLE_NAME, null)) {
+                        if (tableExists.next()) {
+                            return true;
+                        }
+                    }
+                    try (PreparedStatement statement =
+                            conn.prepareStatement(JdbcUtils.CREATE_VIEW_TABLE)) {
+                        return statement.execute();
+                    }
                 });
 
         // if lock enabled, Check and create distributed lock table.
@@ -227,6 +266,26 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
+        checkNotSystemDatabase(name);
+        try {
+            getDatabase(name);
+        } catch (DatabaseNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+
+        if (!cascade && (!listTables(name).isEmpty() || !listViews(name).isEmpty())) {
+            throw new DatabaseNotEmptyException(name);
+        }
+
+        dropDatabaseImpl(name);
+    }
+
+    @Override
     protected void dropDatabaseImpl(String name) {
         // Delete table from paimon_tables
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
@@ -240,6 +299,8 @@ public class JdbcCatalog extends AbstractCatalog {
                     catalogKey,
                     name);
         }
+        // Delete views from paimon_views.
+        execute(connections, JdbcUtils.DELETE_VIEWS_SQL, catalogKey, name);
     }
 
     @Override
@@ -288,6 +349,55 @@ public class JdbcCatalog extends AbstractCatalog {
                 JdbcUtils.LIST_TABLES_SQL,
                 catalogKey,
                 databaseName);
+    }
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotBranch(identifier, "createTable");
+        checkNotSystemTable(identifier, "createTable");
+        validateCreateTable(schema, false);
+        validateCustomTablePath(schema.options());
+
+        getDatabase(identifier.getDatabaseName());
+
+        try {
+            getTable(identifier);
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new TableAlreadyExistException(identifier);
+        } catch (TableNotExistException ignored) {
+        }
+
+        if (JdbcUtils.viewExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new TableAlreadyExistException(identifier);
+        }
+
+        copyTableDefaultOptions(schema.options());
+
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        switch (tableType) {
+            case TABLE:
+            case MATERIALIZED_TABLE:
+                createTableImpl(identifier, schema);
+                break;
+            case FORMAT_TABLE:
+                createFormatTable(identifier, schema);
+                break;
+            case OBJECT_TABLE:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Catalog %s cannot support object tables.",
+                                this.getClass().getName()));
+        }
     }
 
     @Override
@@ -368,6 +478,37 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
+    }
+
+    @Override
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        checkNotBranch(fromTable, "renameTable");
+        checkNotBranch(toTable, "renameTable");
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
+
+        try {
+            getTable(fromTable);
+        } catch (TableNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(fromTable);
+        }
+
+        try {
+            getTable(toTable);
+            throw new TableAlreadyExistException(toTable);
+        } catch (TableNotExistException ignored) {
+        }
+
+        if (JdbcUtils.viewExists(
+                connections, catalogKey, toTable.getDatabaseName(), toTable.getObjectName())) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        renameTableImpl(fromTable, toTable);
     }
 
     @Override
@@ -576,6 +717,19 @@ public class JdbcCatalog extends AbstractCatalog {
         return options.get(CatalogOptions.SYNC_ALL_PROPERTIES);
     }
 
+    private void copyTableDefaultOptions(Map<String, String> tableOptions) {
+        tableDefaultOptions.forEach(tableOptions::putIfAbsent);
+    }
+
+    private void validateCustomTablePath(Map<String, String> tableOptions) {
+        if (!allowCustomTablePath() && tableOptions.containsKey(PATH.key())) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The current catalog %s does not support specifying the table path when creating a table.",
+                            this.getClass().getSimpleName()));
+        }
+    }
+
     private Map<String, String> convertToPropertiesTableKey(TableSchema tableSchema) {
         Map<String, String> properties = new HashMap<>();
         if (!tableSchema.primaryKeys().isEmpty()) {
@@ -644,6 +798,289 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in SQL query", e);
+        }
+    }
+
+    // ======================= view methods ===============================
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        try {
+            String viewSchemaJson =
+                    JdbcUtils.getViewSchema(
+                            connections,
+                            catalogKey,
+                            identifier.getDatabaseName(),
+                            identifier.getObjectName());
+            if (viewSchemaJson == null) {
+                throw new ViewNotExistException(identifier);
+            }
+
+            ViewSchema viewSchema = JsonSerdeUtil.fromJson(viewSchemaJson, ViewSchema.class);
+            return new ViewImpl(
+                    identifier,
+                    viewSchema.fields(),
+                    viewSchema.query(),
+                    viewSchema.dialects(),
+                    viewSchema.comment(),
+                    viewSchema.options());
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException("Failed to get view " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        // Check if database exists
+        try {
+            getDatabase(identifier.getDatabaseName());
+        } catch (DatabaseNotExistException e) {
+            throw e;
+        }
+
+        if (JdbcUtils.tableExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new ViewAlreadyExistException(identifier);
+        }
+
+        // Check if view already exists
+        if (JdbcUtils.viewExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new ViewAlreadyExistException(identifier);
+        }
+
+        // Serialize view schema to JSON
+        ViewSchema viewSchema =
+                new ViewSchema(
+                        view.rowType().getFields(),
+                        view.query(),
+                        view.dialects(),
+                        view.comment().orElse(null),
+                        view.options());
+        String viewSchemaJson = JsonSerdeUtil.toJson(viewSchema);
+
+        // Insert view
+        try {
+            JdbcUtils.insertView(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getObjectName(),
+                    viewSchemaJson);
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("View already exists")) {
+                throw new ViewAlreadyExistException(identifier, e);
+            }
+            throw new RuntimeException("Failed to create view " + identifier.getFullName(), e);
+        }
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        // Check if view exists
+        if (!JdbcUtils.viewExists(
+                connections,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getObjectName())) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new ViewNotExistException(identifier);
+        }
+
+        // Delete view
+        int deletedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.DROP_VIEW_SQL,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName());
+
+        if (deletedRecords != 1) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to drop view %s: affected %d rows",
+                            identifier.getFullName(), deletedRecords));
+        }
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        // Check if database exists
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        return fetch(
+                row -> row.getString(JdbcUtils.VIEW_NAME),
+                JdbcUtils.LIST_VIEWS_SQL,
+                catalogKey,
+                databaseName);
+    }
+
+    @Override
+    public PagedList<String> listViewsPaged(
+            String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
+            throws DatabaseNotExistException {
+        CatalogUtils.validateNamePattern(this, viewNamePattern);
+        return new PagedList<>(listViews(databaseName), null);
+    }
+
+    @Override
+    public PagedList<View> listViewDetailsPaged(
+            String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
+            throws DatabaseNotExistException {
+        PagedList<String> pagedViews =
+                listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
+        return new PagedList<>(
+                pagedViews.getElements().stream()
+                        .map(
+                                viewName -> {
+                                    try {
+                                        return getView(Identifier.create(databaseName, viewName));
+                                    } catch (ViewNotExistException ignored) {
+                                        LOG.warn(
+                                                "view {}.{} does not exist",
+                                                databaseName,
+                                                viewName);
+                                        return null;
+                                    }
+                                })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()),
+                pagedViews.getNextPageToken());
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        // Check if source view exists
+        if (!JdbcUtils.viewExists(
+                connections, catalogKey, fromView.getDatabaseName(), fromView.getObjectName())) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new ViewNotExistException(fromView);
+        }
+
+        // Check if target view already exists
+        if (JdbcUtils.viewExists(
+                connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
+            throw new ViewAlreadyExistException(toView);
+        }
+        if (JdbcUtils.tableExists(
+                connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
+            throw new ViewAlreadyExistException(toView);
+        }
+        if (!JdbcUtils.databaseExists(connections, catalogKey, toView.getDatabaseName())) {
+            throw new IllegalArgumentException(
+                    String.format("Database %s does not exist.", toView.getDatabaseName()));
+        }
+
+        // Rename view
+        try {
+            JdbcUtils.renameView(connections, catalogKey, fromView, toView);
+        } catch (RuntimeException e) {
+            if (e.getMessage() != null && e.getMessage().contains("View already exists")) {
+                throw new ViewAlreadyExistException(toView, e);
+            } else if (e.getMessage() != null && e.getMessage().contains("View does not exist")) {
+                throw new ViewNotExistException(fromView, e);
+            }
+            throw new RuntimeException(
+                    "Failed to rename view from "
+                            + fromView.getFullName()
+                            + " to "
+                            + toView.getFullName(),
+                    e);
+        }
+    }
+
+    @Override
+    public void alterView(
+            Identifier identifier, List<ViewChange> changes, boolean ignoreIfNotExists)
+            throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
+        // Get existing view
+        View existingView;
+        try {
+            existingView = getView(identifier);
+        } catch (ViewNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw e;
+        }
+
+        // Apply changes
+        Map<String, String> newOptions = new HashMap<>(existingView.options());
+        String newComment = existingView.comment().orElse(null);
+        Map<String, String> newDialects = new HashMap<>(existingView.dialects());
+        for (ViewChange change : changes) {
+            if (change instanceof ViewChange.SetViewOption) {
+                ViewChange.SetViewOption setOption = (ViewChange.SetViewOption) change;
+                newOptions.put(setOption.key(), setOption.value());
+            } else if (change instanceof ViewChange.RemoveViewOption) {
+                ViewChange.RemoveViewOption removeOption = (ViewChange.RemoveViewOption) change;
+                newOptions.remove(removeOption.key());
+            } else if (change instanceof ViewChange.UpdateViewComment) {
+                ViewChange.UpdateViewComment updateComment = (ViewChange.UpdateViewComment) change;
+                newComment = updateComment.comment();
+            } else if (change instanceof ViewChange.AddDialect) {
+                ViewChange.AddDialect addDialect = (ViewChange.AddDialect) change;
+                if (newDialects.containsKey(addDialect.dialect())) {
+                    throw new DialectAlreadyExistException(identifier, addDialect.dialect());
+                }
+                newDialects.put(addDialect.dialect(), addDialect.query());
+            } else if (change instanceof ViewChange.UpdateDialect) {
+                ViewChange.UpdateDialect updateDialect = (ViewChange.UpdateDialect) change;
+                if (!newDialects.containsKey(updateDialect.dialect())) {
+                    throw new DialectNotExistException(identifier, updateDialect.dialect());
+                }
+                newDialects.put(updateDialect.dialect(), updateDialect.query());
+            } else if (change instanceof ViewChange.DropDialect) {
+                ViewChange.DropDialect dropDialect = (ViewChange.DropDialect) change;
+                if (!newDialects.containsKey(dropDialect.dialect())) {
+                    throw new DialectNotExistException(identifier, dropDialect.dialect());
+                }
+                newDialects.remove(dropDialect.dialect());
+            }
+        }
+
+        // Create updated view schema
+        ViewSchema updatedSchema =
+                new ViewSchema(
+                        existingView.rowType().getFields(),
+                        existingView.query(),
+                        newDialects,
+                        newComment,
+                        newOptions);
+        String viewSchemaJson = JsonSerdeUtil.toJson(updatedSchema);
+
+        // Update view
+        try {
+            JdbcUtils.updateView(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getObjectName(),
+                    viewSchemaJson);
+        } catch (RuntimeException e) {
+            throw new RuntimeException("Failed to alter view " + identifier.getFullName(), e);
         }
     }
 }
