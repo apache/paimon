@@ -18,27 +18,19 @@
 
 package org.apache.spark.sql.execution.shim
 
-import org.apache.paimon.CoreOptions.TYPE
-import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkSource, SparkTable}
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{NoSuchTableException, ResolvedIdentifier}
-import org.apache.spark.sql.catalyst.expressions.Literal
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwriteByExpression, OverwritePartitionsDynamic, ReplaceTable, ReplaceTableAsSelect, TableSpec}
-import org.apache.spark.sql.connector.catalog.{Identifier, StagingTableCatalog, TableCatalog}
-import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan, SparkStrategy}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.internal.SQLConf.PartitionOverwriteMode
+import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTable, ReplaceTableAsSelect, TableSpec}
+import org.apache.spark.sql.connector.catalog.StagingTableCatalog
+import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-
-import scala.collection.JavaConverters._
 
 case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
   extends SparkStrategy
-  with PaimonStrategyHelper {
+  with PaimonTableAsSelectHelper {
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
     case ReplaceTableAsSelect(
@@ -48,26 +40,27 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           tableSpec: TableSpec,
           options,
           orCreate,
-          true) if PaimonReplaceTableStrategyHelper.supportsCatalog(catalog, tableSpec) =>
+          true) if supportsCatalog(catalog, tableSpec) =>
       // For V1 saveAsTable + overwrite on an existing table, rewrite to
       // OverwriteByExpression to preserve table definition.
-      if (PaimonReplaceTableStrategyHelper.isV1SaveAsTableOverwrite) {
-        val overwrite = PaimonReplaceTableStrategyHelper
-          .rewriteToOverwrite(spark, catalog, ident, query, options)
+      if (isV1SaveAsTableOverwrite) {
+        val overwrite = rewriteToOverwrite(spark, catalog, ident, query, options)
         if (overwrite.isDefined) {
           val qe = spark.sessionState.executePlan(overwrite.get)
           return qe.sparkPlan :: Nil
         }
       }
 
-      val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
+      val (tableOptions, writeOptions) = splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
-      if (PaimonReplaceTableStrategyHelper.canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
+      // Pin snapshot in query to prevent self-referencing RTAS from reading truncated data
+      val pinnedQuery = pinSnapshotInQuery(catalog, ident, query)
+      if (canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
         SparkShimLoader.shim.createAtomicReplaceTableAsSelectExec(
           catalog.asInstanceOf[StagingTableCatalog],
           ident,
           parts,
-          query,
+          pinnedQuery,
           qualifiedSpec,
           writeOptions,
           orCreate = orCreate) :: Nil
@@ -76,7 +69,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           catalog,
           ident,
           parts,
-          query,
+          pinnedQuery,
           qualifiedSpec,
           writeOptions,
           orCreate = orCreate) :: Nil
@@ -87,7 +80,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
 
 case class PaimonReplaceTableStrategy(spark: SparkSession)
   extends SparkStrategy
-  with PaimonStrategyHelper {
+  with PaimonTableAsSelectHelper {
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
     case replace @ ReplaceTable(
@@ -95,7 +88,7 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
           schemaOrColumns,
           parts,
           tableSpec: TableSpec,
-          orCreate) if PaimonReplaceTableStrategyHelper.supportsCatalog(catalog, tableSpec) =>
+          orCreate) if supportsCatalog(catalog, tableSpec) =>
       val columns =
         SparkShimLoader.shim.toReplaceTableColumns(
           replace.tableSchema,
@@ -103,7 +96,7 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
           catalog,
           ident)
       val qualifiedSpec = qualifyTableSpec(tableSpec, Map.empty)
-      if (PaimonReplaceTableStrategyHelper.canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
+      if (canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
         SparkShimLoader.shim.createAtomicReplaceTableExec(
           catalog.asInstanceOf[StagingTableCatalog],
           ident,
@@ -122,80 +115,4 @@ case class PaimonReplaceTableStrategy(spark: SparkSession)
       }
     case _ => Nil
   }
-}
-
-private[shim] object PaimonReplaceTableStrategyHelper {
-
-  def supportsCatalog(catalog: SparkBaseCatalog, tableSpec: TableSpec): Boolean = catalog match {
-    case _: SparkCatalog => true
-    case _: SparkGenericCatalog =>
-      tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME))
-    case _ => false
-  }
-
-  /** Whether the current call originates from V1 DataFrameWriter.saveAsTable(). */
-  def isV1SaveAsTableOverwrite: Boolean = {
-    Thread.currentThread().getStackTrace.exists {
-      e =>
-        val cls = e.getClassName
-        cls.contains("DataFrameWriter") && !cls.contains("DataFrameWriterV2")
-    }
-  }
-
-  /**
-   * Rewrite to OverwriteByExpression or OverwritePartitionsDynamic for an existing table,
-   * preserving table definition. Returns None if the table does not exist.
-   */
-  def rewriteToOverwrite(
-      spark: SparkSession,
-      catalog: SparkBaseCatalog,
-      ident: Identifier,
-      query: LogicalPlan,
-      writeOptions: Map[String, String]): Option[LogicalPlan] = {
-    try {
-      val existing = catalog.loadTable(ident)
-      if (!existing.isInstanceOf[SparkTable]) return None
-      val relation =
-        DataSourceV2Relation.create(existing, Some(catalog.asInstanceOf[TableCatalog]), Some(ident))
-      val dynamicOverwrite = existing.partitioning().nonEmpty &&
-        spark.sessionState.conf.partitionOverwriteMode == PartitionOverwriteMode.DYNAMIC
-      if (dynamicOverwrite) {
-        Some(OverwritePartitionsDynamic.byName(relation, query, writeOptions))
-      } else {
-        Some(OverwriteByExpression.byName(relation, query, Literal(true), writeOptions))
-      }
-    } catch {
-      case _: NoSuchTableException => None
-    }
-  }
-
-  /**
-   * Whether replace can use Spark's staged replace path. Paimon's replaceTable is not a
-   * rollbackable atomic replace; it swaps the current schema and truncates current data while
-   * preserving old snapshots. Return false for cases replaceTable would reject so Spark falls back
-   * to drop+create.
-   */
-  def canAtomicReplace(
-      catalog: SparkBaseCatalog,
-      ident: Identifier,
-      tableSpec: TableSpec,
-      parts: Seq[Transform]): Boolean = {
-    try {
-      val existing = catalog.loadTable(ident)
-      if (!existing.isInstanceOf[SparkTable]) return false
-      val existingProvider =
-        Option(existing.properties().get(TableCatalog.PROP_PROVIDER)).getOrElse(SparkSource.NAME)
-      val targetProvider = tableSpec.provider.getOrElse(SparkSource.NAME)
-      if (!existingProvider.equalsIgnoreCase(targetProvider)) return false
-      val existingType = Options.fromMap(existing.properties()).get(TYPE)
-      val targetType = Options.fromMap(tableSpec.properties.asJava).get(TYPE)
-      if (existingType != targetType) return false
-      val existingParts = existing.partitioning().toSeq
-      existingParts.size == parts.size &&
-      existingParts.zip(parts).forall { case (a, b) => a.toString == b.toString }
-    } catch {
-      case _: NoSuchTableException => true
-    }
-  }
-
 }
