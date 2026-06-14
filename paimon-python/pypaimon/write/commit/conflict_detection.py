@@ -301,13 +301,40 @@ class ConflictDetection:
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
         check_next_row_id = check_snapshot.next_row_id
 
+        delta_ranges = []
+        for f in delta_files:
+            r = f.row_id_range()
+            if r is not None:
+                delta_ranges.append((r.from_, r.to))
+
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
                 latest_snapshot.id + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
                 continue
+
             if snapshot.commit_kind == "COMPACT":
+                if not delta_ranges:
+                    continue
+                compact_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
+                    snapshot, commit_entries)
+                for entry in compact_entries:
+                    file_range = entry.file.row_id_range()
+                    if file_range is None:
+                        continue
+                    for from_, to in delta_ranges:
+                        if file_range.from_ <= to and from_ <= file_range.to:
+                            return RuntimeError(
+                                "For Data Evolution table, the staged row-id update "
+                                "was prepared against a file layout that has since "
+                                "been changed by a concurrent COMPACT (snapshot {sid}): "
+                                "compacted file {name} row range [{ff}, {ft}] "
+                                "overlaps staged update range [{df}, {dt}].".format(
+                                    sid=snapshot.id,
+                                    name=entry.file.file_name,
+                                    ff=file_range.from_, ft=file_range.to,
+                                    df=from_, dt=to))
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

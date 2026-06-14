@@ -1190,7 +1190,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         tc.close()
         print(f"Conflict detected as expected: {ctx.exception}")
 
-    @unittest.expectedFailure
     def test_blob_compact_conflict_update(self):
         import subprocess
 
