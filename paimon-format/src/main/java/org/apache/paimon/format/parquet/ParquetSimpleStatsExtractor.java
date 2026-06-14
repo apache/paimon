@@ -223,8 +223,8 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
         if (precision <= 3) {
             LongStatistics longStats = (LongStatistics) stats;
             return new SimpleColStats(
-                    Timestamp.fromEpochMillis(longStats.getMin()),
-                    Timestamp.fromEpochMillis(longStats.getMax()),
+                    Timestamp.fromMicros(longStats.getMin()),
+                    Timestamp.fromMicros(longStats.getMax()),
                     stats.getNumNulls());
         } else if (precision <= 6) {
             LongStatistics longStats = (LongStatistics) stats;
