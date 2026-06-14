@@ -224,11 +224,15 @@ class _FakeSnapshotManager:
 
 class _FakeCommitScanner:
 
-    def __init__(self, entries_by_snapshot_id):
+    def __init__(self, entries_by_snapshot_id, raw_entries_by_snapshot_id=None):
         self._by_id = entries_by_snapshot_id
+        self._raw_by_id = raw_entries_by_snapshot_id or {}
 
     def read_incremental_entries_from_changed_partitions(self, snapshot, _):
         return self._by_id.get(snapshot.id, [])
+
+    def read_incremental_raw_entries_from_changed_partitions(self, snapshot, _):
+        return self._raw_by_id.get(snapshot.id, self._by_id.get(snapshot.id, []))
 
 
 class _FakeTable:
@@ -239,57 +243,69 @@ class _FakeTable:
 
 class TestCheckRowIdFromSnapshot(unittest.TestCase):
 
-    def _make_detection(self, snapshots, entries_by_snapshot_id):
+    def _make_detection(self, snapshots, raw_entries_by_snapshot_id):
         detection = ConflictDetection(
             data_evolution_enabled=True,
             snapshot_manager=_FakeSnapshotManager(snapshots),
             manifest_list_manager=None,
             table=_FakeTable(_FakeSchemaManager([_DEFAULT_SCHEMA])),
-            commit_scanner=_FakeCommitScanner(entries_by_snapshot_id),
+            commit_scanner=_FakeCommitScanner({}, raw_entries_by_snapshot_id),
         )
         detection._row_id_check_from_snapshot = 1
         return detection
 
-    def test_compact_overlapping_added_file_raises(self):
+    def test_compact_deleted_anchor_blob_raises(self):
         delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
                              write_cols=["col_a"])]
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact_entries = [
-            _make_entry("merged.parquet", kind=0, first_row_id=0, row_count=200),
+            _make_entry("old.blob", kind=1, first_row_id=0, row_count=100),
+            _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
         ]
         detection = self._make_detection(
-            [check_snap, compact_snap],
-            {2: compact_entries})
+            [check_snap, compact_snap], {2: compact_entries})
         result = detection.check_row_id_from_snapshot(compact_snap, delta)
         self.assertIsNotNone(result)
         self.assertIn("COMPACT", str(result))
 
-    def test_compact_disjoint_added_file_does_not_raise(self):
+    def test_compact_deleted_other_file_type_does_not_raise(self):
+        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
+                             write_cols=["col_a"])]
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
+        compact_entries = [
+            _make_entry("old.parquet", kind=1, first_row_id=0, row_count=100),
+            _make_entry("merged.parquet", kind=0, first_row_id=0, row_count=200),
+        ]
+        detection = self._make_detection(
+            [check_snap, compact_snap], {2: compact_entries})
+        self.assertIsNone(
+            detection.check_row_id_from_snapshot(compact_snap, delta))
+
+    def test_compact_deleted_disjoint_range_does_not_raise(self):
         delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
                              write_cols=["col_a"])]
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)
         compact_entries = [
-            _make_entry("merged.parquet", kind=0, first_row_id=200, row_count=200),
+            _make_entry("old.blob", kind=1, first_row_id=200, row_count=200),
         ]
         detection = self._make_detection(
-            [check_snap, compact_snap],
-            {2: compact_entries})
+            [check_snap, compact_snap], {2: compact_entries})
         self.assertIsNone(
             detection.check_row_id_from_snapshot(compact_snap, delta))
 
-    def test_compact_adjacent_added_file_does_not_raise(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=100,
+    def test_compact_added_only_does_not_raise(self):
+        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
                              write_cols=["col_a"])]
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact_entries = [
-            _make_entry("merged.parquet", kind=0, first_row_id=100, row_count=100),
+            _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
         ]
         detection = self._make_detection(
-            [check_snap, compact_snap],
-            {2: compact_entries})
+            [check_snap, compact_snap], {2: compact_entries})
         self.assertIsNone(
             detection.check_row_id_from_snapshot(compact_snap, delta))
 
@@ -300,9 +316,9 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
         entries = {
-            2: [_make_entry("first.parquet", kind=0,
+            2: [_make_entry("first.blob", kind=1,
                             first_row_id=0, row_count=200)],
-            3: [_make_entry("second.parquet", kind=0,
+            3: [_make_entry("second.blob", kind=1,
                             first_row_id=0, row_count=200)],
         }
         detection = self._make_detection(

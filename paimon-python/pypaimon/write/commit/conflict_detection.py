@@ -301,11 +301,17 @@ class ConflictDetection:
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
         check_next_row_id = check_snapshot.next_row_id
 
-        delta_ranges = []
+        # Per-delta-file ranges paired with file type ("blob" vs other), so
+        # we can match a compact's DELETE entries against the actual anchor
+        # files (blob delta cares only about deleted blob files, etc).
+        def _is_blob(name):
+            return name.endswith(".blob")
+
+        delta_signatures = []
         for f in delta_files:
             r = f.row_id_range()
             if r is not None:
-                delta_ranges.append((r.from_, r.to))
+                delta_signatures.append((_is_blob(f.file_name), r.from_, r.to))
 
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
@@ -315,26 +321,27 @@ class ConflictDetection:
                 continue
 
             if snapshot.commit_kind == "COMPACT":
-                if not delta_ranges:
+                if not delta_signatures:
                     continue
-                compact_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
+                raw_entries = self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
                     snapshot, commit_entries)
-                for entry in compact_entries:
+                for entry in raw_entries:
+                    if entry.kind != 1:
+                        continue
                     file_range = entry.file.row_id_range()
                     if file_range is None:
                         continue
-                    for from_, to in delta_ranges:
+                    deleted_is_blob = _is_blob(entry.file.file_name)
+                    for delta_is_blob, from_, to in delta_signatures:
+                        if delta_is_blob != deleted_is_blob:
+                            continue
                         if file_range.from_ <= to and from_ <= file_range.to:
                             return RuntimeError(
-                                "For Data Evolution table, the staged row-id update "
-                                "was prepared against a file layout that has since "
-                                "been changed by a concurrent COMPACT (snapshot {sid}): "
-                                "compacted file {name} row range [{ff}, {ft}] "
-                                "overlaps staged update range [{df}, {dt}].".format(
-                                    sid=snapshot.id,
-                                    name=entry.file.file_name,
-                                    ff=file_range.from_, ft=file_range.to,
-                                    df=from_, dt=to))
+                                f"Blob/row-id update conflicts with concurrent COMPACT "
+                                f"(snapshot {snapshot.id}): anchor file "
+                                f"{entry.file.file_name} [{file_range.from_}, "
+                                f"{file_range.to}] was compacted away, overlaps "
+                                f"staged delta [{from_}, {to}].")
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

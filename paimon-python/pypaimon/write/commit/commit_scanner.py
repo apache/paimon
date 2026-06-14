@@ -95,6 +95,28 @@ class CommitScanner:
             self.table, lambda: ([], None), partition_predicate=partition_filter
         ).read_manifest_entries(delta_manifests)
 
+    def read_incremental_raw_entries_from_changed_partitions(self, snapshot: Snapshot,
+                                                             commit_entries: List[ManifestEntry]):
+        """Like ``read_incremental_entries_from_changed_partitions`` but
+        preserves DELETE entries (kind=1). The regular method funnels through
+        ``read_entries_parallel`` which discards standalone DELETEs.
+        """
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+
+        delta_manifests = self.manifest_list_manager.read_delta(snapshot)
+        if not delta_manifests:
+            return []
+
+        partition_filter = self._build_partition_filter_from_entries(commit_entries)
+        mfm = ManifestFileManager(self.table)
+        entries = []
+        for mf in delta_manifests:
+            for entry in mfm.read(mf.file_name):
+                if partition_filter is not None and not partition_filter.test(entry.partition):
+                    continue
+                entries.append(entry)
+        return entries
+
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
         """Build a partition predicate that matches all partitions present in the given entries.
 

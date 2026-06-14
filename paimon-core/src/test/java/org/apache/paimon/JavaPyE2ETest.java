@@ -1351,8 +1351,8 @@ public class JavaPyE2ETest {
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBlobCompactConflictRunCompact() throws Exception {
         Identifier id = identifier("blob_compact_conflict_test");
-        doDataEvolutionCompact((FileStoreTable) catalog.getTable(id));
-        LOG.info("blob_compact_conflict_test: compact done");
+        doDataEvolutionCompact((FileStoreTable) catalog.getTable(id), true);
+        LOG.info("blob_compact_conflict_test: compact done (compactBlob=true)");
     }
 
     @Test
@@ -1440,8 +1440,13 @@ public class JavaPyE2ETest {
     }
 
     private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
+        doDataEvolutionCompact(table, false);
+    }
+
+    private void doDataEvolutionCompact(FileStoreTable table, boolean compactBlob)
+            throws Exception {
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(table, compactBlob, false);
         List<CommitMessage> messages = new ArrayList<>();
         try {
             List<DataEvolutionCompactTask> tasks;
