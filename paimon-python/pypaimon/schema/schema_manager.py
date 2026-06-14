@@ -216,7 +216,8 @@ def _handle_update_column_nullability(
 
 
 def _handle_update_column_type(
-    change: UpdateColumnType, new_fields: List[DataField]
+    change: UpdateColumnType, new_fields: List[DataField],
+    disable_null_to_not_null: bool
 ):
     from pypaimon.schema.data_types import DataTypeParser
     field_names = change.field_names
@@ -227,6 +228,13 @@ def _handle_update_column_type(
         target_root = DataTypeParser.parse_data_type(change.new_data_type.to_dict())
         if change.keep_nullability:
             target_root.nullable = source_root.nullable
+        else:
+            # A type change carries its own nullability; guard nullable ->
+            # not null just like UpdateColumnNullability (mirrors Java
+            # SchemaManager#updateColumnType).
+            _assert_nullability_change(
+                source_root.nullable, target_root.nullable,
+                '.'.join(field_names), disable_null_to_not_null)
         if not supports_cast(source_root, target_root):
             raise ValueError(
                 "Column type {}[{}] cannot be converted to {} without losing information."
@@ -701,7 +709,8 @@ class SchemaManager:
                 _assert_not_updating_primary_keys(
                     old_table_schema, change.field_names, "update"
                 )
-                _handle_update_column_type(change, new_fields)
+                _handle_update_column_type(
+                    change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnNullability):
                 if change.new_nullability:
                     _assert_not_updating_primary_keys(

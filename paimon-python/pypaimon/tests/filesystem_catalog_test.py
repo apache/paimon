@@ -219,6 +219,44 @@ class FileSystemCatalogTest(unittest.TestCase):
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
 
+    def test_update_column_type_guards_null_to_not_null(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_guard", False)
+
+        def _make_table(name, options):
+            identifier = "test_db_guard.{}".format(name)
+            schema = Schema(
+                fields=[
+                    DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                    DataField.from_dict({"id": 1, "name": "v", "type": "BIGINT"}),
+                ],
+                partition_keys=[], primary_keys=[], options=options, comment="",
+            )
+            catalog.create_table(identifier, schema, False)
+            return identifier
+
+        # Default option (disabled=true) rejects nullable -> not null, mirroring
+        # Java SchemaManager#updateColumnType.
+        default_id = _make_table("default_opt", {})
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                default_id,
+                [SchemaChange.update_column_type(
+                    "v", AtomicType("BIGINT", nullable=False))],
+                False)
+        self.assertIn("nullable to non nullable", str(ctx.exception))
+
+        # Opting out via the table option allows the transition.
+        allowed_id = _make_table(
+            "allow_opt", {"alter-column-null-to-not-null.disabled": "false"})
+        catalog.alter_table(
+            allowed_id,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("BIGINT", nullable=False))],
+            False)
+        table = catalog.get_table(allowed_id)
+        self.assertFalse(table.fields[1].type.nullable)
+
     def test_add_column_before_partition(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
