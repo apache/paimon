@@ -1190,6 +1190,47 @@ class JavaPyReadWriteTest(unittest.TestCase):
         tc.close()
         print(f"Conflict detected as expected: {ctx.exception}")
 
+    @unittest.expectedFailure
+    def test_blob_compact_conflict_update(self):
+        import subprocess
+
+        table = self.catalog.get_table('default.blob_compact_conflict_test')
+        snapshot_before = table.new_read_builder().new_scan().plan().snapshot_id
+
+        wb = table.new_batch_write_builder()
+        table_update = wb.new_update().with_update_type(['f2'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([50], type=pa.int64()),
+            'f2': pa.array([b'blob50-updated'], type=pa.large_binary()),
+        })
+        stale_commit_msgs = table_update.update_by_arrow_with_row_id(update_data)
+
+        project_root = os.path.join(self.tempdir, '..', '..', '..', '..')
+        result = subprocess.run(
+            ['mvn', 'test',
+             '-pl', 'paimon-core',
+             '-Dtest=org.apache.paimon.JavaPyE2ETest#testBlobCompactConflictRunCompact',
+             '-Drun.e2e.tests=true',
+             '-Dsurefire.failIfNoSpecifiedTests=false',
+             '-q'],
+            cwd=os.path.abspath(project_root),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=300
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"Java compact failed:\n{result.stdout}\n{result.stderr}")
+
+        table = self.catalog.get_table('default.blob_compact_conflict_test')
+        snapshot_after = table.new_read_builder().new_scan().plan().snapshot_id
+        self.assertGreater(snapshot_after, snapshot_before)
+
+        tc = wb.new_commit()
+        try:
+            with self.assertRaises(RuntimeError):
+                tc.commit(stale_commit_msgs)
+        finally:
+            tc.close()
+
     @parameterized.expand(get_file_format_params())
     def test_read_data_evolution_table(self, file_format):
         """Read data evolution tables written by Java and verify merged results."""
