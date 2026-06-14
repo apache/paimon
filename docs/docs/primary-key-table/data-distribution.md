@@ -24,7 +24,7 @@ under the License.
 
 # Data Distribution
 
-A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree](./#lsm-trees).
+A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree](./overview#lsm-trees).
 
 ## Fixed Bucket
 
@@ -33,6 +33,9 @@ the bucket of record.
 
 Rescaling buckets can only be done through offline processes, see [Rescale Bucket](../maintenance/rescale-bucket).
 A too large number of buckets leads to too many small files, and a too small number of buckets leads to poor write performance.
+
+For partitioned tables, each partition can have its own bucket count. After a rescale operation, existing
+partitions retain their original bucket count while newly created partitions use the updated table-level default.
 
 ## Dynamic Bucket
 

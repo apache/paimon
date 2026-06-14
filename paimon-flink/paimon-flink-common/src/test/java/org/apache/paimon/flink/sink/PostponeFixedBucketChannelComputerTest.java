@@ -26,6 +26,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -72,8 +73,10 @@ public class PostponeFixedBucketChannelComputerTest {
 
         int numChannels = 8;
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
+        PartitionBucketMapping bucketMapping =
+                new PartitionBucketMapping(numChannels, Collections.emptyMap());
         PostponeFixedBucketChannelComputer computer =
-                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets);
+                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets, bucketMapping);
         computer.setup(numChannels);
 
         Set<Integer> channels = new HashSet<>();
@@ -113,8 +116,10 @@ public class PostponeFixedBucketChannelComputerTest {
 
         int numChannels = 8;
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
+        PartitionBucketMapping bucketMapping =
+                new PartitionBucketMapping(numChannels, Collections.emptyMap());
         PostponeFixedBucketChannelComputer computer =
-                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets);
+                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets, bucketMapping);
         computer.setup(numChannels);
 
         Set<Integer> channels = new HashSet<>();
@@ -155,8 +160,10 @@ public class PostponeFixedBucketChannelComputerTest {
 
         int numChannels = 8;
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
+        PartitionBucketMapping bucketMapping =
+                new PartitionBucketMapping(numChannels, Collections.emptyMap());
         PostponeFixedBucketChannelComputer computer =
-                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets);
+                new PostponeFixedBucketChannelComputer(schema, knownNumBuckets, bucketMapping);
         computer.setup(numChannels);
 
         // Same key should always route to the same channel

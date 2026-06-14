@@ -83,13 +83,27 @@ public class PartitionEntry {
     }
 
     public PartitionEntry merge(PartitionEntry entry) {
+        PartitionEntry newer = entry.lastFileCreationTime >= lastFileCreationTime ? entry : this;
+        PartitionEntry older = newer == entry ? this : entry;
+
+        // Use the totalBuckets from the most recently created file. This correctly handles
+        // the case where a partition has been overwritten with a different bucket count: the
+        // newer files carry the new totalBuckets, and their creation time is always later.
+        // When timestamps are equal (e.g., two files written in the same millisecond with
+        // different bucket counts), we take the larger totalBuckets value. This makes merge
+        // commutative and associative — a.merge(b) == b.merge(a)
+        int newTotalBuckets =
+                newer.lastFileCreationTime == older.lastFileCreationTime
+                        ? Math.max(newer.totalBuckets, older.totalBuckets)
+                        : newer.totalBuckets;
+
         return new PartitionEntry(
                 partition,
                 recordCount + entry.recordCount,
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
-                Math.max(lastFileCreationTime, entry.lastFileCreationTime),
-                entry.totalBuckets);
+                newer.lastFileCreationTime,
+                newTotalBuckets);
     }
 
     public Partition toPartition(InternalRowPartitionComputer computer) {

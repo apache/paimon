@@ -45,14 +45,17 @@ Please note that
 - `ALTER TABLE` only modifies the table's metadata and will **NOT** reorganize or reformat existing data. 
   Reorganize existing data must be achieved by `INSERT OVERWRITE`.
 - Rescale bucket number does not influence the read and running write jobs.
-- Once the bucket number is changed, any newly scheduled `INSERT INTO` jobs which write to without-reorganized 
-  existing table/partition will throw a `TableException` with message like 
+- **Partitioned tables** support per-partition bucket counts. Each partition retains its own bucket
+  count from its data files, and the new bucket count only applies to newly created partitions or partitions that
+  have been reorganized with `INSERT OVERWRITE`.
+- **Unpartitioned tables** require a full rescale before writing. If you change the bucket number and attempt
+  to write without reorganizing the data first, a `RuntimeException` will be thrown:
   ```text
-  Try to write table/partition ... with a new bucket num ..., 
+  Try to write table with a new bucket num ..., 
   but the previous bucket num is ... Please switch to batch mode, 
   and perform INSERT OVERWRITE to rescale current data layout first.
   ```
-- For partitioned table, it is possible to have different bucket number for different partitions. *E.g.*
+- For partitioned tables, it is possible to have different bucket numbers for different partitions. *E.g.*
   ```sql
   ALTER TABLE my_table SET ('bucket' = '4');
   INSERT OVERWRITE my_table PARTITION (dt = '2022-01-01')
@@ -62,7 +65,15 @@ Please note that
   INSERT OVERWRITE my_table PARTITION (dt = '2022-01-02')
   SELECT * FROM ...;
   ```
+  After these operations, partition `dt=2022-01-01` uses 4 buckets, `dt=2022-01-02` uses 8 buckets, and any
+  new partitions will use the latest table-level default (8 buckets in this case).
 - During overwrite period, make sure there are no other jobs writing the same table/partition.
+- **Streaming jobs must be restarted after rescaling a partition.** The per-partition bucket mapping
+  is loaded once when the streaming job starts (from the manifest files at that point in time). If a
+  partition is rescaled while the streaming job is running, the job will continue routing rows using
+  the old bucket count for that partition, which can cause rows to land in wrong buckets and lead to
+  data correctness issues. The recommended workflow is: suspend the streaming job with a savepoint →
+  perform the rescale overwrite → restart from the savepoint.
 
 ## Use Case
 
@@ -121,8 +132,12 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   -- scaling out
   ALTER TABLE verified_orders SET ('bucket' = '32');
   ```
-- Switch to the batch mode and overwrite the current partition(s) to which the streaming job is writing
+- Use the `rescale` procedure or switch to batch mode and overwrite the partition(s) that need rescaling
   ```sql
+  -- Option 1: Use the rescale procedure (recommended)
+  CALL sys.rescale(`table` => 'default.verified_orders', `bucket_num` => 32, `partition` => 'dt=2022-06-22');
+  
+  -- Option 2: Manual batch overwrite
   SET 'execution.runtime-mode' = 'batch';
   -- suppose today is 2022-06-22
   -- case 1: there is no late event which updates the historical partitions, thus overwrite today's partition is enough
@@ -142,8 +157,11 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   FROM verified_orders
   WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22');
   ```
-- After overwrite job has finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
-( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
+- After the overwrite job has finished, switch back to streaming mode. The parallelism can be increased alongside 
+  the bucket number to restore the streaming job from the savepoint 
+  ( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) ).
+  Note that for partitioned tables, each partition retains its own bucket count, so only the rescaled partitions
+  are affected.
   ```sql
   SET 'execution.runtime-mode' = 'streaming';
   SET 'execution.savepoint.path' = <savepointPath>;

@@ -888,7 +888,7 @@ All available procedures are listed below.
          CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => scan_parallelism, `sink_parallelism` => sink_parallelism)
       </td>
       <td>
-         Rescale one partition of a table. Arguments:
+         Rescale one partition of a table. For partitioned tables, different partitions can have different bucket counts after rescaling. Arguments:
          <li>table: The target table identifier. Cannot be empty.</li>
          <li>bucket_num: Resulting bucket number after rescale. The default value of argument bucket_num is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
          <li>partition: What partition to rescale. For partitioned table this argument cannot be empty.</li>

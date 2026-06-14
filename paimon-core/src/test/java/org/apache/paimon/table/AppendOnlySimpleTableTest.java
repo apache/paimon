@@ -99,6 +99,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -154,16 +155,16 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
-    public void testBucketedAppendTableWriteWithInit() throws Exception {
-        innerTestBucketedAppendTableWriteInit(true);
+    public void testBucketedAppendOrderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(true);
     }
 
     @Test
-    public void testBucketedAppendTableWriteNoInit() throws Exception {
-        innerTestBucketedAppendTableWriteInit(false);
+    public void testBucketedAppendUnorderedSequenceNumbers() throws Exception {
+        innerTestBucketedAppendSequenceNumbers(false);
     }
 
-    public void innerTestBucketedAppendTableWriteInit(boolean ordered) throws Exception {
+    public void innerTestBucketedAppendSequenceNumbers(boolean ordered) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> {
@@ -175,31 +176,47 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
 
-        // 1. first write
+        // 1. first write - use a=1 so both batches land in the same bucket
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             write.write(rowData(1, 10, 100L));
             commit.commit(write.prepareCommit());
         }
 
-        // 2. delete all manifests
-        ManifestList manifestList = table.store().manifestListFactory().create();
-        ManifestFile manifestFile = table.store().manifestFileFactory().create();
-        List<ManifestFileMeta> manifests =
-                manifestList.readAllManifests(table.latestSnapshot().get());
-        for (ManifestFileMeta manifest : manifests) {
-            manifestFile.delete(manifest.fileName());
+        // collect sequence numbers from batch 1
+        List<DataFileMeta> batch1Files =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .collect(Collectors.toList());
+        long batch1MaxSeq =
+                batch1Files.stream().mapToLong(DataFileMeta::maxSequenceNumber).max().getAsLong();
+        Set<String> batch1FileNames =
+                batch1Files.stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+
+        // 2. second write - same a=1 value ensures same bucket as batch 1
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(rowData(1, 20, 200L));
+            commit.commit(write.prepareCommit());
         }
 
-        // 3. check new write
-        try (BatchTableWrite write = writeBuilder.newWrite()) {
-            if (ordered) {
-                assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
-                        .hasMessageContaining("FileNotFoundException");
-            } else {
-                // no exception
-                write.write(rowData(1, 10, 100L));
-            }
+        // collect sequence numbers from batch 2 only (exclude batch 1 files by name)
+        List<DataFileMeta> batch2Files =
+                table.newReadBuilder().newScan().plan().splits().stream()
+                        .flatMap(s -> ((DataSplit) s).dataFiles().stream())
+                        .filter(f -> !batch1FileNames.contains(f.fileName()))
+                        .collect(Collectors.toList());
+        long batch2MinSeq =
+                batch2Files.stream().mapToLong(DataFileMeta::minSequenceNumber).min().getAsLong();
+
+        if (ordered) {
+            // ordered mode always restores previous files and continues sequence numbers,
+            // so batch 2 sequence numbers are strictly greater than batch 1's
+            assertThat(batch2MinSeq).isGreaterThan(batch1MaxSeq);
+        } else {
+            // unordered+writeOnly mode skips restoring previous files (ignorePreviousFiles=true),
+            // so sequence numbers reset to 0 each session
+            assertThat(batch2MinSeq).isEqualTo(0L);
         }
     }
 
