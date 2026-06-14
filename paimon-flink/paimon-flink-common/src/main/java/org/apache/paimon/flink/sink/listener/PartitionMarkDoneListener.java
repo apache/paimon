@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.PartitionMarkDoneActionMode;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
@@ -33,7 +34,6 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +66,7 @@ public class PartitionMarkDoneListener implements CommitListener {
             ClassLoader cl,
             boolean isStreaming,
             boolean isRestored,
-            OperatorStateStore stateStore,
+            StateStore stateStore,
             FileStoreTable table)
             throws Exception {
         CoreOptions coreOptions = table.coreOptions();

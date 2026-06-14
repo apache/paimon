@@ -16,30 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.state;
 
-import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.state.OperatorStateStore;
 
-import java.util.List;
+/** A {@link StateStore} backed by Flink's operator-side {@link OperatorStateStore}. */
+public class OperatorBackendStateStore implements StateStore {
 
-/**
- * A {@link CommittableStateManager} which does nothing. If a commit attempt fails, it will be lost
- * after the job restarts.
- *
- * <p>Useful for committing optional snapshots. For example COMPACT snapshots produced by a separate
- * compact job.
- */
-public class NoopCommittableStateManager implements CommittableStateManager<ManifestCommittable> {
+    private final OperatorStateStore delegate;
 
-    @Override
-    public void initializeState(
-            Committer.Context context, Committer<?, ManifestCommittable> committer)
-            throws Exception {
-        // nothing to do
+    public OperatorBackendStateStore(OperatorStateStore delegate) {
+        this.delegate = delegate;
     }
 
     @Override
-    public void snapshotState(List<ManifestCommittable> committables) throws Exception {
-        // nothing to do
+    public <T> ListState<T> getListState(ListStateDescriptor<T> descriptor) throws Exception {
+        return delegate.getListState(descriptor);
     }
 }
