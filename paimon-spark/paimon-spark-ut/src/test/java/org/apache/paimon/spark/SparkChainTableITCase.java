@@ -2420,4 +2420,61 @@ public class SparkChainTableITCase {
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
         spark.close();
     }
+
+    @Test
+    public void testChainTableWithMinuteLevelPartitions(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE `chain_test` (\n"
+                        + "  `t1` BIGINT COMMENT 't1',\n"
+                        + "  `t2` BIGINT COMMENT 't2',\n"
+                        + "  `t3` STRING COMMENT 't3'\n"
+                        + ") PARTITIONED BY (`dt` STRING, `hr_min` STRING)\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'bucket-key' = 't1',\n"
+                        + "  'primary-key' = 'dt,hr_min,t1',\n"
+                        + "  'partition.timestamp-pattern' = '$dt $hr_min:00',\n"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',\n"
+                        + "  'chain-table.enabled' = 'true',\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'merge-engine' = 'deduplicate',\n"
+                        + "  'sequence.field' = 't2',\n"
+                        + "  'chain-table.chain-partition-keys' = 'dt,hr_min'\n"
+                        + ");");
+
+        setupChainTableBranches(spark, "chain_test");
+
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_snapshot` PARTITION (dt = '20250810', hr_min='01:01') VALUES (3, 1, '3');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_snapshot` PARTITION (dt = '20250810', hr_min='03:30') VALUES (4, 1, '4');");
+
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:35') VALUES (5, 1, '5');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:40') VALUES (6, 1, '6');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:45') VALUES (7, 1, '7');");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "select * from `chain_test` where dt='20250810' and hr_min='03:40'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[4,1,4,20250810,03:40]",
+                        "[5,1,5,20250810,03:40]",
+                        "[6,1,6,20250810,03:40]");
+
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
+        spark.close();
+    }
 }
