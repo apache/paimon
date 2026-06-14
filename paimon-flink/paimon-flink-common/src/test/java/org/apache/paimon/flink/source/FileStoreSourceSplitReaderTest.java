@@ -20,13 +20,18 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.FileStoreSourceReaderTest.DummyMetricGroup;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.RecordWriter;
 
@@ -52,6 +57,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalLong;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -342,6 +353,45 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     @Test
+    public void testRecycleIteratorWhenReleaseBatchFails() throws Exception {
+        FileStoreSourceSplitReader reader =
+                createReader(
+                        new TestingTableRead(
+                                new SingleBatchRecordReader(new FailingReleaseIterator())),
+                        null);
+        try {
+            assignSplit(reader, new FileStoreSourceSplit("id1", new TestingSplit()));
+
+            RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
+            assertThatThrownBy(records::recycle).hasMessageContaining("release failed");
+
+            RecordsWithSplitIds<RecordIterator<RowData>> finishedRecords =
+                    fetchWithoutWaitingForPool(reader);
+            assertThat(finishedRecords.finishedSplits()).isEqualTo(Collections.singleton("id1"));
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
+    public void testCloseReleasesCurrentFirstBatch() throws Exception {
+        TrackingRecordIterator iterator = new TrackingRecordIterator();
+        FileStoreSourceSplitReader reader =
+                createReader(new TestingTableRead(new SingleBatchRecordReader(iterator)), null);
+        try {
+            assignSplit(reader, new FileStoreSourceSplit("id1", new TestingSplit(), 1));
+            reader.wakeUp();
+
+            RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
+            assertThat(records.finishedSplits()).isEmpty();
+            assertThat(records.nextSplit()).isNull();
+        } finally {
+            reader.close();
+        }
+        assertThat(iterator.released()).isTrue();
+    }
+
+    @Test
     public void testLimit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), 2L);
@@ -493,5 +543,129 @@ public class FileStoreSourceSplitReaderTest {
         SplitsChange<FileStoreSourceSplit> splitsChange =
                 new SplitsAddition<>(Collections.singletonList(split));
         reader.handleSplitsChanges(splitsChange);
+    }
+
+    private RecordsWithSplitIds<RecordIterator<RowData>> fetchWithoutWaitingForPool(
+            FileStoreSourceSplitReader reader) throws Exception {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        Future<RecordsWithSplitIds<RecordIterator<RowData>>> future =
+                executorService.submit(reader::fetch);
+        try {
+            return future.get(5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            reader.wakeUp();
+            future.get(5, TimeUnit.SECONDS);
+            throw new AssertionError("Timed out waiting for split reader fetch.", e);
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    private static class TestingTableRead implements TableRead {
+
+        private final RecordReader<InternalRow> recordReader;
+
+        private TestingTableRead(RecordReader<InternalRow> recordReader) {
+            this.recordReader = recordReader;
+        }
+
+        @Override
+        public TableRead withMetricRegistry(MetricRegistry registry) {
+            return this;
+        }
+
+        @Override
+        public TableRead executeFilter() {
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            return this;
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(Split split) {
+            return recordReader;
+        }
+    }
+
+    private static class SingleBatchRecordReader implements RecordReader<InternalRow> {
+
+        private final RecordReader.RecordIterator<InternalRow> iterator;
+        private boolean returned;
+
+        private SingleBatchRecordReader(RecordReader.RecordIterator<InternalRow> iterator) {
+            this.iterator = iterator;
+        }
+
+        @Nullable
+        @Override
+        public RecordReader.RecordIterator<InternalRow> readBatch() {
+            if (returned) {
+                return null;
+            }
+
+            returned = true;
+            return iterator;
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    private static class FailingReleaseIterator
+            implements RecordReader.RecordIterator<InternalRow> {
+
+        @Nullable
+        @Override
+        public InternalRow next() {
+            return null;
+        }
+
+        @Override
+        public void releaseBatch() {
+            throw new RuntimeException("release failed");
+        }
+    }
+
+    private static class TrackingRecordIterator
+            implements RecordReader.RecordIterator<InternalRow> {
+
+        private boolean returned;
+        private boolean released;
+
+        @Nullable
+        @Override
+        public InternalRow next() {
+            if (returned) {
+                return null;
+            }
+
+            returned = true;
+            return GenericRow.of(1L);
+        }
+
+        @Override
+        public void releaseBatch() {
+            released = true;
+        }
+
+        private boolean released() {
+            return released;
+        }
+    }
+
+    private static class TestingSplit implements Split {
+
+        @Override
+        public long rowCount() {
+            return 0;
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 }
