@@ -202,6 +202,24 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
 
     public static TestAppendFileStore createAppendStore(
             java.nio.file.Path tempDir, Map<String, String> options) throws Exception {
+        return createAppendStore(
+                tempDir,
+                options,
+                TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                TestKeyValueGenerator.DEFAULT_PART_TYPE);
+    }
+
+    public static TestAppendFileStore createNonPartitionedAppendStore(
+            java.nio.file.Path tempDir, Map<String, String> options) throws Exception {
+        return createAppendStore(tempDir, options, Collections.emptyList(), RowType.of());
+    }
+
+    private static TestAppendFileStore createAppendStore(
+            java.nio.file.Path tempDir,
+            Map<String, String> options,
+            List<String> partitionKeys,
+            RowType partitionType)
+            throws Exception {
         String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         FileIO fileIO = FileIOFinder.find(new Path(root));
@@ -213,7 +231,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                         schemaManage,
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
-                                TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                                partitionKeys,
                                 Collections.emptyList(),
                                 options,
                                 null));
@@ -222,7 +240,7 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 schemaManage,
                 new CoreOptions(options),
                 tableSchema,
-                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                partitionType,
                 RowType.of(),
                 TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                 (new Path(root)).getName());

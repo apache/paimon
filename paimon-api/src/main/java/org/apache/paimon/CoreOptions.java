@@ -1208,6 +1208,20 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
+    public static final ConfigOption<Boolean> SORT_COMPACT_SKIP_OVERWRITE_CONFLICT_DETECTION =
+            key("sort-compact.skip-overwrite-conflict-detection")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip overwrite conflict detection during sort compact commit. "
+                                    + "Default is false (detection enabled). If set to true, sort compact will not check "
+                                    + "for concurrent writes between the read snapshot and the commit snapshot. "
+                                    + "WARNING: Skipping this detection allows concurrent writes to the overwritten "
+                                    + "partition(s) to remain alongside the sorted compaction output, because the "
+                                    + "DELETE list is pinned to the read snapshot and does not include files added "
+                                    + "after it. Readers may then see a mix of sorted and unsorted files, so global "
+                                    + "sort order is no longer guaranteed.");
+
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
                     .stringType()
@@ -3547,6 +3561,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dynamicPartitionOverwrite() {
         return options.get(DYNAMIC_PARTITION_OVERWRITE);
+    }
+
+    public boolean sortCompactSkipOverwriteConflictDetection() {
+        return options.get(SORT_COMPACT_SKIP_OVERWRITE_CONFLICT_DETECTION);
     }
 
     public Duration partitionExpireTime() {

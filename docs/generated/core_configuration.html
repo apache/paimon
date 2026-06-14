@@ -904,6 +904,24 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Level threshold of lookup to generate remote lookup files. Level files below this threshold will not generate remote lookup files.</td>
         </tr>
         <tr>
+            <td><h5>manifest-sort.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.max-rewrite-size</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
+        </tr>
+        <tr>
+            <td><h5>manifest-sort.partition-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
+        </tr>
+        <tr>
             <td><h5>manifest.compression</h5></td>
             <td style="word-wrap: break-word;">"zstd"</td>
             <td>String</td>
@@ -932,24 +950,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">30</td>
             <td>Integer</td>
             <td>To avoid frequent manifest merges, this parameter specifies the minimum number of ManifestFileMeta to merge.<br />Note: when 'manifest-sort.enabled' is true, this minimum-count gate is only applied to the trailing sub-segment of a section that exceeds 'manifest-sort.max-rewrite-size'. Small under-budget sections are sorted and rewritten directly, so two small manifest files may be merged into one even when their count is below this threshold and full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to invoke manifest sort rewrite during commit.<br />Note: enabling this changes the semantics of 'manifest.merge-min-count'. In the sort rewrite path, small manifest files within the rewrite budget are sorted and merged directly, so the minimum-count gate no longer prevents merging a small number of under-budget manifest files when full compaction is not triggered.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.partition-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Partition field name to sort manifest entries by. Validated by schema validation, if not configured, defaults to the first partition field.</td>
-        </tr>
-        <tr>
-            <td><h5>manifest-sort.max-rewrite-size</h5></td>
-            <td style="word-wrap: break-word;">256 mb</td>
-            <td>MemorySize</td>
-            <td>Maximum total size of manifest files to rewrite in a single sort rewrite pass. Sections exceeding this limit are skipped. Set to a larger value to allow more aggressive sort rewriting. The cap only limits the sorted rewrite portion and full/minor cleanup may still happen beyond it.</td>
         </tr>
         <tr>
             <td><h5>manifest.target-file-size</h5></td>
@@ -1432,6 +1432,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-compact.skip-overwrite-conflict-detection</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to skip overwrite conflict detection during sort compact commit. Default is false (detection enabled). If set to true, sort compact will not check for concurrent writes between the read snapshot and the commit snapshot. WARNING: Skipping this detection allows concurrent writes to the overwritten partition(s) to remain alongside the sorted compaction output, because the DELETE list is pinned to the read snapshot and does not include files added after it. Readers may then see a mix of sorted and unsorted files, so global sort order is no longer guaranteed.</td>
         </tr>
         <tr>
             <td><h5>sort-compaction.local-sample.magnification</h5></td>

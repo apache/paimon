@@ -47,6 +47,7 @@ import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
+import org.apache.paimon.operation.commit.OverwriteChangesProvider;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RowIdColumnConflictChecker;
@@ -432,7 +433,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     public int overwritePartition(
             Map<String, String> partition,
             ManifestCommittable committable,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
         LOG.info(
                 "Ready to overwrite to table {}, number of commit messages: {}",
                 tableName,
@@ -520,7 +522,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 changes.appendIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
-                                committable.properties());
+                                committable.properties(),
+                                baseSnapshotId);
                 generatedSnapshot += 1;
             }
 
@@ -640,13 +643,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwritePartition(
-                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                partitionFilter,
+                emptyList(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>(),
+                null);
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
-                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>(), null);
     }
 
     @Override
@@ -797,10 +806,46 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
-            Map<String, String> properties) {
+            Map<String, String> properties,
+            @Nullable Long baseSnapshotId) {
+        Snapshot overwriteSnapshot = null;
+        if (baseSnapshotId != null) {
+            overwriteSnapshot = snapshotManager.snapshot(baseSnapshotId);
+        }
+
+        // When baseSnapshotId is provided, detect concurrent writes between the base snapshot and
+        // the latest snapshot. Conflict detection operates at partition granularity rather than
+        // per-file or per-bucket: an overwrite-partition operation replaces all data in the target
+        // partition(s). If a concurrent writer appends to the same partition while the overwrite is
+        // in flight, allowing the overwrite to succeed would retain data outside the overwrite's
+        // scope, violating overwrite-partition semantics.
+        if (baseSnapshotId != null && !options.sortCompactSkipOverwriteConflictDetection()) {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot != null && latestSnapshot.id() > baseSnapshotId) {
+                List<BinaryRow> changedPartitions =
+                        changes.stream()
+                                .map(ManifestEntry::partition)
+                                .distinct()
+                                .collect(Collectors.toList());
+                overwriteSnapshot =
+                        validateOverwriteBaseSnapshot(
+                                baseSnapshotId, latestSnapshot, changedPartitions, partitionFilter);
+            }
+        }
+
+        OverwriteChangesProvider overwriteProvider =
+                (OverwriteChangesProvider)
+                        scanner.overwriteChangesProvider(
+                                options.bucket(), changes, indexFiles, partitionFilter);
+        Snapshot finalOverwriteSnapshot = overwriteSnapshot;
         return tryCommit(
-                scanner.overwriteChangesProvider(
-                        options.bucket(), changes, indexFiles, partitionFilter),
+                latestSnapshot -> {
+                    Snapshot scanSnapshot =
+                            finalOverwriteSnapshot != null
+                                    ? finalOverwriteSnapshot
+                                    : latestSnapshot;
+                    return overwriteProvider.provide(scanSnapshot);
+                },
                 identifier,
                 watermark,
                 properties,
@@ -808,6 +853,54 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 false,
                 true,
                 null);
+    }
+
+    /**
+     * Validates that no concurrent data was written to the overwritten partition(s) between {@code
+     * baseSnapshotId} and {@code latestSnapshot}.
+     *
+     * <p>Checks are partition-level: any new file in an overwritten partition is treated as a
+     * conflict. For non-partitioned tables the table is treated as a single logical partition
+     * ({@link org.apache.paimon.data.BinaryRow#EMPTY_ROW}).
+     */
+    private Snapshot validateOverwriteBaseSnapshot(
+            long baseSnapshotId,
+            Snapshot latestSnapshot,
+            List<BinaryRow> changedPartitions,
+            @Nullable PartitionPredicate partitionFilter) {
+        List<SimpleFileEntry> incrementalChanges = new ArrayList<>();
+        boolean hasCompaction = false;
+        for (long snapshotId = baseSnapshotId + 1;
+                snapshotId <= latestSnapshot.id();
+                snapshotId++) {
+            Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+            if (snapshot.commitKind() == CommitKind.COMPACT) {
+                hasCompaction = true;
+                continue;
+            }
+            if (snapshot.commitKind() != CommitKind.APPEND
+                    && snapshot.commitKind() != CommitKind.OVERWRITE) {
+                continue;
+            }
+            incrementalChanges.addAll(scanner.readIncrementalChanges(snapshot, changedPartitions));
+        }
+        Collection<SimpleFileEntry> mergedIncremental = FileEntry.mergeEntries(incrementalChanges);
+        boolean hasConflictingChanges =
+                mergedIncremental.stream()
+                        .anyMatch(
+                                e ->
+                                        partitionFilter == null
+                                                || partitionFilter.test(e.partition()));
+        if (hasConflictingChanges) {
+            throw new RuntimeException(
+                    String.format(
+                            "Sort compact conflict detected for table %s: data was modified in "
+                                    + "the overwritten partitions between snapshot %d and %d. "
+                                    + "Please retry the sort compact or ensure no concurrent "
+                                    + "writes to these partitions.",
+                            tableName, baseSnapshotId, latestSnapshot.id()));
+        }
+        return hasCompaction ? latestSnapshot : snapshotManager.snapshot(baseSnapshotId);
     }
 
     @VisibleForTesting
