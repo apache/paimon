@@ -152,7 +152,7 @@ setup(
     },
     extras_require={
         'ray': [
-            'ray>=2.10,<3; python_version>="3.7"',
+            'ray>=2.10,<3',
         ],
         'torch': [
             'torch',
@@ -161,15 +161,14 @@ setup(
             'daft>=0.7.6; python_version>="3.10"',
         ],
         'oss': [
-            'ossfs>=2021.8; python_version<"3.8"',
-            'ossfs>=2023; python_version>="3.8"'
+            'ossfs>=2023',
         ],
         'jindo': [
             'pyjindosdk>=6.10.4',
         ],
         'lance': [
             'pylance>=0.20,<1; python_version>="3.9"',
-            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
+            'pylance>=0.10,<1; python_version<"3.9"'
         ],
         'vortex': [
             'vortex-data==0.70.0; python_version>="3.11"',
@@ -197,12 +196,10 @@ setup(
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "License :: OSI Approved :: Apache Software License",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
 )
