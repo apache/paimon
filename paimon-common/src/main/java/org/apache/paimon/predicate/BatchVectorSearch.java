@@ -24,28 +24,33 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
-/** Vector similarity search. */
-public class VectorSearch implements Serializable {
+/** Batch vector similarity search. */
+public class BatchVectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final float[] vector;
+    private final float[][] vectors;
     private final String fieldName;
     private final int limit;
     private final Map<String, String> options;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
-    public VectorSearch(float[] vector, int limit, String fieldName) {
-        this(vector, limit, fieldName, Collections.emptyMap());
+    public BatchVectorSearch(float[][] vectors, int limit, String fieldName) {
+        this(vectors, limit, fieldName, Collections.emptyMap());
     }
 
-    public VectorSearch(float[] vector, int limit, String fieldName, Map<String, String> options) {
-        if (vector == null) {
-            throw new IllegalArgumentException("Search vector cannot be null");
+    public BatchVectorSearch(
+            float[][] vectors, int limit, String fieldName, Map<String, String> options) {
+        if (vectors == null || vectors.length == 0) {
+            throw new IllegalArgumentException("Search vectors cannot be null or empty");
+        }
+        for (float[] vector : vectors) {
+            if (vector == null) {
+                throw new IllegalArgumentException("Search vector element cannot be null");
+            }
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
@@ -53,17 +58,31 @@ public class VectorSearch implements Serializable {
         if (fieldName == null || fieldName.isEmpty()) {
             throw new IllegalArgumentException("Field name cannot be null or empty");
         }
-        this.vector = vector;
+        this.vectors = vectors;
         this.limit = limit;
         this.fieldName = fieldName;
-        this.options =
-                options == null
-                        ? Collections.emptyMap()
-                        : Collections.unmodifiableMap(new HashMap<>(options));
+        this.options = options == null ? Collections.emptyMap() : options;
     }
 
-    public float[] vector() {
-        return vector;
+    /** Query vectors in input order. */
+    public float[][] vectors() {
+        return vectors;
+    }
+
+    public int vectorCount() {
+        return vectors.length;
+    }
+
+    public VectorSearch forIndex(int i) {
+        VectorSearch vectorSearch = new VectorSearch(vectors[i], limit, fieldName, options);
+        if (includeRowIds != null) {
+            vectorSearch.withIncludeRowIds(includeRowIds);
+        }
+        return vectorSearch;
+    }
+
+    public Map<String, String> options() {
+        return options;
     }
 
     public int limit() {
@@ -74,22 +93,18 @@ public class VectorSearch implements Serializable {
         return fieldName;
     }
 
-    public Map<String, String> options() {
-        return options == null ? Collections.emptyMap() : options;
-    }
-
     public RoaringNavigableMap64 includeRowIds() {
         return includeRowIds;
     }
 
-    public VectorSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
+    public BatchVectorSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
         this.includeRowIds = includeRowIds;
         return this;
     }
 
-    public VectorSearch offsetRange(long from, long to) {
+    public BatchVectorSearch offsetRange(long from, long to) {
         if (includeRowIds != null) {
-            VectorSearch target = new VectorSearch(vector, limit, fieldName, options());
+            BatchVectorSearch target = new BatchVectorSearch(vectors, limit, fieldName, options);
             target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
             return target;
         }
@@ -98,6 +113,7 @@ public class VectorSearch implements Serializable {
 
     @Override
     public String toString() {
-        return String.format("FieldName(%s), Limit(%s)", fieldName, limit);
+        return String.format(
+                "FieldName(%s), Limit(%s), VectorCount(%s)", fieldName, limit, vectors.length);
     }
 }

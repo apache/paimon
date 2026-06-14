@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -36,6 +37,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.aliyun.lumina.LuminaFileInput;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -107,65 +110,116 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 executor);
     }
 
+    @Override
+    public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        ensureLoaded();
+                        return searchBatch(batchVectorSearch);
+                    } catch (IOException e) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Failed to batch search Lumina vector index with fieldName=%s, limit=%d, vectorCount=%d",
+                                        batchVectorSearch.fieldName(),
+                                        batchVectorSearch.limit(),
+                                        batchVectorSearch.vectorCount()),
+                                e);
+                    }
+                },
+                executor);
+    }
+
+    private List<Optional<ScoredGlobalIndexResult>> searchBatch(BatchVectorSearch batchVectorSearch)
+            throws IOException {
+        int n = batchVectorSearch.vectorCount();
+        if (n == 1) {
+            List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
+            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0))));
+            return results;
+        }
+
+        float[][] vectors = batchVectorSearch.vectors();
+        int dim = indexMeta.dim();
+        for (float[] v : vectors) {
+            validateSearchVector(v);
+        }
+
+        int limit = batchVectorSearch.limit();
+        int effectiveK = (int) Math.min(limit, index.size());
+        if (effectiveK <= 0) {
+            return emptyResults(n);
+        }
+
+        float[] queryVectors = new float[n * dim];
+        for (int i = 0; i < n; i++) {
+            System.arraycopy(vectors[i], 0, queryVectors, i * dim, dim);
+        }
+
+        RoaringNavigableMap64 includeRowIds = batchVectorSearch.includeRowIds();
+        long[] scopedIds = toScopedIds(includeRowIds);
+        if (scopedIds != null && scopedIds.length == 0) {
+            return emptyResults(n);
+        }
+        if (scopedIds != null) {
+            effectiveK = Math.min(effectiveK, scopedIds.length);
+        }
+
+        float[] distances = new float[n * effectiveK];
+        long[] labels = new long[n * effectiveK];
+        Map<String, String> searchOptions = buildSearchOptions(scopedIds != null, effectiveK);
+
+        if (scopedIds != null) {
+            index.searchWithFilter(
+                    queryVectors, n, effectiveK, distances, labels, scopedIds, searchOptions);
+        } else {
+            index.search(queryVectors, n, effectiveK, distances, labels, searchOptions);
+        }
+
+        LuminaVectorMetric indexMetric = indexMeta.metric();
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(
+                    buildScoredResult(distances, labels, i * effectiveK, effectiveK, indexMetric));
+        }
+        return results;
+    }
+
     private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
-        int limit = vectorSearch.limit();
-        LuminaVectorMetric indexMetric = indexMeta.metric();
 
-        int effectiveK = (int) Math.min(limit, index.size());
+        int effectiveK = (int) Math.min(vectorSearch.limit(), index.size());
         if (effectiveK <= 0) {
             return null;
         }
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
-        float[] distances;
-        long[] labels;
-
-        if (includeRowIds != null) {
-            long cardinality = includeRowIds.getLongCardinality();
-            if (cardinality > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException(
-                        "includeRowIds cardinality ("
-                                + cardinality
-                                + ") exceeds Integer.MAX_VALUE");
-            }
-            long[] scopedIds = new long[(int) cardinality];
-            Iterator<Long> iter = includeRowIds.iterator();
-            for (int i = 0; i < scopedIds.length; i++) {
-                scopedIds[i] = iter.next();
-            }
-            if (scopedIds.length == 0) {
-                return null;
-            }
+        long[] scopedIds = toScopedIds(includeRowIds);
+        if (scopedIds != null && scopedIds.length == 0) {
+            return null;
+        }
+        if (scopedIds != null) {
             effectiveK = Math.min(effectiveK, scopedIds.length);
-            distances = new float[effectiveK];
-            labels = new long[effectiveK];
-            Map<String, String> mergedOptions =
-                    mergeOptions(
-                            this.options.toLuminaOptions(),
-                            indexMeta.options(),
-                            vectorSearch.options());
-            mergedOptions.put("search.thread_safe_filter", "true");
-            ensureSearchListSize(mergedOptions, effectiveK);
-            index.searchWithFilter(
-                    queryVector, 1, effectiveK, distances, labels, scopedIds, mergedOptions);
-        } else {
-            distances = new float[effectiveK];
-            labels = new long[effectiveK];
-            Map<String, String> mergedOptions =
-                    mergeOptions(
-                            this.options.toLuminaOptions(),
-                            indexMeta.options(),
-                            vectorSearch.options());
-            ensureSearchListSize(mergedOptions, effectiveK);
-            index.search(queryVector, 1, effectiveK, distances, labels, mergedOptions);
         }
 
-        // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
+        float[] distances = new float[effectiveK];
+        long[] labels = new long[effectiveK];
+        Map<String, String> searchOptions =
+                buildSearchOptions(scopedIds != null, effectiveK, vectorSearch.options());
+
+        if (scopedIds != null) {
+            index.searchWithFilter(
+                    queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
+        } else {
+            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+        }
+
+        LuminaVectorMetric indexMetric = indexMeta.metric();
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
-        collectResults(distances, labels, effectiveK, effectiveK, topK, indexMetric);
+        collectResults(distances, labels, 0, effectiveK, effectiveK, topK, indexMetric);
 
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
@@ -176,36 +230,100 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
+    private long[] toScopedIds(RoaringNavigableMap64 includeRowIds) {
+        if (includeRowIds == null) {
+            return null;
+        }
+        long cardinality = includeRowIds.getLongCardinality();
+        if (cardinality > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "includeRowIds cardinality (" + cardinality + ") exceeds Integer.MAX_VALUE");
+        }
+        long[] scopedIds = new long[(int) cardinality];
+        Iterator<Long> iter = includeRowIds.iterator();
+        for (int i = 0; i < scopedIds.length; i++) {
+            scopedIds[i] = iter.next();
+        }
+        return scopedIds;
+    }
+
+    private Map<String, String> buildSearchOptions(boolean withFilter, int effectiveK) {
+        return buildSearchOptions(withFilter, effectiveK, Collections.emptyMap());
+    }
+
+    private Map<String, String> buildSearchOptions(
+            boolean withFilter, int effectiveK, Map<String, String> queryOptions) {
+        Map<String, String> searchOptions = options.toLuminaOptions();
+        searchOptions.putAll(indexMeta.options());
+        searchOptions.putAll(queryOptions);
+        if (withFilter) {
+            searchOptions.put("search.thread_safe_filter", "true");
+        }
+        ensureSearchListSize(searchOptions, effectiveK);
+        return searchOptions;
+    }
+
     static Map<String, String> mergeOptions(
             Map<String, String> baseOptions,
             Map<String, String> indexOptions,
             Map<String, String> queryOptions) {
-        Map<String, String> options = new HashMap<>(baseOptions);
-        options.putAll(indexOptions);
-        options.putAll(queryOptions);
-        return options;
+        Map<String, String> merged = new HashMap<>(baseOptions);
+        merged.putAll(indexOptions);
+        merged.putAll(queryOptions);
+        return merged;
     }
 
-    private static void ensureSearchListSize(Map<String, String> options, int topK) {
-        if (!options.containsKey("diskann.search.list_size")) {
+    private static Optional<ScoredGlobalIndexResult> buildScoredResult(
+            float[] distances,
+            long[] labels,
+            int offset,
+            int effectiveK,
+            LuminaVectorMetric indexMetric) {
+        PriorityQueue<ScoredRow> topK =
+                new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
+        collectResults(distances, labels, offset, effectiveK, effectiveK, topK, indexMetric);
+        if (topK.isEmpty()) {
+            return Optional.empty();
+        }
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
+        for (ScoredRow row : topK) {
+            bitmap.add(row.rowId);
+            id2scores.put(row.rowId, row.score);
+        }
+        return Optional.of(new LuminaScoredGlobalIndexResult(bitmap, id2scores));
+    }
+
+    private static List<Optional<ScoredGlobalIndexResult>> emptyResults(int n) {
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(Optional.empty());
+        }
+        return results;
+    }
+
+    private static void ensureSearchListSize(Map<String, String> searchOptions, int topK) {
+        if (!searchOptions.containsKey("diskann.search.list_size")) {
             int listSize = Math.max((int) (topK * 1.5), MIN_SEARCH_LIST_SIZE);
-            options.put("diskann.search.list_size", String.valueOf(listSize));
+            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
         }
     }
 
     private static void collectResults(
             float[] distances,
             long[] labels,
+            int offset,
             int count,
             int limit,
             PriorityQueue<ScoredRow> topK,
             LuminaVectorMetric metric) {
         for (int i = 0; i < count; i++) {
-            long rowId = labels[i];
+            int index = offset + i;
+            long rowId = labels[index];
             if (rowId < 0) {
                 continue;
             }
-            float score = convertDistanceToScore(distances[i], metric);
+            float score = convertDistanceToScore(distances[index], metric);
             if (topK.size() < limit) {
                 topK.offer(new ScoredRow(rowId, score));
             } else if (score > topK.peek().score) {

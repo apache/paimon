@@ -65,6 +65,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VectorSearchBuilder} using test-only brute-force vector index. */
 public class VectorSearchBuilderTest extends TableTestBase {
@@ -540,6 +541,156 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
+    @Test
+    public void testBatchVectorSearch() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.1f, 0.95f},
+            {0.98f, 0.05f},
+            {0.0f, 1.0f},
+            {0.05f, 0.98f}
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        float[][] queryVectors = {
+            {1.0f, 0.0f},
+            {0.0f, 1.0f},
+            {0.7f, 0.7f}
+        };
+
+        List<GlobalIndexResult> results =
+                table.newVectorSearchBuilder()
+                        .withVectors(queryVectors)
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(3);
+
+        // Query 0 near (1,0): should find rows 0 (1,0) and 3 (0.98,0.05)
+        assertThat(results.get(0).results().isEmpty()).isFalse();
+        ReadBuilder rb0 = table.newReadBuilder();
+        List<Integer> ids0 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                rb0.newRead()
+                        .createReader(rb0.newScan().withGlobalIndexResult(results.get(0)).plan())) {
+            reader.forEachRemaining(row -> ids0.add(row.getInt(0)));
+        }
+        assertThat(ids0).contains(0);
+
+        // Query 1 near (0,1): should find rows 4 (0,1) and 5 (0.05,0.98)
+        assertThat(results.get(1).results().isEmpty()).isFalse();
+        ReadBuilder rb1 = table.newReadBuilder();
+        List<Integer> ids1 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                rb1.newRead()
+                        .createReader(rb1.newScan().withGlobalIndexResult(results.get(1)).plan())) {
+            reader.forEachRemaining(row -> ids1.add(row.getInt(0)));
+        }
+        assertThat(ids1).contains(4);
+    }
+
+    @Test
+    public void testBatchVectorSearchWithMultipleIndexFiles() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] allVectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.1f, 0.95f},
+            {0.98f, 0.05f},
+            {0.0f, 1.0f},
+            {0.05f, 0.98f}
+        };
+
+        writeVectors(table, allVectors);
+        buildAndCommitMultipleIndexFiles(table, allVectors);
+
+        List<GlobalIndexResult> results =
+                table.newVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.85f, 0.15f}, {0.0f, 1.0f}})
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(2);
+
+        List<Integer> ids0 = readIds(table, results.get(0));
+        assertThat(ids0.size()).isLessThanOrEqualTo(3);
+        assertThat(ids0).contains(0, 3);
+
+        List<Integer> ids1 = readIds(table, results.get(1));
+        assertThat(ids1.size()).isLessThanOrEqualTo(3);
+        assertThat(ids1).contains(4, 5);
+    }
+
+    @Test
+    public void testBatchSingleVector() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.0f, 1.0f},
+            {0.98f, 0.05f}
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        float[] queryVector = {0.9f, 0.1f};
+
+        GlobalIndexResult singleResult =
+                table.newVectorSearchBuilder()
+                        .withVector(queryVector)
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        List<GlobalIndexResult> batchResults =
+                table.newVectorSearchBuilder()
+                        .withVectors(new float[][] {queryVector})
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(batchResults).hasSize(1);
+        assertThat(batchResults.get(0).results().getIntCardinality())
+                .isEqualTo(singleResult.results().getIntCardinality());
+
+        for (long rowId : singleResult.results()) {
+            assertThat(batchResults.get(0).results().contains(rowId)).isTrue();
+        }
+    }
+
+    @Test
+    public void testMultiVectorReadThrows() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        assertThatThrownBy(
+                        () ->
+                                table.newVectorSearchBuilder()
+                                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                                        .withLimit(2)
+                                        .withVectorColumn(VECTOR_FIELD_NAME)
+                                        .executeLocal())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("use readBatch()");
+    }
+
     // ====================== Helper methods ======================
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
@@ -551,6 +702,16 @@ public class VectorSearchBuilderTest extends TableTestBase {
             }
             commit.commit(write.prepareCommit());
         }
+    }
+
+    private List<Integer> readIds(FileStoreTable table, GlobalIndexResult result) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
