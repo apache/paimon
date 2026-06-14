@@ -26,7 +26,7 @@ from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
-from pypaimon.casting.data_type_casts import supports_cast
+from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         MapType, RowType, reassign_field_id)
 from pypaimon.schema.schema import Schema
@@ -238,6 +238,15 @@ def _handle_update_column_type(
         if not supports_cast(source_root, target_root):
             raise ValueError(
                 "Column type {}[{}] cannot be converted to {} without losing information."
+                .format(field.name, source_root, target_root)
+            )
+        # Logical cast support is not enough: the read path materializes the
+        # change via PyArrow when reading old files, so reject casts it cannot
+        # execute (mirrors Java's CastExecutors.resolve(...) != null check).
+        if not can_execute_cast(source_root, target_root):
+            raise ValueError(
+                "Column type {}[{}] cannot be converted to {}: the read path "
+                "has no executable cast for this conversion."
                 .format(field.name, source_root, target_root)
             )
         new_type = _get_array_map_type_with_target_type_root(

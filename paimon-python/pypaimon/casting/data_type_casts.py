@@ -26,8 +26,11 @@ widening (e.g. INT -> BIGINT, any numeric -> DECIMAL/DOUBLE), while an
 applies the conversion leniently.
 """
 
+import pyarrow as pa
+
 from pypaimon.schema.data_types import (ArrayType, AtomicType, DataTypeParser,
-                                        MapType, MultisetType, RowType,
+                                        MapType, MultisetType,
+                                        PyarrowFieldParser, RowType,
                                         VectorType)
 
 # ---- Type roots --------------------------------------------------------------
@@ -187,3 +190,63 @@ def _equals_ignore_nullable(source_type, target_type) -> bool:
     source_copy.nullable = True
     target_copy.nullable = True
     return source_copy == target_copy
+
+
+# Caches the PyArrow cast-kernel probe per (source, target) pyarrow type so the
+# alter-time check stays cheap. Keyed by the pyarrow type strings.
+_EXECUTABLE_CAST_CACHE = {}
+
+
+def can_execute_cast(source_type, target_type) -> bool:
+    """Whether the Python read path can actually *materialize* a stored
+    ``source_type`` value as ``target_type`` when reading a file written before
+    the column type change.
+
+    ``supports_cast`` only encodes the *logical* cast specification (mirroring
+    Java ``DataTypeCasts``). This is the executable-cast counterpart of Java's
+    ``CastExecutors.resolve(...) != null`` guard: some logically-valid casts
+    (e.g. ``TIMESTAMP -> DECIMAL``, ``BOOLEAN -> DECIMAL``, ``TIME ->
+    TIMESTAMP``) have no PyArrow cast kernel, so without this check the alter
+    succeeds and the read later fails with ``ArrowNotImplementedError``.
+    """
+    source_root = _root(source_type)
+    target_root = _root(target_type)
+    if source_root is None or target_root is None:
+        return False
+    # Same root: identity, or a same-shape constructed type whose value is
+    # rebuilt by the read path's field-id alignment rather than a value cast.
+    if source_root == target_root:
+        return True
+    # Constructed -> character string is rendered by the read path's custom
+    # ``_constructed_to_string_array`` (see DataFileBatchReader), not a cast.
+    if (source_root in STRING_RENDERABLE_CONSTRUCTED
+            and target_root in CHARACTER_STRING):
+        return True
+    # Any other conversion touching a constructed type has no runtime cast.
+    if source_root in CONSTRUCTED or target_root in CONSTRUCTED:
+        return False
+    # Leaf-to-leaf: defer to PyArrow's cast-kernel availability, which is the
+    # read path's actual cast executor (``array.cast(target, safe=False)``).
+    return _pyarrow_cast_supported(source_type, target_type)
+
+
+def _pyarrow_cast_supported(source_type, target_type) -> bool:
+    source_pa = PyarrowFieldParser.from_paimon_type(source_type)
+    target_pa = PyarrowFieldParser.from_paimon_type(target_type)
+    if source_pa == target_pa:
+        return True
+    cache_key = (str(source_pa), str(target_pa))
+    cached = _EXECUTABLE_CAST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    # An empty-array cast exercises only kernel resolution (not per-value
+    # conversion), so it reports whether PyArrow has a cast kernel for the pair
+    # without depending on any data. ``safe=False`` matches the read path.
+    try:
+        pa.array([], type=source_pa).cast(target_pa, safe=False)
+        ok = True
+    except (pa.lib.ArrowNotImplementedError, pa.lib.ArrowInvalid,
+            pa.lib.ArrowTypeError):
+        ok = False
+    _EXECUTABLE_CAST_CACHE[cache_key] = ok
+    return ok

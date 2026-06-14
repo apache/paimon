@@ -257,6 +257,40 @@ class FileSystemCatalogTest(unittest.TestCase):
         table = catalog.get_table(allowed_id)
         self.assertFalse(table.fields[1].type.nullable)
 
+    def test_update_column_type_rejects_non_executable_cast(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_cast", False)
+
+        identifier = "test_db_cast.ts_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                DataField.from_dict({"id": 1, "name": "ts", "type": "TIMESTAMP(3)"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # TIMESTAMP -> DECIMAL is logically allowed but has no PyArrow cast
+        # kernel, so the read path could not materialize it. Reject at alter
+        # time (mirrors Java's CastExecutors.resolve(...) != null check) instead
+        # of failing later at read with ArrowNotImplementedError.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "ts", AtomicType("DECIMAL(10, 0)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # An executable widening still succeeds.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type("k", AtomicType("BIGINT"))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "BIGINT")
+
     def test_add_column_before_partition(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
