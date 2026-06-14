@@ -19,10 +19,13 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -34,6 +37,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +76,39 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
+    }
+
+    @Test
+    public void testArrayBlobAsDescriptor() throws IOException {
+        innerTestArray(true);
+    }
+
+    @Test
+    public void testReadArrayBlobInlineBytes() throws IOException {
+        innerTestArray(false);
+    }
+
+    @Test
+    public void testWriteArrayBlobPlaceholderWithProjectedRow() throws IOException {
+        BlobFileFormat format = new BlobFileFormat();
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+            ProjectedRow projectedRow = ProjectedRow.from(new int[] {1});
+            formatWriter.addElement(
+                    projectedRow.replaceRow(GenericRow.of(0, BlobArrayPlaceholder.INSTANCE)));
+            formatWriter.close();
+        }
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        List<InternalRow> rows = new ArrayList<>();
+        readerFactory.createReader(context).forEachRemaining(rows::add);
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getArray(0)).isSameAs(BlobArrayPlaceholder.INSTANCE);
     }
 
     private void innerTest(boolean blobAsDescriptor) throws IOException {
@@ -183,5 +220,83 @@ public class BlobFileFormatTest {
         }
         assertThat(rows.get(0).getBlob(1).toData()).isEqualTo("hello".getBytes());
         assertThat(rows.get(1).getBlob(1).toData()).isEqualTo("world".getBytes());
+    }
+
+    private void innerTestArray(boolean blobAsDescriptor) throws IOException {
+        BlobFileFormat format = new BlobFileFormat(blobAsDescriptor);
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.BLOB()));
+
+        GenericArray first =
+                new GenericArray(
+                        new Object[] {
+                            new BlobData("hello".getBytes()), null, new BlobData("world".getBytes())
+                        });
+        GenericArray empty = new GenericArray(new Object[0]);
+        List<Object> arrays = Arrays.asList(first, null, BlobArrayPlaceholder.INSTANCE, empty);
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter formatWriter = format.createWriterFactory(rowType).create(out, null);
+            for (Object array : arrays) {
+                formatWriter.addElement(GenericRow.of(array));
+            }
+            formatWriter.close();
+        }
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        List<Object> result = new ArrayList<>();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(
+                        row -> {
+                            if (row.isNullAt(0)) {
+                                result.add(null);
+                            } else {
+                                addArrayBlobResult(row, blobAsDescriptor, result);
+                            }
+                        });
+
+        assertThat(result).hasSize(4);
+        assertThat((byte[]) ((Object[]) result.get(0))[0]).isEqualTo("hello".getBytes());
+        assertThat(((Object[]) result.get(0))[1]).isNull();
+        assertThat((byte[]) ((Object[]) result.get(0))[2]).isEqualTo("world".getBytes());
+        assertThat(result.get(1)).isNull();
+        assertThat(result.get(2)).isSameAs(BlobArrayPlaceholder.INSTANCE);
+        assertThat((Object[]) result.get(3)).isEmpty();
+
+        RoaringBitmap32 selection = new RoaringBitmap32();
+        selection.add(0);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        result.clear();
+        readerFactory
+                .createReader(context)
+                .forEachRemaining(row -> result.add(row.getArray(0).getBlob(0).toData()));
+        assertThat(result).hasSize(1);
+        assertThat((byte[]) result.get(0)).isEqualTo("hello".getBytes());
+    }
+
+    private static void addArrayBlobResult(
+            InternalRow row, boolean blobAsDescriptor, List<Object> result) {
+        InternalArray array = row.getArray(0);
+        if (array == BlobArrayPlaceholder.INSTANCE) {
+            result.add(BlobArrayPlaceholder.INSTANCE);
+            return;
+        }
+        Object[] bytes = new Object[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                bytes[i] = null;
+            } else {
+                Blob blob = array.getBlob(i);
+                if (blobAsDescriptor) {
+                    assertThat(blob).isInstanceOf(BlobRef.class);
+                } else {
+                    assertThat(blob).isInstanceOf(BlobData.class);
+                }
+                bytes[i] = blob.toData();
+            }
+        }
+        result.add(bytes);
     }
 }

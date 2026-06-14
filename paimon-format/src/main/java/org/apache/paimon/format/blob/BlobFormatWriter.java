@@ -19,15 +19,19 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobPlaceholder;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
@@ -47,12 +51,17 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public static final byte VERSION = 1;
     public static final int MAGIC_NUMBER = 1481511375;
     public static final byte[] MAGIC_NUMBER_BYTES = intToLittleEndian(MAGIC_NUMBER);
+    public static final byte ARRAY_VERSION = 1;
+    public static final int ARRAY_MAGIC_NUMBER = 1094861634;
+    public static final byte[] ARRAY_MAGIC_NUMBER_BYTES = intToLittleEndian(ARRAY_MAGIC_NUMBER);
     public static final long NULL_LENGTH = -1L;
     public static final long PLACE_HOLDER_LENGTH = -2L;
+    public static final long ARRAY_NULL_ELEMENT_LENGTH = -1L;
 
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
     private final String blobFieldName;
+    private final DataType blobFieldType;
     private final CRC32 crc32;
     private final byte[] tmpBuffer;
     private final LongArrayList lengths;
@@ -65,6 +74,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         this.writeConsumer = writeConsumer;
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         this.blobFieldName = type.getFieldNames().get(0);
+        this.blobFieldType = type.getTypeAt(0);
         this.crc32 = new CRC32();
         this.tmpBuffer = new byte[4096];
         this.lengths = new LongArrayList(16);
@@ -90,17 +100,91 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             }
             return;
         }
+
+        if (blobFieldType.getTypeRoot() == DataTypeRoot.ARRAY) {
+            InternalArray array = element.getArray(0);
+            if (array == BlobArrayPlaceholder.INSTANCE) {
+                lengths.add(PLACE_HOLDER_LENGTH);
+            } else {
+                addBlobArray(array);
+            }
+            return;
+        }
+
         Blob blob = element.getBlob(0);
         if (blob == BlobPlaceholder.INSTANCE) {
             lengths.add(PLACE_HOLDER_LENGTH);
             return;
         }
 
+        addBlob(blob);
+    }
+
+    private void addBlob(Blob blob) throws IOException {
         long previousPos = out.getPos();
         crc32.reset();
 
         write(MAGIC_NUMBER_BYTES);
 
+        BlobDescriptor descriptor = writeBlobData(blob);
+
+        long binLength = out.getPos() - previousPos + 12;
+        lengths.add(binLength);
+        byte[] lenBytes = longToLittleEndian(binLength);
+        write(lenBytes);
+        int crcValue = (int) crc32.getValue();
+        out.write(intToLittleEndian(crcValue));
+
+        if (writeConsumer != null) {
+            boolean flush = writeConsumer.accept(blobFieldName, descriptor);
+            if (flush) {
+                out.flush();
+            }
+        }
+    }
+
+    private void addBlobArray(InternalArray array) throws IOException {
+        long previousPos = out.getPos();
+        crc32.reset();
+
+        write(MAGIC_NUMBER_BYTES);
+
+        write(ARRAY_MAGIC_NUMBER_BYTES);
+        write(new byte[] {ARRAY_VERSION});
+        write(intToLittleEndian(array.size()));
+
+        long[] elementLengths = new long[array.size()];
+        boolean flush = false;
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                elementLengths[i] = ARRAY_NULL_ELEMENT_LENGTH;
+                continue;
+            }
+
+            Blob blob = array.getBlob(i);
+            BlobDescriptor descriptor = writeBlobData(blob);
+            elementLengths[i] = descriptor.length();
+            if (writeConsumer != null) {
+                flush |= writeConsumer.accept(blobFieldName, descriptor);
+            }
+        }
+
+        byte[] elementIndexBytes = DeltaVarintCompressor.compress(elementLengths);
+        write(elementIndexBytes);
+        write(intToLittleEndian(elementIndexBytes.length));
+
+        long binLength = out.getPos() - previousPos + 12;
+        lengths.add(binLength);
+        write(longToLittleEndian(binLength));
+        int crcValue = (int) crc32.getValue();
+        out.write(intToLittleEndian(crcValue));
+
+        if (flush) {
+            out.flush();
+        }
+    }
+
+    private BlobDescriptor writeBlobData(Blob blob) throws IOException {
         long blobPos = out.getPos();
         try (SeekableInputStream in = blob.newInputStream()) {
             int bytesRead = in.read(tmpBuffer);
@@ -110,21 +194,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             }
         }
 
-        long blobLength = out.getPos() - blobPos;
-        long binLength = out.getPos() - previousPos + 12;
-        lengths.add(binLength);
-        byte[] lenBytes = longToLittleEndian(binLength);
-        write(lenBytes);
-        int crcValue = (int) crc32.getValue();
-        out.write(intToLittleEndian(crcValue));
-
-        if (writeConsumer != null) {
-            BlobDescriptor descriptor = new BlobDescriptor(pathString, blobPos, blobLength);
-            boolean flush = writeConsumer.accept(blobFieldName, descriptor);
-            if (flush) {
-                out.flush();
-            }
-        }
+        return new BlobDescriptor(pathString, blobPos, out.getPos() - blobPos);
     }
 
     private void write(byte[] bytes) throws IOException {

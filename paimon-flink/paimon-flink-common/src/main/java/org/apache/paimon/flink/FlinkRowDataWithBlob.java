@@ -21,6 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.Set;
 
@@ -32,7 +35,15 @@ public class FlinkRowDataWithBlob extends FlinkRowData {
 
     public FlinkRowDataWithBlob(
             InternalRow row, Set<Integer> blobFields, boolean blobAsDescriptor) {
-        super(row);
+        this(row, null, blobFields, blobAsDescriptor);
+    }
+
+    public FlinkRowDataWithBlob(
+            InternalRow row,
+            @Nullable RowType rowType,
+            Set<Integer> blobFields,
+            boolean blobAsDescriptor) {
+        super(row, rowType);
         this.blobFields = blobFields;
         this.blobAsDescriptor = blobAsDescriptor;
     }

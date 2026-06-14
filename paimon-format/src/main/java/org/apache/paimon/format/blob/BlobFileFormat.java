@@ -33,6 +33,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -44,6 +45,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileFormat} for blob file. */
@@ -87,8 +89,8 @@ public class BlobFileFormat extends FileFormat {
     public void validateDataFields(RowType rowType) {
         checkArgument(rowType.getFieldCount() == 1, "BlobFileFormat only support one field.");
         checkArgument(
-                rowType.getField(0).type().getTypeRoot() == DataTypeRoot.BLOB,
-                "BlobFileFormat only support blob type.");
+                isBlobFileField(rowType.getField(0).type()),
+                "BlobFileFormat only support blob type or array of blob type.");
     }
 
     @Override
@@ -117,6 +119,7 @@ public class BlobFileFormat extends FileFormat {
         private final boolean blobAsDescriptor;
         private final int fieldCount;
         private final int blobIndex;
+        private final DataType blobFieldType;
 
         public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
             this.blobAsDescriptor = blobAsDescriptor;
@@ -125,6 +128,7 @@ public class BlobFileFormat extends FileFormat {
             Preconditions.checkState(
                     this.blobIndex >= 0,
                     "Read type of a blob format does not contain any blob field.");
+            this.blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
         }
 
         @Override
@@ -137,18 +141,26 @@ public class BlobFileFormat extends FileFormat {
                 in = fileIO.newInputStream(filePath);
                 fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
             } finally {
-                if (blobAsDescriptor) {
+                if (blobAsDescriptor && blobFieldType.getTypeRoot() != DataTypeRoot.ARRAY) {
                     IOUtils.closeQuietly(in);
                     in = null;
                 }
             }
 
-            return new BlobFormatReader(fileIO, filePath, fileMeta, in, fieldCount, blobIndex);
+            return new BlobFormatReader(
+                    fileIO,
+                    filePath,
+                    fileMeta,
+                    in,
+                    fieldCount,
+                    blobIndex,
+                    blobFieldType,
+                    blobAsDescriptor);
         }
 
         private static int findBlobFieldIndex(RowType rowType) {
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                if (isBlobFileField(rowType.getTypeAt(i))) {
                     return i;
                 }
             }
