@@ -239,11 +239,16 @@ def _pyarrow_cast_supported(source_type, target_type) -> bool:
     cached = _EXECUTABLE_CAST_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    # An empty-array cast exercises only kernel resolution (not per-value
-    # conversion), so it reports whether PyArrow has a cast kernel for the pair
-    # without depending on any data. ``safe=False`` matches the read path.
+    # Probe a one-row (null-valued) array rather than an empty one. An empty
+    # array only resolves the cast kernel; some kernels additionally reject the
+    # target type parameters on any non-empty input -- e.g. INT -> DECIMAL(10,2)
+    # has a kernel but needs precision >= 12 to hold an int's range at scale 2,
+    # so an empty probe passes yet the read later fails with ArrowInvalid. A
+    # single null row triggers that static type-parameter validation while
+    # avoiding per-value parse/overflow errors (which ``safe=False`` -- matching
+    # the read path -- tolerates anyway).
     try:
-        pa.array([], type=source_pa).cast(target_pa, safe=False)
+        pa.nulls(1, type=source_pa).cast(target_pa, safe=False)
         ok = True
     except (pa.lib.ArrowNotImplementedError, pa.lib.ArrowInvalid,
             pa.lib.ArrowTypeError):

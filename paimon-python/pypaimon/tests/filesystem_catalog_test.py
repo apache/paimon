@@ -283,13 +283,24 @@ class FileSystemCatalogTest(unittest.TestCase):
                 False)
         self.assertIn("no executable cast", str(ctx.exception))
 
-        # An executable widening still succeeds.
+        # INT -> DECIMAL(10, 2) has a PyArrow kernel but the target precision is
+        # too small to hold an int's range at scale 2 (needs >= 12); the read
+        # path would fail with ArrowInvalid, so reject it at alter time too.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "k", AtomicType("DECIMAL(10, 2)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # A wide-enough DECIMAL is executable and succeeds.
         catalog.alter_table(
             identifier,
-            [SchemaChange.update_column_type("k", AtomicType("BIGINT"))],
+            [SchemaChange.update_column_type("k", AtomicType("DECIMAL(12, 2)"))],
             False)
         table = catalog.get_table(identifier)
-        self.assertEqual(table.fields[0].type.type, "BIGINT")
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
 
     def test_add_column_before_partition(self):
         catalog = CatalogFactory.create({

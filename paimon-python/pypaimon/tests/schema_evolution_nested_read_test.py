@@ -36,7 +36,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.casting.data_type_casts import supports_cast
+from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
                                         DataField, MapType, MultisetType,
                                         PyarrowFieldParser, RowType,
@@ -727,6 +727,21 @@ class SupportsCastTest(unittest.TestCase):
         for src, dst in [('BIGINT', 'DATE'), ('BOOLEAN', 'DATE')]:
             self.assertFalse(supports_cast(AtomicType(src), AtomicType(dst)),
                              '{} -> {}'.format(src, dst))
+
+    def test_can_execute_cast_decimal_precision(self):
+        # A numeric -> decimal cast has a PyArrow kernel but is only executable
+        # when the target precision can hold the source's range at the target
+        # scale (INT needs >= 12 at scale 2, BIGINT >= 21). An empty-array probe
+        # misses this; can_execute_cast must reject the too-small targets so the
+        # read path does not later fail with ArrowInvalid.
+        for src, dst in [('INT', 'DECIMAL(10, 2)'), ('BIGINT', 'DECIMAL(10, 2)'),
+                         ('BIGINT', 'DECIMAL(20, 2)')]:
+            self.assertFalse(can_execute_cast(AtomicType(src), AtomicType(dst)),
+                             '{} -> {}'.format(src, dst))
+        for src, dst in [('INT', 'DECIMAL(12, 2)'), ('BIGINT', 'DECIMAL(21, 2)'),
+                         ('INT', 'BIGINT'), ('DOUBLE', 'INT'), ('INT', 'STRING')]:
+            self.assertTrue(can_execute_cast(AtomicType(src), AtomicType(dst)),
+                            '{} -> {}'.format(src, dst))
 
     def test_constructed_to_string(self):
         # ROW/ARRAY/MAP have a read-time string rendering; vector and
