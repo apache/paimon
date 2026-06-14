@@ -25,10 +25,13 @@ import org.apache.paimon.spark.catalog.SparkBaseCatalog
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{NoSuchTableException, ResolvedIdentifier}
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ReplaceTable, ReplaceTableAsSelect, TableSpec}
+import org.apache.spark.sql.catalyst.expressions.Literal
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwriteByExpression, OverwritePartitionsDynamic, ReplaceTable, ReplaceTableAsSelect, TableSpec}
 import org.apache.spark.sql.connector.catalog.{Identifier, StagingTableCatalog, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan, SparkStrategy}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.internal.SQLConf.PartitionOverwriteMode
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
@@ -46,6 +49,17 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           options,
           orCreate,
           true) if PaimonReplaceTableStrategyHelper.supportsCatalog(catalog, tableSpec) =>
+      // For V1 saveAsTable + overwrite on an existing table, rewrite to
+      // OverwriteByExpression to preserve table definition.
+      if (PaimonReplaceTableStrategyHelper.isV1SaveAsTableOverwrite) {
+        val overwrite = PaimonReplaceTableStrategyHelper
+          .rewriteToOverwrite(spark, catalog, ident, query, options)
+        if (overwrite.isDefined) {
+          val qe = spark.sessionState.executePlan(overwrite.get)
+          return qe.sparkPlan :: Nil
+        }
+      }
+
       val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
       if (PaimonReplaceTableStrategyHelper.canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
@@ -117,6 +131,42 @@ private[shim] object PaimonReplaceTableStrategyHelper {
     case _: SparkGenericCatalog =>
       tableSpec.provider.exists(_.equalsIgnoreCase(SparkSource.NAME))
     case _ => false
+  }
+
+  /** Whether the current call originates from V1 DataFrameWriter.saveAsTable(). */
+  def isV1SaveAsTableOverwrite: Boolean = {
+    Thread.currentThread().getStackTrace.exists {
+      e =>
+        val cls = e.getClassName
+        cls.contains("DataFrameWriter") && !cls.contains("DataFrameWriterV2")
+    }
+  }
+
+  /**
+   * Rewrite to OverwriteByExpression or OverwritePartitionsDynamic for an existing table,
+   * preserving table definition. Returns None if the table does not exist.
+   */
+  def rewriteToOverwrite(
+      spark: SparkSession,
+      catalog: SparkBaseCatalog,
+      ident: Identifier,
+      query: LogicalPlan,
+      writeOptions: Map[String, String]): Option[LogicalPlan] = {
+    try {
+      val existing = catalog.loadTable(ident)
+      if (!existing.isInstanceOf[SparkTable]) return None
+      val relation =
+        DataSourceV2Relation.create(existing, Some(catalog.asInstanceOf[TableCatalog]), Some(ident))
+      val dynamicOverwrite = existing.partitioning().nonEmpty &&
+        spark.sessionState.conf.partitionOverwriteMode == PartitionOverwriteMode.DYNAMIC
+      if (dynamicOverwrite) {
+        Some(OverwritePartitionsDynamic.byName(relation, query, writeOptions))
+      } else {
+        Some(OverwriteByExpression.byName(relation, query, Literal(true), writeOptions))
+      }
+    } catch {
+      case _: NoSuchTableException => None
+    }
   }
 
   /**
