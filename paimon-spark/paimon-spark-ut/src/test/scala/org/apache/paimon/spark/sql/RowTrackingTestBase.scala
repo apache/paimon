@@ -649,6 +649,57 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: merge into table with data-evolution delete") {
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, b INT)")
+      sql("INSERT INTO source VALUES (2, 200), (4, 400), (6, 600)")
+
+      sql(
+        "CREATE TABLE target (id INT, b INT, c STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target VALUES (1, 10, 'c1'), (2, 20, 'c2'), (3, 30, 'c3'), (4, 40, 'c4'), (5, 50, 'c5')")
+
+      sql("""
+            |MERGE INTO target
+            |USING source
+            |ON target.id = source.id
+            |WHEN MATCHED AND source.id IN (2, 4) THEN DELETE
+            |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 'new')
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, b, c FROM target ORDER BY id"),
+        Seq(Row(1, 10, "c1"), Row(3, 30, "c3"), Row(5, 50, "c5"), Row(6, 600, "new"))
+      )
+    }
+  }
+
+  test("Data Evolution: merge into table with data-evolution update and delete") {
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, b INT)")
+      sql("INSERT INTO source VALUES (2, 200), (3, 300), (4, 400)")
+
+      sql(
+        "CREATE TABLE target (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql(
+        "INSERT INTO target VALUES (1, 10, 10), (2, 20, 20), (3, 30, 30), (4, 40, 40), (5, 50, 50)")
+
+      sql("""
+            |MERGE INTO target
+            |USING source
+            |ON target.id = source.id
+            |WHEN MATCHED AND source.id = 2 THEN UPDATE SET b = source.b
+            |WHEN MATCHED AND source.id = 3 THEN DELETE
+            |WHEN MATCHED THEN UPDATE SET c = source.b
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, b, c FROM target ORDER BY id"),
+        Seq(Row(1, 10, 10), Row(2, 200, 20), Row(4, 40, 400), Row(5, 50, 50))
+      )
+    }
+  }
+
   Seq(false, true).foreach {
     filePruning =>
       test(s"Data Evolution: merge into file pruning: $filePruning") {

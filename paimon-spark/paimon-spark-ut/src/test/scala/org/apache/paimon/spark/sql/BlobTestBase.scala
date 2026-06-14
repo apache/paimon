@@ -543,6 +543,37 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into deletes rows from data evolution table") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, X'01'), (2, X'02'), (3, X'03'), (4, X'04'), (5, X'05')")
+
+      sql("CREATE TABLE s (id INT)")
+      sql("INSERT INTO s VALUES (3)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN DELETE
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, picture FROM t ORDER BY id"),
+        Seq(
+          Row(1, Array[Byte](1)),
+          Row(2, Array[Byte](2)),
+          Row(4, Array[Byte](4)),
+          Row(5, Array[Byte](5)))
+      )
+    }
+  }
+
   test("Blob: merge-into updates descriptor blob column with external storage end-to-end") {
     withTable("s", "t") {
       val externalStoragePath = tempDBDir.getCanonicalPath + "/external-storage-blob-merge-path"
