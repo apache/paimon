@@ -38,9 +38,6 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.internal.SQLConf.PartitionOverwriteMode
 import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
-import java.util.{HashMap => JHashMap}
 
 import scala.collection.JavaConverters._
 
@@ -108,12 +105,17 @@ object PaimonTableAsSelectHelper {
     if (snapshotId == null) return query
 
     query.transformDown {
-      case r: DataSourceV2Relation
-          if r.catalog.contains(catalog) && r.identifier.contains(ident) &&
-            !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(r.options.asCaseSensitiveMap())) =>
-        val pinned = new JHashMap[String, String](r.options.asCaseSensitiveMap())
-        pinned.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId.toString)
-        r.copy(options = new CaseInsensitiveStringMap(pinned))
+      case r: DataSourceV2Relation if r.catalog.contains(catalog) && r.identifier.contains(ident) =>
+        r.table match {
+          case sparkTable: SparkTable
+              if !TimeTravelUtil.hasTimeTravelOptions(
+                Options.fromMap(sparkTable.getTable.options())) =>
+            val pinnedTable = sparkTable.getTable.copy(
+              java.util.Collections
+                .singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId.toString))
+            SparkShimLoader.shim.copyDataSourceV2Relation(r, SparkTable.of(pinnedTable), r.output)
+          case _ => r
+        }
     }
   }
 
