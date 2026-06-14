@@ -20,6 +20,7 @@ package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.FormatTableCatalog
+import org.apache.paimon.spark.write.SnapshotOperation
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
@@ -66,7 +67,8 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession) extends Strate
         query,
         planLater(query),
         newProps,
-        new CaseInsensitiveStringMap(writeOptions.asJava),
+        new CaseInsensitiveStringMap((writeOptions +
+          (SnapshotOperation.OPERATION_OPTION -> SnapshotOperation.CREATE_TABLE_AS_SELECT)).asJava),
         ifNotExists
       ) :: Nil
     case _ => Nil

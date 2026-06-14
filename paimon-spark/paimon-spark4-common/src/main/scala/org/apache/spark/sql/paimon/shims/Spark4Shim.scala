@@ -193,8 +193,15 @@ class Spark4Shim extends SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[String]): BatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
 
   override def createFormatTableBatchWrite(
       table: FormatTable,

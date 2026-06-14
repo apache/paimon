@@ -71,4 +71,6 @@ public interface BatchTableCommit extends TableCommit {
 
     /** Compact the manifest entries. Generates a snapshot with {@link CommitKind#COMPACT}. */
     void compactManifests();
+
+    BatchTableCommit withCommitProperties(Map<String, String> properties);
 }

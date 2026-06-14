@@ -33,8 +33,15 @@ class PaimonBatchWrite(
     writeSchema: StructType,
     dataSchema: StructType,
     overwritePartitions: Option[Map[String, String]],
-    copyOnWriteScan: Option[PaimonCopyOnWriteScan])
-  extends PaimonBatchWriteBase(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+    copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[String] = None)
+  extends PaimonBatchWriteBase(
+    table,
+    writeSchema,
+    dataSchema,
+    overwritePartitions,
+    copyOnWriteScan,
+    operationType)
   with BatchWrite
   with Serializable {
 
@@ -54,6 +61,13 @@ object PaimonBatchWrite {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): PaimonBatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[String] = None): PaimonBatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
 }

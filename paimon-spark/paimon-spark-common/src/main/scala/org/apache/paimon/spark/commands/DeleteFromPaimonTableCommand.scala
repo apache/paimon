@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
+import org.apache.paimon.spark.write.SnapshotOperation
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
 import org.apache.paimon.table.sink.CommitMessage
@@ -46,7 +47,7 @@ case class DeleteFromPaimonTableCommand(
     } else {
       performNonPrimaryKeyDelete(sparkSession)
     }
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, SnapshotOperation.asProperties(SnapshotOperation.DELETE))
     Seq.empty[Row]
   }
 

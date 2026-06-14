@@ -41,7 +41,8 @@ class PaimonV2Write(
     overwritePartitions: Option[Map[String, String]],
     copyOnWriteScan: Option[PaimonCopyOnWriteScan],
     dataSchema: StructType,
-    options: Options
+    options: Options,
+    operationType: Option[String] = None
 ) extends Write
   with RequiresDistributionAndOrdering
   with SchemaEvolutionHelper
@@ -69,7 +70,8 @@ class PaimonV2Write(
       writeSchema,
       dataSchema,
       overwritePartitions,
-      copyOnWriteScan)
+      copyOnWriteScan,
+      operationType)
   }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {
