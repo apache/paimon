@@ -249,7 +249,7 @@ class RESTCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
+    def _create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:

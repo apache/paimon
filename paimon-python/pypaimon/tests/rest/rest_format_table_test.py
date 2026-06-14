@@ -16,6 +16,7 @@
 # under the License.
 
 import unittest
+from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
@@ -23,7 +24,9 @@ from parameterized import parameterized
 
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import TableNotExistException
+from pypaimon.common.uri_reader import FileUriReader
 from pypaimon.table.format import FormatTable
+from pypaimon.table.row.blob import Blob, BlobDescriptor
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
@@ -187,6 +190,97 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(actual.shape[0], 3)
         self.assertEqual(actual["value"].tolist(), ["a", "b", "c"])
         self.assertEqual(actual["dt"].tolist(), [1, 1, 2])
+
+    def test_format_table_blob_read_write(self):
+        pa_schema = pa.schema([
+            ("payload", pa.large_binary()),
+            ("dt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["dt"],
+            options={"type": "format-table", "file.format": "blob"},
+        )
+        table_name = "default.format_table_rw_blob"
+        self.rest_catalog.drop_table(table_name, True)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        self.assertIsInstance(table, FormatTable)
+        self.assertEqual(table.format().value, "blob")
+
+        raw_blob = b"blob-data"
+        descriptor_blob = b"descriptor-backed-blob"
+        external_file = Path(self.temp_dir) / "format-table-source-blob.bin"
+        external_file.write_bytes(descriptor_blob)
+        descriptor = BlobDescriptor(
+            external_file.as_uri(), 0, len(descriptor_blob)
+        )
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict({
+            "payload": [raw_blob, descriptor.serialize(), None],
+            "dt": [1, 1, 1],
+        }, schema=pa_schema))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        actual = rb.new_read().to_pandas(splits)
+        self.assertEqual(actual["payload"].tolist(), [
+            raw_blob,
+            descriptor_blob,
+            None,
+        ])
+        self.assertEqual(actual["dt"].tolist(), [1, 1, 1])
+
+    def test_format_table_blob_consumer(self):
+        pa_schema = pa.schema([
+            ("payload", pa.large_binary()),
+            ("dt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["dt"],
+            options={"type": "format-table", "file.format": "blob"},
+        )
+        table_name = "default.format_table_blob_consumer"
+        self.rest_catalog.drop_table(table_name, True)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        received = []
+
+        def consumer(field_name, descriptor):
+            received.append((field_name, descriptor))
+            return False
+
+        blob_bytes = b"blob-consumer-data"
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.with_blob_consumer(consumer)
+        tw.write_arrow(pa.Table.from_pydict({
+            "payload": [blob_bytes, None],
+            "dt": [2, 2],
+        }, schema=pa_schema))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        self.assertEqual(len(received), 2)
+        self.assertEqual(received[0][0], "payload")
+        self.assertIsInstance(received[0][1], BlobDescriptor)
+        self.assertIn("dt=2", received[0][1].uri)
+        blob = Blob.from_descriptor(
+            FileUriReader(table.file_io), received[0][1]
+        )
+        self.assertEqual(blob.to_data(), blob_bytes)
+        self.assertEqual(received[1][0], "payload")
+        self.assertIsNone(received[1][1])
 
     def test_format_table_read_with_limit_to_iterator(self):
         pa_schema = pa.schema([

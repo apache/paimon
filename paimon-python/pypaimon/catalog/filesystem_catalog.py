@@ -168,7 +168,7 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return sys_table
 
-    def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
+    def _create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
         if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
             raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 

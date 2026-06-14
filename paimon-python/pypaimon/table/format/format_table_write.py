@@ -30,6 +30,8 @@ from pypaimon.table.format.format_table import (
     Format,
     FormatTable,
 )
+from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 def _partition_path(
@@ -78,6 +80,24 @@ def _partition_from_row(
     return tuple(out)
 
 
+def _data_fields(table: FormatTable):
+    partition_keys = set(table.partition_keys)
+    return [field for field in table.fields if field.name not in partition_keys]
+
+
+def _validate_blob_format_table(table: FormatTable):
+    data_fields = _data_fields(table)
+    if len(data_fields) != 1:
+        raise ValueError(
+            "BLOB format table only supports one non-partition field."
+        )
+    if getattr(data_fields[0].type, "type", "").upper() != "BLOB":
+        raise ValueError(
+            "BLOB format table only supports BLOB type as non-partition field."
+        )
+    return data_fields
+
+
 class FormatTableWrite:
     """Batch write for format table: Arrow/Pandas to partition dirs."""
 
@@ -99,6 +119,7 @@ class FormatTableWrite:
         )
         self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
+        self._blob_consumer: Optional[BlobConsumer] = None
         self._data_file_prefix = "data-"
         self._suffix = {
             "parquet": ".parquet",
@@ -106,7 +127,22 @@ class FormatTableWrite:
             "json": ".json",
             "orc": ".orc",
             "text": ".txt",
+            "blob": ".blob",
         }.get(self._file_format.value, ".parquet")
+
+    def with_blob_consumer(
+        self, blob_consumer: BlobConsumer
+    ) -> "FormatTableWrite":
+        if self._file_format != Format.BLOB:
+            raise RuntimeError(
+                "BlobConsumer is only supported for BLOB format table."
+            )
+        if self._written_paths:
+            raise RuntimeError(
+                "with_blob_consumer must be called before any write operation."
+            )
+        self._blob_consumer = blob_consumer
+        return self
 
     def write_arrow(self, data: pyarrow.Table) -> None:
         for batch in data.to_batches():
@@ -227,6 +263,36 @@ class FormatTableWrite:
                 line = "" if py_val is None else str(py_val)
                 lines.append(line + line_delimiter)
             raw = "".join(lines).encode("utf-8")
+        elif fmt == Format.BLOB:
+            data_fields = _validate_blob_format_table(self.table)
+            blob_field_name = data_fields[0].name
+            if blob_field_name not in tbl.column_names:
+                raise ValueError(
+                    f"BLOB column missing from input data: {blob_field_name}"
+                )
+            uri_reader_factory = getattr(
+                self.table.file_io, "uri_reader_factory", None
+            )
+            try:
+                with self.table.file_io.new_output_stream(path) as out:
+                    writer = BlobFormatWriter(
+                        out,
+                        blob_consumer=self._blob_consumer,
+                        file_path=path,
+                    )
+                    blob_values = tbl.column(blob_field_name)
+                    for i in range(tbl.num_rows):
+                        writer.write_value(
+                            blob_values[i], data_fields, uri_reader_factory
+                        )
+                    writer.close()
+            except Exception as e:
+                self.table.file_io.delete_quietly(path)
+                raise RuntimeError(
+                    f"Failed to write blob format table file {path}: {e}"
+                ) from e
+            self._written_paths.append(path)
+            return
         else:
             raise ValueError(f"Format table write not implemented for {fmt}")
 

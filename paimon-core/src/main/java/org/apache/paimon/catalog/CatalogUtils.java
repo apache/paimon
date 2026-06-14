@@ -46,6 +46,7 @@ import org.apache.paimon.table.system.AllTablesTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -61,8 +62,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_BLOB;
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
@@ -169,10 +173,28 @@ public class CatalogUtils {
                         FORMAT_TABLE_IMPLEMENTATION.key(),
                         PATH.key());
             }
+            validateBlobFormatTable(schema, options);
         }
         for (DataField field : schema.fields()) {
             validateDefaultValue(field.type(), field.defaultValue());
         }
+    }
+
+    private static void validateBlobFormatTable(Schema schema, Options options) {
+        if (!FILE_FORMAT_BLOB.equalsIgnoreCase(options.get(FILE_FORMAT))) {
+            return;
+        }
+
+        List<DataField> nonPartitionFields =
+                schema.fields().stream()
+                        .filter(field -> !schema.partitionKeys().contains(field.name()))
+                        .collect(Collectors.toList());
+        checkArgument(
+                nonPartitionFields.size() == 1,
+                "BLOB format table only supports one non-partition field.");
+        checkArgument(
+                nonPartitionFields.get(0).type().getTypeRoot() == DataTypeRoot.BLOB,
+                "BLOB format table only supports BLOB type as non-partition field.");
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
