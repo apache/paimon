@@ -1135,6 +1135,64 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             3: b'blob-3',
         })
 
+    @unittest.expectedFailure
+    def test_blob_update_writes_only_changed_rows(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_minimal_span', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_minimal_span')
+
+        num_rows = 100
+        initial = pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(num_rows)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_minimal_span')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([50], type=pa.int64()),
+            'blob_data': pa.array(
+                [b'updated-blob-50'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 1)
+        self.assertEqual(update_blob_files[0].first_row_id, 50)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id[50], b'updated-blob-50')
+        self.assertEqual(by_id[0], b'blob-0')
+        self.assertEqual(by_id[99], b'blob-99')
+
     def test_update_blob_column_with_rolling_files(self):
         from pypaimon import Schema
 
