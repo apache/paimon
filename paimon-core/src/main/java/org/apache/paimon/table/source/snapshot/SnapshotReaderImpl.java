@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -46,6 +47,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.FineGrainedSplitGenerator;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
@@ -429,11 +431,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
                 // Calculate bucketPath once per bucket to avoid repeated computation
                 String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+                if (!isStreaming) {
+                    splitGroups = expandFineGrained(splitGroups, bucketPath);
+                }
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     builder.withDataFiles(dataFiles)
                             .rawConvertible(splitGroup.rawConvertible)
-                            .withBucketPath(bucketPath);
+                            .withBucketPath(bucketPath)
+                            .withBoundary(splitGroup.boundary);
                     if (deletionVectors && deletionFilesMap != null) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(
@@ -447,6 +453,44 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
         return splits;
+    }
+
+    private List<SplitGenerator.SplitGroup> expandFineGrained(
+            List<SplitGenerator.SplitGroup> base, String bucketPath) {
+        if (!options.sourceSplitFileEnabled() || !tableSchema.primaryKeys().isEmpty()) {
+            return base;
+        }
+        FineGrainedSplitGenerator expander =
+                new FineGrainedSplitGenerator(
+                        (SplitGenerator)
+                                new SplitGenerator() {
+                                    @Override
+                                    public boolean alwaysRawConvertible() {
+                                        return true;
+                                    }
+
+                                    @Override
+                                    public List<SplitGenerator.SplitGroup> splitForBatch(
+                                            List<DataFileMeta> files) {
+                                        return base;
+                                    }
+
+                                    @Override
+                                    public List<SplitGenerator.SplitGroup> splitForStreaming(
+                                            List<DataFileMeta> files) {
+                                        return base;
+                                    }
+                                },
+                        snapshotManager.fileIO(),
+                        file -> new Path(bucketPath, file.fileName()),
+                        format -> {
+                            FileFormat ff =
+                                    FileFormat.fromIdentifier(format, options.toConfiguration());
+                            return ff == null ? null : ff.createMetadataReader();
+                        },
+                        options.splitTargetSize(),
+                        options.sourceSplitFileMaxSplits());
+        return expander.splitForBatch(Collections.emptyList());
     }
 
     @Override
