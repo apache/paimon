@@ -457,7 +457,8 @@ public class RESTCatalog implements Catalog {
         }
     }
 
-    private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+    @Override
+    public TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table
         Identifier loadTableIdentifier =

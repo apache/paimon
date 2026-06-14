@@ -772,7 +772,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
+    public TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         return loadTableMetadata(identifier, getHmsTable(identifier));
     }
 
