@@ -123,7 +123,9 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
                             new DataField(17, "file_source", DataTypes.STRING()),
                             new DataField(18, "first_row_id", DataTypes.BIGINT()),
-                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING()))));
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING())),
+                            new DataField(
+                                    20, "file_name", SerializationUtils.newStringType(false))));
 
     private final FileStoreTable storeTable;
 
@@ -375,6 +377,7 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
+
             for (Split dataSplit : splits) {
                 iteratorList.add(
                         Iterators.transform(
@@ -468,6 +471,7 @@ public class FilesTable implements ReadonlyTable {
                             return new GenericArray(
                                     writeCols.stream().map(BinaryString::fromString).toArray());
                         },
+                        () -> BinaryString.fromString(file.fileName()),
                     };
 
             return new LazyGenericRow(fields);

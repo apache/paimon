@@ -336,6 +336,17 @@ public class FilesTableTest extends TableTestBase {
                 .containsExactlyInAnyOrder("{f0=null, f1=a, f2=null}", "{f0=null, f1=null, f2=1}");
     }
 
+    @Test
+    public void testFileName() throws Exception {
+        List<InternalRow> result = read(filesTable);
+        assertThat(result).isNotEmpty();
+        for (InternalRow row : result) {
+            String filePath = row.getString(2).toString();
+            String expectedFileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+            assertThat(row.getString(20).toString()).isEqualTo(expectedFileName);
+        }
+    }
+
     private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {
         commitables.forEach(
                 c -> {
@@ -409,7 +420,8 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(
                                     file.fileSource().map(Object::toString).orElse(null)),
                             file.firstRowId(),
-                            null));
+                            null,
+                            BinaryString.fromString(file.fileName())));
         }
         return expectedRow;
     }
