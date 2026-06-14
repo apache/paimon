@@ -108,23 +108,24 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
     format => {
       test(
         s"Paimon migrate table procedure: migrate $format non-partitioned table with set target table") {
-        withTable(s"hive_tbl_$random", s"target_$random") {
+        withTable(s"hive_tbl_${random}_$format", s"target_${random}_$format") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE hive_tbl_$random (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl_${random}_$format (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
-          spark.sql(s"INSERT INTO hive_tbl_$random VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
+          spark.sql(
+            s"INSERT INTO hive_tbl_${random}_$format VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_$random', options => 'file.format=$format', target_table => '$hiveDbName.target_$random', delete_origin => false)")
+            s"CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl_${random}_$format', options => 'file.format=$format', target_table => '$hiveDbName.target_${random}_$format', delete_origin => false)")
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM target_$random ORDER BY id"),
+            spark.sql(s"SELECT * FROM target_${random}_$format ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
 
-          checkAnswer(spark.sql(s"SELECT * FROM hive_tbl_$random ORDER BY id"), Nil)
+          checkAnswer(spark.sql(s"SELECT * FROM hive_tbl_${random}_$format ORDER BY id"), Nil)
 
         }
       }
