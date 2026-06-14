@@ -65,6 +65,26 @@ public class PredicateTest {
     }
 
     @Test
+    public void testBinaryUnsignedComparison() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.BYTES()));
+
+        Predicate greaterThan = builder.greaterThan(0, new byte[] {(byte) 0x7F});
+        assertThat(greaterThan.test(GenericRow.of((Object) new byte[] {(byte) 0x80}))).isTrue();
+        assertThat(greaterThan.test(GenericRow.of((Object) new byte[] {(byte) 0x7E}))).isFalse();
+
+        Predicate greaterThanLow = builder.greaterThan(0, new byte[] {(byte) 0x01});
+        assertThat(greaterThanLow.test(GenericRow.of((Object) new byte[] {(byte) 0xFF}))).isTrue();
+
+        Predicate lessThan = builder.lessThan(0, new byte[] {(byte) 0x80});
+        assertThat(lessThan.test(GenericRow.of((Object) new byte[] {(byte) 0x01}))).isTrue();
+        assertThat(lessThan.test(GenericRow.of((Object) new byte[] {(byte) 0xFF}))).isFalse();
+
+        Predicate between = builder.between(0, new byte[] {(byte) 0x70}, new byte[] {(byte) 0x90});
+        assertThat(between.test(GenericRow.of((Object) new byte[] {(byte) 0x80}))).isTrue();
+        assertThat(between.test(GenericRow.of((Object) new byte[] {(byte) 0x60}))).isFalse();
+    }
+
+    @Test
     public void testEqualNull() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         Predicate predicate = builder.equal(0, null);
