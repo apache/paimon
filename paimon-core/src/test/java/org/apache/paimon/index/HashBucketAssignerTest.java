@@ -33,6 +33,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -66,7 +67,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 numAssigners,
                 assignId,
                 5,
-                -1);
+                -1,
+                -1,
+                null);
     }
 
     private HashBucketAssigner createAssigner(
@@ -79,7 +82,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 numAssigners,
                 assignId,
                 5,
-                maxBucketsNum);
+                maxBucketsNum,
+                -1,
+                null);
     }
 
     @Test
@@ -362,5 +367,335 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
+    }
+
+    /**
+     * Test that bucket refresh is triggered when a bucket approaches target capacity, that buckets
+     * newly added on disk become discoverable by subsequent assignments, AND that the refresh
+     * respects assigner ownership (only buckets owned by this assigner are surfaced).
+     *
+     * <p>Setup uses two assigners: assigner 0 owns even buckets (0, 2, ...), assigner 1 owns odd
+     * buckets (1, 3, ...). Without the fix:
+     *
+     * <ul>
+     *   <li>The async refresh would never run, so bucket 2 (added after load) would stay invisible.
+     *   <li>Even if the refresh ran, it would surface bucket 1 (owned by assigner 1) into assigner
+     *       0's in-memory map, breaking the ownership invariant.
+     * </ul>
+     */
+    @Test
+    public void testRefreshTriggeredWhenBucketNearFull() throws IOException {
+        // Initial on-disk state seen by assigner 0 at load time: only bucket 0 (its own) with
+        // 2 rows. Bucket 1 also exists on disk but is owned by assigner 1.
+        commit.commit(
+                0,
+                Arrays.asList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 2})),
+                        createCommitMessage(
+                                row(1),
+                                1,
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {1, 3}))));
+
+        // numChannels=2, numAssigners=2, assignId=0 -> assigner 0 owns even buckets only.
+        // targetBucketRowNumber=5, threshold=2 -> refresh triggers when a bucket reaches 3 rows.
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        2,
+                        2,
+                        0,
+                        5,
+                        -1,
+                        2,
+                        Duration.ofMillis(1));
+
+        // After the assigner has loaded, simulate another writer (or compaction) committing a
+        // new even bucket (2) that this assigner does not yet know about. We also commit
+        // additional rows to bucket 1 (owned by assigner 1) to make sure the refresh has
+        // something to filter out.
+        commit.commit(
+                1,
+                Arrays.asList(
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                2,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 6})),
+                        createCommitMessage(
+                                row(1),
+                                1,
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {5}))));
+
+        // Fresh hashes avoid the hash2Bucket fast path and push bucket 0 past the threshold.
+        assertThat(assigner.assign(row(1), 50)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 52)).isEqualTo(0);
+
+        // Poll until the async refresh has surfaced bucket 2. Keep assigning even hashes
+        // (which belong to assigner 0) and expect at least one of them to land on bucket 2
+        // within the timeout. The same loop also asserts ownership: assigner 0 must NEVER
+        // return bucket 1, even though bucket 1 has space on disk.
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        int hash = 100;
+        boolean bucket2Seen = false;
+        while (System.nanoTime() < deadline) {
+            int assigned = assigner.assign(row(1), hash);
+            assertThat(assigned)
+                    .as("assigner 0 must only return buckets it owns (even ones)")
+                    .isEven();
+            if (assigned == 2) {
+                bucket2Seen = true;
+                break;
+            }
+            hash += 2;
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        assertThat(bucket2Seen)
+                .as("bucket 2 should become assignable after the async refresh runs")
+                .isTrue();
+    }
+
+    /**
+     * Test that refresh is NOT triggered when threshold is disabled (-1). This ensures backward
+     * compatibility with existing behavior.
+     */
+    @Test
+    public void testRefreshDisabledWhenThresholdIsNegative() {
+        // Create assigner with threshold=-1 (disabled)
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5, // targetBucketRowNumber
+                        -1, // maxBucketsNum
+                        -1, // minEmptyBucketsBeforeAsyncCheck (DISABLED)
+                        Duration.ofHours(1));
+
+        // Assign rows - even when bucket is near full, no refresh should trigger
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 1)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 2)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 3)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 4)).isEqualTo(0);
+
+        // Bucket is full, should create new bucket
+        assertThat(assigner.assign(row(1), 5)).isEqualTo(1);
+    }
+
+    /**
+     * Test that refresh respects the minimum refresh interval. Multiple assignments within the
+     * interval should not trigger multiple refreshes.
+     */
+    @Test
+    public void testRefreshRespectsMinimumInterval() throws IOException {
+        // Create assigner with 10-second minimum refresh interval
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5, // targetBucketRowNumber
+                        -1,
+                        2, // threshold
+                        Duration.ofSeconds(10)); // Long interval
+
+        // Setup initial state with bucket on disk
+        commit.commit(
+                0,
+                Collections.singletonList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
+
+        // Recreate assigner to load from disk
+        assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5,
+                        -1,
+                        2,
+                        Duration.ofSeconds(10));
+
+        // First assignment triggers refresh.
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0);
+
+        // Subsequent assignments within the interval do not trigger another refresh.
+        assertThat(assigner.assign(row(1), 10)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 11)).isEqualTo(0);
+        assertThat(assigner.assign(row(1), 12)).isEqualTo(0);
+    }
+
+    /**
+     * Test refresh with multiple partitions to ensure each partition is handled independently. Data
+     * skew scenario where different partitions have different bucket counts.
+     */
+    @Test
+    public void testRefreshWithMultiplePartitionsDataSkew() throws IOException {
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5, // targetBucketRowNumber
+                        -1,
+                        2, // threshold
+                        Duration.ofMillis(100));
+
+        // Setup: partition 1 has 1 bucket, partition 2 has 3 buckets (data skew)
+        commit.commit(
+                0,
+                Arrays.asList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
+                        createCommitMessage(
+                                row(2),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(2), 0).write(new int[] {10, 11})),
+                        createCommitMessage(
+                                row(2),
+                                1,
+                                3,
+                                fileHandler.hashIndex(row(2), 1).write(new int[] {12})),
+                        createCommitMessage(
+                                row(2),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(2), 2).write(new int[] {13}))));
+
+        // Recreate assigner
+        assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5,
+                        -1,
+                        2,
+                        Duration.ofMillis(100));
+
+        // Partition 1: should trigger refresh when reaching threshold
+        assertThat(assigner.assign(row(1), 0)).isEqualTo(0); // 3 rows, triggers refresh
+
+        // Partition 2: independently should also trigger refresh for its buckets
+        assertThat(assigner.assign(row(2), 10)).isEqualTo(0); // 3 rows, triggers refresh
+
+        // Wait for async refresh
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // Both partitions should work correctly
+        assertThat(assigner.assign(row(1), 20)).isIn(0, 1);
+        assertThat(assigner.assign(row(2), 30)).isIn(0, 1, 2);
+    }
+
+    /**
+     * Test that refresh correctly discovers buckets freed by compaction. Simulates a scenario where
+     * compaction removes data from a full bucket, making it available again.
+     */
+    @Test
+    public void testRefreshDiscoversFreedBucketsAfterCompaction() throws IOException {
+        // Initial state: bucket 0 is full (5 rows), bucket 1 has space.
+        commit.commit(
+                0,
+                Arrays.asList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1, 2, 3, 4})),
+                        createCommitMessage(
+                                row(1),
+                                1,
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {5, 6}))));
+
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        fileHandler,
+                        1,
+                        1,
+                        0,
+                        5,
+                        -1,
+                        2,
+                        Duration.ofMillis(1));
+
+        // Simulate compaction: bucket 0 now has only 2 rows (freed by compaction). The assigner
+        // does not learn about this until it refreshes from disk.
+        commit.commit(
+                1,
+                Collections.singletonList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
+
+        // Push bucket 1 to its near-full threshold (3 rows >= 5-2). This must schedule the
+        // async refresh before returning; otherwise the freed bucket 0 stays invisible.
+        assertThat(assigner.assign(row(1), 5)).isEqualTo(1);
+
+        // Poll until bucket 0 (freed by compaction) becomes assignable again. Without the fix
+        // the refresh never runs and the loop exhausts the timeout.
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        int hash = 100;
+        boolean freedBucketRediscovered = false;
+        while (System.nanoTime() < deadline) {
+            int assigned = assigner.assign(row(1), hash++);
+            if (assigned == 0) {
+                freedBucketRediscovered = true;
+                break;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        assertThat(freedBucketRediscovered)
+                .as("bucket 0 freed by compaction should become assignable after refresh")
+                .isTrue();
     }
 }

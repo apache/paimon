@@ -26,6 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -38,6 +39,8 @@ public class HashBucketAssigner implements BucketAssigner {
 
     private static final Logger LOG = LoggerFactory.getLogger(HashBucketAssigner.class);
 
+    private static final int MIN_THRESHOLD_PERCENT = 5;
+
     private final SnapshotManager snapshotManager;
     private final String commitUser;
     private final IndexFileHandler indexFileHandler;
@@ -47,6 +50,8 @@ public class HashBucketAssigner implements BucketAssigner {
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
     private int maxBucketId;
+    private int minEmptyBucketsBeforeAsyncCheck;
+    private Duration minRefreshInterval;
 
     private final Map<BinaryRow, PartitionIndex> partitionIndex;
 
@@ -58,7 +63,9 @@ public class HashBucketAssigner implements BucketAssigner {
             int numAssigners,
             int assignId,
             long targetBucketRowNumber,
-            int maxBucketsNum) {
+            int maxBucketsNum,
+            int minEmptyBucketsBeforeAsyncCheck,
+            Duration minRefreshInterval) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.indexFileHandler = indexFileHandler;
@@ -68,6 +75,20 @@ public class HashBucketAssigner implements BucketAssigner {
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.partitionIndex = new HashMap<>();
         this.maxBucketsNum = maxBucketsNum;
+        this.minEmptyBucketsBeforeAsyncCheck = minEmptyBucketsBeforeAsyncCheck;
+        this.minRefreshInterval = minRefreshInterval;
+
+        if (minEmptyBucketsBeforeAsyncCheck != -1
+                && minEmptyBucketsBeforeAsyncCheck
+                        < targetBucketRowNumber * MIN_THRESHOLD_PERCENT / 100) {
+            LOG.warn(
+                    "dynamic-bucket.empty-bucket-threshold ({}) is below {}% of "
+                            + "dynamic-bucket.target-row-num ({}). The async refresh may "
+                            + "not complete before existing buckets saturate, which can "
+                            + "cause unnecessary bucket creation. Recommended: 10-20% of "
+                            + "target-row-num (higher for high-throughput partitions).",
+                    minEmptyBucketsBeforeAsyncCheck, MIN_THRESHOLD_PERCENT, targetBucketRowNumber);
+        }
     }
 
     /** Assign a bucket for key hash of a record. */
@@ -88,7 +109,14 @@ public class HashBucketAssigner implements BucketAssigner {
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum, maxBucketId);
+        int assigned =
+                index.assign(
+                        hash,
+                        this::isMyBucket,
+                        maxBucketsNum,
+                        maxBucketId,
+                        minEmptyBucketsBeforeAsyncCheck,
+                        minRefreshInterval);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Assign {} to the partition {} key hash {}", assigned, partition, hash);
         }
@@ -137,6 +165,10 @@ public class HashBucketAssigner implements BucketAssigner {
                     //
                     // We need a mechanism to clear index, otherwise there will be more and
                     // more such as yesterday's partition that no longer needs to be accessed.
+
+                    // Cancel any ongoing refresh before removing the index
+                    index.cancelOngoingRefresh();
+
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Removing index for partition {}. "
