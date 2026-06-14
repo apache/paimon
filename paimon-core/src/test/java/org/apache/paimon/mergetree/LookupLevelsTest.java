@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
@@ -37,7 +38,9 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.sort.SortLookupStoreFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.mergetree.lookup.DefaultLookupSerializerFactory;
+import org.apache.paimon.mergetree.lookup.PersistValueAndPosProcessor;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
+import org.apache.paimon.mergetree.lookup.PositionedKeyValue;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -66,6 +69,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -270,6 +274,61 @@ public class LookupLevelsTest {
         assertThat(kv.value().getInt(1)).isEqualTo(11);
     }
 
+    @Test
+    public void testLookupRespectsDeletionVectorUpdates() throws IOException {
+        Levels levels = new Levels(comparator, Arrays.asList(newFile(1, kv(1, 11))), 3);
+        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+        LookupLevels<PositionedKeyValue> lookupLevels =
+                createPositionedLookupLevels(
+                        levels, fileName -> Optional.ofNullable(deletionVectors.get(fileName)));
+
+        // first lookup hits the live row and warms the lookup file cache
+        PositionedKeyValue hit = lookupLevels.lookup(row(1), 1);
+        assertThat(hit).isNotNull();
+        assertThat(hit.keyValue().value().getInt(1)).isEqualTo(11);
+
+        // a deletion of an unrelated position must not affect the live row
+        BitmapDeletionVector unrelated = new BitmapDeletionVector();
+        unrelated.delete(hit.rowPosition() + 1);
+        deletionVectors.put(hit.fileName(), unrelated);
+        hit = lookupLevels.lookup(row(1), 1);
+        assertThat(hit).isNotNull();
+        assertThat(hit.keyValue().value().getInt(1)).isEqualTo(11);
+
+        // mark the returned position deleted; data files are immutable so the cached
+        // lookup file is not rebuilt and would keep serving the stale row
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(hit.rowPosition());
+        deletionVectors.put(hit.fileName(), deletionVector);
+
+        // the hit must now be validated against the current deletion vector
+        assertThat(lookupLevels.lookup(row(1), 1)).isNull();
+
+        lookupLevels.close();
+    }
+
+    private LookupLevels<PositionedKeyValue> createPositionedLookupLevels(
+            Levels levels, DeletionVector.Factory dvFactory) {
+        return new LookupLevels<>(
+                schemaId -> rowType,
+                0L,
+                levels,
+                comparator,
+                keyType,
+                PersistValueAndPosProcessor.factory(rowType),
+                new DefaultLookupSerializerFactory(),
+                file -> createReaderFactory().createRecordReader(file),
+                file -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
+                new SortLookupStoreFactory(
+                        new RowCompactedSerializer(keyType).createSliceComparator(),
+                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        4096,
+                        new CompressOptions("none", 1)),
+                rowCount -> BloomFilter.builder(rowCount, 0.05),
+                LookupFile.createCache(Duration.ofHours(1), MemorySize.ofMebiBytes(10)),
+                dvFactory);
+    }
+
     private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels<>(
                 schemaId -> rowType,
@@ -287,7 +346,8 @@ public class LookupLevelsTest {
                         4096,
                         new CompressOptions("none", 1)),
                 rowCount -> BloomFilter.builder(rowCount, 0.05),
-                LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
+                LookupFile.createCache(Duration.ofHours(1), maxDiskSize),
+                DeletionVector.emptyFactory());
     }
 
     private KeyValue kv(int key, int value) {

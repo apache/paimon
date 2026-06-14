@@ -168,7 +168,9 @@ public class LocalTableQuery implements TableQuery {
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),
-                        lookupFileCache);
+                        lookupFileCache,
+                        // TODO pass DeletionVector factory (see reader factory above)
+                        DeletionVector.emptyFactory());
 
         // Optimization - download lookup files if already persisted to object store
         // We download these files if three conditions are met
