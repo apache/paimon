@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
@@ -201,6 +202,15 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void compactManifests() {
         commit.compactManifest();
+    }
+
+    public boolean restoreAsLatest(Snapshot targetSnapshot) {
+        checkCommitted();
+        boolean success = commit.restoreAsLatest(targetSnapshot);
+        if (success) {
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, true);
+        }
+        return success;
     }
 
     private void checkCommitted() {
