@@ -484,7 +484,18 @@ class DataTypeParser:
 
     @staticmethod
     def parse_atomic_type_sql_string(type_string: str) -> DataType:
+        nullable = DataTypeParser.parse_nullability(type_string)
         type_upper = type_string.upper().strip()
+        # Strip the trailing nullability suffix so it is stored only in
+        # ``nullable``, not baked into the atomic type string. The space-split
+        # branch below drops it for plain types ("BIGINT NOT NULL"), but a
+        # parameterized type ("DECIMAL(12, 2) NOT NULL", "VARCHAR(10) NOT NULL")
+        # takes the paren branch and would otherwise keep the suffix in
+        # ``AtomicType.type`` -- doubling it on the next ``to_dict()``.
+        for suffix in (" NOT NULL", " NULL"):
+            if type_upper.endswith(suffix):
+                type_upper = type_upper[: -len(suffix)].rstrip()
+                break
 
         if "(" in type_upper:
             base_type = type_upper.split("(")[0]
@@ -496,9 +507,7 @@ class DataTypeParser:
 
         try:
             Keyword(base_type)
-            return AtomicType(
-                type_upper, DataTypeParser.parse_nullability(type_string)
-            )
+            return AtomicType(type_upper, nullable)
         except ValueError:
             raise Exception("Unknown type: {}".format(base_type))
 

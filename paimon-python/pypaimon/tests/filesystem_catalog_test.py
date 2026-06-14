@@ -302,6 +302,32 @@ class FileSystemCatalogTest(unittest.TestCase):
         table = catalog.get_table(identifier)
         self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
 
+    def test_update_column_type_parameterized_not_null_target(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_nn_param", False)
+        identifier = "test_db_nn_param.t"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "v", "type": "INT NOT NULL"}),
+                DataField.from_dict({"id": 1, "name": "s", "type": "STRING"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # Widening a non-null INT to a non-null DECIMAL(12, 2) is valid. The
+        # target's to_dict() is "DECIMAL(12, 2) NOT NULL"; the atomic parser must
+        # keep the nullability in `nullable` so the executable-cast check does
+        # not choke on a doubled "NOT NULL NOT NULL" type string.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("DECIMAL(12, 2)", nullable=False))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
+        self.assertFalse(table.fields[0].type.nullable)
+
     def test_add_column_before_partition(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
