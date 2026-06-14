@@ -724,6 +724,22 @@ class RawFileSplitRead(SplitRead):
                 reader = NestedLeafBatchReader(
                     reader, self.outer_extract_name_paths,
                     self.outer_flat_read_type)
+                # A predicate on a projected nested leaf cannot be pushed down:
+                # its leaf path is absent from the widened top-level read
+                # fields, so SplitRead.__init__ dropped it (predicate_for_reader
+                # is None). Without re-applying it the filter is silently lost
+                # and every row is returned. Re-evaluate it on the extracted
+                # flat batches, whose column names match the predicate fields;
+                # trim to the projected columns so a filter on a non-projected
+                # column keeps the existing "dropped" semantics rather than
+                # referencing a missing column.
+                if self.predicate is not None and self.predicate_for_reader is None:
+                    flat_names = [f.name for f in self.outer_flat_read_type]
+                    trimmed = trim_predicate_by_fields(self.predicate, flat_names)
+                    if trimmed is not None:
+                        from pypaimon.read.reader.filter_record_batch_reader \
+                            import FilterRecordBatchReader
+                        reader = FilterRecordBatchReader(reader, trimmed)
             if self.limit is not None:
                 reader = LimitedRecordBatchReader(reader, self.limit)
         return reader
@@ -743,6 +759,7 @@ class MergeFileSplitRead(SplitRead):
             split: Split,
             row_tracking_enabled: bool,
             outer_extract_name_paths: Optional[List[List[str]]] = None,
+            outer_flat_read_type: Optional[List[DataField]] = None,
             limit: Optional[int] = None):
         # Merge functions need full ROW sub-structures, so nested paths
         # are not pushed down here; sub-path extraction happens above
@@ -757,6 +774,7 @@ class MergeFileSplitRead(SplitRead):
             limit=limit,
         )
         self.outer_extract_name_paths = outer_extract_name_paths
+        self.outer_flat_read_type = outer_flat_read_type
         # Built once per split-read (value_fields and options are constant
         # for the object's life), not per section. ``None`` when
         # ``sequence.field`` is unset, in which case the heap falls back to
@@ -855,6 +873,21 @@ class MergeFileSplitRead(SplitRead):
                 file_io=self.table.file_io,
                 blob_field_indices=_blob_field_indices(inner_value_fields),
                 vector_field_indices=_vector_field_indices(inner_value_fields))
+            # A predicate on a projected nested leaf is not pushed down (its leaf
+            # path is absent from the widened-to-full-ROW read fields, so it was
+            # dropped in __init__). Without re-applying it after extraction the
+            # filter is silently lost. Evaluate it on the extracted flat rows,
+            # whose fields are outer_flat_read_type; trim to the projected
+            # columns and rewrite indices into that flat row.
+            if (self.predicate is not None and self.predicate_for_reader is None
+                    and self.outer_flat_read_type is not None):
+                flat_names = [f.name for f in self.outer_flat_read_type]
+                trimmed = trim_predicate_by_fields(self.predicate, flat_names)
+                if trimmed is not None:
+                    reader = FilterRecordReader(
+                        reader,
+                        rewrite_predicate_indices(
+                            trimmed, self.outer_flat_read_type))
         if self.limit is not None:
             reader = LimitedRecordReader(reader, self.limit)
         return reader

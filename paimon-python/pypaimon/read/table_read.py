@@ -585,6 +585,8 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=False,
                 outer_extract_name_paths=outer_extract_name_paths,
+                outer_flat_read_type=(
+                    self.read_type if outer_extract_name_paths else None),
                 limit=self.limit,
             )
         elif self.table.options.data_evolution_enabled():
