@@ -300,7 +300,6 @@ public class ParquetFilters {
             Timestamp timestamp = (Timestamp) value;
             int precision = getTimestampPrecision(type);
             if (precision <= 6) {
-                // microseconds (precision 0-3 also stored as MICROS since the writer uses toMicros())
                 return timestamp.toMicros();
             }
             // precision > 6 uses INT96, not supported
