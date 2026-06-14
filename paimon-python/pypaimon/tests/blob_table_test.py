@@ -1103,25 +1103,22 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         update_files = [f for msg in update_messages for f in msg.new_files]
         update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
-        self.assertGreater(len(update_blob_files), 0)
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 1)
+        self.assertEqual(update_blob_files[0].first_row_id, 1)
         self.assertTrue(all(f.write_cols == ['blob_data'] for f in update_files))
-        update_blob_lengths = []
         blob_fields = [field for field in table.fields if field.name == 'blob_data']
-        for blob_file in update_blob_files:
-            blob_reader = FormatBlobReader(
-                file_io=table.file_io,
-                file_path=blob_file.file_path,
-                read_fields=['blob_data'],
-                full_fields=blob_fields,
-                push_down_predicate=None,
-                blob_as_descriptor=False,
-            )
-            update_blob_lengths.extend(blob_reader.blob_lengths)
-            blob_reader.close()
-        self.assertEqual(
-            update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
-            2,
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['blob_data'],
+            full_fields=blob_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
         )
+        update_blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertNotIn(BlobFormatWriter.PLACE_HOLDER_LENGTH, update_blob_lengths)
 
         read_builder = table.new_read_builder()
         result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
@@ -1135,7 +1132,6 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             3: b'blob-3',
         })
 
-    @unittest.expectedFailure
     def test_blob_update_writes_only_changed_rows(self):
         from pypaimon import Schema
 
@@ -1344,7 +1340,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             blob_reader.close()
         self.assertEqual(
             update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
-            3,
+            1,
         )
 
         update_builder.new_commit().commit(update_messages)

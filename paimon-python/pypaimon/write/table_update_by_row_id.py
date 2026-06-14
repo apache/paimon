@@ -270,7 +270,8 @@ class TableUpdateByRowId:
             original_data: Optional[pa.Table],
             update_data: pa.Table,
             column_names: List[str],
-            first_row_id: int) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
+            first_row_id: int,
+    ) -> Tuple[Optional[pa.Table], Dict[str, Dict[str, object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
@@ -283,7 +284,9 @@ class TableUpdateByRowId:
             first_row_id: The first_row_id of this file group
 
         Returns:
-            Normal merged PyArrow Table and blob values to write row-by-row.
+            Normal merged PyArrow Table, and per-blob-column dicts of
+            ``{"offset": <pos relative to first_row_id>, "values": [...]}``
+            spanning ``[min_updated_pos, max_updated_pos]`` only.
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -298,7 +301,7 @@ class TableUpdateByRowId:
 
         # Build the merged table column by column
         merged_columns = {}
-        blob_columns = {}
+        blob_columns: Dict[str, Dict[str, object]] = {}
         update_by_col = {
             col_name: update_data[col_name].combine_chunks()
             for col_name in column_names
@@ -307,6 +310,8 @@ class TableUpdateByRowId:
             int(relative_index.as_py()): idx
             for idx, relative_index in enumerate(relative_indices)
         }
+        min_pos = min(update_positions) if update_positions else 0
+        max_pos = max(update_positions) if update_positions else -1
         for col_name in column_names:
             update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
@@ -314,12 +319,17 @@ class TableUpdateByRowId:
                 update_col = self._coerce_column(
                     update_col, original_col.type)
             if self._is_blob_column(col_name):
-                blob_columns[col_name] = [
-                    update_col[update_positions[i]].as_py()
-                    if i in update_positions
-                    else Blob.PLACE_HOLDER
-                    for i in range(original_data.num_rows)
-                ]
+                if not update_positions:
+                    continue
+                blob_columns[col_name] = {
+                    "offset": min_pos,
+                    "values": [
+                        update_col[update_positions[i]].as_py()
+                        if i in update_positions
+                        else Blob.PLACE_HOLDER
+                        for i in range(min_pos, max_pos + 1)
+                    ],
+                }
             else:
                 try:
                     merged_columns[col_name] = pc.replace_with_mask(
@@ -402,7 +412,9 @@ class TableUpdateByRowId:
                 for msg in new_messages:
                     new_files.extend(msg.new_files)
 
-            for column_name, values in blob_columns.items():
+            blob_offsets: Dict[str, int] = {}
+            blob_lengths: Dict[str, int] = {}
+            for column_name, slice_ in blob_columns.items():
                 blob_writer = BlobWriter(
                     self.table,
                     partition_tuple,
@@ -413,13 +425,17 @@ class TableUpdateByRowId:
                 )
                 blob_writers.append(blob_writer)
                 arrow_type = original_data.schema.field(column_name).type
+                values = slice_["values"]
                 for value in values:
                     blob_writer.write_blob(value, arrow_type)
                 new_files.extend(blob_writer.prepare_commit())
+                blob_offsets[column_name] = int(slice_["offset"])
+                blob_lengths[column_name] = len(values)
 
             if new_files:
                 self._assign_update_file_metadata(
-                    new_files, first_row_id, column_names, original_data.num_rows)
+                    new_files, first_row_id, column_names,
+                    original_data.num_rows, blob_offsets, blob_lengths)
                 self.commit_messages.append(
                     CommitMessage(
                         partition=partition_tuple,
@@ -436,9 +452,10 @@ class TableUpdateByRowId:
 
     @staticmethod
     def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
-                                     column_names: List[str], expected_row_count: int):
-        blob_end = first_row_id + expected_row_count
-        blob_starts = {}
+                                     column_names: List[str], expected_row_count: int,
+                                     blob_offsets: Dict[str, int],
+                                     blob_lengths: Dict[str, int]):
+        blob_starts: Dict[str, int] = {}
         # BlobWriter.prepare_commit preserves write/rolling order, which is required
         # for assigning continuous row-id ranges to rolled blob files.
         for file in new_files:
@@ -449,13 +466,15 @@ class TableUpdateByRowId:
                         f"Blob update file {file.file_name} should contain "
                         f"exactly one write column, got {file.write_cols}")
                 blob_column = file.write_cols[0]
-                blob_start = blob_starts.get(blob_column, first_row_id)
+                column_start = first_row_id + blob_offsets[blob_column]
+                column_end = column_start + blob_lengths[blob_column]
+                blob_start = blob_starts.get(blob_column, column_start)
                 next_blob_start = blob_start + file.row_count
-                if next_blob_start > blob_end:
+                if next_blob_start > column_end:
                     raise RuntimeError(
                         f"Blob update file {file.file_name} row-id range "
                         f"[{blob_start}, {next_blob_start - 1}] exceeds target range "
-                        f"[{first_row_id}, {blob_end - 1}]")
+                        f"[{column_start}, {column_end - 1}]")
                 file.first_row_id = blob_start
                 # Only update-by-row-id blob delta files use the 0/0 sentinel;
                 # regular blob writes keep their per-row sequence range.
@@ -466,8 +485,9 @@ class TableUpdateByRowId:
                 file.first_row_id = first_row_id
 
         for blob_column, next_blob_start in blob_starts.items():
-            if next_blob_start != blob_end:
+            column_end = first_row_id + blob_offsets[blob_column] + blob_lengths[blob_column]
+            if next_blob_start != column_end:
                 raise RuntimeError(
                     f"Blob update column {blob_column} covers row ids "
-                    f"[{first_row_id}, {next_blob_start - 1}], expected "
-                    f"[{first_row_id}, {blob_end - 1}]")
+                    f"[{first_row_id + blob_offsets[blob_column]}, {next_blob_start - 1}], "
+                    f"expected [{first_row_id + blob_offsets[blob_column]}, {column_end - 1}]")
