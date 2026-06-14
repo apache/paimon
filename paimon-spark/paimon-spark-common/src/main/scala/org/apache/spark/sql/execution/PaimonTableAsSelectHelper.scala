@@ -109,7 +109,7 @@ object PaimonTableAsSelectHelper {
 
     query.transformDown {
       case r: DataSourceV2Relation
-          if r.catalog.exists(_ == catalog) && r.identifier.exists(_ == ident) &&
+          if r.catalog.contains(catalog) && r.identifier.contains(ident) &&
             !TimeTravelUtil.hasTimeTravelOptions(Options.fromMap(r.options.asCaseSensitiveMap())) =>
         val pinned = new JHashMap[String, String](r.options.asCaseSensitiveMap())
         pinned.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId.toString)
