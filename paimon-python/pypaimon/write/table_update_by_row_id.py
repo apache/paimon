@@ -177,7 +177,11 @@ class TableUpdateByRowId:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        sorted_data = data.sort_by([(SpecialFields.ROW_ID.name, "ascending")])
+        sort_keys = [(SpecialFields.ROW_ID.name, "ascending")]
+        if hasattr(data, "sort_by"):
+            sorted_data = data.sort_by(sort_keys)
+        else:
+            sorted_data = data.take(pc.sort_indices(data, sort_keys=sort_keys))
         data_with_first_row_id = self._calculate_first_row_id(sorted_data)
         self._write_by_first_row_id(data_with_first_row_id, column_names)
 
