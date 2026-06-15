@@ -40,7 +40,7 @@ public class ParquetTimestampVector implements TimestampColumnVector {
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         if (precision <= 3 && vector instanceof LongColumnVector) {
-            return Timestamp.fromEpochMillis(((LongColumnVector) vector).getLong(i));
+            return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
         } else if (precision <= 6 && vector instanceof LongColumnVector) {
             return Timestamp.fromMicros(((LongColumnVector) vector).getLong(i));
         } else {
