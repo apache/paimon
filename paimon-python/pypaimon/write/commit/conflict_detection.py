@@ -303,14 +303,12 @@ class ConflictDetection:
 
         # Pair each delta with its anchor file type so a parquet-only
         # compact does not flag a blob delta whose .blob anchor is intact.
-        def _is_blob(name):
-            return name.endswith(".blob")
-
         delta_signatures = []
         for f in delta_files:
             r = f.row_id_range()
             if r is not None:
-                delta_signatures.append((_is_blob(f.file_name), r.from_, r.to))
+                delta_signatures.append(
+                    (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
 
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
@@ -320,32 +318,10 @@ class ConflictDetection:
                 continue
 
             if snapshot.commit_kind == "COMPACT":
-                if not delta_signatures:
-                    continue
-                raw_entries = self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
-                    snapshot, commit_entries)
-                for entry in raw_entries:
-                    if entry.kind != 1:
-                        continue
-                    file_range = entry.file.row_id_range()
-                    if file_range is None:
-                        continue
-                    deleted_is_blob = _is_blob(entry.file.file_name)
-                    for delta_is_blob, from_, to in delta_signatures:
-                        if delta_is_blob != deleted_is_blob:
-                            continue
-                        if file_range.from_ <= to and from_ <= file_range.to:
-                            return RuntimeError(
-                                "Blob/row-id update conflicts with concurrent COMPACT "
-                                "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
-                                "was compacted away, overlaps staged delta "
-                                "[{df}, {dt}].".format(
-                                    sid=snapshot.id,
-                                    name=entry.file.file_name,
-                                    ff=file_range.from_,
-                                    ft=file_range.to,
-                                    df=from_,
-                                    dt=to))
+                err = self._compact_conflicts_with_delta(
+                    snapshot, delta_signatures, commit_entries)
+                if err is not None:
+                    return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
@@ -362,4 +338,37 @@ class ConflictDetection:
                             "the same file, which can render some updates "
                             "ineffective.")
 
+        return None
+
+    def _compact_conflicts_with_delta(self, snapshot, delta_signatures, commit_entries):
+        """Return RuntimeError if a COMPACT snapshot deleted a same-kind
+        (blob vs non-blob) anchor file whose row-id range overlaps any
+        staged delta; otherwise None.
+        """
+        if not delta_signatures:
+            return None
+        raw_entries = self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
+            snapshot, commit_entries)
+        for entry in raw_entries:
+            if entry.kind != 1:
+                continue
+            file_range = entry.file.row_id_range()
+            if file_range is None:
+                continue
+            deleted_is_blob = DataFileMeta.is_blob_file(entry.file.file_name)
+            for delta_is_blob, from_, to in delta_signatures:
+                if delta_is_blob != deleted_is_blob:
+                    continue
+                if file_range.from_ <= to and from_ <= file_range.to:
+                    return RuntimeError(
+                        "Blob/row-id update conflicts with concurrent COMPACT "
+                        "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
+                        "was compacted away, overlaps staged delta "
+                        "[{df}, {dt}].".format(
+                            sid=snapshot.id,
+                            name=entry.file.file_name,
+                            ff=file_range.from_,
+                            ft=file_range.to,
+                            df=from_,
+                            dt=to))
         return None
