@@ -24,6 +24,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.manifest_file_merger import ManifestFileMerger
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -151,6 +152,52 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
         self.assertEqual(
             len(final_entries), 0,
             "ADD and DELETE entries with same identifier should both be removed")
+
+    def test_minor_compaction_cancels_add_delete_matching_same_file(self):
+        partition = GenericRow([], [])
+        add_entry = ManifestEntry(
+            kind=0,
+            partition=partition,
+            bucket=0,
+            total_buckets=1,
+            file=self._create_file_meta("data-1.parquet", level=0)
+        )
+        delete_entry = ManifestEntry(
+            kind=1,
+            partition=partition,
+            bucket=0,
+            total_buckets=1,
+            file=self._create_file_meta("data-1.parquet", level=0)
+        )
+
+        manifest_file_1 = ManifestFileMeta(
+            file_name="manifest-minor-1.avro",
+            file_size=1024,
+            num_added_files=1,
+            num_deleted_files=0,
+            partition_stats=SimpleStats.empty_stats(),
+            schema_id=0
+        )
+        manifest_file_2 = ManifestFileMeta(
+            file_name="manifest-minor-2.avro",
+            file_size=1024,
+            num_added_files=0,
+            num_deleted_files=1,
+            partition_stats=SimpleStats.empty_stats(),
+            schema_id=0
+        )
+        self.manifest_file_manager.write(manifest_file_1.file_name, [add_entry])
+        self.manifest_file_manager.write(manifest_file_2.file_name, [delete_entry])
+
+        merger = ManifestFileMerger(
+            self.manifest_file_manager,
+            suggested_meta_size=8 * 1024 * 1024,
+            suggested_min_meta_count=2,
+        )
+        merged_files, new_files = merger.merge([manifest_file_1, manifest_file_2])
+
+        self.assertEqual(merged_files, [])
+        self.assertEqual(new_files, [])
 
     def test_add_delete_different_levels(self):
         """

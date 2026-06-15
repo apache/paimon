@@ -180,6 +180,23 @@ class CoreOptions:
         .with_description("The parallelism for scanning manifest files.")
     )
 
+    MANIFEST_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("manifest.target-file-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(8))
+        .with_description("Suggested file size of a manifest file.")
+    )
+
+    MANIFEST_MERGE_MIN_COUNT: ConfigOption[int] = (
+        ConfigOptions.key("manifest.merge-min-count")
+        .int_type()
+        .default_value(30)
+        .with_description(
+            "To avoid frequent manifest merges, this parameter specifies the minimum number "
+            "of ManifestFileMeta to merge."
+        )
+    )
+
     # File format options
     FILE_FORMAT: ConfigOption[str] = (
         ConfigOptions.key("file.format")
@@ -777,6 +794,14 @@ class CoreOptions:
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
+
+    def manifest_target_size(self, default=None):
+        if default is not None and not isinstance(default, MemorySize):
+            default = MemorySize.of_bytes(default) if isinstance(default, int) else MemorySize.parse(default)
+        return self.options.get(CoreOptions.MANIFEST_TARGET_FILE_SIZE, default).get_bytes()
+
+    def manifest_merge_min_count(self, default=None):
+        return self.options.get(CoreOptions.MANIFEST_MERGE_MIN_COUNT, default)
 
     def file_format(self, default=None):
         return self.options.get(CoreOptions.FILE_FORMAT, default)

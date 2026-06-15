@@ -29,6 +29,7 @@ from parameterized import parameterized
 
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
@@ -146,6 +147,56 @@ class TableWriteTest(unittest.TestCase):
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
         self.assertEqual(self.expected, actual)
+
+    def test_commit_minor_compacts_manifest_files(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={'manifest.merge-min-count': '2'},
+        )
+        self.catalog.create_table('default.test_minor_manifest_compaction', schema, False)
+        table = self.catalog.get_table('default.test_minor_manifest_compaction')
+
+        expected_data = {
+            'user_id': [],
+            'item_id': [],
+            'behavior': [],
+            'dt': [],
+        }
+        for i in range(3):
+            row = {
+                'user_id': [i + 1],
+                'item_id': [1000 + i],
+                'behavior': ['click'],
+                'dt': ['p1'],
+            }
+            for key, values in row.items():
+                expected_data[key].extend(values)
+
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            table_write.write_arrow(pa.Table.from_pydict(row, schema=self.pa_schema))
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        manifest_list_manager = ManifestListManager(table)
+        base_manifests = manifest_list_manager.read(snapshot.base_manifest_list)
+        delta_manifests = manifest_list_manager.read(snapshot.delta_manifest_list)
+
+        self.assertEqual(len(base_manifests), 1)
+        self.assertEqual(base_manifests[0].num_added_files, 2)
+        self.assertEqual(base_manifests[0].num_deleted_files, 0)
+        self.assertEqual(len(delta_manifests), 1)
+
+        expected = pa.Table.from_pydict(expected_data, schema=self.pa_schema)
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        self.assertEqual(expected, actual)
 
     def test_multi_prepare_commit_pk(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], primary_keys=['user_id', 'dt'],
