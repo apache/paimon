@@ -285,8 +285,8 @@ public class ExpireSnapshotsTest {
                         1,
                         EMPTY_ROW,
                         EMPTY_ROW,
-                        null,
-                        null,
+                        SimpleStats.EMPTY_STATS,
+                        SimpleStats.EMPTY_STATS,
                         0,
                         1,
                         0,
@@ -346,8 +346,8 @@ public class ExpireSnapshotsTest {
                         1,
                         EMPTY_ROW,
                         EMPTY_ROW,
-                        null,
-                        null,
+                        SimpleStats.EMPTY_STATS,
+                        SimpleStats.EMPTY_STATS,
                         0,
                         1,
                         0,
@@ -835,10 +835,15 @@ public class ExpireSnapshotsTest {
         snapshotDeletion.reset();
         List<Runnable> manifestPlan =
                 snapshotDeletion.planManifestsCleaner(snapshot, new HashSet<>());
+        assertThat(manifestPlan).isNotEmpty();
         List<Runnable> duplicateManifestPlan = new ArrayList<>(manifestPlan);
         duplicateManifestPlan.addAll(manifestPlan);
+        AtomicInteger probeRuns = new AtomicInteger();
+        Runnable probe = probeRuns::incrementAndGet;
+        duplicateManifestPlan.add(probe);
+        duplicateManifestPlan.add(probe);
         snapshotDeletion.executeAll(duplicateManifestPlan);
-        snapshotDeletion.assertDeleteBatchesDeduplicated();
+        assertThat(probeRuns).hasValue(1);
     }
 
     @Test

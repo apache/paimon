@@ -253,8 +253,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         Set<String> skippingSet = null;
         try {
-            skippingSet = ConcurrentHashMap.newKeySet();
-            skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            Set<String> builtSkippingSet = ConcurrentHashMap.newKeySet();
+            builtSkippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            skippingSet = builtSkippingSet;
         } catch (Exception e) {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
         }
