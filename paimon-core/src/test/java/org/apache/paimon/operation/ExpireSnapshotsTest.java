@@ -46,6 +46,7 @@ import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SlowFileIO;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -69,7 +70,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -561,6 +565,82 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
+    public void testExpireCollectsSnapshotsConcurrently() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(Integer.MAX_VALUE)
+                        .snapshotTimeRetain(Duration.ofMillis(1))
+                        .build();
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(5, allData, snapshotPositions);
+        for (int i = 1; i <= 5; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        BlockingSnapshotManager blockingSnapshotManager =
+                new BlockingSnapshotManager(snapshotManager, 1, 5);
+        ExpireSnapshotsImpl expire =
+                new ExpireSnapshotsImpl(
+                        blockingSnapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        store.newTagManager());
+        expire.config(config);
+        expire.setCurrentTimeMillis(() -> 1000L);
+
+        expire.expire();
+
+        assertThat(blockingSnapshotManager.maxActiveReads()).isGreaterThan(1);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireWithSlowObjectStoreFileIO() throws Exception {
+        TestFileStore slowStore = createSlowStore();
+        slowStore.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        try {
+            List<KeyValue> allData = new ArrayList<>();
+            List<Integer> snapshotPositions = new ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                commit(slowStore, 3, allData, snapshotPositions);
+            }
+
+            SnapshotManager slowSnapshotManager = slowStore.snapshotManager();
+            int latestSnapshotId = requireNonNull(slowSnapshotManager.latestSnapshotId()).intValue();
+            for (int i = 1; i <= latestSnapshotId; i++) {
+                rewriteSnapshotTime(slowStore.fileIO(), slowSnapshotManager, i, 0);
+            }
+
+            SlowFileIO.reset();
+            SlowFileIO.setDelayMillis(20);
+            ExpireConfig config =
+                    ExpireConfig.builder()
+                            .snapshotRetainMin(1)
+                            .snapshotRetainMax(Integer.MAX_VALUE)
+                            .snapshotTimeRetain(Duration.ofMillis(1))
+                            .build();
+            ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) slowStore.newExpire(config);
+            expire.setCurrentTimeMillis(() -> 1000L);
+
+            expire.expire();
+
+            assertThat(SlowFileIO.delayedOperations()).isGreaterThan(0);
+            assertThat(SlowFileIO.maxActiveOperations()).isGreaterThan(1);
+            assertSnapshot(slowStore, latestSnapshotId, allData, snapshotPositions);
+        } finally {
+            SlowFileIO.reset();
+        }
+    }
+
+    @Test
     public void testExpireWithTimeProtectsEachSnapshot() throws Exception {
         // Even with a small retainMin, each snapshot should be protected by
         // snapshotTimeRetain: a snapshot can only be expired when its next
@@ -779,6 +859,14 @@ public class ExpireSnapshotsTest {
     }
 
     private TestFileStore createStore() {
+        return createStore(tempDir.toString());
+    }
+
+    private TestFileStore createSlowStore() {
+        return createStore(SlowFileIO.SCHEME + "://" + tempDir.toString());
+    }
+
+    private TestFileStore createStore(String root) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         CoreOptions.ChangelogProducer changelogProducer;
@@ -790,7 +878,7 @@ public class ExpireSnapshotsTest {
 
         return new TestFileStore.Builder(
                         "avro",
-                        tempDir.toString(),
+                        root,
                         1,
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         TestKeyValueGenerator.KEY_TYPE,
@@ -803,6 +891,15 @@ public class ExpireSnapshotsTest {
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
+        rewriteSnapshotTime(fileIO, snapshotManager, snapshotId, newTimeMillis);
+    }
+
+    private void rewriteSnapshotTime(
+            FileIO fileIO,
+            SnapshotManager snapshotManager,
+            long snapshotId,
+            long newTimeMillis)
+            throws IOException {
         String oldJson = fileIO.readFileUtf8(snapshotManager.snapshotPath(snapshotId));
         ObjectNode node = (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(oldJson);
         node.put("timeMillis", newTimeMillis);
@@ -811,7 +908,77 @@ public class ExpireSnapshotsTest {
         snapshotManager.invalidateCache();
     }
 
+    private static class BlockingSnapshotManager extends SnapshotManager {
+
+        private final long minBlockedSnapshotId;
+        private final long maxBlockedSnapshotId;
+        private final CountDownLatch releaseReads = new CountDownLatch(1);
+        private final AtomicInteger activeReads = new AtomicInteger();
+        private final AtomicInteger maxActiveReads = new AtomicInteger();
+
+        private BlockingSnapshotManager(
+                SnapshotManager snapshotManager, long minBlockedSnapshotId, long maxBlockedSnapshotId) {
+            super(
+                    snapshotManager.fileIO(),
+                    snapshotManager.tablePath(),
+                    snapshotManager.branch(),
+                    null,
+                    null);
+            this.minBlockedSnapshotId = minBlockedSnapshotId;
+            this.maxBlockedSnapshotId = maxBlockedSnapshotId;
+        }
+
+        @Override
+        public Snapshot tryGetSnapshot(long snapshotId) throws java.io.FileNotFoundException {
+            if (snapshotId < minBlockedSnapshotId
+                    || snapshotId > maxBlockedSnapshotId
+                    || releaseReads.getCount() == 0) {
+                return super.tryGetSnapshot(snapshotId);
+            }
+
+            int active = activeReads.incrementAndGet();
+            updateMaxActiveReads(active);
+            if (active > 1) {
+                releaseReads.countDown();
+            }
+            try {
+                if (!releaseReads.await(5, TimeUnit.SECONDS)) {
+                    throw new RuntimeException("Snapshots were not read concurrently.");
+                }
+                return super.tryGetSnapshot(snapshotId);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } finally {
+                activeReads.decrementAndGet();
+            }
+        }
+
+        private void updateMaxActiveReads(int active) {
+            int current;
+            do {
+                current = maxActiveReads.get();
+                if (active <= current) {
+                    return;
+                }
+            } while (!maxActiveReads.compareAndSet(current, active));
+        }
+
+        private int maxActiveReads() {
+            return maxActiveReads.get();
+        }
+    }
+
     protected void commit(int numCommits, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        commit(store, numCommits, allData, snapshotPositions);
+    }
+
+    protected void commit(
+            TestFileStore store,
+            int numCommits,
+            List<KeyValue> allData,
+            List<Integer> snapshotPositions)
             throws Exception {
         for (int i = 0; i < numCommits; i++) {
             int numRecords = ThreadLocalRandom.current().nextInt(100) + 1;
@@ -830,11 +997,29 @@ public class ExpireSnapshotsTest {
     protected void assertSnapshot(
             int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
             throws Exception {
-        assertSnapshot(snapshotManager.snapshot(snapshotId), allData, snapshotPositions);
+        assertSnapshot(store, snapshotManager.snapshot(snapshotId), allData, snapshotPositions);
+    }
+
+    protected void assertSnapshot(
+            TestFileStore store,
+            int snapshotId,
+            List<KeyValue> allData,
+            List<Integer> snapshotPositions)
+            throws Exception {
+        assertSnapshot(store, store.snapshotManager().snapshot(snapshotId), allData, snapshotPositions);
     }
 
     protected void assertSnapshot(
             Snapshot snapshot, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        assertSnapshot(store, snapshot, allData, snapshotPositions);
+    }
+
+    protected void assertSnapshot(
+            TestFileStore store,
+            Snapshot snapshot,
+            List<KeyValue> allData,
+            List<Integer> snapshotPositions)
             throws Exception {
         int snapshotId = (int) snapshot.id();
         Map<BinaryRow, BinaryRow> expected =
