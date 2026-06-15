@@ -167,6 +167,14 @@ class SplitRead(ABC):
     def _nested_path_by_name(self) -> Optional[Dict[str, List[str]]]:
         return self._cached_nested_path_by_name
 
+    def _resolve_schema(self, schema_id: int):
+        """Resolve schema, short-circuiting current table schema id to avoid
+        filesystem access (REST catalog would get 403).
+        """
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema
+        return self.table.schema_manager.get_schema(schema_id)
+
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
             return None
@@ -304,8 +312,7 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on ROW files")
-            file_schema = self.table.schema_manager.get_schema(
-                file.schema_id)
+            file_schema = self._resolve_schema(file.schema_id)
             if file.write_cols:
                 field_map = {f.name: f for f in file_schema.fields}
                 row_full_fields = [field_map[n] for n in file.write_cols
@@ -389,7 +396,7 @@ class SplitRead(ABC):
         key = (schema_id, tuple(read_fields))
         if key not in self.schema_id_2_fields:
             nested_path_by_name = self._nested_path_by_name()
-            schema = self.table.schema_manager.get_schema(schema_id)
+            schema = self._resolve_schema(schema_id)
             schema_fields = (
                 SpecialFields.row_type_with_row_tracking(schema.fields)
                 if self.row_tracking_enabled else schema.fields
@@ -461,7 +468,7 @@ class SplitRead(ABC):
         nested-projection reads."""
         if self._nested_path_by_name() is not None:
             return None
-        file_schema = self.table.schema_manager.get_schema(file.schema_id)
+        file_schema = self._resolve_schema(file.schema_id)
         if file_schema is None:
             return None
         return self._final_data_fields_from(
