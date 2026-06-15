@@ -127,12 +127,13 @@ Supported vector index options:
 | `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 | `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 
-**Per-Column Options**
+**Per-Field Options**
 
 The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared
 by every vector column of the same index type. When a table has multiple vector columns, you can
 scope an option to a single column with `<index-type>.fields.<field-name>.<option>`. The field-level
-form takes precedence over the column-agnostic `<index-type>.<option>` for that column:
+form takes precedence over the column-agnostic `<index-type>.<option>` for that column. Use the
+stored table column name exactly as `<field-name>`:
 
 ```sql
 CREATE TABLE my_table (

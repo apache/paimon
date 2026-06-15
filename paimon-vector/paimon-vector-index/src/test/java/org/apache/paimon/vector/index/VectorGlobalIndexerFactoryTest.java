@@ -153,6 +153,22 @@ public class VectorGlobalIndexerFactoryTest {
     }
 
     @Test
+    public void testFieldLevelOptionsRequireExactFieldName() {
+        Options options = new Options();
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("ivf-flat.fields.vec_extra.nlist", "512");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions).containsEntry("nlist", "128");
+    }
+
+    @Test
     public void testFieldLevelOptionsWithoutIndexTypeOption() {
         Options options = new Options();
         options.setString("ivf-flat.fields.vec.distance.metric", "cosine");
