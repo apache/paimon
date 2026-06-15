@@ -31,6 +31,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -63,6 +65,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,6 +165,110 @@ public class MergeFileSplitReadTest {
         }
         actual.entrySet().removeIf(e -> e.getValue() == 0);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testWithLimit() throws Exception {
+        int numRecords = 100;
+        OverlappingL0Data overlapping = prepareOverlappingL0Data(numRecords);
+        int limit = 10;
+        RecordReader<KeyValue> reader =
+                overlapping.read().withLimit(limit).createReader(overlapping.splitWithAllFiles());
+        assertThat(countRecords(reader)).isEqualTo(limit);
+    }
+
+    @Test
+    public void testWithLimitDisabledByNonPrimaryKeyFilter() throws Exception {
+        int numRecords = 100;
+        OverlappingL0Data overlapping = prepareOverlappingL0Data(numRecords);
+        int limit = 10;
+        Predicate filter =
+                new PredicateBuilder(TestKeyValueGenerator.NON_PARTITIONED_ROW_TYPE).isNotNull(4);
+        RecordReader<KeyValue> reader =
+                overlapping
+                        .read()
+                        .withFilter(filter)
+                        .withLimit(limit)
+                        .createReader(overlapping.splitWithAllFiles());
+        assertThat(countRecords(reader))
+                .as("Non-PK filter must disable merge read limit to preserve SQL semantics")
+                .isEqualTo(numRecords);
+    }
+
+    /**
+     * Use deterministic INSERT-only data in a single (non-partitioned) bucket so limit assertions
+     * are stable. Random {@link TestKeyValueGenerator#next()} data spans multiple partitions and
+     * may contain DELETE rows, which makes per-partition row counts flaky.
+     */
+    private OverlappingL0Data prepareOverlappingL0Data(int numRecords) throws Exception {
+        TestKeyValueGenerator gen = new TestKeyValueGenerator(NON_PARTITIONED);
+        List<KeyValue> data = new ArrayList<>();
+        for (int i = 0; i < numRecords; i++) {
+            data.add(gen.nextInsert("20201110", 9, (long) i, new int[] {1, 2}, "comment-" + i));
+        }
+        TestFileStore store =
+                createStore(
+                        TestKeyValueGenerator.NON_PARTITIONED_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.NON_PARTITIONED_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory());
+
+        // Write multiple times to create overlapping level-0 files in the same bucket.
+        for (int i = 0; i < 5; i++) {
+            store.commitData(data.subList(i * 20, (i + 1) * 20), gen::getPartition, kv -> 0);
+        }
+
+        Long snapshotId = store.snapshotManager().latestSnapshotId();
+        List<ManifestEntry> files = store.newScan().withSnapshot(snapshotId).plan().files();
+        assertThat(files).hasSizeGreaterThan(1);
+
+        BinaryRow partition = gen.getPartition(data.get(0));
+        return new OverlappingL0Data(store, snapshotId, partition, files);
+    }
+
+    private static int countRecords(RecordReader<KeyValue> reader) throws Exception {
+        int count = 0;
+        RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader);
+        while (iterator.hasNext()) {
+            iterator.next();
+            count++;
+        }
+        iterator.close();
+        return count;
+    }
+
+    private static final class OverlappingL0Data {
+        private final TestFileStore store;
+        private final Long snapshotId;
+        private final BinaryRow partition;
+        private final List<ManifestEntry> files;
+
+        private OverlappingL0Data(
+                TestFileStore store,
+                Long snapshotId,
+                BinaryRow partition,
+                List<ManifestEntry> files) {
+            this.store = store;
+            this.snapshotId = snapshotId;
+            this.partition = partition;
+            this.files = files;
+        }
+
+        private MergeFileSplitRead read() {
+            return store.newRead();
+        }
+
+        private DataSplit splitWithAllFiles() {
+            return DataSplit.builder()
+                    .withSnapshot(snapshotId)
+                    .withPartition(partition)
+                    .withBucket(0)
+                    .withDataFiles(
+                            files.stream().map(ManifestEntry::file).collect(Collectors.toList()))
+                    .withBucketPath("not used")
+                    .build();
+        }
     }
 
     @Test

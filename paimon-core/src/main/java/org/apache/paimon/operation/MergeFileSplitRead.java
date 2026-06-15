@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
@@ -41,6 +42,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -53,6 +55,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -74,6 +79,8 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
  */
 public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(MergeFileSplitRead.class);
+
     private final TableSchema tableSchema;
     private final FileIO fileIO;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
@@ -82,6 +89,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private final MergeSorter mergeSorter;
     private final List<String> sequenceFields;
     private final boolean sequenceOrder;
+    private final CoreOptions coreOptions;
 
     @Nullable private RowType readKeyType;
     @Nullable private RowType outerReadType;
@@ -89,7 +97,10 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable private List<Predicate> filtersForKeys;
     @Nullable private List<Predicate> filtersForAll;
 
+    @Nullable private Integer limit;
+
     private boolean forceKeepDelete = false;
+    private boolean mergeReadLimitLogEmitted = false;
 
     public MergeFileSplitRead(
             CoreOptions options,
@@ -100,6 +111,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
         this.tableSchema = schema;
+        this.coreOptions = options;
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
@@ -174,6 +186,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Override
     public MergeFileSplitRead forceKeepDelete() {
         this.forceKeepDelete = true;
+        return this;
+    }
+
+    @Override
+    public MergeFileSplitRead withLimit(@Nullable Integer limit) {
+        this.limit = limit;
         return this;
     }
 
@@ -312,6 +330,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             reader = new DropDeleteReader(reader);
         }
 
+        reader = LimitRecordReader.limit(reader, effectiveReadLimit());
         return projectOuter(projectKey(reader));
     }
 
@@ -334,7 +353,89 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             suppliers.add(() -> readerFactory.createRecordReader(file));
         }
 
-        return projectOuter(ConcatRecordReader.create(suppliers));
+        return LimitRecordReader.limit(
+                projectOuter(ConcatRecordReader.create(suppliers)), effectiveReadLimit());
+    }
+
+    /**
+     * Limit on merge read is only safe when filters are fully applied before truncation. This
+     * aligns with {@link KeyValueFileStoreScan#limitPushdownEnabled()} and additionally rejects
+     * non-primary-key filters, which are not pushed down to overlapping L0 sections (see {@link
+     * #withFilter(Predicate)}).
+     */
+    @Nullable
+    private Integer effectiveReadLimit() {
+        if (limit == null || limit <= 0) {
+            return null;
+        }
+
+        String disabledReason = mergeReadLimitDisabledReason();
+        if (disabledReason != null) {
+            logMergeReadLimitOnce(disabledReason);
+            return null;
+        }
+
+        logMergeReadLimitOnce(null);
+        return limit;
+    }
+
+    /** Returns why merge read limit is unsafe, or {@code null} if limit can be applied. */
+    @Nullable
+    private String mergeReadLimitDisabledReason() {
+        if (forceKeepDelete) {
+            return "forceKeepDelete is enabled";
+        }
+
+        MergeEngine mergeEngine = coreOptions.mergeEngine();
+        if (mergeEngine == MergeEngine.PARTIAL_UPDATE) {
+            return "merge-engine is partial-update";
+        }
+        if (mergeEngine == MergeEngine.AGGREGATE) {
+            return "merge-engine is aggregation";
+        }
+
+        if (coreOptions.deletionVectorsEnabled()) {
+            return "deletion-vectors is enabled";
+        }
+
+        if (hasNonPrimaryKeyFilter()) {
+            return "non-primary-key filter is present";
+        }
+
+        return null;
+    }
+
+    private void logMergeReadLimitOnce(@Nullable String disabledReason) {
+        if (mergeReadLimitLogEmitted) {
+            return;
+        }
+        mergeReadLimitLogEmitted = true;
+        if (disabledReason != null) {
+            LOG.info(
+                    "Merge read limit {} is disabled: {}. Limit will not be applied during merge read.",
+                    limit,
+                    disabledReason);
+        } else {
+            LOG.info("Applying merge read limit {} during merge read.", limit);
+        }
+    }
+
+    private boolean hasNonPrimaryKeyFilter() {
+        if (filtersForAll == null || filtersForAll.isEmpty()) {
+            return false;
+        }
+
+        List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
+        Set<String> nonPrimaryKeys =
+                tableSchema.fieldNames().stream()
+                        .filter(name -> !primaryKeys.contains(name))
+                        .collect(Collectors.toSet());
+        for (Predicate filter : filtersForAll) {
+            if (containsFields(filter, nonPrimaryKeys)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
