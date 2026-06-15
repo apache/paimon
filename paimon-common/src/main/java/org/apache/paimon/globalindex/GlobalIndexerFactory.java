@@ -32,14 +32,6 @@ public interface GlobalIndexerFactory {
     GlobalIndexer create(DataField indexField, Options options);
 
     /**
-     * Whether this index type supports multi-column indexes. A factory that returns {@code true}
-     * must override {@link #create(DataField, List, Options)} to handle extra columns.
-     */
-    default boolean supportsMultiColumn() {
-        return false;
-    }
-
-    /**
      * Creates an indexer over a primary column plus optional extra columns. {@code indexField} is
      * the primary column; {@code extraFields} holds the remaining columns and is empty for a
      * single-column index.

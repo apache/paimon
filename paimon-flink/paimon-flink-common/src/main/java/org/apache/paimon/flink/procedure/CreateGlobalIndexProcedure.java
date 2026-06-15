@@ -20,11 +20,12 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 
@@ -116,13 +117,21 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
         if (indexColumns.size() > 1) {
-            // Whether multi-column is supported is decided by each index type's factory; fail fast
-            // up front instead of failing later in the build job.
-            checkArgument(
-                    GlobalIndexerFactoryUtils.load(indexType).supportsMultiColumn(),
-                    "Index type '%s' does not support multi-column index, got columns: %s",
-                    indexType,
-                    indexColumns);
+            // Fail fast before submitting the job: index types that do not support multi-column
+            // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.
+            DataField indexField = rowType.getField(indexColumns.get(0));
+            List<DataField> extraFields =
+                    indexColumns.subList(1, indexColumns.size()).stream()
+                            .map(rowType::getField)
+                            .collect(Collectors.toList());
+            try {
+                GlobalIndexer.create(indexType, indexField, extraFields, userOptions);
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                indexType, indexColumns));
+            }
         }
         try {
             if ("btree".equals(indexType)) {

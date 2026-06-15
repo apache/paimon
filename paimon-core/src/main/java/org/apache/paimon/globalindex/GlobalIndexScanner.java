@@ -114,12 +114,16 @@ public class GlobalIndexScanner implements Closeable {
                     if (extraGroups == null || extraGroups.isEmpty()) {
                         return Collections.emptyList();
                     }
-                    // Union readers from all groups that share this extra column
+                    // Union readers from all groups that share this extra column. Wrap them in a
+                    // single UnionGlobalIndexReader so the evaluator unions (OR) these alternative
+                    // indexes; returning them as separate readers would make visitLeafAsync AND
+                    // them together, which can yield an empty/partial bitmap when the indexes cover
+                    // different row ranges.
                     List<GlobalIndexReader> allReaders = new ArrayList<>();
                     for (IndexMetaFileGroup g : extraGroups) {
                         allReaders.addAll(createReaders(indexFileReader, g, rowType));
                     }
-                    return allReaders;
+                    return Collections.singletonList(new UnionGlobalIndexReader(allReaders));
                 };
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }

@@ -80,15 +80,6 @@ public class GlobalIndexMeta {
         return indexFieldId;
     }
 
-    /**
-     * Whether this index covers more than one column. {@link #indexFieldId} is always the primary
-     * column; {@link #extraFieldIds} holds the remaining columns and is null/empty for a
-     * single-column index.
-     */
-    public boolean isMultiColumn() {
-        return extraFieldIds != null && extraFieldIds.length > 0;
-    }
-
     @Nullable
     public int[] extraFieldIds() {
         return extraFieldIds;

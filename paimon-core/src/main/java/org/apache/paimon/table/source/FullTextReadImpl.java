@@ -82,7 +82,7 @@ public class FullTextReadImpl implements FullTextRead {
         String indexType = firstFile.indexType();
         GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
         GlobalIndexer globalIndexer;
-        if (firstMeta.isMultiColumn()) {
+        if (firstMeta.extraFieldIds() != null) {
             globalIndexer =
                     GlobalIndexerFactoryUtils.load(indexType)
                             .create(
