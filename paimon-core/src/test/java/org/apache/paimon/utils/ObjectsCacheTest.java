@@ -35,7 +35,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
+import static org.apache.paimon.utils.ObjectsCache.Filters;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ObjectsCache}. */
@@ -62,19 +64,34 @@ public class ObjectsCacheTest {
         cache.withCacheMetrics(scanMetrics.getCacheMetrics());
         // test empty
         map.put("k1", Collections.emptyList());
-        List<String> values = cache.read("k1", null, Filter.alwaysTrue(), Filter.alwaysTrue());
+        List<String> values =
+                cache.read(
+                        "k1",
+                        null,
+                        new Filters<>(Filter.alwaysTrue(), Filter.alwaysTrue()),
+                        Function.identity());
         assertThat(values).isEmpty();
         assertThat(scanMetrics.getCacheMetrics().getMissedObject()).hasValue(1);
 
         // test values
         List<String> expect = Arrays.asList("v1", "v2", "v3");
         map.put("k2", expect);
-        values = cache.read("k2", null, Filter.alwaysTrue(), Filter.alwaysTrue());
+        values =
+                cache.read(
+                        "k2",
+                        null,
+                        new Filters<>(Filter.alwaysTrue(), Filter.alwaysTrue()),
+                        Function.identity());
         assertThat(values).containsExactlyElementsOf(expect);
         assertThat(scanMetrics.getCacheMetrics().getMissedObject()).hasValue(2);
 
         // test cache
-        values = cache.read("k2", null, Filter.alwaysTrue(), Filter.alwaysTrue());
+        values =
+                cache.read(
+                        "k2",
+                        null,
+                        new Filters<>(Filter.alwaysTrue(), Filter.alwaysTrue()),
+                        Function.identity());
         assertThat(values).containsExactlyElementsOf(expect);
         assertThat(scanMetrics.getCacheMetrics().getHitObject()).hasValue(1);
 
@@ -83,9 +100,34 @@ public class ObjectsCacheTest {
                 cache.read(
                         "k2",
                         null,
-                        r -> r.getString(0).toString().endsWith("2"),
-                        Filter.alwaysTrue());
+                        new Filters<>(
+                                r -> r.getString(0).toString().endsWith("2"), Filter.alwaysTrue()),
+                        Function.identity());
         assertThat(values).containsExactly("v2");
+
+        // test filter with loadFilter semantics moved to readFilter
+        expect = Arrays.asList("v1", "v2", "v3");
+        map.put("k3", expect);
+        values =
+                cache.read(
+                        "k3",
+                        null,
+                        new Filters<>(
+                                r -> r.getString(0).toString().endsWith("2"), Filter.alwaysTrue()),
+                        Function.identity());
+        assertThat(values).containsExactly("v2");
+
+        // test filter empty
+        expect = Arrays.asList("v1", "v2", "v3");
+        map.put("k4", expect);
+        values =
+                cache.read(
+                        "k4",
+                        null,
+                        new Filters<>(
+                                r -> r.getString(0).toString().endsWith("5"), Filter.alwaysTrue()),
+                        Function.identity());
+        assertThat(values).isEmpty();
 
         // test read concurrently
         map.clear();
@@ -101,8 +143,10 @@ public class ObjectsCacheTest {
                                                 cache.read(
                                                         k,
                                                         null,
-                                                        Filter.alwaysTrue(),
-                                                        Filter.alwaysTrue()))
+                                                        new Filters<>(
+                                                                Filter.alwaysTrue(),
+                                                                Filter.alwaysTrue()),
+                                                        Function.identity()))
                                         .containsExactly(k);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
