@@ -33,6 +33,12 @@ def _create_mock_snapshot(snapshot_id: int, commit_kind: str = "APPEND"):
     return snapshot
 
 
+def _create_mock_snapshot_with_time(snapshot_id: int, time_millis: int):
+    snapshot = _create_mock_snapshot(snapshot_id)
+    snapshot.time_millis = time_millis
+    return snapshot
+
+
 def _build_manager(file_io):
     from pypaimon.snapshot.snapshot_manager import SnapshotManager
     return SnapshotManager(file_io, "/tmp/test_table")
@@ -110,6 +116,25 @@ class SnapshotManagerTest(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(next_id, 8)
         self.assertEqual(skipped_count, 3)
+
+    def test_earlier_or_equal_time_mills_skips_missing_earliest_snapshot(self):
+        """earlier_or_equal_time_mills should retry if earliest snapshot disappeared."""
+        file_io = Mock()
+        file_io.exists.return_value = True
+        file_io.read_file_utf8.return_value = "1"
+
+        snapshots = {
+            2: _create_mock_snapshot_with_time(2, 2000),
+            3: _create_mock_snapshot_with_time(3, 3000),
+        }
+
+        manager = _build_manager(file_io)
+        manager.get_latest_snapshot = lambda: snapshots[3]
+        manager.get_snapshot_by_id = lambda sid: snapshots.get(sid)
+
+        result = manager.earlier_or_equal_time_mills(2500)
+
+        self.assertEqual(result.id, 2)
 
 
 if __name__ == '__main__':

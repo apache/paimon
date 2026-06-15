@@ -240,10 +240,6 @@ public class TimeTravelUtil {
                 if (snapshotId > stopSnapshotId) {
                     return null;
                 }
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
             }
         } while (true);
     }

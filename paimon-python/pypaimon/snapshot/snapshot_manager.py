@@ -158,19 +158,24 @@ class SnapshotManager:
         """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
-    def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
+    def try_get_earliest_snapshot(
+        self, stop_snapshot_id: Optional[int] = None
+    ) -> Optional[Snapshot]:
         earliest_file = f"{self.snapshot_dir}/EARLIEST"
         if self.file_io.exists(earliest_file):
             earliest_content = self.file_io.read_file_utf8(earliest_file)
             earliest_snapshot_id = int(earliest_content.strip())
-            snapshot = self.get_snapshot_by_id(earliest_snapshot_id)
-            if snapshot is None:
-                logger.warning(
-                    "The earliest snapshot or changelog was once identified but disappeared. "
-                    "It might have been expired by other jobs operating on this table."
-                )
-            return snapshot
-        return self.get_snapshot_by_id(1)
+        else:
+            earliest_snapshot_id = 1
+
+        if stop_snapshot_id is None:
+            stop_snapshot_id = earliest_snapshot_id + 3
+
+        for snapshot_id in range(earliest_snapshot_id, stop_snapshot_id + 1):
+            snapshot = self.get_snapshot_by_id(snapshot_id)
+            if snapshot is not None:
+                return snapshot
+        return None
 
     def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
         """
@@ -182,10 +187,13 @@ class SnapshotManager:
         Returns:
             The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
         """
-        earliest_snap = self.try_get_earliest_snapshot()
         latest_snap = self.get_latest_snapshot()
 
-        if earliest_snap is None or latest_snap is None:
+        if latest_snap is None:
+            return None
+
+        earliest_snap = self.try_get_earliest_snapshot(latest_snap.id)
+        if earliest_snap is None:
             return None
 
         earliest = earliest_snap.id
