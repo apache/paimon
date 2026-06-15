@@ -607,19 +607,19 @@ class StreamingConsumerTest(unittest.TestCase):
 class ScanFromTest(unittest.TestCase):
     """Integration tests for AsyncStreamingTableScan scan_from parameter."""
 
-    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
     def test_scan_from_earliest(
         self, MockFileScanner, MockManifestFileManager,
-        MockManifestListManager, MockSnapshotManager
+        MockManifestListManager
     ):
         """scan_from='earliest' should yield initial plan from the earliest snapshot."""
         table, _ = _create_mock_table()
 
         earliest = _create_mock_snapshot(1)
-        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager = Mock()
+        table.snapshot_manager.return_value = mock_snapshot_manager
         mock_snapshot_manager.try_get_earliest_snapshot.return_value = earliest
         mock_snapshot_manager.find_next_scannable.return_value = (None, 2, 0)
 
@@ -636,19 +636,18 @@ class ScanFromTest(unittest.TestCase):
         # next_snapshot_id should be earliest.id + 1
         self.assertEqual(scan.next_snapshot_id, 2)
 
-    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
     def test_scan_from_numeric_id(
         self, MockFileScanner, MockManifestFileManager,
-        MockManifestListManager, MockSnapshotManager
+        MockManifestListManager
     ):
         """scan_from=5 should set next_snapshot_id=5 without an initial full scan."""
         table, _ = _create_mock_table()
 
-        mock_snapshot_manager = MockSnapshotManager.return_value
-        # get_latest_snapshot needed by _should_use_diff_catch_up
+        mock_snapshot_manager = Mock()
+        table.snapshot_manager.return_value = mock_snapshot_manager
         mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
         mock_snapshot_manager.find_next_scannable.return_value = (None, 6, 0)
 
@@ -668,19 +667,19 @@ class ScanFromTest(unittest.TestCase):
         # FileScanner.scan was NOT called for an initial full-scan plan
         MockFileScanner.return_value.scan.assert_not_called()
 
-    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
     def test_scan_from_latest_matches_default(
         self, MockFileScanner, MockManifestFileManager,
-        MockManifestListManager, MockSnapshotManager
+        MockManifestListManager
     ):
         """scan_from='latest' should behave identically to the default (no scan_from)."""
         table, _ = _create_mock_table()
 
         latest = _create_mock_snapshot(7)
-        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager = Mock()
+        table.snapshot_manager.return_value = mock_snapshot_manager
         mock_snapshot_manager.get_latest_snapshot.return_value = latest
         mock_snapshot_manager.get_snapshot_by_id.return_value = None
 
@@ -696,13 +695,12 @@ class ScanFromTest(unittest.TestCase):
         self.assertEqual(scan.next_snapshot_id, 8)
 
     @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
-    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
     def test_consumer_restore_overrides_scan_from(
         self, MockFileScanner, MockManifestFileManager, MockManifestListManager,
-        MockSnapshotManager, MockConsumerManager
+        MockConsumerManager
     ):
         """Consumer restore should take precedence over scan_from='earliest'."""
         table, _ = _create_mock_table()
@@ -712,7 +710,8 @@ class ScanFromTest(unittest.TestCase):
         mock_consumer.next_snapshot = 10
         mock_consumer_manager.consumer.return_value = mock_consumer
 
-        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_snapshot_manager = Mock()
+        table.snapshot_manager.return_value = mock_snapshot_manager
         mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(10)
         mock_snapshot_manager.find_next_scannable.return_value = (None, 11, 0)
 
