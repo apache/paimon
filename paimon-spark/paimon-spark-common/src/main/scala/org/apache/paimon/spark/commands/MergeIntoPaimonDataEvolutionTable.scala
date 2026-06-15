@@ -30,6 +30,7 @@ import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
+import org.apache.paimon.spark.write.SnapshotOperation
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
@@ -233,7 +234,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       if (plan.snapshotId() != null) {
         writer.rowIdCheckConflict(plan.snapshotId())
       }
-      writer.commit(updateCommit ++ insertCommit)
+      writer.commit(
+        updateCommit ++ insertCommit,
+        SnapshotOperation.asProperties(SnapshotOperation.MERGE))
     } finally {
       if (persistSourceDss.isDefined) {
         persistSourceDss.get.unpersist(blocking = false)

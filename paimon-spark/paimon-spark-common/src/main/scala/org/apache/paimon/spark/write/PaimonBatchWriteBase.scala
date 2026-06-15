@@ -26,7 +26,7 @@ import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, ROW_ID, SEQUENCE_NUMBER}
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl, InnerTableCommit}
 
 import org.apache.spark.sql.PaimonSparkSession
 import org.apache.spark.sql.connector.write.{DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
@@ -55,7 +55,8 @@ abstract class PaimonBatchWriteBase(
     val writeSchema: StructType,
     val dataSchema: StructType,
     val overwritePartitions: Option[Map[String, String]],
-    val copyOnWriteScan: Option[PaimonCopyOnWriteScan])
+    val copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[String] = None)
   extends WriteHelper
   with Serializable {
 
@@ -114,6 +115,12 @@ abstract class PaimonBatchWriteBase(
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
+    // Record the operation type; INSERT/INSERT OVERWRITE have none and fall back to WRITE/OVERWRITE.
+    val operation = operationType.getOrElse(
+      if (overwritePartitions.isDefined) SnapshotOperation.OVERWRITE else SnapshotOperation.WRITE)
+    batchTableCommit
+      .withCommitProperties(
+        java.util.Collections.singletonMap(SnapshotOperation.OPERATION_PROPERTY, operation))
     val addCommitMessage = WriteTaskResult.merge(messages)
     val deletedCommitMessage = copyOnWriteScan match {
       case Some(scan) => buildDeletedCommitMessage(scan.scannedFiles)

@@ -283,6 +283,11 @@ public class FormatTableCommit implements BatchTableCommit {
     }
 
     @Override
+    public FormatTableCommit withCommitProperties(Map<String, String> properties) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public TableCommit withMetricRegistry(MetricRegistry registry) {
         throw new UnsupportedOperationException();
     }

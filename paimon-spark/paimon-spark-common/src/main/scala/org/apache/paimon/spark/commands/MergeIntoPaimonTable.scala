@@ -23,6 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.{PaimonRelation, PaimonUpdateAc
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
+import org.apache.paimon.spark.write.SnapshotOperation
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
@@ -78,7 +79,7 @@ case class MergeIntoPaimonTable(
     } else {
       performMergeForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, SnapshotOperation.asProperties(SnapshotOperation.MERGE))
     Seq.empty[Row]
   }
 

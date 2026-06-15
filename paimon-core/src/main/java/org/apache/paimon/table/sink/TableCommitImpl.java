@@ -89,6 +89,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final ThreadPoolExecutor fileCheckExecutor;
 
     @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private Map<String, String> commitProperties = null;
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
@@ -171,6 +172,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl withCommitProperties(Map<String, String> commitProperties) {
+        this.commitProperties = commitProperties;
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
@@ -226,6 +233,9 @@ public class TableCommitImpl implements InnerTableCommit {
         ManifestCommittable committable = new ManifestCommittable(identifier);
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);
+        }
+        if (commitProperties != null) {
+            commitProperties.forEach(committable::addProperty);
         }
         return committable;
     }

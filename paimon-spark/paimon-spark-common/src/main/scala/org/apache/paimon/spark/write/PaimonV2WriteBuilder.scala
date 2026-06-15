@@ -30,13 +30,29 @@ import scala.collection.JavaConverters._
 class PaimonV2WriteBuilder(table: FileStoreTable, dataSchema: StructType, options: Options)
   extends BaseV2WriteBuilder(table) {
 
+  // Operation type for the snapshot: from the write option (CTAS/RTAS) or withOperationType (COW).
+  private var operationType: Option[String] =
+    Option(options.get(SnapshotOperation.OPERATION_OPTION))
+
+  /** Set the operation type, e.g. DELETE/UPDATE/MERGE for copy-on-write. */
+  def withOperationType(operationType: String): PaimonV2WriteBuilder = {
+    this.operationType = Option(operationType)
+    this
+  }
+
   override def build: PaimonV2Write = {
     val finalTable = overwriteDynamic match {
       case Some(o) =>
         table.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> o.toString).asJava)
       case _ => table
     }
-    new PaimonV2Write(finalTable, overwritePartitions, copyOnWriteScan, dataSchema, options)
+    new PaimonV2Write(
+      finalTable,
+      overwritePartitions,
+      copyOnWriteScan,
+      dataSchema,
+      options,
+      operationType)
   }
 
   override def partitionRowType(): RowType = table.schema().logicalPartitionType()

@@ -19,6 +19,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
+import org.apache.paimon.spark.write.SnapshotOperation
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
@@ -53,6 +54,10 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
 
       val (tableOptions, writeOptions) = splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
+      val operation =
+        if (orCreate) SnapshotOperation.CREATE_OR_REPLACE_TABLE_AS_SELECT
+        else SnapshotOperation.REPLACE_TABLE_AS_SELECT
+      val finalWriteOptions = writeOptions + (SnapshotOperation.OPERATION_OPTION -> operation)
       // Pin snapshot in query to prevent self-referencing RTAS from reading truncated data
       val pinnedQuery = pinSnapshotInQuery(catalog, ident, query)
       if (canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {
@@ -62,7 +67,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           parts,
           pinnedQuery,
           qualifiedSpec,
-          writeOptions,
+          finalWriteOptions,
           orCreate = orCreate) :: Nil
       } else {
         SparkShimLoader.shim.createReplaceTableAsSelectExec(
@@ -71,7 +76,7 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
           parts,
           pinnedQuery,
           qualifiedSpec,
-          writeOptions,
+          finalWriteOptions,
           orCreate = orCreate) :: Nil
       }
     case _ => Nil

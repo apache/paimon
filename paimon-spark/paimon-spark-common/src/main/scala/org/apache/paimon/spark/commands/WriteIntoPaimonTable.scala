@@ -23,6 +23,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.ReplacePaimonFunctions
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.write.SnapshotOperation
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -60,8 +61,17 @@ case class WriteIntoPaimonTable(
     if (overwritePartition != null) {
       writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }
+    // CTAS/RTAS inject the operation via this write option; plain INSERT/OVERWRITE derive it
+    // from the save mode.
+    val operation = Option(options.get(SnapshotOperation.OPERATION_OPTION)).getOrElse {
+      if (overwritePartition != null || dynamicPartitionOverwriteMode) {
+        SnapshotOperation.OVERWRITE
+      } else {
+        SnapshotOperation.WRITE
+      }
+    }
     val commitMessages = writer.write(replacedData)
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, SnapshotOperation.asProperties(operation))
 
     Seq.empty
   }

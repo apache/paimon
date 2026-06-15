@@ -52,6 +52,8 @@ class PaimonSparkCopyOnWriteOperation(table: FileStoreTable, info: RowLevelOpera
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     val options = Options.fromMap(info.options)
     val builder = new PaimonV2WriteBuilder(table, info.schema(), options)
+    // command() is DELETE / UPDATE / MERGE, recorded into the snapshot properties.
+    builder.withOperationType(command().toString)
     assert(copyOnWriteScan.isDefined)
     builder.overwriteFiles(copyOnWriteScan.get)
   }
