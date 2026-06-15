@@ -26,6 +26,8 @@ from pypaimon.common.json_util import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
+EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 100
+
 
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
@@ -169,7 +171,7 @@ class SnapshotManager:
             earliest_snapshot_id = 1
 
         if stop_snapshot_id is None:
-            stop_snapshot_id = earliest_snapshot_id + 3
+            stop_snapshot_id = earliest_snapshot_id + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM
 
         for snapshot_id in range(earliest_snapshot_id, stop_snapshot_id + 1):
             snapshot = self.get_snapshot_by_id(snapshot_id)

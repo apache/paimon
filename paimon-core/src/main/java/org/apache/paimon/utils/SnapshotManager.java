@@ -65,7 +65,7 @@ public class SnapshotManager implements Serializable {
 
     public static final String SNAPSHOT_PREFIX = "snapshot-";
 
-    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
+    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 100;
 
     private final FileIO fileIO;
     private final Path tablePath;

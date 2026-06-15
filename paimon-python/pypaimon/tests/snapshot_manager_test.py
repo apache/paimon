@@ -136,6 +136,20 @@ class SnapshotManagerTest(unittest.TestCase):
 
         self.assertEqual(result.id, 2)
 
+    def test_try_get_earliest_snapshot_retries_beyond_three_missing_snapshots(self):
+        file_io = Mock()
+        file_io.exists.return_value = True
+        file_io.read_file_utf8.return_value = "1"
+
+        snapshot = _create_mock_snapshot_with_time(5, 5000)
+
+        manager = _build_manager(file_io)
+        manager.get_snapshot_by_id = lambda sid: snapshot if sid == 5 else None
+
+        result = manager.try_get_earliest_snapshot()
+
+        self.assertEqual(result.id, 5)
+
     def test_try_get_earliest_snapshot_throws_when_retry_exhausted(self):
         file_io = Mock()
         file_io.exists.return_value = True
