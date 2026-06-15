@@ -254,24 +254,31 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         detection._row_id_check_from_snapshot = 1
         return detection
 
-    def test_compact_deleted_anchor_blob_raises(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
-                             write_cols=["col_a"])]
+    def _blob_delta(self):
+        return [_make_entry("d.blob", first_row_id=0, row_count=51,
+                            write_cols=["col_a"])]
+
+    def test_compact_blob_delete_raises_at_first_match(self):
+        # Two COMPACT snapshots, both have a blob DELETE overlapping the
+        # delta range. The loop must walk ascending and return on the
+        # first match -> error names snapshot 2.
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
-        compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
-        compact_entries = [
-            _make_entry("old.blob", kind=1, first_row_id=0, row_count=100),
-            _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
-        ]
+        compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
+        compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        entries = {
+            2: [_make_entry("first.blob", kind=1, first_row_id=0, row_count=200)],
+            3: [_make_entry("second.blob", kind=1, first_row_id=0, row_count=200)],
+        }
         detection = self._make_detection(
-            [check_snap, compact_snap], {2: compact_entries})
-        result = detection.check_row_id_from_snapshot(compact_snap, delta)
+            [check_snap, compact1, compact2], entries)
+        result = detection.check_row_id_from_snapshot(compact2, self._blob_delta())
         self.assertIsNotNone(result)
+        self.assertIn("snapshot 2", str(result))
         self.assertIn("COMPACT", str(result))
 
-    def test_compact_deleted_other_file_type_does_not_raise(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
-                             write_cols=["col_a"])]
+    def test_compact_other_file_type_does_not_raise(self):
+        # Parquet-only compact must NOT flag a blob delta whose .blob
+        # anchor is still intact. Locks in the precise-version invariant.
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact_entries = [
@@ -281,51 +288,27 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         detection = self._make_detection(
             [check_snap, compact_snap], {2: compact_entries})
         self.assertIsNone(
-            detection.check_row_id_from_snapshot(compact_snap, delta))
+            detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
 
-    def test_compact_deleted_disjoint_range_does_not_raise(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
-                             write_cols=["col_a"])]
+    def test_compact_no_conflict_when_no_matching_delete(self):
+        # Negative cases that should not raise: disjoint range, add-only
+        # (no DELETE entries at all).
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)
-        compact_entries = [
-            _make_entry("old.blob", kind=1, first_row_id=200, row_count=200),
+        cases = [
+            ("disjoint_range", [
+                _make_entry("old.blob", kind=1, first_row_id=200, row_count=200),
+            ]),
+            ("add_only", [
+                _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
+            ]),
         ]
-        detection = self._make_detection(
-            [check_snap, compact_snap], {2: compact_entries})
-        self.assertIsNone(
-            detection.check_row_id_from_snapshot(compact_snap, delta))
-
-    def test_compact_added_only_does_not_raise(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
-                             write_cols=["col_a"])]
-        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
-        compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
-        compact_entries = [
-            _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
-        ]
-        detection = self._make_detection(
-            [check_snap, compact_snap], {2: compact_entries})
-        self.assertIsNone(
-            detection.check_row_id_from_snapshot(compact_snap, delta))
-
-    def test_multiple_compact_snapshots_first_overlap_wins(self):
-        delta = [_make_entry("d.blob", first_row_id=0, row_count=51,
-                             write_cols=["col_a"])]
-        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
-        compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
-        compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
-        entries = {
-            2: [_make_entry("first.blob", kind=1,
-                            first_row_id=0, row_count=200)],
-            3: [_make_entry("second.blob", kind=1,
-                            first_row_id=0, row_count=200)],
-        }
-        detection = self._make_detection(
-            [check_snap, compact1, compact2], entries)
-        result = detection.check_row_id_from_snapshot(compact2, delta)
-        self.assertIsNotNone(result)
-        self.assertIn("snapshot 2", str(result))
+        for name, compact_entries in cases:
+            with self.subTest(case=name):
+                detection = self._make_detection(
+                    [check_snap, compact_snap], {2: compact_entries})
+                self.assertIsNone(
+                    detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):
