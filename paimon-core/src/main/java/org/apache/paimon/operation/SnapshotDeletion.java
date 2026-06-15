@@ -31,6 +31,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,11 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
 
     @Override
     public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+        deletePlannedDataFiles(Collections.singletonList(planUnusedDataFiles(snapshot, skipper)));
+    }
+
+    public DataFileDeletionPlan planUnusedDataFiles(
+            Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
             // eg: the old version table file, we just skip clean this here, let it done by
@@ -75,9 +81,9 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                             skipper.test(manifestEntry)
                                     || (manifestEntry.fileSource().orElse(FileSource.APPEND)
                                             == FileSource.APPEND);
-            cleanUnusedDataFiles(snapshot.deltaManifestList(), enriched);
+            return planUnusedDataFiles(snapshot.deltaManifestList(), enriched);
         } else {
-            cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
+            return planUnusedDataFiles(snapshot.deltaManifestList(), skipper);
         }
     }
 
@@ -89,6 +95,26 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                 skippingSet,
                 !changelogDecoupled || produceChangelog,
                 !changelogDecoupled);
+    }
+
+    public ManifestDeletionPlan planUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
+        // delay clean the base and delta manifest lists when changelog decoupled enabled
+        return planUnusedManifests(
+                snapshot,
+                skippingSet,
+                !changelogDecoupled || produceChangelog,
+                !changelogDecoupled);
+    }
+
+    public ManifestDeletionPlan planUnusedManifests(
+            Snapshot snapshot, Set<String> skippingSet, boolean updateSkippingSet) {
+        // delay clean the base and delta manifest lists when changelog decoupled enabled
+        return planUnusedManifests(
+                snapshot,
+                skippingSet,
+                !changelogDecoupled || produceChangelog,
+                !changelogDecoupled,
+                updateSkippingSet);
     }
 
     @VisibleForTesting
