@@ -22,8 +22,8 @@ import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
-import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
@@ -229,14 +229,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        snapshotDeletion.deletePlannedDataFiles(
-                collectDataFileDeletionPlans(
-                        snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId));
+        snapshotDeletion.deleteDataFiles(
+                collectDataFilesToDelete(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId));
 
         // delete changelog files
         if (!expireConfig.isChangelogDecoupled()) {
-            snapshotDeletion.deletePlannedDataFiles(
-                    collectChangelogDeletionPlans(snapshotsExcludingEnd));
+            snapshotDeletion.deleteDataFiles(collectChangelogFilesToDelete(snapshotsExcludingEnd));
         }
 
         // data files and changelog files in bucket directories has been deleted
@@ -279,7 +277,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return snapshotsExcludingEnd.size();
     }
 
-    private Collection<DataFileDeletionPlan> collectDataFileDeletionPlans(
+    private Collection<Path> collectDataFilesToDelete(
             List<Snapshot> snapshotsIncludingEnd,
             List<Snapshot> taggedSnapshots,
             long beginInclusiveId)
@@ -304,7 +302,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
                 collectTagSkippers(tags.values());
         Predicate<ExpireFileEntry> deleteAll = entry -> false;
-        List<CompletableFuture<DataFileDeletionPlan>> futures = new ArrayList<>();
+        List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
         for (Snapshot snapshot : snapshotsIncludingEnd) {
             long id = snapshot.id();
             if (id == beginInclusiveId) {
@@ -331,7 +329,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                             () -> snapshotDeletion.planUnusedDataFiles(snapshot, skipper.get()),
                             fileExecutor));
         }
-        return getAll(futures);
+        return flatten(getAll(futures));
     }
 
     private Map<Long, Optional<Predicate<ExpireFileEntry>>> collectTagSkippers(
@@ -365,9 +363,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return skippers;
     }
 
-    private Collection<DataFileDeletionPlan> collectChangelogDeletionPlans(List<Snapshot> snapshots)
+    private Collection<Path> collectChangelogFilesToDelete(List<Snapshot> snapshots)
             throws ExecutionException, InterruptedException {
-        List<CompletableFuture<DataFileDeletionPlan>> futures = new ArrayList<>();
+        List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
         for (Snapshot snapshot : snapshots) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from snapshot #{}", snapshot.id());
@@ -381,7 +379,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                 fileExecutor));
             }
         }
-        return getAll(futures);
+        return flatten(getAll(futures));
     }
 
     private Collection<ManifestDeletionPlan> collectManifestDeletionPlans(
@@ -408,6 +406,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         List<T> result = new ArrayList<>();
         for (CompletableFuture<T> future : futures) {
             result.add(future.get());
+        }
+        return result;
+    }
+
+    private <T> List<T> flatten(List<? extends Collection<T>> collections) {
+        List<T> result = new ArrayList<>();
+        for (Collection<T> collection : collections) {
+            result.addAll(collection);
         }
         return result;
     }

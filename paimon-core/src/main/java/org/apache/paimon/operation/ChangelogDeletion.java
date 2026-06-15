@@ -47,7 +47,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -56,7 +56,7 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                deleteFileThreadNum);
+                fileOperationThreadNum);
     }
 
     @Override

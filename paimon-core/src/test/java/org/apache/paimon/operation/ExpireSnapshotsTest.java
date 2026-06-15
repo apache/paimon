@@ -38,7 +38,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
 import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
@@ -780,9 +779,10 @@ public class ExpireSnapshotsTest {
 
         CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
         Snapshot snapshot = snapshotManager.snapshot(1);
-        DataFileDeletionPlan dataPlan =
-                snapshotDeletion.planAddedDataFiles(snapshot.deltaManifestList());
-        snapshotDeletion.deletePlannedDataFiles(Arrays.asList(dataPlan, dataPlan));
+        List<Path> dataFiles = snapshotDeletion.planAddedDataFiles(snapshot.deltaManifestList());
+        List<Path> duplicateDataFiles = new ArrayList<>(dataFiles);
+        duplicateDataFiles.addAll(dataFiles);
+        snapshotDeletion.deleteDataFiles(duplicateDataFiles);
         snapshotDeletion.assertDeleteBatchesDeduplicated();
 
         snapshotDeletion.reset();
@@ -1229,7 +1229,7 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public DataFileDeletionPlan planUnusedDataFiles(
+        public List<Path> planUnusedDataFiles(
                 Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
             if (blockDataFilePlans && shouldBlock(snapshot.id())) {
                 dataFilePlans.awaitConcurrentCall();
@@ -1238,7 +1238,7 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public DataFileDeletionPlan planAddedDataFiles(String manifestListName) {
+        public List<Path> planAddedDataFiles(String manifestListName) {
             if (blockedChangelogManifestLists.contains(manifestListName)) {
                 changelogPlans.awaitConcurrentCall();
             }

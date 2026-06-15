@@ -31,7 +31,6 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +51,7 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
             StatsFileHandler statsFileHandler,
             boolean produceChangelog,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -61,17 +60,16 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                deleteFileThreadNum);
+                fileOperationThreadNum);
         this.produceChangelog = produceChangelog;
     }
 
     @Override
     public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
-        deletePlannedDataFiles(Collections.singletonList(planUnusedDataFiles(snapshot, skipper)));
+        deleteDataFiles(planUnusedDataFiles(snapshot, skipper));
     }
 
-    public DataFileDeletionPlan planUnusedDataFiles(
-            Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+    public List<Path> planUnusedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
             // eg: the old version table file, we just skip clean this here, let it done by

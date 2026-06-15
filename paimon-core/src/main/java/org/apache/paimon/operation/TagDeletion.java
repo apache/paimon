@@ -57,7 +57,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -66,7 +66,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                deleteFileThreadNum);
+                fileOperationThreadNum);
     }
 
     @Override

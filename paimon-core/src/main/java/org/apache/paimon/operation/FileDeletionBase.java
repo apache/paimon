@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -97,7 +98,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
@@ -105,13 +106,13 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.indexFileHandler = indexFileHandler;
         this.statsFileHandler = statsFileHandler;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
-        this.deletionBuckets = new HashMap<>();
-        this.fileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
+        this.deletionBuckets = new ConcurrentHashMap<>();
+        this.fileExecutor = FileOperationThreadPool.getExecutorService(fileOperationThreadNum);
         this.fileOperationParallelism =
                 Math.max(
                         1,
-                        deleteFileThreadNum > 0
-                                ? deleteFileThreadNum
+                        fileOperationThreadNum > 0
+                                ? fileOperationThreadNum
                                 : Runtime.getRuntime().availableProcessors());
     }
 
@@ -181,25 +182,15 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     protected void recordDeletionBuckets(ExpireFileEntry entry) {
         deletionBuckets
-                .computeIfAbsent(entry.partition(), p -> new HashSet<>())
+                .computeIfAbsent(entry.partition(), p -> ConcurrentHashMap.newKeySet())
                 .add(entry.bucket());
     }
 
-    private void recordDeletionBuckets(Map<BinaryRow, Set<Integer>> buckets) {
-        buckets.forEach(
-                (partition, bucketSet) ->
-                        deletionBuckets
-                                .computeIfAbsent(partition, p -> new HashSet<>())
-                                .addAll(bucketSet));
-    }
-
     public void cleanUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
-        deletePlannedDataFiles(
-                Collections.singletonList(planUnusedDataFiles(manifestList, skipper)));
+        deleteDataFiles(planUnusedDataFiles(manifestList, skipper));
     }
 
-    public DataFileDeletionPlan planUnusedDataFiles(
-            String manifestList, Predicate<ExpireFileEntry> skipper) {
+    public List<Path> planUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
         List<ManifestFileMeta> manifests = tryReadManifestList(manifestList);
         // data file path -> (original manifest entry, extra file paths)
         Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
@@ -208,7 +199,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         } catch (Exception e) {
             // cancel deletion if any exception occurs
             LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
-            return DataFileDeletionPlan.empty();
+            return Collections.emptyList();
         }
 
         return planUnusedDataFile(dataFileToDelete, skipper);
@@ -217,14 +208,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected void doCleanUnusedDataFile(
             Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete,
             Predicate<ExpireFileEntry> skipper) {
-        deletePlannedDataFiles(
-                Collections.singletonList(planUnusedDataFile(dataFileToDelete, skipper)));
+        deleteDataFiles(planUnusedDataFile(dataFileToDelete, skipper));
     }
 
-    protected DataFileDeletionPlan planUnusedDataFile(
+    protected List<Path> planUnusedDataFile(
             Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete,
             Predicate<ExpireFileEntry> skipper) {
-        DataFileDeletionPlan plan = new DataFileDeletionPlan();
         List<Path> actualDataFileToDelete = new ArrayList<>();
         dataFileToDelete.forEach(
                 (path, pair) -> {
@@ -235,11 +224,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                         actualDataFileToDelete.add(path);
                         actualDataFileToDelete.addAll(pair.getRight());
 
-                        plan.recordDeletionBucket(entry);
+                        recordDeletionBuckets(entry);
                     }
                 });
-        plan.addDataFiles(actualDataFileToDelete);
-        return plan;
+        return actualDataFileToDelete;
     }
 
     protected void getDataFileToDelete(
@@ -282,10 +270,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      * @param manifestListName name of manifest list
      */
     public void deleteAddedDataFiles(String manifestListName) {
-        deletePlannedDataFiles(Collections.singletonList(planAddedDataFiles(manifestListName)));
+        deleteDataFiles(planAddedDataFiles(manifestListName));
     }
 
-    public DataFileDeletionPlan planAddedDataFiles(String manifestListName) {
+    public List<Path> planAddedDataFiles(String manifestListName) {
         List<ManifestFileMeta> manifests = tryReadManifestList(manifestListName);
         return planAddedDataFiles(readExpireFileEntriesIgnoringErrors(manifests));
     }
@@ -318,35 +306,25 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 fileOperationParallelism);
     }
 
-    private DataFileDeletionPlan planAddedDataFiles(Iterable<ExpireFileEntry> manifestEntries) {
-        DataFileDeletionPlan plan = new DataFileDeletionPlan();
+    private List<Path> planAddedDataFiles(Iterable<ExpireFileEntry> manifestEntries) {
+        List<Path> dataFiles = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
         for (ExpireFileEntry entry : manifestEntries) {
             DataFilePathFactory dataFilePathFactory =
                     factories.get(entry.partition(), entry.bucket());
             if (entry.kind() == FileKind.ADD) {
-                plan.addDataFile(dataFilePathFactory.toPath(entry));
-                plan.recordDeletionBucket(entry);
+                dataFiles.add(dataFilePathFactory.toPath(entry));
+                recordDeletionBuckets(entry);
             }
         }
-        return plan;
+        return dataFiles;
     }
 
-    private DataFileDeletionPlan planAddedDataFiles(List<ExpireFileEntry> manifestEntries) {
-        return planAddedDataFiles((Iterable<ExpireFileEntry>) manifestEntries);
-    }
-
-    public void deletePlannedDataFiles(Collection<DataFileDeletionPlan> plans) {
-        Set<Path> dataFiles = new LinkedHashSet<>();
-        for (DataFileDeletionPlan plan : plans) {
-            dataFiles.addAll(plan.dataFiles);
-            recordDeletionBuckets(plan.deletionBuckets);
-        }
-        deleteFiles(dataFiles, fileIO::deleteQuietly);
+    public void deleteDataFiles(Collection<Path> dataFiles) {
+        deleteFiles(new LinkedHashSet<>(dataFiles), fileIO::deleteQuietly);
     }
 
     public void cleanUnusedStatisticsManifests(Snapshot snapshot, Set<String> skippingSet) {
-        // clean statistics
         deletePlannedManifests(
                 Collections.singletonList(planUnusedStatisticsManifests(snapshot, skippingSet)));
     }
@@ -667,40 +645,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             throw new RuntimeException(e);
         } catch (ExecutionException e) {
             throw new RuntimeException(e.getCause());
-        }
-    }
-
-    /** Planned data files and bucket directories to clean. */
-    public static class DataFileDeletionPlan {
-
-        private final List<Path> dataFiles = new ArrayList<>();
-        private final Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
-
-        public static DataFileDeletionPlan empty() {
-            return new DataFileDeletionPlan();
-        }
-
-        private void addDataFile(Path path) {
-            dataFiles.add(path);
-        }
-
-        private void addDataFiles(Collection<Path> paths) {
-            dataFiles.addAll(paths);
-        }
-
-        private void recordDeletionBucket(ExpireFileEntry entry) {
-            deletionBuckets
-                    .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                    .add(entry.bucket());
-        }
-
-        private void merge(DataFileDeletionPlan plan) {
-            dataFiles.addAll(plan.dataFiles);
-            plan.deletionBuckets.forEach(
-                    (partition, bucketSet) ->
-                            deletionBuckets
-                                    .computeIfAbsent(partition, p -> new HashSet<>())
-                                    .addAll(bucketSet));
         }
     }
 
