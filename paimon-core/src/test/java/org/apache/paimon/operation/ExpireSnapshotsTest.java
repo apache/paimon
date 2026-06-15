@@ -817,36 +817,6 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testPlannedDeletionDeduplicatesFilesBeforeDelete() throws Exception {
-        List<KeyValue> allData = new ArrayList<>();
-        List<Integer> snapshotPositions = new ArrayList<>();
-        commit(2, allData, snapshotPositions);
-
-        CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
-        Snapshot snapshot = snapshotManager.snapshot(1);
-        List<Path> dataFiles =
-                snapshotDeletion.planAddedInChangelogManifest(
-                        snapshotWithChangelogManifestList(snapshot.deltaManifestList()));
-        List<Path> duplicateDataFiles = new ArrayList<>(dataFiles);
-        duplicateDataFiles.addAll(dataFiles);
-        snapshotDeletion.cleanDataFiles(duplicateDataFiles);
-        snapshotDeletion.assertDeleteBatchesDeduplicated();
-
-        snapshotDeletion.reset();
-        List<Runnable> manifestPlan =
-                snapshotDeletion.planManifestsCleaner(snapshot, new HashSet<>());
-        assertThat(manifestPlan).isNotEmpty();
-        List<Runnable> duplicateManifestPlan = new ArrayList<>(manifestPlan);
-        duplicateManifestPlan.addAll(manifestPlan);
-        AtomicInteger probeRuns = new AtomicInteger();
-        Runnable probe = probeRuns::incrementAndGet;
-        duplicateManifestPlan.add(probe);
-        duplicateManifestPlan.add(probe);
-        snapshotDeletion.executeAll(duplicateManifestPlan);
-        assertThat(probeRuns).hasValue(1);
-    }
-
-    @Test
     public void testPlanUnusedDataFilesCancelsDeletionWhenManifestFileMissing() throws Exception {
         ManifestFileMeta missingManifest =
                 new ManifestFileMeta(

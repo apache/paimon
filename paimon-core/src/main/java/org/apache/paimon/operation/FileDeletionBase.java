@@ -527,13 +527,12 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public void executeAll(Collection<Runnable> tasks) {
-        Collection<Runnable> deduplicatedTasks = new LinkedHashSet<>(tasks);
-        if (deduplicatedTasks.isEmpty()) {
+        if (tasks.isEmpty()) {
             return;
         }
 
-        List<CompletableFuture<Void>> futures = new ArrayList<>(deduplicatedTasks.size());
-        for (Runnable runnable : deduplicatedTasks) {
+        List<CompletableFuture<Void>> futures = new ArrayList<>(tasks.size());
+        for (Runnable runnable : tasks) {
             futures.add(CompletableFuture.runAsync(runnable, fileExecutor));
         }
 
