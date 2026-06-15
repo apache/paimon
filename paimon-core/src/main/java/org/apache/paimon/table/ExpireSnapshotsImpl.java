@@ -24,7 +24,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
-import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.utils.ChangelogManager;
@@ -40,14 +39,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
@@ -229,12 +227,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        snapshotDeletion.deleteDataFiles(
+        snapshotDeletion.cleanDataFiles(
                 collectDataFilesToDelete(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId));
 
         // delete changelog files
         if (!expireConfig.isChangelogDecoupled()) {
-            snapshotDeletion.deleteDataFiles(collectChangelogFilesToDelete(snapshotsExcludingEnd));
+            snapshotDeletion.cleanDataFiles(collectChangelogFilesToDelete(snapshotsExcludingEnd));
         }
 
         // data files and changelog files in bucket directories has been deleted
@@ -255,13 +253,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         Set<String> skippingSet = null;
         try {
-            skippingSet = new HashSet<>(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
+            skippingSet = ConcurrentHashMap.newKeySet();
+            skippingSet.addAll(snapshotDeletion.manifestSkippingSet(skippingSnapshots));
         } catch (Exception e) {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
         }
         if (skippingSet != null) {
-            snapshotDeletion.deletePlannedManifests(
-                    collectManifestDeletionPlans(snapshotsExcludingEnd, skippingSet));
+            snapshotDeletion.executeAll(
+                    collectManifestDeletionTasks(snapshotsExcludingEnd, skippingSet));
         }
 
         // delete snapshot file finally
@@ -326,7 +325,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
             futures.add(
                     CompletableFuture.supplyAsync(
-                            () -> snapshotDeletion.planUnusedDataFiles(snapshot, skipper.get()),
+                            () ->
+                                    snapshotDeletion.planDeletedInDeltaManifest(
+                                            snapshot, skipper.get()),
                             fileExecutor));
         }
         return flatten(getAll(futures));
@@ -373,32 +374,27 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             if (snapshot.changelogManifestList() != null) {
                 futures.add(
                         CompletableFuture.supplyAsync(
-                                () ->
-                                        snapshotDeletion.planAddedDataFiles(
-                                                snapshot.changelogManifestList()),
+                                () -> snapshotDeletion.planAddedInChangelogManifest(snapshot),
                                 fileExecutor));
             }
         }
         return flatten(getAll(futures));
     }
 
-    private Collection<ManifestDeletionPlan> collectManifestDeletionPlans(
+    private Collection<Runnable> collectManifestDeletionTasks(
             List<Snapshot> snapshots, Set<String> skippingSet)
             throws ExecutionException, InterruptedException {
-        Set<String> readOnlySkippingSet = Collections.unmodifiableSet(skippingSet);
-        List<CompletableFuture<ManifestDeletionPlan>> futures = new ArrayList<>();
+        List<CompletableFuture<List<Runnable>>> futures = new ArrayList<>();
         for (Snapshot snapshot : snapshots) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #{}", snapshot.id());
             }
             futures.add(
                     CompletableFuture.supplyAsync(
-                            () ->
-                                    snapshotDeletion.planUnusedManifests(
-                                            snapshot, readOnlySkippingSet, false),
+                            () -> snapshotDeletion.planManifestsCleaner(snapshot, skippingSet),
                             fileExecutor));
         }
-        return getAll(futures);
+        return flatten(getAll(futures));
     }
 
     private <T> List<T> getAll(List<CompletableFuture<T>> futures)

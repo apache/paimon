@@ -39,7 +39,6 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -305,9 +304,7 @@ public class ExpireSnapshotsTest {
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
-        expire.snapshotDeletion()
-                .cleanUnusedDataFile(
-                        Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
+        cleanDeletedDataFiles(expire.snapshotDeletion(), Arrays.asList(add, delete));
 
         // check
         assertThat(fileIO.exists(myDataFile)).isFalse();
@@ -368,9 +365,7 @@ public class ExpireSnapshotsTest {
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
-        expire.snapshotDeletion()
-                .cleanUnusedDataFile(
-                        Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
+        cleanDeletedDataFiles(expire.snapshotDeletion(), Arrays.asList(add, delete));
 
         // check
         assertThat(fileIO.exists(myDataFile)).isFalse();
@@ -378,6 +373,54 @@ public class ExpireSnapshotsTest {
         assertThat(fileIO.exists(extra2)).isFalse();
 
         store.assertCleaned();
+    }
+
+    private void cleanDeletedDataFiles(
+            SnapshotDeletion snapshotDeletion, List<ManifestEntry> dataFileLog) {
+        List<ManifestFileMeta> manifests = store.manifestFileFactory().create().write(dataFileLog);
+        String manifestList = store.manifestListFactory().create().write(manifests).getLeft();
+        Snapshot snapshot = snapshotWithDeltaManifestList(manifestList);
+
+        snapshotDeletion.cleanDataFiles(
+                snapshotDeletion.planDeletedInDeltaManifest(snapshot, file -> false));
+
+        for (ManifestFileMeta manifest : manifests) {
+            fileIO.deleteQuietly(store.pathFactory().toManifestFilePath(manifest.fileName()));
+        }
+        fileIO.deleteQuietly(store.pathFactory().toManifestListPath(manifestList));
+    }
+
+    private Snapshot snapshotWithDeltaManifestList(String manifestList) {
+        return snapshotWithManifestLists(manifestList, null);
+    }
+
+    private Snapshot snapshotWithChangelogManifestList(String manifestList) {
+        return snapshotWithManifestLists(null, manifestList);
+    }
+
+    private Snapshot snapshotWithManifestLists(
+            String deltaManifestList, String changelogManifestList) {
+        return new Snapshot(
+                0,
+                0L,
+                null,
+                null,
+                deltaManifestList,
+                null,
+                changelogManifestList,
+                null,
+                null,
+                "test",
+                0L,
+                Snapshot.CommitKind.APPEND,
+                0L,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     @Test
@@ -668,7 +711,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testExpirePlansManifestsConcurrentlyWithoutMutatingSkippingSet() throws Exception {
+    public void testExpirePlansManifestsConcurrentlyWithSkippingSet() throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
 
         List<KeyValue> allData = new ArrayList<>();
@@ -781,16 +824,20 @@ public class ExpireSnapshotsTest {
 
         CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
         Snapshot snapshot = snapshotManager.snapshot(1);
-        List<Path> dataFiles = snapshotDeletion.planAddedDataFiles(snapshot.deltaManifestList());
+        List<Path> dataFiles =
+                snapshotDeletion.planAddedInChangelogManifest(
+                        snapshotWithChangelogManifestList(snapshot.deltaManifestList()));
         List<Path> duplicateDataFiles = new ArrayList<>(dataFiles);
         duplicateDataFiles.addAll(dataFiles);
-        snapshotDeletion.deleteDataFiles(duplicateDataFiles);
+        snapshotDeletion.cleanDataFiles(duplicateDataFiles);
         snapshotDeletion.assertDeleteBatchesDeduplicated();
 
         snapshotDeletion.reset();
-        ManifestDeletionPlan manifestPlan =
-                snapshotDeletion.planUnusedManifests(snapshot, Collections.emptySet(), false);
-        snapshotDeletion.deletePlannedManifests(Arrays.asList(manifestPlan, manifestPlan));
+        List<Runnable> manifestPlan =
+                snapshotDeletion.planManifestsCleaner(snapshot, new HashSet<>());
+        List<Runnable> duplicateManifestPlan = new ArrayList<>(manifestPlan);
+        duplicateManifestPlan.addAll(manifestPlan);
+        snapshotDeletion.executeAll(duplicateManifestPlan);
         snapshotDeletion.assertDeleteBatchesDeduplicated();
     }
 
@@ -817,7 +864,10 @@ public class ExpireSnapshotsTest {
                         .getLeft();
 
         CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
-        assertThat(snapshotDeletion.planUnusedDataFiles(manifestList, entry -> false)).isEmpty();
+        assertThat(
+                        snapshotDeletion.planDeletedInDeltaManifest(
+                                snapshotWithDeltaManifestList(manifestList), entry -> false))
+                .isEmpty();
     }
 
     @Test
@@ -1257,33 +1307,28 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        public List<Path> planUnusedDataFiles(
+        public List<Path> planDeletedInDeltaManifest(
                 Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
             if (blockDataFilePlans && shouldBlock(snapshot.id())) {
                 dataFilePlans.awaitConcurrentCall();
             }
-            return super.planUnusedDataFiles(snapshot, skipper);
+            return super.planDeletedInDeltaManifest(snapshot, skipper);
         }
 
         @Override
-        public List<Path> planAddedDataFiles(String manifestListName) {
-            if (blockedChangelogManifestLists.contains(manifestListName)) {
+        public List<Path> planAddedInChangelogManifest(Snapshot snapshot) {
+            if (blockedChangelogManifestLists.contains(snapshot.changelogManifestList())) {
                 changelogPlans.awaitConcurrentCall();
             }
-            return super.planAddedDataFiles(manifestListName);
+            return super.planAddedInChangelogManifest(snapshot);
         }
 
         @Override
-        public ManifestDeletionPlan planUnusedManifests(
-                Snapshot snapshot, Set<String> skippingSet, boolean updateSkippingSet) {
-            if (updateSkippingSet) {
-                throw new AssertionError(
-                        "Concurrent manifest planning must not mutate skipping set.");
-            }
+        public List<Runnable> planManifestsCleaner(Snapshot snapshot, Set<String> skippingSet) {
             if (blockManifestPlans && shouldBlock(snapshot.id())) {
                 manifestPlans.awaitConcurrentCall();
             }
-            return super.planUnusedManifests(snapshot, skippingSet, updateSkippingSet);
+            return super.planManifestsCleaner(snapshot, skippingSet);
         }
 
         private boolean shouldBlock(long snapshotId) {
@@ -1321,10 +1366,10 @@ public class ExpireSnapshotsTest {
         }
 
         @Override
-        protected <F> void deleteFiles(
+        protected <F> void executeAll(
                 Collection<F> files, java.util.function.Consumer<F> deletion) {
             if (!files.isEmpty()) {
-                deleteBatches.add(new ArrayList<Object>(files));
+                deleteBatches.add(new ArrayList<>(files));
             }
         }
 

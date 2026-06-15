@@ -335,7 +335,7 @@ public class TagManager {
             success = false;
         }
         if (success) {
-            tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
+            tagDeletion.cleanDeletedDataFiles(taggedSnapshot, dataFileSkipper);
             tagDeletion.cleanEmptyDirectories();
         }
 

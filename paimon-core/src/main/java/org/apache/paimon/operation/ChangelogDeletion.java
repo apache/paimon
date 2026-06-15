@@ -31,7 +31,9 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -60,13 +62,11 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
     }
 
     @Override
-    public void cleanUnusedDataFiles(Changelog changelog, Predicate<ExpireFileEntry> skipper) {
+    public void cleanDeletedDataFiles(Changelog changelog, Predicate<ExpireFileEntry> skipper) {
         if (changelog.changelogManifestList() != null) {
-            deleteAddedDataFiles(changelog.changelogManifestList());
+            cleanDataFiles(planAddedInChangelogManifest(changelog));
         } else {
-            if (manifestList.exists(changelog.deltaManifestList())) {
-                cleanUnusedDataFiles(changelog.deltaManifestList(), skipper);
-            }
+            cleanDataFiles(planDeletedInDeltaManifest(changelog, skipper));
         }
     }
 
@@ -126,5 +126,19 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
         }
 
         return skippingSet;
+    }
+
+    public void cleanUnusedManifestList(String manifestName, Set<String> skippingSet) {
+        executeAll(planUnusedManifestList(manifestName, skippingSet));
+    }
+
+    public List<Runnable> planUnusedManifestList(String manifestName, Set<String> skippingSet) {
+        Set<String> manifests = new LinkedHashSet<>();
+        collectUnusedManifestList(manifestName, skippingSet, manifests);
+        List<Runnable> tasks = new ArrayList<>();
+        for (String manifest : manifests) {
+            tasks.add(() -> manifestFile.delete(manifest));
+        }
+        return tasks;
     }
 }
