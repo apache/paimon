@@ -26,7 +26,7 @@ from pypaimon.common.json_util import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
-EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 100
+EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300
 
 
 class SnapshotManager:
