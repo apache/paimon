@@ -48,7 +48,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+import static org.apache.paimon.utils.SnapshotManager.retryEarliestSnapshot;
 
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
@@ -222,31 +222,12 @@ public class TimeTravelUtil {
         if (snapshotId == null) {
             return null;
         }
-        long earliestSnapshotId = snapshotId;
-
-        if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
-        }
 
         FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
                 includeChangelog
                         ? s -> tryGetChangelogOrSnapshot(snapshotManager, changelogManager, s)
                         : snapshotManager::tryGetSnapshot;
-
-        do {
-            try {
-                return snapshotFunction.apply(snapshotId);
-            } catch (FileNotFoundException e) {
-                snapshotId++;
-                if (snapshotId > stopSnapshotId) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "Cannot find earliest snapshot from #%s to #%s.",
-                                    earliestSnapshotId, stopSnapshotId),
-                            e);
-                }
-            }
-        } while (true);
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, snapshotFunction);
     }
 
     private static Snapshot tryGetChangelogOrSnapshot(

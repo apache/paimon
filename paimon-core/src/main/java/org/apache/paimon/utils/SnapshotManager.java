@@ -231,15 +231,22 @@ public class SnapshotManager implements Serializable {
         if (snapshotId == null) {
             return null;
         }
-        long earliestSnapshotId = snapshotId;
 
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, this::tryGetSnapshot);
+    }
+
+    public static Snapshot retryEarliestSnapshot(
+            long earliestSnapshotId,
+            @Nullable Long stopSnapshotId,
+            FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction) {
         if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+            stopSnapshotId = earliestSnapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
         }
 
+        long snapshotId = earliestSnapshotId;
         do {
             try {
-                return tryGetSnapshot(snapshotId);
+                return snapshotFunction.apply(snapshotId);
             } catch (FileNotFoundException e) {
                 snapshotId++;
                 if (snapshotId > stopSnapshotId) {
