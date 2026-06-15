@@ -741,6 +741,88 @@ public class ParquetReadWriteTest {
         assertThat(count.get()).isEqualTo(nanosValues.length);
     }
 
+    @Test
+    public void testReadTimestampMicrosWrittenByParquetForLowPrecision() throws Exception {
+        // Regression test: after PR #8230, TIMESTAMP(n<=3) columns are written as INT64 with a
+        // MICROS annotation and epoch-microsecond values. The vectorized reader must decode them
+        // correctly when the Paimon row type declares precision 3 (not 6).
+        //
+        // The fix lives in LongTimestampUpdater.longTimestamp(): it reads the actual Parquet time
+        // unit via timestampUnit() and normalises MICROS values to epoch-milliseconds before
+        // storing them in the LongColumnVector, so ParquetTimestampVector.getTimestamp() receives
+        // epoch-ms and correctly calls Timestamp.fromEpochMillis(). Without timestampUnit() (e.g.
+        // paimon 1.4.1), the raw epoch-µs would be stored and fromEpochMillis() would return
+        // year ~58xxx or throw ArithmeticException: Millis overflow.
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        Type timestampMicrosType =
+                Types.primitive(INT64, Type.Repetition.REQUIRED)
+                        .as(
+                                LogicalTypeAnnotation.timestampType(
+                                        false, LogicalTypeAnnotation.TimeUnit.MICROS))
+                        .named("f0")
+                        .withId(0);
+        Type arrayTimestampMicrosType =
+                ConversionPatterns.listOfElements(
+                                Type.Repetition.OPTIONAL,
+                                "f1",
+                                Types.primitive(INT64, Type.Repetition.OPTIONAL)
+                                        .as(
+                                                LogicalTypeAnnotation.timestampType(
+                                                        false,
+                                                        LogicalTypeAnnotation.TimeUnit.MICROS))
+                                        .named("element")
+                                        .withId(2))
+                        .withId(1);
+        MessageType schema =
+                new MessageType("origin-parquet", timestampMicrosType, arrayTimestampMicrosType);
+        long[] microsValues = new long[] {1704067200123000L, -1000000L};
+
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(new Configuration())
+                        .withType(schema)
+                        .build()) {
+            SimpleGroupFactory simpleGroupFactory = new SimpleGroupFactory(schema);
+            for (long micros : microsValues) {
+                Group row = simpleGroupFactory.newGroup();
+                row.append("f0", micros);
+                Group array = row.addGroup("f1");
+                array.addGroup(0).add(0, micros);
+                array.addGroup(0).add(0, micros + 1000L);
+                writer.write(row);
+            }
+        }
+
+        RowType paimonRowType =
+                RowType.builder()
+                        .fields(new TimestampType(3), new ArrayType(new TimestampType(3)))
+                        .build();
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), paimonRowType, 500, FilterCompat.NOOP);
+        AtomicInteger count = new AtomicInteger(0);
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)))) {
+            reader.forEachRemaining(
+                    row -> {
+                        long micros = microsValues[count.get()];
+                        assertThat(row.getTimestamp(0, 3))
+                                .isEqualTo(Timestamp.fromMicros(micros));
+                        assertThat(row.getArray(1).getTimestamp(0, 3))
+                                .isEqualTo(Timestamp.fromMicros(micros));
+                        assertThat(row.getArray(1).getTimestamp(1, 3))
+                                .isEqualTo(Timestamp.fromMicros(micros + 1000L));
+                        count.incrementAndGet();
+                    });
+        }
+        assertThat(count.get()).isEqualTo(microsValues.length);
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());

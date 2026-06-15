@@ -447,7 +447,7 @@ class ParquetFiltersTest {
 
     @Test
     public void testTimestampMillis() {
-        // precision <= 3 uses milliseconds (INT64)
+        // precision <= 3 now uses microseconds (MICROS annotation, matching the writer)
         int precision = 3;
         PredicateBuilder builder =
                 new PredicateBuilder(
@@ -456,16 +456,16 @@ class ParquetFiltersTest {
                                         new DataField(0, "ts1", new TimestampType(precision)))));
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200000L); // 2024-01-01 00:00:00
-        long expectedMillis = value.getMillisecond();
+        long expectedMicros = value.toMicros();
 
         test(builder.isNull(0), "eq(ts1, null)", true);
         test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
-        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMillis + ")", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMicros + ")", true);
     }
 
     @Test
@@ -493,7 +493,7 @@ class ParquetFiltersTest {
 
     @Test
     public void testLocalZonedTimestampMillis() {
-        // precision <= 3 uses milliseconds (INT64)
+        // precision <= 3 now uses microseconds (MICROS annotation, matching the writer)
         int precision = 3;
         PredicateBuilder builder =
                 new PredicateBuilder(
@@ -505,14 +505,14 @@ class ParquetFiltersTest {
                                                 new LocalZonedTimestampType(precision)))));
 
         Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
-        long expectedMillis = value.getMillisecond();
+        long expectedMicros = value.toMicros();
 
         test(builder.isNull(0), "eq(ts1, null)", true);
         test(builder.isNotNull(0), "noteq(ts1, null)", true);
-        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
-        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
-        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
-        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
     }
 
     @Test
@@ -555,22 +555,22 @@ class ParquetFiltersTest {
         test(
                 builder.in(0, Arrays.asList(v1, v2, v3)),
                 "or(or(eq(ts1, "
-                        + v1.getMillisecond()
+                        + v1.toMicros()
                         + "), eq(ts1, "
-                        + v2.getMillisecond()
+                        + v2.toMicros()
                         + ")), eq(ts1, "
-                        + v3.getMillisecond()
+                        + v3.toMicros()
                         + "))",
                 true);
 
         test(
                 builder.notIn(0, Arrays.asList(v1, v2, v3)),
                 "and(and(noteq(ts1, "
-                        + v1.getMillisecond()
+                        + v1.toMicros()
                         + "), noteq(ts1, "
-                        + v2.getMillisecond()
+                        + v2.toMicros()
                         + ")), noteq(ts1, "
-                        + v3.getMillisecond()
+                        + v3.toMicros()
                         + "))",
                 true);
     }
