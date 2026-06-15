@@ -27,7 +27,9 @@ import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /** Schema for global index. */
 public class GlobalIndexMeta {
@@ -86,5 +88,49 @@ public class GlobalIndexMeta {
     @Nullable
     public byte[] indexMeta() {
         return indexMeta;
+    }
+
+    /** All indexed field ids in order: the primary {@link #indexFieldId} followed by the rest. */
+    public List<Integer> getIndexedFieldIds() {
+        List<Integer> ids = new ArrayList<>();
+        ids.add(indexFieldId);
+        if (extraFieldIds != null) {
+            for (int id : extraFieldIds) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
+    public List<DataField> getIndexedFields(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        for (int id : getIndexedFieldIds()) {
+            fields.add(rowType.getField(id));
+        }
+        return fields;
+    }
+
+    /** The primary index column. */
+    public DataField getIndexField(RowType rowType) {
+        return rowType.getField(indexFieldId);
+    }
+
+    /** The extra columns beyond the primary one; empty for a single-column index. */
+    public List<DataField> getExtraFields(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        if (extraFieldIds != null) {
+            for (int id : extraFieldIds) {
+                fields.add(rowType.getField(id));
+            }
+        }
+        return fields;
+    }
+
+    public List<String> getIndexedFieldNames(RowType rowType) {
+        List<String> names = new ArrayList<>();
+        for (int id : getIndexedFieldIds()) {
+            names.add(rowType.getField(id).name());
+        }
+        return names;
     }
 }

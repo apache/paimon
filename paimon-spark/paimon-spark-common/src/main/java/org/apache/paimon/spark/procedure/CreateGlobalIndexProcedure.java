@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
@@ -43,12 +44,14 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -120,6 +123,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
         return modifySparkTable(
                 tableIdent,
                 sparkTable -> {
+                    List<String> indexColumns =
+                            Arrays.stream(column.split(","))
+                                    .map(String::trim)
+                                    .filter(s -> !s.isEmpty())
+                                    .collect(Collectors.toList());
                     try {
                         org.apache.paimon.table.Table t = sparkTable.getTable();
                         checkArgument(
@@ -132,11 +140,24 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 tableIdent);
 
                         RowType rowType = table.rowType();
+                        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
                         checkArgument(
-                                rowType.containsField(column),
-                                "Column '%s' does not exist in table '%s'.",
-                                column,
-                                tableIdent);
+                                indexColumns.size() == new HashSet<>(indexColumns).size(),
+                                "Duplicate index columns are not allowed: %s",
+                                indexColumns);
+                        // No hard cap on the number of index columns: unlike row-store B-tree
+                        // indexes (e.g. MySQL 16, PostgreSQL 32) whose limit comes from composing
+                        // columns into a single key, the global index is built on per-type index
+                        // frameworks. Whether multiple columns are supported, and any practical
+                        // limit, is decided by each index type (single-column types reject
+                        // multi-column via UnsupportedOperationException).
+                        for (String col : indexColumns) {
+                            checkArgument(
+                                    rowType.containsField(col),
+                                    "Column '%s' does not exist in table '%s'.",
+                                    col,
+                                    tableIdent);
+                        }
                         DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
                                 SparkProcedureUtils.convertToPartitionPredicate(
@@ -145,12 +166,32 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         spark(),
                                         relation);
 
-                        DataField indexField = rowType.getField(column);
-                        RowType projectedRowType =
-                                rowType.project(Collections.singletonList(column));
+                        List<DataField> indexFields =
+                                indexColumns.stream()
+                                        .map(rowType::getField)
+                                        .collect(Collectors.toList());
+                        RowType projectedRowType = rowType.project(indexColumns);
                         RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
 
                         Options userOptions = createUserOptions(table, optionString);
+
+                        if (indexColumns.size() > 1) {
+                            // Fail fast before submitting the job: index types that do not support
+                            // multi-column throw from GlobalIndexerFactory#create, which happens
+                            // before any indexer side effect.
+                            try {
+                                GlobalIndexer.create(
+                                        indexType,
+                                        indexFields.get(0),
+                                        indexFields.subList(1, indexFields.size()),
+                                        userOptions);
+                            } catch (UnsupportedOperationException e) {
+                                throw new IllegalArgumentException(
+                                        String.format(
+                                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                                indexType, indexColumns));
+                            }
+                        }
 
                         GlobalIndexTopologyBuilder topoBuilder =
                                 GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
@@ -163,7 +204,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         table,
                                         indexType,
                                         readRowType,
-                                        indexField,
+                                        indexFields.get(0),
+                                        indexFields.subList(1, indexFields.size()),
                                         userOptions);
 
                         try (TableCommitImpl commit =
@@ -179,8 +221,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                     } catch (Exception e) {
                         throw new RuntimeException(
                                 String.format(
-                                        "Failed to create %s index for column '%s' on table '%s'.",
-                                        indexType, column, tableIdent),
+                                        "Failed to create %s index for columns '%s' on table '%s'.",
+                                        indexType, indexColumns, tableIdent),
                                 e);
                     }
                 });
