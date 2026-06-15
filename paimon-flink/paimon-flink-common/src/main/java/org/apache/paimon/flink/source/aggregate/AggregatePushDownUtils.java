@@ -20,6 +20,8 @@ package org.apache.paimon.flink.source.aggregate;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.utils.ScanBucketUtils;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -153,6 +155,7 @@ public class AggregatePushDownUtils {
                 table.newReadBuilder()
                         .withFilter(predicate)
                         .withPartitionFilter(partitionPredicate);
+        ScanBucketUtils.applyScanBucket(table, readBuilder, Options.fromMap(table.options()));
         if (minMaxColumns.isEmpty()) {
             readBuilder.dropStats();
         }

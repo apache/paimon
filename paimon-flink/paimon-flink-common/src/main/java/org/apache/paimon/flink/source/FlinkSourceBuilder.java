@@ -26,6 +26,7 @@ import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
+import org.apache.paimon.flink.utils.ScanBucketUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -200,6 +201,7 @@ public class FlinkSourceBuilder {
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
         }
+        ScanBucketUtils.applyScanBucket(table, readBuilder, conf);
         return readBuilder.dropStats();
     }
 

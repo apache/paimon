@@ -23,6 +23,8 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -37,6 +39,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Implementation for {@link ReadBuilder}. */
@@ -161,8 +164,38 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withBucket(int bucket) {
+        validateSpecifiedBucket(table, bucket);
         this.specifiedBucket = bucket;
         return this;
+    }
+
+    /**
+     * Validates bucket id before manifest pruning ({@link InnerTableScan#withBucket(int)}). Callers
+     * such as Flink {@code scan.bucket} should route through {@link #withBucket(int)}.
+     */
+    static void validateSpecifiedBucket(InnerTable table, int bucket) {
+        checkArgument(bucket >= 0, "Bucket id must be non-negative, but is %s.", bucket);
+        if (!(table instanceof FileStoreTable)) {
+            throw new IllegalArgumentException(
+                    "Bucket scan is only supported for FileStoreTable, but got "
+                            + table.getClass().getName());
+        }
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        checkArgument(
+                fileStoreTable.bucketMode() == BucketMode.HASH_FIXED,
+                "Bucket scan is only supported for fixed-bucket tables, but got bucket mode %s.",
+                fileStoreTable.bucketMode());
+
+        int numBuckets = CoreOptions.fromMap(fileStoreTable.options()).bucket();
+        checkArgument(
+                numBuckets > 0,
+                "Bucket scan is only supported for tables with bucket > 0, but got bucket %s.",
+                numBuckets);
+        checkArgument(
+                bucket < numBuckets,
+                "Bucket id %s must be less than table bucket number %s.",
+                bucket,
+                numBuckets);
     }
 
     @Override
