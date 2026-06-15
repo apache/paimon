@@ -20,11 +20,10 @@
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from io import StringIO
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pandas as pd
@@ -148,9 +147,6 @@ class CliTableStreamTest(unittest.TestCase):
         mock_builder.with_include_row_kind.return_value = mock_builder
         mock_builder.with_consumer_id.return_value = mock_builder
         mock_builder.with_scan_from.return_value = mock_builder
-
-        stdout_buf = StringIO()
-        stderr_buf = StringIO()
 
         with patch('sys.argv', argv):
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
