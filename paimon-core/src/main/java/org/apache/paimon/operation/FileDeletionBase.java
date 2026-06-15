@@ -44,8 +44,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -83,7 +81,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     private final Executor fileExecutor;
     private final int fileOperationParallelism;
-    @Nullable private final Integer manifestReadParallelism;
 
     protected boolean changelogDecoupled;
 
@@ -117,7 +114,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                         deleteFileThreadNum > 0
                                 ? deleteFileThreadNum
                                 : Runtime.getRuntime().availableProcessors());
-        this.manifestReadParallelism = deleteFileThreadNum > 0 ? deleteFileThreadNum : null;
     }
 
     public Executor fileExecutor() {
@@ -311,7 +307,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                     }
                 },
                 manifests,
-                manifestReadParallelism);
+                fileOperationParallelism);
     }
 
     private Iterable<ExpireFileEntry> readExpireFileEntries(List<ManifestFileMeta> manifests) {
@@ -320,7 +316,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                         manifestFile.readExpireFileEntries(
                                 manifest.fileName(), manifest.fileSize()),
                 manifests,
-                manifestReadParallelism);
+                fileOperationParallelism);
     }
 
     private DataFileDeletionPlan planAddedDataFiles(Iterable<ExpireFileEntry> manifestEntries) {
@@ -587,7 +583,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             futures.add(
                     CompletableFuture.supplyAsync(
                             () -> manifestSkippingSet(skippingSnapshot),
-                            ManifestReadThreadPool.getExecutorService(manifestReadParallelism)));
+                            ManifestReadThreadPool.getExecutorService(fileOperationParallelism)));
         }
 
         Set<String> skippingSet = new HashSet<>();
