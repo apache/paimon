@@ -310,8 +310,12 @@ class TestConvertPlanPreservesSnapshotId(unittest.TestCase):
 
         split = MagicMock()
         original_plan = Plan([split], snapshot_id=42)
+        predicate_json = (
+            '{"kind":"LEAF","transform":{"name":"FIELD_REF",'
+            '"fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'
+        )
         auth_result = TableQueryAuthResult(
-            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF","fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'],
+            filter=[predicate_json],
             column_masking=None)
         converted = auth_result.convert_plan(original_plan)
         assert converted.snapshot_id == 42
@@ -323,8 +327,12 @@ class TestConvertPlanPreservesSnapshotId(unittest.TestCase):
 
         split = MagicMock()
         original_plan = Plan([split], snapshot_id=None)
+        predicate_json = (
+            '{"kind":"LEAF","transform":{"name":"FIELD_REF",'
+            '"fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'
+        )
         auth_result = TableQueryAuthResult(
-            filter=['{"kind":"LEAF","transform":{"name":"FIELD_REF","fieldRef":{"name":"id"}},"function":"EQUAL","literals":[1]}'],
+            filter=[predicate_json],
             column_masking=None)
         converted = auth_result.convert_plan(original_plan)
         assert converted.snapshot_id is None
