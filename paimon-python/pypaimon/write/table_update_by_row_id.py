@@ -315,7 +315,7 @@ class TableUpdateByRowId:
 
         # Build a boolean mask: True at positions that need to be updated
         all_indices = pa.array(range(original_data.num_rows), type=pa.int64())
-        mask = pc.is_in(all_indices, relative_indices)
+        mask = pc.is_in(all_indices, value_set=relative_indices)
 
         # Build the merged table column by column
         merged_columns = {}
