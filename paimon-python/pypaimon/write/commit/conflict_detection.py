@@ -319,7 +319,7 @@ class ConflictDetection:
 
             if snapshot.commit_kind == "COMPACT":
                 err = self._compact_conflicts_with_delta(
-                    snapshot, delta_signatures, commit_entries)
+                    snapshot, delta_signatures, column_checker, commit_entries)
                 if err is not None:
                     return err
                 continue
@@ -340,10 +340,17 @@ class ConflictDetection:
 
         return None
 
-    def _compact_conflicts_with_delta(self, snapshot, delta_signatures, commit_entries):
+    def _compact_conflicts_with_delta(self, snapshot, delta_signatures,
+                                      column_checker, commit_entries):
         """Return RuntimeError if a COMPACT snapshot deleted a same-kind
-        (blob vs non-blob) anchor file whose row-id range overlaps any
+        anchor file whose row-id range AND write columns overlap any
         staged delta; otherwise None.
+
+        File-type match guards against `write_cols=None` ambiguity (an
+        initial full-row parquet does not actually contain blob columns);
+        column_checker guards against unrelated column-write shards
+        (compacting an f1-only parquet must not block an f2 update on
+        the same row range).
         """
         if not delta_signatures:
             return None
@@ -359,16 +366,19 @@ class ConflictDetection:
             for delta_is_blob, from_, to in delta_signatures:
                 if delta_is_blob != deleted_is_blob:
                     continue
-                if file_range.from_ <= to and from_ <= file_range.to:
-                    return RuntimeError(
-                        "Blob/row-id update conflicts with concurrent COMPACT "
-                        "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
-                        "was compacted away, overlaps staged delta "
-                        "[{df}, {dt}].".format(
-                            sid=snapshot.id,
-                            name=entry.file.file_name,
-                            ff=file_range.from_,
-                            ft=file_range.to,
-                            df=from_,
-                            dt=to))
+                if file_range.from_ > to or from_ > file_range.to:
+                    continue
+                if not column_checker.conflicts_with(entry.file):
+                    continue
+                return RuntimeError(
+                    "Blob/row-id update conflicts with concurrent COMPACT "
+                    "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
+                    "was compacted away, overlaps staged delta "
+                    "[{df}, {dt}].".format(
+                        sid=snapshot.id,
+                        name=entry.file.file_name,
+                        ff=file_range.from_,
+                        ft=file_range.to,
+                        df=from_,
+                        dt=to))
         return None

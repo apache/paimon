@@ -259,9 +259,6 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
                             write_cols=["col_a"])]
 
     def test_compact_blob_delete_raises_at_first_match(self):
-        # Two COMPACT snapshots, both have a blob DELETE overlapping the
-        # delta range. The loop must walk ascending and return on the
-        # first match -> error names snapshot 2.
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
@@ -277,8 +274,6 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         self.assertIn("COMPACT", str(result))
 
     def test_compact_other_file_type_does_not_raise(self):
-        # Parquet-only compact must NOT flag a blob delta whose .blob
-        # anchor is still intact. Locks in the precise-version invariant.
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=200)
         compact_entries = [
@@ -291,24 +286,29 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
             detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
 
     def test_compact_no_conflict_when_no_matching_delete(self):
-        # Negative cases that should not raise: disjoint range, add-only
-        # (no DELETE entries at all).
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)
+        col_a_delta = self._blob_delta()
+        col_b_delta = [_make_entry("d.parquet", first_row_id=0, row_count=51,
+                                   write_cols=["col_b"])]
         cases = [
-            ("disjoint_range", [
+            ("disjoint_range", col_a_delta, [
                 _make_entry("old.blob", kind=1, first_row_id=200, row_count=200),
             ]),
-            ("add_only", [
+            ("add_only", col_a_delta, [
                 _make_entry("merged.blob", kind=0, first_row_id=0, row_count=200),
             ]),
+            ("other_column_shard", col_b_delta, [
+                _make_entry("old.parquet", kind=1, first_row_id=0, row_count=100,
+                            write_cols=["col_a"]),
+            ]),
         ]
-        for name, compact_entries in cases:
+        for name, delta, compact_entries in cases:
             with self.subTest(case=name):
                 detection = self._make_detection(
                     [check_snap, compact_snap], {2: compact_entries})
                 self.assertIsNone(
-                    detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
+                    detection.check_row_id_from_snapshot(compact_snap, delta))
 
 
 class TestRowIdColumnConflictChecker(unittest.TestCase):
