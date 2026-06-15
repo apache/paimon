@@ -33,17 +33,31 @@ class TableScan:
         self,
         table,
         predicate: Optional[Predicate],
-        limit: Optional[int]
+        limit: Optional[int],
+        query_auth=None,
+        read_type=None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
+        self._query_auth = query_auth
+        self._read_type = read_type
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
-        return self.file_scanner.scan()
+        auth_result = self._auth_query()
+        plan = self.file_scanner.scan()
+        if auth_result is not None:
+            plan = auth_result.convert_plan(plan)
+        return plan
+
+    def _auth_query(self):
+        if self._query_auth is None:
+            return None
+        select = [f.name for f in self._read_type] if self._read_type else None
+        return self._query_auth(select)
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
         """Run :meth:`plan` while recording manifest / pruning counters.
@@ -51,7 +65,11 @@ class TableScan:
         Only used by :meth:`ReadBuilder.explain`; the regular read path
         keeps going through :meth:`plan`.
         """
-        return self.file_scanner.scan_with_stats()
+        auth_result = self._auth_query()
+        plan, stats = self.file_scanner.scan_with_stats()
+        if auth_result is not None:
+            plan = auth_result.convert_plan(plan)
+        return plan, stats
 
     def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options

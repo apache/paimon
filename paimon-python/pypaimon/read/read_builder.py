@@ -33,7 +33,7 @@ from pypaimon.utils.projection import Projection, is_row_type
 class ReadBuilder:
     """Implementation of ReadBuilder for native Python reading."""
 
-    def __init__(self, table):
+    def __init__(self, table, query_auth=None):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -45,6 +45,7 @@ class ReadBuilder:
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[List[int]]] = None
         self._limit: Optional[int] = None
+        self._query_auth = query_auth
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
@@ -77,7 +78,9 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            query_auth=self._query_auth,
+            read_type=self.read_type()
         )
 
     def new_read(self) -> TableRead:
@@ -250,6 +253,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
             splits_all_above_l0 += 1
 
         if verbose:
+            from pypaimon.read.query_auth_split import QueryAuthSplit
             split_infos.append(ExplainSplitInfo(
                 partition=_format_partition(split, table),
                 bucket=int(getattr(split, 'bucket', -1)),
@@ -262,6 +266,7 @@ def _build_explain_result(table, scan: TableScan, plan, stats: ScanStats,
                 level_histogram=per_split_levels,
                 deletion_file_count=dv_count_here,
                 file_paths=list(getattr(split, 'file_paths', []) or []),
+                has_auth=isinstance(split, QueryAuthSplit),
             ))
 
     fps_min, fps_max, fps_avg = _min_max_avg(files_per_split)

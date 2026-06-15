@@ -268,7 +268,7 @@ class FileStoreWrite:
         return buckets
 
     def _load_seq_number_stats(self, partition: Tuple) -> dict:
-        read_builder = self.table.new_read_builder()
+        read_builder = self.table.new_read_builder(_skip_auth=True)
         predicate_builder = read_builder.new_predicate_builder()
         sub_predicates = []
         for key, value in zip(self.table.partition_keys, partition):

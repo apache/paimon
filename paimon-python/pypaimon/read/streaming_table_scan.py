@@ -79,7 +79,9 @@ class AsyncStreamingTableScan:
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
-        consumer_id: Optional[str] = None
+        consumer_id: Optional[str] = None,
+        query_auth=None,
+        read_type=None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -108,6 +110,8 @@ class AsyncStreamingTableScan:
 
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
+        self._query_auth = query_auth
+        self._read_type = read_type
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -267,6 +271,16 @@ class AsyncStreamingTableScan:
             )
             self._pending_consumer_snapshot = None
 
+    def _apply_auth(self, plan) -> 'Plan':
+        if self._query_auth is None:
+            return plan
+        read_type = self._read_type
+        select = [f.name for f in read_type] if read_type else None
+        auth_result = self._query_auth(select)
+        if auth_result is not None:
+            return auth_result.convert_plan(plan)
+        return plan
+
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""
         if self._prefetch_future is not None or self._prefetch_executor is None:
@@ -300,9 +314,10 @@ class AsyncStreamingTableScan:
     def _create_follow_up_plan(self, snapshot: Snapshot) -> Plan:
         """Route to changelog or delta plan based on scanner type."""
         if isinstance(self.follow_up_scanner, ChangelogFollowUpScanner):
-            return self._create_changelog_plan(snapshot)
+            plan = self._create_changelog_plan(snapshot)
         else:
-            return self._create_delta_plan(snapshot)
+            plan = self._create_delta_plan(snapshot)
+        return self._apply_auth(plan)
 
     def _create_follow_up_scanner(self) -> FollowUpScanner:
         """Create the appropriate follow-up scanner based on changelog-producer option."""
@@ -319,8 +334,8 @@ class AsyncStreamingTableScan:
             return [e for e in entries if self._bucket_filter(e.bucket)]
         return entries
 
-    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
-        """Create a Plan for the initial full scan of the latest snapshot."""
+    def _create_initial_plan_raw(self, snapshot: Snapshot) -> Plan:
+        """Create initial plan without auth (used by catch-up to avoid double auth)."""
         def all_manifests():
             return self._manifest_list_manager.read_all(snapshot), snapshot
 
@@ -331,6 +346,10 @@ class AsyncStreamingTableScan:
             limit=None
         )
         return starting_scanner.scan()
+
+    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
+        """Create a Plan for the initial full scan of the latest snapshot."""
+        return self._apply_auth(self._create_initial_plan_raw(snapshot))
 
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
@@ -403,13 +422,11 @@ class AsyncStreamingTableScan:
 
     def _create_catch_up_plan(self, start_id: int, end_snapshot: Snapshot) -> Plan:
         """Create a catch-up plan using diff-based scanning between start and end snapshots."""
-        # Get start snapshot (one before where we want to start reading).
-        # If start_id is 0 or 1, fall back to a full scan of end_snapshot.
         start_snapshot = None
         if start_id > 1:
             start_snapshot = self._snapshot_manager.get_snapshot_by_id(start_id - 1)
 
         if start_snapshot is None:
-            return self._create_initial_plan(end_snapshot)
+            return self._apply_auth(self._create_initial_plan_raw(end_snapshot))
 
-        return IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
+        return self._apply_auth(IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot))
