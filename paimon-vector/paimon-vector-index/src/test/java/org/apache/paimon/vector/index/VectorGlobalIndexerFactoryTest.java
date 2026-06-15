@@ -137,6 +137,22 @@ public class VectorGlobalIndexerFactoryTest {
     }
 
     @Test
+    public void testFieldLevelDimensionOverridesIndexTypeDimension() {
+        Options options = new Options();
+        options.setString("ivf-flat.dimension", "32");
+        options.setString("ivf-flat.fields.vec.dimension", "64");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions).containsEntry("dimension", "64");
+    }
+
+    @Test
     public void testFieldLevelOptionsOnlyApplyToMatchingField() {
         Options options = new Options();
         options.setString("ivf-flat.nlist", "128");

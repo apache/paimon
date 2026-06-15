@@ -46,13 +46,14 @@ public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory
             DataType fieldType, Options tableOptions, String identifier, String fieldName) {
         Map<String, String> nativeOptions = new LinkedHashMap<>();
         String optionPrefix = identifier + ".";
-        String fieldPrefix = optionPrefix + "fields." + fieldName + ".";
+        String fieldsPrefix = optionPrefix + "fields.";
+        String fieldPrefix = fieldsPrefix + fieldName + ".";
         Map<String, String> tableOptionsMap = tableOptions.toMap();
 
         // First collect index-type level options, e.g. <index-type>.xxx.
         for (Map.Entry<String, String> entry : tableOptionsMap.entrySet()) {
             String optionKey = entry.getKey();
-            if (optionKey.startsWith(optionPrefix)) {
+            if (optionKey.startsWith(optionPrefix) && !optionKey.startsWith(fieldsPrefix)) {
                 String nativeKey = nativeOptionKey(optionKey.substring(optionPrefix.length()));
                 if (nativeKey != null) {
                     nativeOptions.put(nativeKey, entry.getValue());
