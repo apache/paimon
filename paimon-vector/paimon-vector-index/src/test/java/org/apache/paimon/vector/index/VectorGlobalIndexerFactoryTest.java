@@ -121,7 +121,7 @@ public class VectorGlobalIndexerFactoryTest {
         Options options = new Options();
         options.setString("ivf-flat.dimension", "32");
         options.setString("ivf-flat.nlist", "128");
-        options.setString("ivf-flat.fields.vec.nlist", "256");
+        options.setString("fields.vec.nlist", "256");
 
         Map<String, String> nativeOptions =
                 VectorGlobalIndexerFactory.nativeOptions(
@@ -140,7 +140,7 @@ public class VectorGlobalIndexerFactoryTest {
     public void testFieldLevelDimensionOverridesIndexTypeDimension() {
         Options options = new Options();
         options.setString("ivf-flat.dimension", "32");
-        options.setString("ivf-flat.fields.vec.dimension", "64");
+        options.setString("fields.vec.dimension", "64");
 
         Map<String, String> nativeOptions =
                 VectorGlobalIndexerFactory.nativeOptions(
@@ -156,7 +156,7 @@ public class VectorGlobalIndexerFactoryTest {
     public void testFieldLevelOptionsOnlyApplyToMatchingField() {
         Options options = new Options();
         options.setString("ivf-flat.nlist", "128");
-        options.setString("ivf-flat.fields.vec.nlist", "256");
+        options.setString("fields.vec.nlist", "256");
 
         Map<String, String> nativeOptions =
                 VectorGlobalIndexerFactory.nativeOptions(
@@ -172,7 +172,7 @@ public class VectorGlobalIndexerFactoryTest {
     public void testFieldLevelOptionsRequireExactFieldName() {
         Options options = new Options();
         options.setString("ivf-flat.nlist", "128");
-        options.setString("ivf-flat.fields.vec_extra.nlist", "512");
+        options.setString("fields.vec_extra.nlist", "512");
 
         Map<String, String> nativeOptions =
                 VectorGlobalIndexerFactory.nativeOptions(
@@ -187,7 +187,7 @@ public class VectorGlobalIndexerFactoryTest {
     @Test
     public void testFieldLevelOptionsWithoutIndexTypeOption() {
         Options options = new Options();
-        options.setString("ivf-flat.fields.vec.distance.metric", "cosine");
+        options.setString("fields.vec.distance.metric", "cosine");
 
         Map<String, String> nativeOptions =
                 VectorGlobalIndexerFactory.nativeOptions(

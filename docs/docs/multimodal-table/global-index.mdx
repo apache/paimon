@@ -131,7 +131,7 @@ Supported vector index options:
 
 The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared
 by every vector column of the same index type. When a table has multiple vector columns, you can
-scope an option to a single column with `<index-type>.fields.<field-name>.<option>`. The field-level
+scope an option to a single column with `fields.<field-name>.<option>`. The field-level
 form takes precedence over the column-agnostic `<index-type>.<option>` for that column. Use the
 stored table column name exactly as `<field-name>`:
 
@@ -146,11 +146,11 @@ CREATE TABLE my_table (
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true',
     -- per-column dimensions
-    'ivf-pq.fields.title_embedding.dimension' = '768',
-    'ivf-pq.fields.image_embedding.dimension' = '512',
+    'fields.title_embedding.dimension' = '768',
+    'fields.image_embedding.dimension' = '512',
     -- shared by every ivf-pq column, overridden only for 'image_embedding'
     'ivf-pq.nlist' = '256',
-    'ivf-pq.fields.image_embedding.nlist' = '512'
+    'fields.image_embedding.nlist' = '512'
 );
 ```
 
