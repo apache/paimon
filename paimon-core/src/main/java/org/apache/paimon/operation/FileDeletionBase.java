@@ -37,6 +37,7 @@ import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -45,11 +46,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -179,15 +182,17 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     public void cleanUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
         // try read manifests
         List<ManifestFileMeta> manifests = tryReadManifestList(manifestList);
-        List<ExpireFileEntry> manifestEntries;
         // data file path -> (original manifest entry, extra file paths)
         Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
-        for (ManifestFileMeta manifest : manifests) {
+        Iterator<List<ExpireFileEntry>> entries = readExpireFileEntries(manifests).iterator();
+        while (true) {
+            List<ExpireFileEntry> manifestEntries;
             try {
-                manifestEntries =
-                        manifestFile.readExpireFileEntries(
-                                manifest.fileName(), manifest.fileSize());
-            } catch (Exception e) {
+                if (!entries.hasNext()) {
+                    break;
+                }
+                manifestEntries = entries.next();
+            } catch (RuntimeException e) {
                 // cancel deletion if any exception occurs
                 LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
                 return;
@@ -253,16 +258,26 @@ public abstract class FileDeletionBase<T extends Snapshot> {
      */
     public void deleteAddedDataFiles(String manifestListName) {
         List<ManifestFileMeta> manifests = tryReadManifestList(manifestListName);
-        for (ManifestFileMeta manifest : manifests) {
-            try {
-                List<ExpireFileEntry> manifestEntries =
-                        manifestFile.readExpireFileEntries(
-                                manifest.fileName(), manifest.fileSize());
-                deleteAddedDataFiles(manifestEntries);
-            } catch (Exception e) {
-                // We want to delete the data file, so just ignore the unavailable files
-                LOG.info("Failed to read manifest " + manifest.fileName() + ". Ignore it.", e);
-            }
+        Iterable<List<ExpireFileEntry>> entries =
+                ManifestReadThreadPool.sequentialBatchedExecute(
+                        manifest -> {
+                            try {
+                                return Collections.singletonList(readExpireFileEntries(manifest));
+                            } catch (Exception e) {
+                                // We want to delete the data file, so just ignore the unavailable
+                                // files
+                                LOG.info(
+                                        "Failed to read manifest "
+                                                + manifest.fileName()
+                                                + ". Ignore it.",
+                                        e);
+                                return Collections.emptyList();
+                            }
+                        },
+                        manifests,
+                        null);
+        for (List<ExpireFileEntry> manifestEntries : entries) {
+            deleteAddedDataFiles(manifestEntries);
         }
     }
 
@@ -288,31 +303,43 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public void cleanUnusedIndexManifests(Snapshot snapshot, Set<String> skippingSet) {
-        // clean index manifests
         String indexManifest = snapshot.indexManifest();
-        // check exists, it may have been deleted by other snapshots
-        if (indexManifest != null) {
-            List<IndexManifestEntry> indexManifestEntries;
-            try {
-                indexManifestEntries = indexFileHandler.readManifestWithIOException(indexManifest);
-            } catch (FileNotFoundException e) {
-                return;
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            indexManifestEntries.removeIf(
-                    entry -> skippingSet.contains(entry.indexFile().fileName()));
-            deleteFiles(indexManifestEntries, indexFileHandler::deleteIndexFile);
+        if (indexManifest == null) {
+            return;
+        }
+        try {
+            cleanUnusedIndexManifests(
+                    indexManifest,
+                    indexFileHandler.readManifestWithIOException(indexManifest),
+                    skippingSet);
+        } catch (FileNotFoundException e) {
+            // check exists, it may have been deleted by other snapshots
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-            if (!skippingSet.contains(indexManifest)) {
-                indexFileHandler.deleteManifest(indexManifest);
-            }
+    private void cleanUnusedIndexManifests(
+            String indexManifest,
+            List<IndexManifestEntry> indexManifestEntries,
+            Set<String> skippingSet) {
+        indexManifestEntries.removeIf(entry -> skippingSet.contains(entry.indexFile().fileName()));
+        deleteFiles(indexManifestEntries, indexFileHandler::deleteIndexFile);
+
+        if (!skippingSet.contains(indexManifest)) {
+            indexFileHandler.deleteManifest(indexManifest);
         }
     }
 
     public void cleanUnusedManifestList(String manifestName, Set<String> skippingSet) {
+        cleanUnusedManifestList(manifestName, tryReadManifestList(manifestName), skippingSet);
+    }
+
+    private void cleanUnusedManifestList(
+            String manifestName,
+            List<ManifestFileMeta> toExpireManifests,
+            Set<String> skippingSet) {
         List<String> toDeleteManifests = new ArrayList<>();
-        List<ManifestFileMeta> toExpireManifests = tryReadManifestList(manifestName);
         for (ManifestFileMeta manifest : toExpireManifests) {
             String fileName = manifest.fileName();
             if (!skippingSet.contains(fileName)) {
@@ -333,22 +360,105 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             Set<String> skippingSet,
             boolean deleteDataManifestLists,
             boolean deleteChangelog) {
-        if (deleteDataManifestLists) {
-            // deleteDataManifestLists will be false
-            // with changelog decouple + none changelog producer.
-            // Why don't we clean base manifest in this scenario?
-            // Because cleanUnusedManifestList is compared with the earliest snapshot.
-            // For none changelog producer, changelog files are the level 0 files.
-            // Even if these files are not used by the earliest snapshot,
-            // we have to keep them as changelog, and clean then in ChangelogDeletion.
-            cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
-            cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
+        cleanUnusedManifests(
+                Collections.singletonList(snapshot),
+                skippingSet,
+                deleteDataManifestLists,
+                deleteChangelog);
+    }
+
+    protected void cleanUnusedManifests(
+            List<? extends Snapshot> snapshots,
+            Set<String> skippingSet,
+            boolean deleteDataManifestLists,
+            boolean deleteChangelog) {
+        List<String> manifestLists = new ArrayList<>();
+        for (Snapshot snapshot : snapshots) {
+            if (deleteDataManifestLists) {
+                // deleteDataManifestLists will be false
+                // with changelog decouple + none changelog producer.
+                // Why don't we clean base manifest in this scenario?
+                // Because cleanUnusedManifestList is compared with the earliest snapshot.
+                // For none changelog producer, changelog files are the level 0 files.
+                // Even if these files are not used by the earliest snapshot,
+                // we have to keep them as changelog, and clean then in ChangelogDeletion.
+                manifestLists.add(snapshot.baseManifestList());
+                manifestLists.add(snapshot.deltaManifestList());
+            }
+            if (deleteChangelog && snapshot.changelogManifestList() != null) {
+                manifestLists.add(snapshot.changelogManifestList());
+            }
         }
-        if (deleteChangelog && snapshot.changelogManifestList() != null) {
-            cleanUnusedManifestList(snapshot.changelogManifestList(), skippingSet);
+
+        List<Pair<String, List<ManifestFileMeta>>> manifestListAndFiles =
+                new ArrayList<>(manifestLists.size());
+        readManifestLists(manifestLists).forEach(manifestListAndFiles::add);
+
+        List<Pair<String, List<IndexManifestEntry>>> indexManifestAndEntries = new ArrayList<>();
+        readIndexManifests(snapshots).forEach(indexManifestAndEntries::add);
+
+        for (Pair<String, List<ManifestFileMeta>> manifestListAndFile : manifestListAndFiles) {
+            cleanUnusedManifestList(
+                    manifestListAndFile.getLeft(), manifestListAndFile.getRight(), skippingSet);
         }
-        cleanUnusedIndexManifests(snapshot, skippingSet);
-        cleanUnusedStatisticsManifests(snapshot, skippingSet);
+
+        for (Pair<String, List<IndexManifestEntry>> indexManifestAndEntry :
+                indexManifestAndEntries) {
+            cleanUnusedIndexManifests(
+                    indexManifestAndEntry.getLeft(),
+                    indexManifestAndEntry.getRight(),
+                    skippingSet);
+        }
+
+        for (Snapshot snapshot : snapshots) {
+            cleanUnusedStatisticsManifests(snapshot, skippingSet);
+        }
+    }
+
+    private Iterable<Pair<String, List<ManifestFileMeta>>> readManifestLists(
+            List<String> manifestNames) {
+        return ManifestReadThreadPool.sequentialBatchedExecute(
+                manifestName ->
+                        Collections.singletonList(
+                                Pair.of(manifestName, tryReadManifestList(manifestName))),
+                manifestNames,
+                null);
+    }
+
+    private Iterable<Pair<String, List<IndexManifestEntry>>> readIndexManifests(
+            List<? extends Snapshot> snapshots) {
+        List<String> indexManifests = new ArrayList<>();
+        for (Snapshot snapshot : snapshots) {
+            String indexManifest = snapshot.indexManifest();
+            if (indexManifest != null) {
+                indexManifests.add(indexManifest);
+            }
+        }
+        return readIndexManifestFiles(indexManifests, true);
+    }
+
+    private Iterable<Pair<String, List<IndexManifestEntry>>> readIndexManifestFiles(
+            List<String> indexManifests, boolean ignoreFileNotFound) {
+        return ManifestReadThreadPool.sequentialBatchedExecute(
+                indexManifest -> {
+                    try {
+                        return Collections.singletonList(
+                                Pair.of(
+                                        indexManifest,
+                                        indexFileHandler.readManifestWithIOException(
+                                                indexManifest)));
+                    } catch (FileNotFoundException e) {
+                        // check exists, it may have been deleted by other snapshots
+                        if (ignoreFileNotFound) {
+                            return Collections.emptyList();
+                        }
+                        throw new UncheckedIOException(e);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                },
+                indexManifests,
+                null);
     }
 
     public Predicate<ExpireFileEntry> createDataFileSkipperForTags(
@@ -391,8 +501,18 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
             throws IOException {
-        for (ExpireFileEntry entry :
-                readMergedDataFiles(manifestList.readDataManifests(snapshot))) {
+        List<ManifestFileMeta> manifests;
+        try {
+            manifests = readDataManifests(snapshot);
+        } catch (RuntimeException e) {
+            Throwable cause = rootCause(e);
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            throw e;
+        }
+
+        for (ExpireFileEntry entry : readMergedDataFiles(manifests)) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
@@ -403,13 +523,58 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected Collection<ExpireFileEntry> readMergedDataFiles(List<ManifestFileMeta> manifests)
             throws IOException {
         Map<Identifier, ExpireFileEntry> map = new HashMap<>();
-        for (ManifestFileMeta manifest : manifests) {
-            List<ExpireFileEntry> entries =
-                    manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
-            FileEntry.mergeEntries(entries, map);
+        try {
+            for (List<ExpireFileEntry> entries : readExpireFileEntries(manifests)) {
+                FileEntry.mergeEntries(entries, map);
+            }
+        } catch (RuntimeException e) {
+            Throwable cause = rootCause(e);
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            throw e;
         }
 
         return map.values();
+    }
+
+    private Iterable<List<ExpireFileEntry>> readExpireFileEntries(
+            List<ManifestFileMeta> manifests) {
+        return ManifestReadThreadPool.sequentialBatchedExecute(
+                manifest -> Collections.singletonList(readExpireFileEntries(manifest)),
+                manifests,
+                null);
+    }
+
+    private List<ExpireFileEntry> readExpireFileEntries(ManifestFileMeta manifest) {
+        return manifestFile.readExpireFileEntries(manifest.fileName(), manifest.fileSize());
+    }
+
+    private List<ManifestFileMeta> readDataManifests(Snapshot snapshot) {
+        List<Pair<String, Long>> manifestLists = new ArrayList<>(2);
+        manifestLists.add(Pair.of(snapshot.baseManifestList(), snapshot.baseManifestListSize()));
+        manifestLists.add(Pair.of(snapshot.deltaManifestList(), snapshot.deltaManifestListSize()));
+
+        List<ManifestFileMeta> result = new ArrayList<>();
+        for (Pair<String, List<ManifestFileMeta>> manifestListAndFiles :
+                readManifestListsWithSize(manifestLists)) {
+            result.addAll(manifestListAndFiles.getRight());
+        }
+
+        return result;
+    }
+
+    private Iterable<Pair<String, List<ManifestFileMeta>>> readManifestListsWithSize(
+            List<Pair<String, Long>> manifestLists) {
+        return ManifestReadThreadPool.sequentialBatchedExecute(
+                manifestList ->
+                        Collections.singletonList(
+                                Pair.of(
+                                        manifestList.getLeft(),
+                                        this.manifestList.read(
+                                                manifestList.getLeft(), manifestList.getRight()))),
+                manifestLists,
+                null);
     }
 
     protected boolean containsDataFile(
@@ -427,31 +592,56 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
         Set<String> skippingSet = new HashSet<>();
 
+        List<Pair<String, Long>> dataManifestLists = new ArrayList<>(skippingSnapshots.size() * 2);
+        List<String> indexManifests = new ArrayList<>();
+
         for (Snapshot skippingSnapshot : skippingSnapshots) {
-            // data manifests
             skippingSet.add(skippingSnapshot.baseManifestList());
             skippingSet.add(skippingSnapshot.deltaManifestList());
-            manifestList.readDataManifests(skippingSnapshot).stream()
-                    .map(ManifestFileMeta::fileName)
-                    .forEach(skippingSet::add);
+            dataManifestLists.add(
+                    Pair.of(
+                            skippingSnapshot.baseManifestList(),
+                            skippingSnapshot.baseManifestListSize()));
+            dataManifestLists.add(
+                    Pair.of(
+                            skippingSnapshot.deltaManifestList(),
+                            skippingSnapshot.deltaManifestListSize()));
 
-            // index manifests
             String indexManifest = skippingSnapshot.indexManifest();
             if (indexManifest != null) {
                 skippingSet.add(indexManifest);
-                indexFileHandler.readManifest(indexManifest).stream()
-                        .map(IndexManifestEntry::indexFile)
-                        .map(IndexFileMeta::fileName)
-                        .forEach(skippingSet::add);
+                indexManifests.add(indexManifest);
             }
 
-            // statistics
             if (skippingSnapshot.statistics() != null) {
                 skippingSet.add(skippingSnapshot.statistics());
             }
         }
 
+        for (Pair<String, List<ManifestFileMeta>> manifestListAndFiles :
+                readManifestListsWithSize(dataManifestLists)) {
+            manifestListAndFiles.getRight().stream()
+                .map(ManifestFileMeta::fileName)
+                .forEach(skippingSet::add);
+        }
+
+        for (Pair<String, List<IndexManifestEntry>> indexManifestAndEntries :
+                readIndexManifestFiles(indexManifests, false)) {
+            indexManifestAndEntries.getRight().stream()
+                    .map(IndexManifestEntry::indexFile)
+                    .map(IndexFileMeta::fileName)
+                    .forEach(skippingSet::add);
+        }
+
         return skippingSet;
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     private boolean tryDeleteEmptyDirectory(Path path) {

@@ -91,6 +91,15 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                 !changelogDecoupled);
     }
 
+    public void cleanUnusedManifests(List<Snapshot> snapshots, Set<String> skippingSet) {
+        // delay clean the base and delta manifest lists when changelog decoupled enabled
+        cleanUnusedManifests(
+                snapshots,
+                skippingSet,
+                !changelogDecoupled || produceChangelog,
+                !changelogDecoupled);
+    }
+
     @VisibleForTesting
     void cleanUnusedDataFile(List<ExpireFileEntry> dataFileLog) {
         Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
