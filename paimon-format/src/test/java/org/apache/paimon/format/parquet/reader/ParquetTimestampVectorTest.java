@@ -37,8 +37,7 @@ public class ParquetTimestampVectorTest {
         vec.setLong(0, epochMicros);
         ParquetTimestampVector tv = new ParquetTimestampVector(vec);
 
-        Assertions.assertThat(tv.getTimestamp(0, 3))
-                .isEqualTo(Timestamp.fromMicros(epochMicros));
+        Assertions.assertThat(tv.getTimestamp(0, 3)).isEqualTo(Timestamp.fromMicros(epochMicros));
     }
 
     @Test
@@ -50,8 +49,7 @@ public class ParquetTimestampVectorTest {
         vec.setLong(0, epochMicros);
         ParquetTimestampVector tv = new ParquetTimestampVector(vec);
 
-        Assertions.assertThat(tv.getTimestamp(0, 6))
-                .isEqualTo(Timestamp.fromMicros(epochMicros));
+        Assertions.assertThat(tv.getTimestamp(0, 6)).isEqualTo(Timestamp.fromMicros(epochMicros));
     }
 
     @Test
