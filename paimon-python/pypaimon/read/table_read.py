@@ -585,6 +585,8 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=False,
                 outer_extract_name_paths=outer_extract_name_paths,
+                outer_flat_read_type=(
+                    self.read_type if outer_extract_name_paths else None),
                 limit=self.limit,
             )
         elif self.table.options.data_evolution_enabled():
@@ -603,13 +605,26 @@ class TableRead:
                 limit=self.limit,
             )
         else:
+            inner_read_type = self.read_type
+            outer_extract_name_paths: Optional[List[List[str]]] = None
+            if self.nested_name_paths and any(
+                    len(p) > 1 for p in self.nested_name_paths):
+                # Mirror the merge path: read the full top-level columns so
+                # the per-file field-id normalization applies (a leaf path is
+                # only valid against the latest schema, not each file's own
+                # names/types), then extract the requested sub-paths back to
+                # the user's flat schema.
+                inner_read_type = self._widen_to_top_level_for_merge()
+                outer_extract_name_paths = self.nested_name_paths
             return RawFileSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                read_type=self.read_type,
+                read_type=inner_read_type,
                 split=split,
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
-                nested_name_paths=self.nested_name_paths,
+                outer_extract_name_paths=outer_extract_name_paths,
+                outer_flat_read_type=(
+                    self.read_type if outer_extract_name_paths else None),
                 limit=self.limit,
             )
 

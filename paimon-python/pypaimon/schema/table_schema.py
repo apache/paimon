@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import json_field
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, current_highest_field_id
 from pypaimon.schema.schema import Schema
 
 
@@ -115,7 +115,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = max((field.id for field in fields), default=0)
+        highest_field_id: int = current_highest_field_id(fields)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,

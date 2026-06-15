@@ -26,7 +26,9 @@ from pypaimon.common.options import CoreOptions, Options
 from pypaimon.schema.column_directive_utils import (
     apply_add_column_directive, apply_directives,
     remove_dropped_directive_options)
-from pypaimon.schema.data_types import AtomicInteger, DataField
+from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
+from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
+                                        MapType, RowType, reassign_field_id)
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption,
                                            RenameColumn, SchemaChange,
@@ -44,6 +46,123 @@ def _find_field_index(fields: List[DataField], field_name: str) -> Optional[int]
     return None
 
 
+def _extract_row_data_fields(data_type, out_fields: List[DataField],
+                             field_names: List[str], token_pos: int) -> int:
+    """Collect the immediate sub-fields reachable from *data_type* into
+    *out_fields* and return the path depth consumed. A ROW contributes its
+    fields (depth 1); an ARRAY/MAP is transparent and descends into its
+    element/value, consuming the ``element``/``value`` path token -- the
+    consumed token is validated so an unknown step cannot silently mutate
+    the schema; anything else contributes nothing (depth 1)."""
+    if isinstance(data_type, RowType):
+        out_fields.extend(data_type.fields)
+        return 1
+    if isinstance(data_type, ArrayType):
+        _assert_wrapper_token(field_names, token_pos, 'element')
+        return _extract_row_data_fields(
+            data_type.element, out_fields, field_names, token_pos + 1) + 1
+    if isinstance(data_type, MapType):
+        _assert_wrapper_token(field_names, token_pos, 'value')
+        return _extract_row_data_fields(
+            data_type.value, out_fields, field_names, token_pos + 1) + 1
+    return 1
+
+
+def _assert_wrapper_token(field_names: List[str], token_pos: int, expected: str):
+    # A path that ends inside the wrappers (token_pos out of range) is the
+    # update-the-wrapped-type-itself case, handled by the caller's overflow
+    # branch; only a present-but-wrong token is rejected.
+    if token_pos < len(field_names) and field_names[token_pos] != expected:
+        raise ColumnNotExistException('.'.join(field_names))
+
+
+def _wrap_new_row_type(data_type, nested_fields: List[DataField]):
+    """Rebuild *data_type* substituting *nested_fields* at its innermost ROW,
+    preserving any ARRAY/MAP wrappers."""
+    if isinstance(data_type, RowType):
+        return RowType(data_type.nullable, nested_fields)
+    if isinstance(data_type, ArrayType):
+        return ArrayType(data_type.nullable, _wrap_new_row_type(data_type.element, nested_fields))
+    if isinstance(data_type, MapType):
+        return MapType(
+            data_type.nullable, data_type.key,
+            _wrap_new_row_type(data_type.value, nested_fields))
+    return data_type
+
+
+def _get_root_type(data_type, curr_depth: int, max_depth: int):
+    """Return the type sitting at ``max_depth`` when walking ARRAY/MAP wrappers
+    from *data_type* (e.g. the INT in ARRAY<MAP<STRING, ARRAY<INT>>>)."""
+    if curr_depth == max_depth - 1:
+        return data_type
+    if isinstance(data_type, ArrayType):
+        return _get_root_type(data_type.element, curr_depth + 1, max_depth)
+    if isinstance(data_type, MapType):
+        return _get_root_type(data_type.value, curr_depth + 1, max_depth)
+    return data_type
+
+
+def _get_array_map_type_with_target_type_root(source, target, curr_depth: int, max_depth: int):
+    """Rebuild *source* with *target* substituted at ``max_depth``, keeping the
+    ARRAY/MAP wrappers around it intact."""
+    if curr_depth == max_depth - 1:
+        return target
+    if isinstance(source, ArrayType):
+        return ArrayType(
+            source.nullable,
+            _get_array_map_type_with_target_type_root(
+                source.element, target, curr_depth + 1, max_depth))
+    if isinstance(source, MapType):
+        return MapType(
+            source.nullable, source.key,
+            _get_array_map_type_with_target_type_root(
+                source.value, target, curr_depth + 1, max_depth))
+    return target
+
+
+def _update_intermediate_column(new_fields, previous_fields, depth, prev_depth,
+                                field_names, update_last_fn):
+    """Walk *field_names* into nested ROW (transparently through ARRAY/MAP),
+    then run *update_last_fn(depth, fields, name)* on the field list that
+    directly contains the final path element, rebuilding parent types upward."""
+    if depth == len(field_names) - 1:
+        update_last_fn(depth, new_fields, field_names[depth])
+        return
+    if depth >= len(field_names):
+        # Path descended through ARRAY/MAP past the last ROW; operate on the
+        # field that owns the wrapper at the previous depth.
+        update_last_fn(prev_depth, previous_fields, field_names[prev_depth])
+        return
+    for i, field in enumerate(new_fields):
+        if field.name != field_names[depth]:
+            continue
+        nested_fields: List[DataField] = []
+        new_depth = depth + _extract_row_data_fields(
+            field.type, nested_fields, field_names, depth + 1)
+        _update_intermediate_column(
+            nested_fields, new_fields, new_depth, depth, field_names, update_last_fn)
+        field = new_fields[i]
+        new_fields[i] = DataField(
+            field.id, field.name,
+            _wrap_new_row_type(field.type, nested_fields),
+            field.description, field.default_value)
+        return
+    raise ColumnNotExistException('.'.join(field_names[:depth + 1]))
+
+
+def _modify_nested_column(new_fields, field_names, update_last_fn):
+    _update_intermediate_column(new_fields, new_fields, 0, 0, field_names, update_last_fn)
+
+
+def _update_nested_column(new_fields, field_names, update_func):
+    def update_last(depth, fields, field_name):
+        idx = _find_field_index(fields, field_name)
+        if idx is None:
+            raise ColumnNotExistException('.'.join(field_names))
+        fields[idx] = update_func(fields[idx], depth)
+    _modify_nested_column(new_fields, field_names, update_last)
+
+
 def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
     rename_mappings = {}
     for change in changes:
@@ -55,49 +174,87 @@ def _get_rename_mappings(changes: List[SchemaChange]) -> dict:
 def _handle_update_column_comment(
     change: UpdateColumnComment, new_fields: List[DataField]
 ):
-    field_name = change.field_names[-1]
-    field_index = _find_field_index(new_fields, field_name)
-    if field_index is None:
-        raise ColumnNotExistException(field_name)
-    field = new_fields[field_index]
-    new_fields[field_index] = DataField(
-        field.id, field.name, field.type, change.new_comment, field.default_value
-    )
+    def update_func(field: DataField, depth: int) -> DataField:
+        return DataField(
+            field.id, field.name, field.type, change.new_comment, field.default_value
+        )
+    _update_nested_column(new_fields, change.field_names, update_func)
+
+
+def _assert_nullability_change(old_nullability: bool, new_nullability: bool,
+                               field_name: str, disable_null_to_not_null: bool):
+    if disable_null_to_not_null and old_nullability and not new_nullability:
+        raise ValueError(
+            "Cannot update column type from nullable to non nullable for {}. "
+            "You can set table configuration option "
+            "'alter-column-null-to-not-null.disabled' = 'false' "
+            "to allow converting null columns to not null".format(field_name)
+        )
 
 
 def _handle_update_column_nullability(
-    change: UpdateColumnNullability, new_fields: List[DataField]
+    change: UpdateColumnNullability, new_fields: List[DataField],
+    disable_null_to_not_null: bool
 ):
-    field_name = change.field_names[-1]
-    field_index = _find_field_index(new_fields, field_name)
-    if field_index is None:
-        raise ColumnNotExistException(field_name)
-    field = new_fields[field_index]
     from pypaimon.schema.data_types import DataTypeParser
-    field_type_dict = field.type.to_dict()
-    new_type = DataTypeParser.parse_data_type(field_type_dict)
-    new_type.nullable = change.new_nullability
-    new_fields[field_index] = DataField(
-        field.id, field.name, new_type, field.description, field.default_value
-    )
+    field_names = change.field_names
+    max_depth = len(field_names)
+
+    def update_func(field: DataField, depth: int) -> DataField:
+        source_root = _get_root_type(field.type, depth, max_depth)
+        _assert_nullability_change(
+            source_root.nullable, change.new_nullability,
+            '.'.join(field_names), disable_null_to_not_null)
+        new_root = DataTypeParser.parse_data_type(source_root.to_dict())
+        new_root.nullable = change.new_nullability
+        new_type = _get_array_map_type_with_target_type_root(
+            field.type, new_root, depth, max_depth)
+        return DataField(
+            field.id, field.name, new_type, field.description, field.default_value
+        )
+    _update_nested_column(new_fields, field_names, update_func)
 
 
 def _handle_update_column_type(
-    change: UpdateColumnType, new_fields: List[DataField]
+    change: UpdateColumnType, new_fields: List[DataField],
+    disable_null_to_not_null: bool
 ):
-    field_name = change.field_names[-1]
-    field_index = _find_field_index(new_fields, field_name)
-    if field_index is None:
-        raise ColumnNotExistException(field_name)
-    field = new_fields[field_index]
     from pypaimon.schema.data_types import DataTypeParser
-    new_type_dict = change.new_data_type.to_dict()
-    new_type = DataTypeParser.parse_data_type(new_type_dict)
-    if change.keep_nullability:
-        new_type.nullable = field.type.nullable
-    new_fields[field_index] = DataField(
-        field.id, field.name, new_type, field.description, field.default_value
-    )
+    field_names = change.field_names
+    max_depth = len(field_names)
+
+    def update_func(field: DataField, depth: int) -> DataField:
+        source_root = _get_root_type(field.type, depth, max_depth)
+        target_root = DataTypeParser.parse_data_type(change.new_data_type.to_dict())
+        if change.keep_nullability:
+            target_root.nullable = source_root.nullable
+        else:
+            # A type change carries its own nullability; guard nullable ->
+            # not null just like UpdateColumnNullability (mirrors Java
+            # SchemaManager#updateColumnType).
+            _assert_nullability_change(
+                source_root.nullable, target_root.nullable,
+                '.'.join(field_names), disable_null_to_not_null)
+        if not supports_cast(source_root, target_root):
+            raise ValueError(
+                "Column type {}[{}] cannot be converted to {} without losing information."
+                .format(field.name, source_root, target_root)
+            )
+        # Logical cast support is not enough: the read path materializes the
+        # change via PyArrow when reading old files, so reject casts it cannot
+        # execute (mirrors Java's CastExecutors.resolve(...) != null check).
+        if not can_execute_cast(source_root, target_root):
+            raise ValueError(
+                "Column type {}[{}] cannot be converted to {}: the read path "
+                "has no executable cast for this conversion."
+                .format(field.name, source_root, target_root)
+            )
+        new_type = _get_array_map_type_with_target_type_root(
+            field.type, target_root, depth, max_depth)
+        return DataField(
+            field.id, field.name, new_type, field.description, field.default_value
+        )
+    _update_nested_column(new_fields, field_names, update_func)
 
 
 def _drop_column_validation(schema: 'TableSchema', change: DropColumn):
@@ -112,17 +269,20 @@ def _drop_column_validation(schema: 'TableSchema', change: DropColumn):
 
 def _handle_drop_column(change: DropColumn, new_fields: List[DataField],
                         new_options: dict):
-    field_name = change.field_names[-1]
-    field_index = _find_field_index(new_fields, field_name)
-    if field_index is None:
-        raise ColumnNotExistException(field_name)
-    if len(change.field_names) == 1:
-        field = new_fields[field_index]
-        type_root = _get_type_root(field.type)
-        remove_dropped_directive_options(field_name, type_root, new_options)
-    new_fields.pop(field_index)
-    if not new_fields:
-        raise ValueError("Cannot drop all fields in table")
+    field_names = change.field_names
+
+    def update_last(depth, fields, field_name):
+        field_index = _find_field_index(fields, field_name)
+        if field_index is None:
+            raise ColumnNotExistException(field_name)
+        if len(field_names) == 1:
+            field = fields[field_index]
+            type_root = _get_type_root(field.type)
+            remove_dropped_directive_options(field_name, type_root, new_options)
+        fields.pop(field_index)
+        if not fields:
+            raise ValueError("Cannot drop all fields in table")
+    _modify_nested_column(new_fields, field_names, update_last)
 
 
 def _get_type_root(data_type) -> str:
@@ -274,17 +434,19 @@ def _validate_blob_external_storage_fields(fields: List[DataField], options: dic
 
 
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
-    field_name = change.field_names[-1]
     new_name = change.new_name
-    field_index = _find_field_index(new_fields, field_name)
-    if field_index is None:
-        raise ColumnNotExistException(field_name)
-    if _find_field_index(new_fields, new_name) is not None:
-        raise ColumnAlreadyExistException(new_name)
-    field = new_fields[field_index]
-    new_fields[field_index] = DataField(
-        field.id, new_name, field.type, field.description, field.default_value
-    )
+
+    def update_last(depth, fields, field_name):
+        field_index = _find_field_index(fields, field_name)
+        if field_index is None:
+            raise ColumnNotExistException(field_name)
+        if _find_field_index(fields, new_name) is not None:
+            raise ColumnAlreadyExistException(new_name)
+        field = fields[field_index]
+        fields[field_index] = DataField(
+            field.id, new_name, field.type, field.description, field.default_value
+        )
+    _modify_nested_column(new_fields, change.field_names, update_last)
 
 
 def _apply_move(fields: List[DataField], new_field: Optional[DataField], move):
@@ -332,11 +494,11 @@ def _handle_add_column(
             f"Column {'.'.join(change.field_names)} cannot specify NOT NULL in the table."
         )
     field_id = highest_field_id.increment_and_get()
+    # Reassign ids of any nested sub-fields the new column carries (a ROW/ARRAY/
+    # MAP type) so they draw globally-unique ids from the running counter.
+    data_type = reassign_field_id(change.data_type, highest_field_id)
     field_name = change.field_names[-1]
-    if _find_field_index(new_fields, field_name) is not None:
-        raise ColumnAlreadyExistException(field_name)
 
-    data_type = change.data_type
     comment = change.comment
     converted = apply_add_column_directive(comment, field_name, data_type, new_options)
     if converted is not None:
@@ -349,21 +511,26 @@ def _handle_add_column(
         comment = converted.comment
 
     new_field = DataField(field_id, field_name, data_type, comment)
-    if change.move:
-        _apply_move(new_fields, new_field, change.move)
-    elif (
-        add_column_before_partition
-        and partition_keys
-        and len(change.field_names) == 1
-    ):
-        insert_index = len(new_fields)
-        for i, field in enumerate(new_fields):
-            if field.name in partition_keys:
-                insert_index = i
-                break
-        new_fields.insert(insert_index, new_field)
-    else:
-        new_fields.append(new_field)
+
+    def update_last(depth, fields, fname):
+        if _find_field_index(fields, fname) is not None:
+            raise ColumnAlreadyExistException(fname)
+        if change.move:
+            _apply_move(fields, new_field, change.move)
+        elif (
+            add_column_before_partition
+            and partition_keys
+            and len(change.field_names) == 1
+        ):
+            insert_index = len(fields)
+            for i, field in enumerate(fields):
+                if field.name in partition_keys:
+                    insert_index = i
+                    break
+            fields.insert(insert_index, new_field)
+        else:
+            fields.append(new_field)
+    _modify_nested_column(new_fields, change.field_names, update_last)
 
 
 class SchemaManager:
@@ -517,6 +684,10 @@ class SchemaManager:
         # Get add_column_before_partition option
         add_column_before_partition = CoreOptions(Options(old_table_schema.options)).add_column_before_partition()
         partition_keys = old_table_schema.partition_keys
+        # Converting a nullable column to NOT NULL is unsafe for existing
+        # data and is disabled by default; the table option below opts in.
+        disable_null_to_not_null = str(old_table_schema.options.get(
+            'alter-column-null-to-not-null.disabled', 'true')).lower() != 'false'
 
         for change in changes:
             if isinstance(change, SetOption):
@@ -547,13 +718,15 @@ class SchemaManager:
                 _assert_not_updating_primary_keys(
                     old_table_schema, change.field_names, "update"
                 )
-                _handle_update_column_type(change, new_fields)
+                _handle_update_column_type(
+                    change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnNullability):
                 if change.new_nullability:
                     _assert_not_updating_primary_keys(
                         old_table_schema, change.field_names, "change nullability of"
                     )
-                _handle_update_column_nullability(change, new_fields)
+                _handle_update_column_nullability(
+                    change, new_fields, disable_null_to_not_null)
             elif isinstance(change, UpdateColumnComment):
                 _handle_update_column_comment(change, new_fields)
             elif isinstance(change, UpdateColumnPosition):
