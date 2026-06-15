@@ -127,6 +127,35 @@ Supported vector index options:
 | `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 | `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
 
+**Per-Column Options**
+
+The options above can also be set at the table level (in `TBLPROPERTIES`), where they are shared
+by every vector column of the same index type. When a table has multiple vector columns, you can
+scope an option to a single column with `<index-type>.fields.<field-name>.<option>`. The field-level
+form takes precedence over the column-agnostic `<index-type>.<option>` for that column:
+
+```sql
+CREATE TABLE my_table (
+    id INT,
+    title_embedding ARRAY<FLOAT>,
+    image_embedding ARRAY<FLOAT>
+) TBLPROPERTIES (
+    'bucket' = '-1',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'global-index.enabled' = 'true',
+    -- per-column dimensions
+    'ivf-pq.fields.title_embedding.dimension' = '768',
+    'ivf-pq.fields.image_embedding.dimension' = '512',
+    -- shared by every ivf-pq column, overridden only for 'image_embedding'
+    'ivf-pq.nlist' = '256',
+    'ivf-pq.fields.image_embedding.nlist' = '512'
+);
+```
+
+With the properties above, `title_embedding` is indexed with `nlist=256` while `image_embedding`
+uses `nlist=512`.
+
 **Vector Search**
 
 Search-time options are passed with each vector search request:

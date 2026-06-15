@@ -70,7 +70,8 @@ public class VectorGlobalIndexerFactoryTest {
                 VectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
-                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
 
         assertThat(nativeOptions)
                 .containsEntry("index.type", "ivf_flat")
@@ -92,7 +93,8 @@ public class VectorGlobalIndexerFactoryTest {
                 VectorGlobalIndexerFactory.nativeOptions(
                         new VectorType(8, new FloatType()),
                         options,
-                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER);
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
 
         assertThat(nativeOptions).containsEntry("dimension", "8");
     }
@@ -107,9 +109,61 @@ public class VectorGlobalIndexerFactoryTest {
                                 VectorGlobalIndexerFactory.nativeOptions(
                                         new ArrayType(new FloatType()),
                                         options,
-                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER))
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ivf-flat.dimension")
                 .hasMessageContaining("positive integer");
+    }
+
+    @Test
+    public void testFieldLevelOptionsOverrideIndexTypeOptions() {
+        Options options = new Options();
+        options.setString("ivf-flat.dimension", "32");
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("ivf-flat.fields.vec.nlist", "256");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions)
+                .containsEntry("dimension", "32")
+                .containsEntry("nlist", "256")
+                .doesNotContainEntry("nlist", "128");
+    }
+
+    @Test
+    public void testFieldLevelOptionsOnlyApplyToMatchingField() {
+        Options options = new Options();
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("ivf-flat.fields.vec.nlist", "256");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "other");
+
+        assertThat(nativeOptions).containsEntry("nlist", "128");
+    }
+
+    @Test
+    public void testFieldLevelOptionsWithoutIndexTypeOption() {
+        Options options = new Options();
+        options.setString("ivf-flat.fields.vec.distance.metric", "cosine");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions).containsEntry("metric", "cosine");
     }
 }
