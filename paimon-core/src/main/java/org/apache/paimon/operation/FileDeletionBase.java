@@ -191,14 +191,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public List<Path> planUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
-        List<ManifestFileMeta> manifests = tryReadManifestList(manifestList);
         // data file path -> (original manifest entry, extra file paths)
         Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
-        try {
-            getDataFileToDelete(dataFileToDelete, readExpireFileEntries(manifests));
-        } catch (Exception e) {
-            // cancel deletion if any exception occurs
-            LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
+        if (!tryGetDataFileToDelete(dataFileToDelete, manifestList)) {
             return Collections.emptyList();
         }
 
@@ -262,6 +257,19 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete,
             List<ExpireFileEntry> dataFileEntries) {
         getDataFileToDelete(dataFileToDelete, (Iterable<ExpireFileEntry>) dataFileEntries);
+    }
+
+    private boolean tryGetDataFileToDelete(
+            Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete, String manifestList) {
+        List<ManifestFileMeta> manifests = tryReadManifestList(manifestList);
+        try {
+            getDataFileToDelete(dataFileToDelete, readExpireFileEntries(manifests));
+            return true;
+        } catch (Exception e) {
+            // cancel deletion if any exception occurs
+            LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
+            return false;
+        }
     }
 
     /**

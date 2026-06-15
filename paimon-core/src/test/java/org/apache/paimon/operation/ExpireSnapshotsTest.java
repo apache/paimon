@@ -37,11 +37,13 @@ import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.ChangelogManager;
@@ -790,6 +792,32 @@ public class ExpireSnapshotsTest {
                 snapshotDeletion.planUnusedManifests(snapshot, Collections.emptySet(), false);
         snapshotDeletion.deletePlannedManifests(Arrays.asList(manifestPlan, manifestPlan));
         snapshotDeletion.assertDeleteBatchesDeduplicated();
+    }
+
+    @Test
+    public void testPlanUnusedDataFilesCancelsDeletionWhenManifestFileMissing() throws Exception {
+        ManifestFileMeta missingManifest =
+                new ManifestFileMeta(
+                        "missing-manifest",
+                        1,
+                        0,
+                        1,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        String manifestList =
+                store.manifestListFactory()
+                        .create()
+                        .write(Arrays.asList(missingManifest))
+                        .getLeft();
+
+        CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
+        assertThat(snapshotDeletion.planUnusedDataFiles(manifestList, entry -> false)).isEmpty();
     }
 
     @Test
