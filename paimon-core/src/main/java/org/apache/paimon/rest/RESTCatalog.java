@@ -105,6 +105,7 @@ public class RESTCatalog implements Catalog {
 
     private final RESTApi api;
     private final CatalogContext context;
+    private final UriReaderFactory uriReaderFactory;
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
     private final @Nullable LocalCacheManager cacheManager;
@@ -121,6 +122,7 @@ public class RESTCatalog implements Catalog {
                         context.hadoopConf(),
                         context.preferIO(),
                         context.fallbackIO());
+        this.uriReaderFactory = new UriReaderFactory(this.context);
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
         this.cacheManager = CachingFileIO.createCacheManager(this.context);
@@ -1032,7 +1034,7 @@ public class RESTCatalog implements Catalog {
                 response.uri(),
                 response.size(),
                 response.lastModifiedTime(),
-                new UriReaderFactory(context));
+                uriReaderFactory);
     }
 
     @Override
