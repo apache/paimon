@@ -68,7 +68,6 @@ import java.util.function.Predicate;
 public abstract class FileDeletionBase<T extends Snapshot> {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileDeletionBase.class);
-    private static final int DELETE_BATCH_MULTIPLIER = 4;
 
     protected final FileIO fileIO;
     protected final FileStorePathFactory pathFactory;
@@ -647,23 +646,13 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             return;
         }
 
-        int batchSize = deleteBatchSize();
-        List<CompletableFuture<Void>> deletionFutures =
-                new ArrayList<>(Math.min(files.size(), batchSize));
+        List<CompletableFuture<Void>> deletionFutures = new ArrayList<>(files.size());
         for (F file : files) {
             deletionFutures.add(
                     CompletableFuture.runAsync(() -> deletion.accept(file), fileExecutor));
-            if (deletionFutures.size() >= batchSize) {
-                waitForDeletion(deletionFutures);
-                deletionFutures.clear();
-            }
         }
 
         waitForDeletion(deletionFutures);
-    }
-
-    private int deleteBatchSize() {
-        return Math.max(1, fileOperationParallelism * DELETE_BATCH_MULTIPLIER);
     }
 
     private void waitForDeletion(List<CompletableFuture<Void>> deletionFutures) {
