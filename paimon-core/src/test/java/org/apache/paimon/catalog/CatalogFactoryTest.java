@@ -33,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -91,21 +92,6 @@ public class CatalogFactoryTest {
         assertThat(conf).isInstanceOf(HdfsConfiguration.class);
         assertThat(conf.get("fs.defaultFS")).isEqualTo(defaultFS);
         assertThat(conf.get("dfs.replication")).isEqualTo(replication);
-    }
-
-    @Test
-    public void testCreateCatalogWithoutHadoop(@TempDir java.nio.file.Path path) {
-        Path root = new Path(path.toUri().toString());
-        Options options = new Options();
-        options.set(WAREHOUSE, new Path(root, "warehouse").toString());
-
-        CatalogContext context =
-                CatalogContext.createWithoutHadoop(options, new TraceableFileIO.Loader(), null);
-
-        assertThat(CatalogFactory.createCatalog(context).listDatabases()).isEmpty();
-        assertThatThrownBy(context::hadoopConf)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Hadoop configuration is not available");
     }
 
     @Test
@@ -181,10 +167,13 @@ public class CatalogFactoryTest {
             Options options = new Options();
             options.set("warehouse", warehouse);
             CatalogContext context =
-                    CatalogContext.createWithoutHadoop(options, new TraceableFileIO.Loader(), null);
+                    CatalogContext.create(options, new TraceableFileIO.Loader(), null);
             Catalog catalog = CatalogFactory.createCatalog(context, classLoader);
 
             assertThat(catalog.listDatabases()).isEmpty();
+            Field hadoopConfField = CatalogContext.class.getDeclaredField("hadoopConf");
+            hadoopConfField.setAccessible(true);
+            assertThat(hadoopConfField.get(context)).isNull();
         }
     }
 }
