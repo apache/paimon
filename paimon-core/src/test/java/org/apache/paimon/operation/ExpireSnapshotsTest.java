@@ -979,6 +979,26 @@ public class ExpireSnapshotsTest {
         store.assertCleaned();
     }
 
+    @Test
+    public void testExpireWithZeroFileOperationThreadNumCleansDataFiles() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 0);
+
+        List<KeyValue> data = FileStoreTestUtils.partitionedData(5, gen, "0401", 8);
+        BinaryRow partition = gen.getPartition(data.get(0));
+        RecordWriter<KeyValue> writer = FileStoreTestUtils.writeData(store, data, partition, 0);
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers =
+                Collections.singletonMap(partition, Collections.singletonMap(0, writer));
+        FileStoreTestUtils.commitData(store, 0, writers);
+
+        writer.compact(true);
+        writer.sync();
+        FileStoreTestUtils.commitData(store, 1, writers);
+
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
+        store.assertCleaned();
+    }
+
     @RepeatedTest(5)
     public void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();

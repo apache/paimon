@@ -108,7 +108,10 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new ConcurrentHashMap<>();
         this.fileExecutor = FileOperationThreadPool.getExecutorService(fileOperationThreadNum);
-        this.fileOperationParallelism = fileOperationThreadNum;
+        this.fileOperationParallelism =
+                fileOperationThreadNum > 0
+                        ? fileOperationThreadNum
+                        : Runtime.getRuntime().availableProcessors();
     }
 
     public Executor fileExecutor() {
