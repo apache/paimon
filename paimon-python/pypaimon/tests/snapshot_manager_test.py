@@ -136,6 +136,17 @@ class SnapshotManagerTest(unittest.TestCase):
 
         self.assertEqual(result.id, 2)
 
+    def test_try_get_earliest_snapshot_throws_when_retry_exhausted(self):
+        file_io = Mock()
+        file_io.exists.return_value = True
+        file_io.read_file_utf8.return_value = "1"
+
+        manager = _build_manager(file_io)
+        manager.get_snapshot_by_id = lambda sid: None
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot find earliest snapshot"):
+            manager.try_get_earliest_snapshot()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -175,7 +175,10 @@ class SnapshotManager:
             snapshot = self.get_snapshot_by_id(snapshot_id)
             if snapshot is not None:
                 return snapshot
-        return None
+        raise RuntimeError(
+            f"Cannot find earliest snapshot from #{earliest_snapshot_id} "
+            f"to #{stop_snapshot_id}."
+        )
 
     def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
         """

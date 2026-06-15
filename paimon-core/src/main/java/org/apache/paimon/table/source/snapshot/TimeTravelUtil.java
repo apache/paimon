@@ -222,6 +222,7 @@ public class TimeTravelUtil {
         if (snapshotId == null) {
             return null;
         }
+        long earliestSnapshotId = snapshotId;
 
         if (stopSnapshotId == null) {
             stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
@@ -238,7 +239,11 @@ public class TimeTravelUtil {
             } catch (FileNotFoundException e) {
                 snapshotId++;
                 if (snapshotId > stopSnapshotId) {
-                    return null;
+                    throw new RuntimeException(
+                            String.format(
+                                    "Cannot find earliest snapshot from #%s to #%s.",
+                                    earliestSnapshotId, stopSnapshotId),
+                            e);
                 }
             }
         } while (true);
