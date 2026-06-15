@@ -301,9 +301,8 @@ class ConflictDetection:
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
         check_next_row_id = check_snapshot.next_row_id
 
-        # Per-delta-file ranges paired with file type ("blob" vs other), so
-        # we can match a compact's DELETE entries against the actual anchor
-        # files (blob delta cares only about deleted blob files, etc).
+        # Pair each delta with its anchor file type so a parquet-only
+        # compact does not flag a blob delta whose .blob anchor is intact.
         def _is_blob(name):
             return name.endswith(".blob")
 
@@ -337,11 +336,16 @@ class ConflictDetection:
                             continue
                         if file_range.from_ <= to and from_ <= file_range.to:
                             return RuntimeError(
-                                f"Blob/row-id update conflicts with concurrent COMPACT "
-                                f"(snapshot {snapshot.id}): anchor file "
-                                f"{entry.file.file_name} [{file_range.from_}, "
-                                f"{file_range.to}] was compacted away, overlaps "
-                                f"staged delta [{from_}, {to}].")
+                                "Blob/row-id update conflicts with concurrent COMPACT "
+                                "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
+                                "was compacted away, overlaps staged delta "
+                                "[{df}, {dt}].".format(
+                                    sid=snapshot.id,
+                                    name=entry.file.file_name,
+                                    ff=file_range.from_,
+                                    ft=file_range.to,
+                                    df=from_,
+                                    dt=to))
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(

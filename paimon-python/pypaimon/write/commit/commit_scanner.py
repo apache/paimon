@@ -21,6 +21,7 @@ Manifest entries scanner for commit operations.
 from typing import Optional, List
 
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.file_scanner import FileScanner
@@ -101,8 +102,6 @@ class CommitScanner:
         preserves DELETE entries (kind=1). The regular method funnels through
         ``read_entries_parallel`` which discards standalone DELETEs.
         """
-        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
-
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)
         if not delta_manifests:
             return []
