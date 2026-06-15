@@ -51,8 +51,13 @@ public class UriReaderFactory implements Serializable {
 
     public boolean exists(String input) throws IOException {
         UriReader reader = create(input);
-        return !(reader instanceof UriReader.FileUriReader)
-                || ((UriReader.FileUriReader) reader).exists(input);
+        if (reader instanceof UriReader.FileUriReader) {
+            return ((UriReader.FileUriReader) reader).exists(input);
+        }
+        if (reader instanceof UriReader.HttpUriReader) {
+            return ((UriReader.HttpUriReader) reader).exists(input);
+        }
+        return true;
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {

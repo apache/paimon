@@ -202,7 +202,8 @@ public class DedicatedFormatRollingFileWriter
                                     statsDenseStore,
                                     blobTargetFileSize,
                                     context.blobConsumer(),
-                                    context.blobInlineFields());
+                                    context.blobInlineFields(),
+                                    context.writeNullOnMissingFile());
         } else {
             this.blobWriterFactory = null;
         }
@@ -220,7 +221,8 @@ public class DedicatedFormatRollingFileWriter
                             fileSource,
                             asyncFileWrite,
                             statsDenseStore,
-                            blobTargetFileSize);
+                            blobTargetFileSize,
+                            context.writeNullOnMissingFile());
         } else {
             this.externalStorageBlobWriter = null;
         }

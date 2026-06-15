@@ -86,7 +86,8 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize) {
+            long targetFileSize,
+            boolean writeNullOnMissingFile) {
         checkNotNull(
                 externalStoragePath,
                 "'%s' must be set when '%s' is configured.",
@@ -105,7 +106,8 @@ public class ExternalStorageBlobWriter implements Closeable {
                         fileSource,
                         asyncFileWrite,
                         statsDenseStore,
-                        targetFileSize);
+                        targetFileSize,
+                        writeNullOnMissingFile);
         this.uriReader = UriReader.fromFile(fileIO);
 
         int fieldCount = writeSchema.getFieldCount();
@@ -167,7 +169,8 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize) {
+            long targetFileSize,
+            boolean writeNullOnMissingFile) {
         List<ExternalStorageBlobFieldWriter> writers = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
             if (field.type().getTypeRoot() == DataTypeRoot.BLOB
@@ -184,7 +187,8 @@ public class ExternalStorageBlobWriter implements Closeable {
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                targetFileSize));
+                                targetFileSize,
+                                writeNullOnMissingFile));
             }
         }
         return writers;
@@ -201,12 +205,14 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize) {
+            long targetFileSize,
+            boolean writeNullOnMissingFile) {
         int fieldIndex = writeSchema.getFieldIndex(fieldName);
         ExternalStorageBlobFieldWriter fieldWriter = new ExternalStorageBlobFieldWriter(fieldIndex);
 
         BlobFileFormat blobFileFormat = new BlobFileFormat();
         blobFileFormat.setWriteConsumer(fieldWriter);
+        blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
 
         RowType projectedType = writeSchema.project(fieldName);
         fieldWriter.setWriter(
