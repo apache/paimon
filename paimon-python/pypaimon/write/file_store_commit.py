@@ -92,8 +92,8 @@ class FileStoreCommit:
         self.manifest_file_manager = ManifestFileManager(table)
         self.manifest_list_manager = ManifestListManager(table)
 
-        self.manifest_target_size = self._option_or_default("manifest_target_size", 8 * 1024 * 1024)
-        self.manifest_merge_min_count = self._option_or_default("manifest_merge_min_count", 30)
+        self.manifest_target_size = table.options.manifest_target_size()
+        self.manifest_merge_min_count = table.options.manifest_merge_min_count()
         self.manifest_file_merger = ManifestFileMerger(
             self.manifest_file_manager,
             self.manifest_target_size,
@@ -117,14 +117,6 @@ class FileStoreCommit:
 
         table_rollback = table.catalog_environment.catalog_table_rollback()
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
-
-    def _option_or_default(self, method_name: str, default):
-        method = getattr(self.table.options, method_name, None)
-        if callable(method):
-            value = method()
-            if isinstance(value, type(default)):
-                return value
-        return default
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
@@ -406,7 +398,7 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
-        compacted_manifest_files = []
+        new_manifest_files_for_abort = []
         try:
             new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
@@ -435,7 +427,7 @@ class FileStoreCommit:
                     total_record_count += previous_record_count
             else:
                 existing_manifest_files = []
-            merged_manifest_files, compacted_manifest_files = self.manifest_file_merger.merge(
+            merged_manifest_files, new_manifest_files_for_abort = self.manifest_file_merger.merge(
                 existing_manifest_files)
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
 
@@ -481,7 +473,7 @@ class FileStoreCommit:
         except Exception as e:
             self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list,
                                               new_index_manifest, changelog_manifest_list_name,
-                                              compacted_manifest_files)
+                                              new_manifest_files_for_abort)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
 
@@ -493,17 +485,13 @@ class FileStoreCommit:
                     commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
                     logger.warning(
                         "Atomic commit failed for snapshot #%d by user %s "
-                        "with identifier %s and kind %s after %.0f seconds. "
-                        "Clean up and try again.",
+                        "with identifier %s and kind %s after %.0f seconds. Try again.",
                         new_snapshot_id,
                         self.commit_user,
                         commit_identifier,
                         commit_kind,
                         commit_time_s,
                     )
-                    self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list,
-                                                      new_index_manifest, changelog_manifest_list_name,
-                                                      compacted_manifest_files)
                     return RetryResult(latest_snapshot, None)
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
@@ -532,7 +520,6 @@ class FileStoreCommit:
         return SuccessResult()
 
     def _write_manifest_file(self, commit_entries, new_manifest_file):
-        # Write new manifest file
         return self.manifest_file_manager.write_with_meta(new_manifest_file, commit_entries)
 
     def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:

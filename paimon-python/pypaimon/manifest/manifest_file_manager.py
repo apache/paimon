@@ -258,13 +258,6 @@ class ManifestFileManager:
 
     def write_with_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
         self.write(file_name, entries)
-        try:
-            return self.create_manifest_file_meta(file_name, entries)
-        except Exception:
-            self.file_io.delete_quietly(f"{self.manifest_path}/{file_name}")
-            raise
-
-    def create_manifest_file_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
