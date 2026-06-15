@@ -301,13 +301,27 @@ class ConflictDetection:
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
         check_next_row_id = check_snapshot.next_row_id
 
+        # Pair each delta with its anchor file type so a parquet-only
+        # compact does not flag a blob delta whose .blob anchor is intact.
+        delta_signatures = []
+        for f in delta_files:
+            r = f.row_id_range()
+            if r is not None:
+                delta_signatures.append(
+                    (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
+
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
                 latest_snapshot.id + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
                 continue
+
             if snapshot.commit_kind == "COMPACT":
+                err = self._compact_conflicts_with_delta(
+                    snapshot, delta_signatures, column_checker, commit_entries)
+                if err is not None:
+                    return err
                 continue
 
             incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
@@ -324,4 +338,47 @@ class ConflictDetection:
                             "the same file, which can render some updates "
                             "ineffective.")
 
+        return None
+
+    def _compact_conflicts_with_delta(self, snapshot, delta_signatures,
+                                      column_checker, commit_entries):
+        """Return RuntimeError if a COMPACT snapshot deleted a same-kind
+        anchor file whose row-id range AND write columns overlap any
+        staged delta; otherwise None.
+
+        File-type match guards against `write_cols=None` ambiguity (an
+        initial full-row parquet does not actually contain blob columns);
+        column_checker guards against unrelated column-write shards
+        (compacting an f1-only parquet must not block an f2 update on
+        the same row range).
+        """
+        if not delta_signatures:
+            return None
+        raw_entries = self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
+            snapshot, commit_entries)
+        for entry in raw_entries:
+            if entry.kind != 1:
+                continue
+            file_range = entry.file.row_id_range()
+            if file_range is None:
+                continue
+            deleted_is_blob = DataFileMeta.is_blob_file(entry.file.file_name)
+            for delta_is_blob, from_, to in delta_signatures:
+                if delta_is_blob != deleted_is_blob:
+                    continue
+                if file_range.from_ > to or from_ > file_range.to:
+                    continue
+                if not column_checker.conflicts_with(entry.file):
+                    continue
+                return RuntimeError(
+                    "Blob/row-id update conflicts with concurrent COMPACT "
+                    "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
+                    "was compacted away, overlaps staged delta "
+                    "[{df}, {dt}].".format(
+                        sid=snapshot.id,
+                        name=entry.file.file_name,
+                        ff=file_range.from_,
+                        ft=file_range.to,
+                        df=from_,
+                        dt=to))
         return None

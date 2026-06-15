@@ -1288,6 +1288,73 @@ public class JavaPyE2ETest {
         LOG.info("compact_conflict_test: compact done, 5 files merged into 1 (1000 rows)");
     }
 
+    /**
+     * Step 1 for blob compact conflict test: write a blob table with 2 data files so compaction
+     * will merge them. Each file has 100 rows of (id, name, blob_data).
+     */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBlobCompactConflictWriteBase() throws Exception {
+        Identifier id = identifier("blob_compact_conflict_test");
+        try {
+            catalog.dropTable(id, true);
+        } catch (Exception ignore) {
+        }
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.BLOB())
+                        .option("target-file-size", "100 MB")
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option("compaction.min.file-num", "2")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(id, schema, false);
+
+        byte[] blobBytes = new byte[64];
+        java.util.Random rng = new java.util.Random(42);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(id);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite w = builder.newWrite()) {
+            for (int i = 0; i < 100; i++) {
+                rng.nextBytes(blobBytes);
+                w.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name" + i),
+                                new org.apache.paimon.data.BlobData(blobBytes.clone())));
+            }
+            builder.newCommit().commit(w.prepareCommit());
+        }
+
+        table = (FileStoreTable) catalog.getTable(id);
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite w = builder.newWrite()) {
+            for (int i = 100; i < 200; i++) {
+                rng.nextBytes(blobBytes);
+                w.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name" + i),
+                                new org.apache.paimon.data.BlobData(blobBytes.clone())));
+            }
+            builder.newCommit().commit(w.prepareCommit());
+        }
+        LOG.info("blob_compact_conflict_test: 2 base files written (100 rows each, total 200)");
+    }
+
+    /** Step 3 for blob compact conflict test: run compact. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBlobCompactConflictRunCompact() throws Exception {
+        Identifier id = identifier("blob_compact_conflict_test");
+        doDataEvolutionCompact((FileStoreTable) catalog.getTable(id), true);
+        LOG.info("blob_compact_conflict_test: compact done (compactBlob=true)");
+    }
+
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testDataEvolutionWrite() throws Exception {
@@ -1373,8 +1440,13 @@ public class JavaPyE2ETest {
     }
 
     private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
+        doDataEvolutionCompact(table, false);
+    }
+
+    private void doDataEvolutionCompact(FileStoreTable table, boolean compactBlob)
+            throws Exception {
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(table, compactBlob, false);
         List<CommitMessage> messages = new ArrayList<>();
         try {
             List<DataEvolutionCompactTask> tasks;
