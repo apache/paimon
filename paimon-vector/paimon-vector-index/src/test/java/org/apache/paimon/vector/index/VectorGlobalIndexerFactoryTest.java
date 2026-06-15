@@ -198,4 +198,23 @@ public class VectorGlobalIndexerFactoryTest {
 
         assertThat(nativeOptions).containsEntry("metric", "cosine");
     }
+
+    @Test
+    public void testFieldLevelVectorOptionsCoexistWithCoreFieldOptions() {
+        Options options = new Options();
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("fields.vec.nlist", "256");
+        options.setString("fields.vec.aggregate-function", "sum");
+
+        Map<String, String> nativeOptions =
+                VectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions)
+                .containsEntry("nlist", "256")
+                .doesNotContainKey("aggregate-function");
+    }
 }
