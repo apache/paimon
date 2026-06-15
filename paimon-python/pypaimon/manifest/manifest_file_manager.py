@@ -28,7 +28,8 @@ from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.table.row.generic_row import (GenericRowDeserializer,
+from pypaimon.table.row.generic_row import (GenericRow,
+                                            GenericRowDeserializer,
                                             GenericRowSerializer)
 from pypaimon.table.row.binary_row import BinaryRow
 
@@ -254,3 +255,68 @@ class ManifestFileManager:
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
+
+    def write_with_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
+        self.write(file_name, entries)
+        try:
+            return self.create_manifest_file_meta(file_name, entries)
+        except Exception:
+            self.file_io.delete_quietly(f"{self.manifest_path}/{file_name}")
+            raise
+
+    def create_manifest_file_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
+        added_file_count = 0
+        deleted_file_count = 0
+        schema_id = None
+        for entry in entries:
+            if entry.kind == 0:
+                added_file_count += 1
+            else:
+                deleted_file_count += 1
+            schema_id = entry.file.schema_id if schema_id is None else max(schema_id, entry.file.schema_id)
+        if schema_id is None:
+            schema_id = self.table.table_schema.id
+
+        partition_columns = list(zip(*(entry.partition.values for entry in entries))) if entries else []
+        partition_null_counts = [sum(1 for value in col if value is None) for col in partition_columns]
+        partition_min_stats = [
+            min((v for v in col if v is not None), default=None) for col in partition_columns
+        ]
+        partition_max_stats = [
+            max((v for v in col if v is not None), default=None) for col in partition_columns
+        ]
+
+        min_row_id = None
+        max_row_id = None
+        for entry in entries:
+            if entry.file.first_row_id is None:
+                min_row_id = None
+                max_row_id = None
+                break
+            file_range = entry.file.row_id_range()
+            if min_row_id is None or file_range.from_ < min_row_id:
+                min_row_id = file_range.from_
+            if max_row_id is None or file_range.to > max_row_id:
+                max_row_id = file_range.to
+
+        manifest_file_path = f"{self.manifest_path}/{file_name}"
+        return ManifestFileMeta(
+            file_name=file_name,
+            file_size=self.table.file_io.get_file_size(manifest_file_path),
+            num_added_files=added_file_count,
+            num_deleted_files=deleted_file_count,
+            partition_stats=SimpleStats(
+                min_values=GenericRow(
+                    values=partition_min_stats,
+                    fields=self.table.partition_keys_fields
+                ),
+                max_values=GenericRow(
+                    values=partition_max_stats,
+                    fields=self.table.partition_keys_fields
+                ),
+                null_counts=partition_null_counts,
+            ),
+            schema_id=schema_id,
+            min_row_id=min_row_id,
+            max_row_id=max_row_id,
+        )
