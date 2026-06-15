@@ -38,6 +38,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.FileDeletionBase.DataFileDeletionPlan;
+import org.apache.paimon.operation.FileDeletionBase.ManifestDeletionPlan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -64,6 +66,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -74,6 +77,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -568,12 +572,7 @@ public class ExpireSnapshotsTest {
     public void testExpireCollectsSnapshotsConcurrently() throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
 
-        ExpireConfig config =
-                ExpireConfig.builder()
-                        .snapshotRetainMin(1)
-                        .snapshotRetainMax(Integer.MAX_VALUE)
-                        .snapshotTimeRetain(Duration.ofMillis(1))
-                        .build();
+        ExpireConfig config = expireAllButLatestConfig();
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -599,6 +598,198 @@ public class ExpireSnapshotsTest {
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
         store.assertCleaned();
+    }
+
+    @Test
+    public void testExpirePlansDataFilesConcurrently() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(6, allData, snapshotPositions);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        BlockingSnapshotDeletion snapshotDeletion =
+                new BlockingSnapshotDeletion(store, 2, latestSnapshotId);
+        snapshotDeletion.blockDataFilePlans();
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(store, snapshotManager, snapshotDeletion);
+        expire.config(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+
+        expire.expire();
+
+        assertThat(snapshotDeletion.maxActiveDataFilePlans()).isGreaterThan(1);
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpirePlansChangelogFilesConcurrently() throws Exception {
+        TestFileStore inputStore = createStore(CoreOptions.ChangelogProducer.INPUT);
+        inputStore.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(inputStore, 6, allData, snapshotPositions);
+        SnapshotManager snapshotManager = inputStore.snapshotManager();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(inputStore.fileIO(), snapshotManager, i, 0);
+        }
+
+        Set<String> changelogManifestLists = new HashSet<>();
+        for (int i = 1; i < latestSnapshotId; i++) {
+            String changelogManifestList = snapshotManager.snapshot(i).changelogManifestList();
+            if (changelogManifestList != null) {
+                changelogManifestLists.add(changelogManifestList);
+            }
+        }
+        assertThat(changelogManifestLists.size()).isGreaterThan(1);
+
+        BlockingSnapshotDeletion snapshotDeletion =
+                new BlockingSnapshotDeletion(inputStore, 1, latestSnapshotId - 1);
+        snapshotDeletion.blockChangelogPlans(changelogManifestLists);
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(inputStore, snapshotManager, snapshotDeletion);
+        expire.config(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+
+        expire.expire();
+
+        assertThat(snapshotDeletion.maxActiveChangelogPlans()).isGreaterThan(1);
+        assertSnapshot(inputStore, latestSnapshotId, allData, snapshotPositions);
+        inputStore.assertCleaned();
+    }
+
+    @Test
+    public void testExpirePlansManifestsConcurrentlyWithoutMutatingSkippingSet() throws Exception {
+        store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(6, allData, snapshotPositions);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        BlockingSnapshotDeletion snapshotDeletion =
+                new BlockingSnapshotDeletion(store, 1, latestSnapshotId - 1);
+        snapshotDeletion.blockManifestPlans();
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(store, snapshotManager, snapshotDeletion);
+        expire.config(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+
+        expire.expire();
+
+        assertThat(snapshotDeletion.maxActiveManifestPlans()).isGreaterThan(1);
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+        store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireWithTagsAndConcurrentPlanningKeepsTaggedSnapshotsReadable()
+            throws Exception {
+        store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(8, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        TagManager tagManager = store.newTagManager();
+        tagManager.createTag(
+                snapshotManager.snapshot(3),
+                "tag3",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+        tagManager.createTag(
+                snapshotManager.snapshot(6),
+                "tag6",
+                store.options().tagDefaultTimeRetained(),
+                Collections.emptyList(),
+                false);
+
+        ExpireSnapshotsImpl expire =
+                (ExpireSnapshotsImpl) store.newExpire(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+        expire.expire();
+
+        for (int i = 1; i < latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+        assertSnapshot(tagManager.getOrThrow("tag3").trimToSnapshot(), allData, snapshotPositions);
+        assertSnapshot(tagManager.getOrThrow("tag6").trimToSnapshot(), allData, snapshotPositions);
+    }
+
+    @Test
+    public void testTagManagerReadsTagsConcurrentlyWithObjectStoreFileIO() throws Exception {
+        TestFileStore slowStore = createSlowStore();
+        slowStore.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
+
+        try {
+            List<KeyValue> allData = new ArrayList<>();
+            List<Integer> snapshotPositions = new ArrayList<>();
+            commit(slowStore, 6, allData, snapshotPositions);
+
+            SnapshotManager snapshotManager = slowStore.snapshotManager();
+            int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+            TagManager tagManager = slowStore.newTagManager();
+            for (int i = 1; i <= latestSnapshotId; i++) {
+                tagManager.createTag(
+                        snapshotManager.snapshot(i),
+                        "tag" + i,
+                        slowStore.options().tagDefaultTimeRetained(),
+                        Collections.emptyList(),
+                        false);
+            }
+
+            SlowFileIO.reset();
+            SlowFileIO.setDelayMillis(20);
+
+            List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+
+            assertThat(taggedSnapshots).hasSize(latestSnapshotId);
+            for (int i = 1; i <= latestSnapshotId; i++) {
+                assertThat(taggedSnapshots.get(i - 1).id()).isEqualTo(i);
+            }
+            assertThat(SlowFileIO.delayedOperations()).isGreaterThan(0);
+            assertThat(SlowFileIO.maxActiveOperations()).isGreaterThan(1);
+        } finally {
+            SlowFileIO.reset();
+        }
+    }
+
+    @Test
+    public void testPlannedDeletionDeduplicatesFilesBeforeDelete() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(2, allData, snapshotPositions);
+
+        CapturingSnapshotDeletion snapshotDeletion = new CapturingSnapshotDeletion(store);
+        Snapshot snapshot = snapshotManager.snapshot(1);
+        DataFileDeletionPlan dataPlan =
+                snapshotDeletion.planAddedDataFiles(snapshot.deltaManifestList());
+        snapshotDeletion.deletePlannedDataFiles(Arrays.asList(dataPlan, dataPlan));
+        snapshotDeletion.assertDeleteBatchesDeduplicated();
+
+        snapshotDeletion.reset();
+        ManifestDeletionPlan manifestPlan =
+                snapshotDeletion.planUnusedManifests(snapshot, Collections.emptySet(), false);
+        snapshotDeletion.deletePlannedManifests(Arrays.asList(manifestPlan, manifestPlan));
+        snapshotDeletion.assertDeleteBatchesDeduplicated();
     }
 
     @Test
@@ -877,6 +1068,15 @@ public class ExpireSnapshotsTest {
             changelogProducer = CoreOptions.ChangelogProducer.NONE;
         }
 
+        return createStore(root, changelogProducer);
+    }
+
+    private TestFileStore createStore(CoreOptions.ChangelogProducer changelogProducer) {
+        return createStore(tempDir.toString(), changelogProducer);
+    }
+
+    private TestFileStore createStore(
+            String root, CoreOptions.ChangelogProducer changelogProducer) {
         return new TestFileStore.Builder(
                         "avro",
                         root,
@@ -889,6 +1089,22 @@ public class ExpireSnapshotsTest {
                         null)
                 .changelogProducer(changelogProducer)
                 .build();
+    }
+
+    private ExpireConfig expireAllButLatestConfig() {
+        return ExpireConfig.builder()
+                .snapshotRetainMin(1)
+                .snapshotRetainMax(Integer.MAX_VALUE)
+                .snapshotTimeRetain(Duration.ofMillis(1))
+                .build();
+    }
+
+    private ExpireSnapshotsImpl newExpireWithSnapshotDeletion(
+            TestFileStore store,
+            SnapshotManager snapshotManager,
+            SnapshotDeletion snapshotDeletion) {
+        return new ExpireSnapshotsImpl(
+                snapshotManager, store.changelogManager(), snapshotDeletion, store.newTagManager());
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
@@ -966,6 +1182,177 @@ public class ExpireSnapshotsTest {
 
         private int maxActiveReads() {
             return maxActiveReads.get();
+        }
+    }
+
+    private static class BlockingSnapshotDeletion extends SnapshotDeletion {
+
+        private final long minBlockedSnapshotId;
+        private final long maxBlockedSnapshotId;
+        private final ConcurrentCallTracker dataFilePlans =
+                new ConcurrentCallTracker("Data file plans were not created concurrently.");
+        private final ConcurrentCallTracker changelogPlans =
+                new ConcurrentCallTracker("Changelog plans were not created concurrently.");
+        private final ConcurrentCallTracker manifestPlans =
+                new ConcurrentCallTracker("Manifest plans were not created concurrently.");
+
+        private boolean blockDataFilePlans;
+        private boolean blockManifestPlans;
+        private Set<String> blockedChangelogManifestLists = Collections.emptySet();
+
+        private BlockingSnapshotDeletion(
+                TestFileStore store, long minBlockedSnapshotId, long maxBlockedSnapshotId) {
+            super(
+                    store.fileIO(),
+                    store.pathFactory(),
+                    store.manifestFileFactory().create(),
+                    store.manifestListFactory().create(),
+                    store.newIndexFileHandler(),
+                    store.newStatsFileHandler(),
+                    store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                    store.options().cleanEmptyDirectories(),
+                    store.options().fileOperationThreadNum());
+            this.minBlockedSnapshotId = minBlockedSnapshotId;
+            this.maxBlockedSnapshotId = maxBlockedSnapshotId;
+        }
+
+        private void blockDataFilePlans() {
+            blockDataFilePlans = true;
+        }
+
+        private void blockChangelogPlans(Set<String> changelogManifestLists) {
+            blockedChangelogManifestLists = changelogManifestLists;
+        }
+
+        private void blockManifestPlans() {
+            blockManifestPlans = true;
+        }
+
+        @Override
+        public DataFileDeletionPlan planUnusedDataFiles(
+                Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+            if (blockDataFilePlans && shouldBlock(snapshot.id())) {
+                dataFilePlans.awaitConcurrentCall();
+            }
+            return super.planUnusedDataFiles(snapshot, skipper);
+        }
+
+        @Override
+        public DataFileDeletionPlan planAddedDataFiles(String manifestListName) {
+            if (blockedChangelogManifestLists.contains(manifestListName)) {
+                changelogPlans.awaitConcurrentCall();
+            }
+            return super.planAddedDataFiles(manifestListName);
+        }
+
+        @Override
+        public ManifestDeletionPlan planUnusedManifests(
+                Snapshot snapshot, Set<String> skippingSet, boolean updateSkippingSet) {
+            if (updateSkippingSet) {
+                throw new AssertionError(
+                        "Concurrent manifest planning must not mutate skipping set.");
+            }
+            if (blockManifestPlans && shouldBlock(snapshot.id())) {
+                manifestPlans.awaitConcurrentCall();
+            }
+            return super.planUnusedManifests(snapshot, skippingSet, updateSkippingSet);
+        }
+
+        private boolean shouldBlock(long snapshotId) {
+            return snapshotId >= minBlockedSnapshotId && snapshotId <= maxBlockedSnapshotId;
+        }
+
+        private int maxActiveDataFilePlans() {
+            return dataFilePlans.maxActiveCalls();
+        }
+
+        private int maxActiveChangelogPlans() {
+            return changelogPlans.maxActiveCalls();
+        }
+
+        private int maxActiveManifestPlans() {
+            return manifestPlans.maxActiveCalls();
+        }
+    }
+
+    private static class CapturingSnapshotDeletion extends SnapshotDeletion {
+
+        private final List<List<Object>> deleteBatches = new ArrayList<>();
+
+        private CapturingSnapshotDeletion(TestFileStore store) {
+            super(
+                    store.fileIO(),
+                    store.pathFactory(),
+                    store.manifestFileFactory().create(),
+                    store.manifestListFactory().create(),
+                    store.newIndexFileHandler(),
+                    store.newStatsFileHandler(),
+                    store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                    store.options().cleanEmptyDirectories(),
+                    store.options().fileOperationThreadNum());
+        }
+
+        @Override
+        protected <F> void deleteFiles(
+                Collection<F> files, java.util.function.Consumer<F> deletion) {
+            if (!files.isEmpty()) {
+                deleteBatches.add(new ArrayList<Object>(files));
+            }
+        }
+
+        private void assertDeleteBatchesDeduplicated() {
+            assertThat(deleteBatches).isNotEmpty();
+            for (List<Object> batch : deleteBatches) {
+                assertThat(new HashSet<>(batch)).hasSize(batch.size());
+            }
+        }
+
+        private void reset() {
+            deleteBatches.clear();
+        }
+    }
+
+    private static class ConcurrentCallTracker {
+
+        private final String timeoutMessage;
+        private final CountDownLatch releaseCalls = new CountDownLatch(1);
+        private final AtomicInteger activeCalls = new AtomicInteger();
+        private final AtomicInteger maxActiveCalls = new AtomicInteger();
+
+        private ConcurrentCallTracker(String timeoutMessage) {
+            this.timeoutMessage = timeoutMessage;
+        }
+
+        private void awaitConcurrentCall() {
+            int active = activeCalls.incrementAndGet();
+            updateMaxActiveCalls(active);
+            if (active > 1) {
+                releaseCalls.countDown();
+            }
+            try {
+                if (!releaseCalls.await(5, TimeUnit.SECONDS)) {
+                    throw new RuntimeException(timeoutMessage);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            } finally {
+                activeCalls.decrementAndGet();
+            }
+        }
+
+        private void updateMaxActiveCalls(int active) {
+            int current;
+            do {
+                current = maxActiveCalls.get();
+                if (active <= current) {
+                    return;
+                }
+            } while (!maxActiveCalls.compareAndSet(current, active));
+        }
+
+        private int maxActiveCalls() {
+            return maxActiveCalls.get();
         }
     }
 
