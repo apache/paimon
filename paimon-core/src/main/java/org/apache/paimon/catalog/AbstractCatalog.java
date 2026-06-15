@@ -33,6 +33,8 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -747,6 +749,35 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
             throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<String> listResources(String databaseName) throws DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Resource getResource(Identifier identifier) throws ResourceNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createResource(Identifier identifier, Resource resource, boolean ignoreIfExists)
+            throws ResourceAlreadyExistException, DatabaseNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void dropResource(Identifier identifier, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void alterResource(
+            Identifier identifier, List<ResourceChange> changes, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
         throw new UnsupportedOperationException();
     }
 

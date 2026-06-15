@@ -62,6 +62,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
 import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -2600,6 +2602,320 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RESTFunctionValidator.checkFunctionName(null));
+    }
+
+    @Test
+    void testResource() throws Exception {
+        Identifier identifierWithSlash = new Identifier("rest_catalog_db", "resource/");
+        catalog.createDatabase(identifierWithSlash.getDatabaseName(), false);
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createResource(
+                                identifierWithSlash,
+                                MockRESTMessage.resource(identifierWithSlash),
+                                false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.getResource(identifierWithSlash));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropResource(identifierWithSlash, true));
+
+        Identifier identifierWithoutAlphabet = new Identifier("rest_catalog_db", "-");
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        catalog.createResource(
+                                identifierWithoutAlphabet,
+                                MockRESTMessage.resource(identifierWithoutAlphabet),
+                                false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.getResource(identifierWithoutAlphabet));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.dropResource(identifierWithoutAlphabet, true));
+
+        Identifier identifier = Identifier.fromString("rest_catalog_db.resource.na_me-01");
+        Resource resource = MockRESTMessage.resource(identifier);
+
+        catalog.createResource(identifier, resource, true);
+        assertThrows(
+                Catalog.ResourceAlreadyExistException.class,
+                () -> catalog.createResource(identifier, resource, false));
+
+        assertThat(catalog.listResources(identifier.getDatabaseName()).contains(resource.name()))
+                .isTrue();
+
+        Resource getResource = catalog.getResource(identifier);
+        assertThat(getResource.name()).isEqualTo(resource.name());
+        assertThat(getResource.uri()).isEqualTo(resource.uri());
+        assertThat(getResource.resourceType()).isEqualTo(resource.resourceType());
+        assertThat(getResource.comment()).isEqualTo(resource.comment());
+
+        catalog.dropResource(identifier, true);
+
+        assertThat(catalog.listResources(identifier.getDatabaseName()).contains(resource.name()))
+                .isFalse();
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.dropResource(identifier, false));
+        assertThrows(
+                Catalog.ResourceNotExistException.class, () -> catalog.getResource(identifier));
+    }
+
+    @Test
+    void testListResourcesPaged() throws Exception {
+        String databaseName = "resources_paged_db";
+        catalog.createDatabase(databaseName, false);
+
+        // empty database returns empty list
+        PagedList<String> pagedResources =
+                catalog.listResourcesPaged(databaseName, null, null, null);
+        assertThat(pagedResources.getElements()).isEmpty();
+        assertNull(pagedResources.getNextPageToken());
+
+        String[] resourceNames = {"res1", "res2", "res3", "abd", "def", "resource_name"};
+        for (String name : resourceNames) {
+            Identifier id = Identifier.create(databaseName, name);
+            catalog.createResource(id, MockRESTMessage.resource(id), false);
+        }
+
+        // null maxResults returns all resources
+        String[] sortedNames = Arrays.stream(resourceNames).sorted().toArray(String[]::new);
+        pagedResources = catalog.listResourcesPaged(databaseName, null, null, null);
+        assertThat(pagedResources.getElements()).containsExactly(sortedNames);
+        assertNull(pagedResources.getNextPageToken());
+
+        // paged traversal
+        int maxResults = 2;
+        pagedResources = catalog.listResourcesPaged(databaseName, maxResults, null, null);
+        assertThat(pagedResources.getElements()).containsExactly("abd", "def");
+        assertEquals("def", pagedResources.getNextPageToken());
+
+        pagedResources =
+                catalog.listResourcesPaged(
+                        databaseName, maxResults, pagedResources.getNextPageToken(), null);
+        assertThat(pagedResources.getElements()).containsExactly("res1", "res2");
+        assertEquals("res2", pagedResources.getNextPageToken());
+
+        pagedResources =
+                catalog.listResourcesPaged(
+                        databaseName, maxResults, pagedResources.getNextPageToken(), null);
+        assertThat(pagedResources.getElements()).containsExactly("res3", "resource_name");
+        assertEquals("resource_name", pagedResources.getNextPageToken());
+
+        pagedResources =
+                catalog.listResourcesPaged(
+                        databaseName, maxResults, pagedResources.getNextPageToken(), null);
+        assertThat(pagedResources.getElements()).isEmpty();
+        assertNull(pagedResources.getNextPageToken());
+
+        // pattern matching
+        pagedResources = catalog.listResourcesPaged(databaseName, null, null, "res%");
+        assertThat(pagedResources.getElements())
+                .containsExactly("res1", "res2", "res3", "resource_name");
+        assertNull(pagedResources.getNextPageToken());
+
+        pagedResources = catalog.listResourcesPaged(databaseName, null, null, "resource_%");
+        assertThat(pagedResources.getElements()).containsExactly("resource_name");
+        assertNull(pagedResources.getNextPageToken());
+
+        // non-existing database
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.listResourcesPaged("non_existing_db", null, null, null));
+
+        // invalid patterns
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listResourcesPaged(databaseName, null, null, "%res"));
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listResourcesPaged(databaseName, null, null, "re%s"));
+    }
+
+    @Test
+    void testListResourceDetailsPaged() throws Exception {
+        String databaseName = "resource_details_paged_db";
+        catalog.createDatabase(databaseName, false);
+
+        // empty database returns empty list
+        PagedList<Resource> pagedDetails =
+                catalog.listResourceDetailsPaged(databaseName, null, null, null);
+        assertThat(pagedDetails.getElements()).isEmpty();
+        assertNull(pagedDetails.getNextPageToken());
+
+        String[] resourceNames = {"res1", "res2", "res3", "abd", "def", "resource_name"};
+        for (String name : resourceNames) {
+            Identifier id = Identifier.create(databaseName, name);
+            catalog.createResource(id, MockRESTMessage.resource(id), false);
+        }
+
+        // null maxResults returns all
+        pagedDetails = catalog.listResourceDetailsPaged(databaseName, null, null, null);
+        List<String> fullNames =
+                pagedDetails.getElements().stream()
+                        .map(Resource::fullName)
+                        .collect(Collectors.toList());
+        String[] sortedNames = Arrays.stream(resourceNames).sorted().toArray(String[]::new);
+        assertThat(fullNames)
+                .containsExactly(
+                        Arrays.stream(sortedNames)
+                                .map(n -> Identifier.create(databaseName, n).getFullName())
+                                .toArray(String[]::new));
+        assertNull(pagedDetails.getNextPageToken());
+
+        // paged traversal
+        int maxResults = 2;
+        pagedDetails = catalog.listResourceDetailsPaged(databaseName, maxResults, null, null);
+        assertEquals(maxResults, pagedDetails.getElements().size());
+        assertThat(
+                        pagedDetails.getElements().stream()
+                                .map(Resource::fullName)
+                                .collect(Collectors.toList()))
+                .containsExactly(
+                        Identifier.create(databaseName, "abd").getFullName(),
+                        Identifier.create(databaseName, "def").getFullName());
+        assertEquals("def", pagedDetails.getNextPageToken());
+
+        pagedDetails =
+                catalog.listResourceDetailsPaged(
+                        databaseName, maxResults, pagedDetails.getNextPageToken(), null);
+        assertEquals(maxResults, pagedDetails.getElements().size());
+        assertThat(
+                        pagedDetails.getElements().stream()
+                                .map(Resource::fullName)
+                                .collect(Collectors.toList()))
+                .containsExactly(
+                        Identifier.create(databaseName, "res1").getFullName(),
+                        Identifier.create(databaseName, "res2").getFullName());
+        assertEquals("res2", pagedDetails.getNextPageToken());
+
+        pagedDetails =
+                catalog.listResourceDetailsPaged(
+                        databaseName, maxResults, pagedDetails.getNextPageToken(), null);
+        assertEquals(maxResults, pagedDetails.getElements().size());
+        assertThat(
+                        pagedDetails.getElements().stream()
+                                .map(Resource::fullName)
+                                .collect(Collectors.toList()))
+                .containsExactly(
+                        Identifier.create(databaseName, "res3").getFullName(),
+                        Identifier.create(databaseName, "resource_name").getFullName());
+        assertEquals("resource_name", pagedDetails.getNextPageToken());
+
+        pagedDetails =
+                catalog.listResourceDetailsPaged(
+                        databaseName, maxResults, pagedDetails.getNextPageToken(), null);
+        assertThat(pagedDetails.getElements()).isEmpty();
+        assertNull(pagedDetails.getNextPageToken());
+
+        // pattern matching
+        pagedDetails = catalog.listResourceDetailsPaged(databaseName, null, null, "res%");
+        assertThat(
+                        pagedDetails.getElements().stream()
+                                .map(Resource::fullName)
+                                .collect(Collectors.toList()))
+                .containsExactly(
+                        Identifier.create(databaseName, "res1").getFullName(),
+                        Identifier.create(databaseName, "res2").getFullName(),
+                        Identifier.create(databaseName, "res3").getFullName(),
+                        Identifier.create(databaseName, "resource_name").getFullName());
+
+        // non-existing database
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.listResourceDetailsPaged(
+                                        "non_existing_db", null, null, null));
+
+        // invalid patterns
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listResourceDetailsPaged(databaseName, null, null, "%res"));
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () -> catalog.listResourceDetailsPaged(databaseName, null, null, "re%s"));
+    }
+
+    @Test
+    void testListResourcesPagedGlobally() throws Exception {
+        String databaseName = "list_resources_paged_globally_db";
+        String databaseName2 = "sample_resource_db";
+        String databaseNamePattern = "list_resources_paged_globally%";
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createDatabase(databaseName2, false);
+
+        String[] resourceNames = {"res1", "res2", "abd"};
+        for (String name : resourceNames) {
+            Identifier id = Identifier.create(databaseName, name);
+            catalog.createResource(id, MockRESTMessage.resource(id), false);
+        }
+        Identifier crossDbResource = Identifier.create(databaseName2, "res1");
+        catalog.createResource(crossDbResource, MockRESTMessage.resource(crossDbResource), false);
+
+        // list all under databaseNamePattern
+        Identifier[] expectedIdentifiers =
+                Arrays.stream(resourceNames)
+                        .map(n -> Identifier.create(databaseName, n))
+                        .toArray(Identifier[]::new);
+        PagedList<Identifier> pagedResources =
+                catalog.listResourcesPagedGlobally(databaseNamePattern, null, null, null);
+        assertThat(pagedResources.getElements()).containsExactlyInAnyOrder(expectedIdentifiers);
+        assertNull(pagedResources.getNextPageToken());
+
+        // paged traversal with loop
+        List<Identifier> allCollected = new ArrayList<>();
+        String pageToken = null;
+        do {
+            pagedResources =
+                    catalog.listResourcesPagedGlobally(databaseNamePattern, null, 1, pageToken);
+            allCollected.addAll(pagedResources.getElements());
+            pageToken = pagedResources.getNextPageToken();
+        } while (pageToken != null);
+        assertThat(allCollected).containsExactlyInAnyOrder(expectedIdentifiers);
+
+        // pattern matching on resource name
+        pagedResources =
+                catalog.listResourcesPagedGlobally(databaseNamePattern, "res%", null, null);
+        assertThat(pagedResources.getElements())
+                .containsExactlyInAnyOrder(
+                        Identifier.create(databaseName, "res1"),
+                        Identifier.create(databaseName, "res2"));
+
+        // null databaseNamePattern returns resources from all databases
+        pagedResources = catalog.listResourcesPagedGlobally(null, "res1", null, null);
+        assertThat(pagedResources.getElements())
+                .containsExactlyInAnyOrder(
+                        Identifier.create(databaseName, "res1"), crossDbResource);
+    }
+
+    @Test
+    void testAlterResource() throws Exception {
+        Identifier identifier = new Identifier("rest_catalog_db", "alter_resource_name");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        Resource resource = MockRESTMessage.resource(identifier);
+        ResourceChange updateUri = ResourceChange.updateUri("/new/path/to/resource");
+        assertDoesNotThrow(
+                () -> catalog.alterResource(identifier, ImmutableList.of(updateUri), true));
+        assertThrows(
+                Catalog.ResourceNotExistException.class,
+                () -> catalog.alterResource(identifier, ImmutableList.of(updateUri), false));
+        catalog.createResource(identifier, resource, true);
+
+        // update uri
+        catalog.alterResource(identifier, ImmutableList.of(updateUri), false);
+        Resource catalogResource = catalog.getResource(identifier);
+        assertThat(catalogResource.uri()).isEqualTo("/new/path/to/resource");
+
+        // update comment
+        String newComment = "new comment";
+        catalog.alterResource(
+                identifier, ImmutableList.of(ResourceChange.updateComment(newComment)), false);
+        catalogResource = catalog.getResource(identifier);
+        assertThat(catalogResource.comment().orElse(null)).isEqualTo(newComment);
     }
 
     @Test
