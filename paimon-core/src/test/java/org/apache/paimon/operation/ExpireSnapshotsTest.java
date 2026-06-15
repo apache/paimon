@@ -614,7 +614,8 @@ public class ExpireSnapshotsTest {
             }
 
             SnapshotManager slowSnapshotManager = slowStore.snapshotManager();
-            int latestSnapshotId = requireNonNull(slowSnapshotManager.latestSnapshotId()).intValue();
+            int latestSnapshotId =
+                    requireNonNull(slowSnapshotManager.latestSnapshotId()).intValue();
             for (int i = 1; i <= latestSnapshotId; i++) {
                 rewriteSnapshotTime(slowStore.fileIO(), slowSnapshotManager, i, 0);
             }
@@ -895,10 +896,7 @@ public class ExpireSnapshotsTest {
     }
 
     private void rewriteSnapshotTime(
-            FileIO fileIO,
-            SnapshotManager snapshotManager,
-            long snapshotId,
-            long newTimeMillis)
+            FileIO fileIO, SnapshotManager snapshotManager, long snapshotId, long newTimeMillis)
             throws IOException {
         String oldJson = fileIO.readFileUtf8(snapshotManager.snapshotPath(snapshotId));
         ObjectNode node = (ObjectNode) JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(oldJson);
@@ -917,7 +915,9 @@ public class ExpireSnapshotsTest {
         private final AtomicInteger maxActiveReads = new AtomicInteger();
 
         private BlockingSnapshotManager(
-                SnapshotManager snapshotManager, long minBlockedSnapshotId, long maxBlockedSnapshotId) {
+                SnapshotManager snapshotManager,
+                long minBlockedSnapshotId,
+                long maxBlockedSnapshotId) {
             super(
                     snapshotManager.fileIO(),
                     snapshotManager.tablePath(),
@@ -1006,7 +1006,8 @@ public class ExpireSnapshotsTest {
             List<KeyValue> allData,
             List<Integer> snapshotPositions)
             throws Exception {
-        assertSnapshot(store, store.snapshotManager().snapshot(snapshotId), allData, snapshotPositions);
+        assertSnapshot(
+                store, store.snapshotManager().snapshot(snapshotId), allData, snapshotPositions);
     }
 
     protected void assertSnapshot(

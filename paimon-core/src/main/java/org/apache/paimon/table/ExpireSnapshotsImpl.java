@@ -39,8 +39,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -188,7 +188,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (endExclusiveId <= earliestId) {
             return innerExpireUntil(earliestId, endExclusiveId, new ArrayList<>());
         }
-        return innerExpireUntil(earliestId, endExclusiveId, collectSnapshots(earliestId, endExclusiveId));
+        return innerExpireUntil(
+                earliestId, endExclusiveId, collectSnapshots(earliestId, endExclusiveId));
     }
 
     private int innerExpireUntil(
@@ -300,7 +301,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
         }
 
-        Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers = collectTagSkippers(tags.values());
+        Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
+                collectTagSkippers(tags.values());
         Predicate<ExpireFileEntry> deleteAll = entry -> false;
         List<CompletableFuture<DataFileDeletionPlan>> futures = new ArrayList<>();
         for (Snapshot snapshot : snapshotsIncludingEnd) {

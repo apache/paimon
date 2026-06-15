@@ -58,8 +58,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -199,7 +199,8 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     }
 
     public void cleanUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
-        deletePlannedDataFiles(Collections.singletonList(planUnusedDataFiles(manifestList, skipper)));
+        deletePlannedDataFiles(
+                Collections.singletonList(planUnusedDataFiles(manifestList, skipper)));
     }
 
     public DataFileDeletionPlan planUnusedDataFiles(
@@ -303,7 +304,9 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                                 manifest.fileName(), manifest.fileSize());
                     } catch (Exception e) {
                         // We want to delete the data file, so just ignore the unavailable files
-                        LOG.info("Failed to read manifest " + manifest.fileName() + ". Ignore it.", e);
+                        LOG.info(
+                                "Failed to read manifest " + manifest.fileName() + ". Ignore it.",
+                                e);
                         return Collections.emptyList();
                     }
                 },
@@ -682,6 +685,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
+    /** Planned data files and bucket directories to clean. */
     public static class DataFileDeletionPlan {
 
         private final List<Path> dataFiles = new ArrayList<>();
@@ -715,6 +719,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         }
     }
 
+    /** Planned manifest, index, and statistics files to clean. */
     public static class ManifestDeletionPlan {
 
         private final List<String> manifests = new ArrayList<>();

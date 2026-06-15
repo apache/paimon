@@ -84,7 +84,12 @@ public class TagManager {
 
     /** Specify the default branch for data writing. */
     public TagManager(FileIO fileIO, Path tablePath, String branch, CoreOptions options) {
-        this(fileIO, tablePath, branch, createIfNecessary(options), options.fileOperationThreadNum());
+        this(
+                fileIO,
+                tablePath,
+                branch,
+                createIfNecessary(options),
+                options.fileOperationThreadNum());
     }
 
     @Nullable
