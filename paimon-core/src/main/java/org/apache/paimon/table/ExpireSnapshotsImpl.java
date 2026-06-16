@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ExpireFileEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -149,27 +150,22 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return expireUntil(earliest, maxExclusive);
         }
 
-        try {
-            List<Snapshot> snapshots = collectSnapshots(earliest, maxExclusive);
-            Map<Long, Snapshot> snapshotById = new HashMap<>();
-            for (Snapshot snapshot : snapshots) {
-                snapshotById.put(snapshot.id(), snapshot);
-            }
-
-            for (long id = min; id < maxExclusive; id++) {
-                // Early exit the loop for 'snapshot.time-retained'
-                // A snapshot can only be expired if its next snapshot has been alive
-                // longer than snapshotTimeRetain, providing stronger protection
-                Snapshot nextSnapshot = snapshotById.get(id + 1);
-                if (nextSnapshot != null && olderThanMills <= nextSnapshot.timeMillis()) {
-                    return innerExpireUntil(earliest, id, snapshots);
+        for (long id = min; id < maxExclusive; id++) {
+            // Early exit the loop for 'snapshot.time-retained'
+            // A snapshot can only be expired if its next snapshot has been alive
+            // longer than snapshotTimeRetain, providing stronger protection
+            try {
+                Snapshot nextSnapshot = snapshotManager.tryGetSnapshot(id + 1);
+                if (olderThanMills <= nextSnapshot.timeMillis()) {
+                    return expireUntil(earliest, id);
                 }
+            } catch (FileNotFoundException e) {
+                // ignore
+                // snapshot may have been deleted by another process
             }
-
-            return innerExpireUntil(earliest, maxExclusive, snapshots);
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException(e);
         }
+
+        return expireUntil(earliest, maxExclusive);
     }
 
     @VisibleForTesting
@@ -222,7 +218,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         long beginInclusiveId = snapshotsIncludingEnd.get(0).id();
 
         // tags to create data file skipper
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+        List<Snapshot> taggedSnapshots = collectTaggedSnapshots();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
@@ -415,24 +411,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return result;
     }
 
-    private void deleteSnapshotFiles(List<Snapshot> snapshots)
-            throws ExecutionException, InterruptedException {
-        if (expireConfig.isChangelogDecoupled()) {
-            for (Snapshot snapshot : snapshots) {
-                commitChangelog(new Changelog(snapshot));
-                snapshotManager.deleteSnapshot(snapshot.id());
-            }
-            return;
-        }
-
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+    private void deleteSnapshotFiles(List<Snapshot> snapshots) {
         for (Snapshot snapshot : snapshots) {
-            futures.add(
-                    CompletableFuture.runAsync(
-                            () -> snapshotManager.deleteSnapshot(snapshot.id()), fileExecutor));
-        }
-        for (CompletableFuture<Void> future : futures) {
-            future.get();
+            if (expireConfig.isChangelogDecoupled()) {
+                commitChangelog(new Changelog(snapshot));
+            }
+            snapshotManager.deleteSnapshot(snapshot.id());
         }
     }
 
@@ -457,6 +441,38 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         for (CompletableFuture<Optional<Snapshot>> future : futures) {
             future.get().ifPresent(snapshots::add);
         }
+        return snapshots;
+    }
+
+    private List<Snapshot> collectTaggedSnapshots() throws InterruptedException, ExecutionException {
+        List<Path> tagPaths;
+        try {
+            tagPaths = tagManager.tagPaths(path -> true);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        List<CompletableFuture<Optional<Snapshot>>> futures = new ArrayList<>();
+        for (Path path : tagPaths) {
+            futures.add(
+                    CompletableFuture.supplyAsync(
+                            () -> {
+                                try {
+                                    return Optional.of(
+                                            Tag.tryFromPath(snapshotManager.fileIO(), path)
+                                                    .trimToSnapshot());
+                                } catch (FileNotFoundException ignored) {
+                                    return Optional.empty();
+                                }
+                            },
+                            fileExecutor));
+        }
+
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (CompletableFuture<Optional<Snapshot>> future : futures) {
+            future.get().ifPresent(snapshots::add);
+        }
+        snapshots.sort((left, right) -> Long.compare(left.id(), right.id()));
         return snapshots;
     }
 

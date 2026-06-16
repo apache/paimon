@@ -99,6 +99,10 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
         executeAll(dataFileToDelete, fileIO::deleteQuietly);
     }
 
+    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ExpireFileEntry> skipper) {
+        cleanDeletedDataFiles(taggedSnapshot, skipper);
+    }
+
     @Override
     public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion

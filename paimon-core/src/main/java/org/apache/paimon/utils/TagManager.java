@@ -49,9 +49,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -70,8 +67,6 @@ public class TagManager {
     private final FileIO fileIO;
     private final Path tablePath;
     private final String branch;
-    @Nullable private final Integer fileOperationThreadNum;
-    private final Executor fileExecutor;
     @Nullable private final TagPeriodHandler tagPeriodHandler;
 
     public TagManager(FileIO fileIO, Path tablePath) {
@@ -84,12 +79,7 @@ public class TagManager {
 
     /** Specify the default branch for data writing. */
     public TagManager(FileIO fileIO, Path tablePath, String branch, CoreOptions options) {
-        this(
-                fileIO,
-                tablePath,
-                branch,
-                createIfNecessary(options),
-                options.fileOperationThreadNum());
+        this(fileIO, tablePath, branch, createIfNecessary(options));
     }
 
     @Nullable
@@ -104,23 +94,9 @@ public class TagManager {
             Path tablePath,
             String branch,
             @Nullable TagPeriodHandler tagPeriodHandler) {
-        this(fileIO, tablePath, branch, tagPeriodHandler, null);
-    }
-
-    private TagManager(
-            FileIO fileIO,
-            Path tablePath,
-            String branch,
-            @Nullable TagPeriodHandler tagPeriodHandler,
-            @Nullable Integer fileOperationThreadNum) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
         this.branch = BranchManager.normalizeBranch(branch);
-        this.fileOperationThreadNum = fileOperationThreadNum;
-        this.fileExecutor =
-                fileOperationThreadNum == null
-                        ? Runnable::run
-                        : FileOperationThreadPool.getExecutorService(fileOperationThreadNum);
         this.tagPeriodHandler = tagPeriodHandler;
     }
 
@@ -128,8 +104,7 @@ public class TagManager {
     // If we will use the new branch TagManager to create tag, we need to pass TagPeriodHandler
     // according to branch options.
     public TagManager copyWithBranch(String branchName) {
-        return new TagManager(
-                fileIO, tablePath, branchName, (TagPeriodHandler) null, fileOperationThreadNum);
+        return new TagManager(fileIO, tablePath, branchName, (TagPeriodHandler) null);
     }
 
     /** Return the root Directory of tags. */
@@ -335,7 +310,7 @@ public class TagManager {
             success = false;
         }
         if (success) {
-            tagDeletion.cleanDeletedDataFiles(taggedSnapshot, dataFileSkipper);
+            tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
             tagDeletion.cleanEmptyDirectories();
         }
 
@@ -422,22 +397,19 @@ public class TagManager {
         try {
             List<Path> paths = tagPaths(path -> true);
 
-            List<CompletableFuture<Optional<Pair<Snapshot, String>>>> futures = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
-                if (filter.test(tagName)) {
-                    futures.add(
-                            CompletableFuture.supplyAsync(
-                                    () -> tryReadTag(path, tagName), fileExecutor));
-                }
-            }
 
-            for (CompletableFuture<Optional<Pair<Snapshot, String>>> future : futures) {
-                Optional<Pair<Snapshot, String>> tag = getReadTagResult(future);
-                tag.ifPresent(
-                        pair ->
-                                tags.computeIfAbsent(pair.getLeft(), s -> new ArrayList<>())
-                                        .add(pair.getRight()));
+                if (!filter.test(tagName)) {
+                    continue;
+                }
+                // If the tag file is not found, it might be deleted by
+                // other processes, so just skip this tag
+                try {
+                    Snapshot snapshot = Tag.tryFromPath(fileIO, path).trimToSnapshot();
+                    tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                } catch (FileNotFoundException ignored) {
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -449,46 +421,17 @@ public class TagManager {
     public List<Pair<Tag, String>> tagObjects() {
         try {
             List<Path> paths = tagPaths(path -> true);
-            List<CompletableFuture<Optional<Pair<Tag, String>>>> futures = new ArrayList<>();
+            List<Pair<Tag, String>> tags = new ArrayList<>();
             for (Path path : paths) {
                 String tagName = path.getName().substring(TAG_PREFIX.length());
-                futures.add(
-                        CompletableFuture.supplyAsync(
-                                () -> tryReadTagObject(path, tagName), fileExecutor));
-            }
-
-            List<Pair<Tag, String>> tags = new ArrayList<>();
-            for (CompletableFuture<Optional<Pair<Tag, String>>> future : futures) {
-                getReadTagResult(future).ifPresent(tags::add);
+                try {
+                    tags.add(Pair.of(Tag.tryFromPath(fileIO, path), tagName));
+                } catch (FileNotFoundException ignored) {
+                }
             }
             return tags;
         } catch (IOException e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    private Optional<Pair<Snapshot, String>> tryReadTag(Path path, String tagName) {
-        return tryReadTagObject(path, tagName)
-                .map(pair -> Pair.of(pair.getLeft().trimToSnapshot(), pair.getRight()));
-    }
-
-    private Optional<Pair<Tag, String>> tryReadTagObject(Path path, String tagName) {
-        // If the tag file is not found, it might be deleted by other processes, so just skip it.
-        try {
-            return Optional.of(Pair.of(Tag.tryFromPath(fileIO, path), tagName));
-        } catch (FileNotFoundException ignored) {
-            return Optional.empty();
-        }
-    }
-
-    private <T> Optional<T> getReadTagResult(CompletableFuture<Optional<T>> future) {
-        try {
-            return future.get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e.getCause());
         }
     }
 

@@ -616,11 +616,10 @@ public class ExpireSnapshotsTest {
     public void testExpireCollectsSnapshotsConcurrently() throws Exception {
         store.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
 
-        ExpireConfig config = expireAllButLatestConfig();
-
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         for (int i = 1; i <= 5; i++) {
             rewriteSnapshotTime(i, 0);
         }
@@ -633,13 +632,10 @@ public class ExpireSnapshotsTest {
                         changelogManager,
                         store.newSnapshotDeletion(),
                         store.newTagManager());
-        expire.config(config);
-        expire.setCurrentTimeMillis(() -> 1000L);
 
-        expire.expire();
+        expire.expireUntil(1, latestSnapshotId);
 
         assertThat(blockingSnapshotManager.maxActiveReads()).isGreaterThan(1);
-        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
         store.assertCleaned();
     }
@@ -779,7 +775,7 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testTagManagerReadsTagsConcurrentlyWithObjectStoreFileIO() throws Exception {
+    public void testExpireReadsTagsConcurrentlyWithObjectStoreFileIO() throws Exception {
         TestFileStore slowStore = createSlowStore();
         slowStore.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
 
@@ -798,19 +794,20 @@ public class ExpireSnapshotsTest {
                         slowStore.options().tagDefaultTimeRetained(),
                         Collections.emptyList(),
                         false);
+                rewriteSnapshotTime(slowStore.fileIO(), snapshotManager, i, 0);
             }
 
             SlowFileIO.reset();
             SlowFileIO.setDelayMillis(20);
+            ExpireSnapshotsImpl expire =
+                    (ExpireSnapshotsImpl) slowStore.newExpire(expireAllButLatestConfig());
+            expire.setCurrentTimeMillis(() -> 1000L);
 
-            List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+            expire.expire();
 
-            assertThat(taggedSnapshots).hasSize(latestSnapshotId);
-            for (int i = 1; i <= latestSnapshotId; i++) {
-                assertThat(taggedSnapshots.get(i - 1).id()).isEqualTo(i);
-            }
             assertThat(SlowFileIO.delayedOperations()).isGreaterThan(0);
             assertThat(SlowFileIO.maxActiveOperations()).isGreaterThan(1);
+            assertSnapshot(slowStore, latestSnapshotId, allData, snapshotPositions);
         } finally {
             SlowFileIO.reset();
         }
@@ -934,6 +931,45 @@ public class ExpireSnapshotsTest {
         assertSnapshot(6, allData, snapshotPositions);
 
         store.assertCleaned();
+    }
+
+    @Test
+    public void testExpireWithTimeDoesNotReadProtectedRange() throws Exception {
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(Integer.MAX_VALUE)
+                        .snapshotTimeRetain(Duration.ofMillis(5000))
+                        .build();
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(6, allData, snapshotPositions);
+        for (int i = 1; i <= 6; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+        rewriteSnapshotTime(4, 2000);
+
+        FailingSnapshotManager failingSnapshotManager =
+                new FailingSnapshotManager(snapshotManager, 5);
+        ExpireSnapshotsImpl expire =
+                new ExpireSnapshotsImpl(
+                        failingSnapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        store.newTagManager());
+        expire.config(config);
+        expire.setCurrentTimeMillis(() -> 6000L);
+
+        expire.expire();
+
+        assertThat(failingSnapshotManager.readFailedSnapshot()).isFalse();
+        assertThat(snapshotManager.snapshotExists(1)).isFalse();
+        assertThat(snapshotManager.snapshotExists(2)).isFalse();
+        for (int i = 3; i <= 6; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+            assertSnapshot(i, allData, snapshotPositions);
+        }
     }
 
     @Test
@@ -1193,6 +1229,35 @@ public class ExpireSnapshotsTest {
         String newJson = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.writeValueAsString(node);
         fileIO.overwriteFileUtf8(snapshotManager.snapshotPath(snapshotId), newJson);
         snapshotManager.invalidateCache();
+    }
+
+    private static class FailingSnapshotManager extends SnapshotManager {
+
+        private final long failedSnapshotId;
+        private boolean readFailedSnapshot;
+
+        private FailingSnapshotManager(SnapshotManager snapshotManager, long failedSnapshotId) {
+            super(
+                    snapshotManager.fileIO(),
+                    snapshotManager.tablePath(),
+                    snapshotManager.branch(),
+                    null,
+                    null);
+            this.failedSnapshotId = failedSnapshotId;
+        }
+
+        @Override
+        public Snapshot tryGetSnapshot(long snapshotId) throws java.io.FileNotFoundException {
+            if (snapshotId == failedSnapshotId) {
+                readFailedSnapshot = true;
+                throw new RuntimeException("Unexpected snapshot read.");
+            }
+            return super.tryGetSnapshot(snapshotId);
+        }
+
+        private boolean readFailedSnapshot() {
+            return readFailedSnapshot;
+        }
     }
 
     private static class BlockingSnapshotManager extends SnapshotManager {
