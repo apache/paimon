@@ -37,6 +37,7 @@ public class ManifestReadThreadPool {
             createCachedThreadPool(Runtime.getRuntime().availableProcessors(), THREAD_NAME);
 
     public static synchronized ExecutorService getExecutorService(@Nullable Integer threadNum) {
+        threadNum = normalizeThreadNum(threadNum);
         if (threadNum == null || threadNum == executorService.getMaximumPoolSize()) {
             return executorService;
         }
@@ -54,6 +55,7 @@ public class ManifestReadThreadPool {
     /** This method aims to parallel process tasks with memory control and sequentially. */
     public static <T, U> Iterable<T> sequentialBatchedExecute(
             Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
+        threadNum = normalizeThreadNum(threadNum);
         ExecutorService executor = getExecutorService(threadNum);
         if (threadNum == null) {
             threadNum =
@@ -62,6 +64,10 @@ public class ManifestReadThreadPool {
                             : ((SemaphoredDelegatingExecutor) executor).getPermitCount();
         }
         return ThreadPoolUtils.sequentialBatchedExecute(executor, processor, input, threadNum);
+    }
+
+    private static @Nullable Integer normalizeThreadNum(@Nullable Integer threadNum) {
+        return threadNum == null || threadNum <= 0 ? null : threadNum;
     }
 
     /** This method aims to parallel process tasks with randomly but return values sequentially. */
