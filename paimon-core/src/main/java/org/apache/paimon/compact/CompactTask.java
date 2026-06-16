@@ -37,22 +37,36 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
+    @Nullable private String partitionString;
+    private int bucket = -1;
+
     public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
         this.metricsReporter = metricsReporter;
+    }
+
+    /** Set partition and bucket info for logging purposes. */
+    public void setPartitionBucketInfo(@Nullable String partitionString, int bucket) {
+        this.partitionString = partitionString;
+        this.bucket = bucket;
     }
 
     @Override
     public CompactResult call() throws Exception {
         MetricUtils.safeCall(this::startTimer, LOG);
+        LOG.info(
+                "Paimon compact task started: partition={}, bucket={}, taskType={}",
+                partitionString,
+                bucket,
+                getClass().getSimpleName());
         try {
             long startMillis = System.currentTimeMillis();
             CompactResult result = doCompact();
+            long durationMs = System.currentTimeMillis() - startMillis;
 
             MetricUtils.safeCall(
                     () -> {
                         if (metricsReporter != null) {
-                            metricsReporter.reportCompactionTime(
-                                    System.currentTimeMillis() - startMillis);
+                            metricsReporter.reportCompactionTime(durationMs);
                             metricsReporter.increaseCompactionsCompletedCount();
                             metricsReporter.reportCompactionInputSize(
                                     result.before().stream()
@@ -68,10 +82,30 @@ public abstract class CompactTask implements Callable<CompactResult> {
                     },
                     LOG);
 
+            LOG.info(
+                    "Paimon compact task finished: partition={}, bucket={}, taskType={}, "
+                            + "inputFiles={}, inputBytes={}, outputFiles={}, outputBytes={}, durationMs={}",
+                    partitionString,
+                    bucket,
+                    getClass().getSimpleName(),
+                    result.before().size(),
+                    result.before().stream().mapToLong(DataFileMeta::fileSize).sum(),
+                    result.after().size(),
+                    result.after().stream().mapToLong(DataFileMeta::fileSize).sum(),
+                    durationMs);
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug(logMetric(startMillis, result.before(), result.after()));
             }
             return result;
+        } catch (Exception e) {
+            LOG.warn(
+                    "Paimon compact task failed: partition={}, bucket={}, taskType={}",
+                    partitionString,
+                    bucket,
+                    getClass().getSimpleName(),
+                    e);
+            throw e;
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
             MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);

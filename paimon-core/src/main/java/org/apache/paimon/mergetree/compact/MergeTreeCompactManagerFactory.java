@@ -171,21 +171,24 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         if (metricsReporter != null) {
             rewriter.setMetricsReporter(metricsReporter);
         }
-        return new MergeTreeCompactManager(
-                compactExecutor,
-                levels,
-                compactStrategy,
-                keyComparator,
-                options.compactionFileSize(true),
-                options.numSortedRunStopTrigger(),
-                rewriter,
-                metricsReporter,
-                dvMaintainer,
-                options.prepareCommitWaitCompaction(),
-                options.needLookup(),
-                recordLevelExpire,
-                options.forceRewriteAllFiles(),
-                options.isChainTable());
+        MergeTreeCompactManager compactManager =
+                new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        metricsReporter,
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        recordLevelExpire,
+                        options.forceRewriteAllFiles(),
+                        options.isChainTable());
+        compactManager.setPartitionBucketInfo(partition, bucket, keyReaderFactory.pathFactory());
+        return compactManager;
     }
 
     private CompactStrategy createCompactStrategy(
