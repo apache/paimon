@@ -54,7 +54,7 @@ import java.util.stream.Collectors;
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
+import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -100,7 +100,7 @@ public class DataEvolutionCompactCoordinator {
                                 ? table.rowType().getFields().stream()
                                         .filter(
                                                 field ->
-                                                        field.type().is(BLOB)
+                                                        isBlobFileField(field.type())
                                                                 && !blobInlineFields.contains(
                                                                         field.name()))
                                         .map(DataField::id)

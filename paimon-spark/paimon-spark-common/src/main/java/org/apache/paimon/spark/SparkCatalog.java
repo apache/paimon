@@ -76,6 +76,7 @@ import org.apache.spark.sql.execution.datasources.DataSource;
 import org.apache.spark.sql.execution.datasources.FileFormat;
 import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2;
 import org.apache.spark.sql.types.ArrayType;
+import org.apache.spark.sql.types.BinaryType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -607,13 +608,10 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (blobFields.contains(name)
-                    || blobDescriptorFields.contains(name)
-                    || blobViewFields.contains(name)) {
-                checkArgument(
-                        field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
-                        "The type of blob field must be binary");
-                type = new BlobType();
+            if (blobDescriptorFields.contains(name) || blobViewFields.contains(name)) {
+                type = toBlobType(field, false);
+            } else if (blobFields.contains(name)) {
+                type = toBlobType(field, true);
             } else if (vectorFields.contains(field.name())) {
                 Preconditions.checkArgument(
                         field.dataType() instanceof ArrayType,
@@ -643,6 +641,26 @@ public class SparkCatalog extends SparkBaseCatalog
             }
         }
         return schemaBuilder.build();
+    }
+
+    private static DataType toBlobType(StructField field, boolean allowArray) {
+        org.apache.spark.sql.types.DataType sparkType = field.dataType();
+        if (sparkType instanceof BinaryType) {
+            return new BlobType(field.nullable());
+        }
+        if (sparkType instanceof ArrayType) {
+            checkArgument(
+                    allowArray,
+                    "ARRAY<BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
+            ArrayType arrayType = (ArrayType) sparkType;
+            checkArgument(
+                    arrayType.elementType() instanceof BinaryType,
+                    "The element type of array blob field must be binary");
+            return new org.apache.paimon.types.ArrayType(
+                    field.nullable(), new BlobType(arrayType.containsNull()));
+        }
+        throw new IllegalArgumentException(
+                "The type of blob field must be binary or array of binary");
     }
 
     private void validateAlterProperty(String alterKey) {

@@ -77,6 +77,73 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test array blob") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'paimon', array(X'48656C6C6F', CAST(NULL AS BINARY), X'5945')), " +
+          "(2, 'one', array(X'414243')), " +
+          "(3, 'null-array', CAST(NULL AS ARRAY<BINARY>))")
+
+      val pictures = sql("SELECT pictures FROM t WHERE id = 1")
+        .collect()(0)
+        .getSeq[Array[Byte]](0)
+      assert(pictures.size == 3)
+      assert(util.Arrays.equals(pictures.head, Array[Byte](72, 101, 108, 108, 111)))
+      assert(pictures(1) == null)
+      assert(util.Arrays.equals(pictures(2), Array[Byte](89, 69)))
+
+      val first =
+        sql("SELECT id, size(pictures), pictures[0], pictures[1], pictures[2] FROM t WHERE id = 1")
+          .collect()(0)
+      assert(first.getInt(0) == 1)
+      assert(first.getInt(1) == 3)
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(first.isNullAt(3))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      val second = sql("SELECT id, size(pictures), pictures[0] FROM t WHERE id = 2").collect()(0)
+      assert(second.getInt(0) == 2)
+      assert(second.getInt(1) == 1)
+      assert(util.Arrays.equals(second.getAs[Array[Byte]](2), Array[Byte](65, 66, 67)))
+
+      checkAnswer(
+        sql("SELECT id, pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(3, true))
+      )
+      checkAnswer(
+        sql("SELECT COUNT(*) > 0 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: array blob inline fields are rejected") {
+    Seq(
+      ("array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
+      ("array_blob_view_reject", "'blob-view-field'='pictures'"),
+      (
+        "array_blob_external_reject",
+        s"'blob-descriptor-field'='pictures', " +
+          s"'blob-external-storage-field'='pictures', " +
+          s"'blob-external-storage-path'='${tempDBDir.getCanonicalPath}/array_blob_external'")
+    ).foreach {
+      case (tableName, blobOptions) =>
+        withTable(tableName) {
+          val error = intercept[Exception] {
+            sql(
+              s"CREATE TABLE $tableName (id INT, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+                s"'row-tracking.enabled'='true', 'data-evolution.enabled'='true', $blobOptions)")
+          }
+          assert(
+            containsMessage(error, "ARRAY<BLOB> is only supported by 'blob-field'."),
+            throwableMessages(error))
+        }
+    }
+  }
+
   test("Blob: test write blob descriptor") {
     withTable("t") {
       val blobData = new Array[Byte](1024 * 1024)
@@ -480,6 +547,54 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into updates non-blob column on raw array blob table with split files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', array(X'48656C6C6F', X'5945')), " +
+          "(2, 'name2', array(X'414243')), " +
+          "(3, 'name3', CAST(NULL AS ARRAY<BINARY>))")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) > 1 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"), Row(3, "name3"))
+      )
+
+      val first = sql("SELECT name, pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      assert(first.getString(0) == "updated_name1")
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](89, 69)))
+
+      val second = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 2").collect()(0)
+      assert(util.Arrays.equals(second.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
+      assert(second.isNullAt(1))
+
+      checkAnswer(
+        sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(true))
+      )
+    }
+  }
+
   test("Blob: self merge reads raw blob column to update non-blob column") {
     withTable("t") {
       sql(
@@ -573,6 +688,30 @@ class BlobTestBase extends PaimonSparkTestBase {
         Seq(Row(1, "updated_name1"), Row(2, "name2"))
       )
     }
+  }
+
+  private def containsMessage(error: Throwable, expected: String): Boolean = {
+    var current = error
+    while (current != null) {
+      if (current.getMessage != null && current.getMessage.contains(expected)) {
+        return true
+      }
+      current = current.getCause
+    }
+    false
+  }
+
+  private def throwableMessages(error: Throwable): String = {
+    val builder = new StringBuilder
+    var current = error
+    while (current != null) {
+      if (builder.nonEmpty) {
+        builder.append(" -> ")
+      }
+      builder.append(current.getClass.getName).append(": ").append(current.getMessage)
+      current = current.getCause
+    }
+    builder.toString()
   }
 
   private val HEX_ARRAY = "0123456789ABCDEF".toCharArray
