@@ -110,16 +110,18 @@ public class LuminaVectorIndexOptions {
                     .withDescription("The parallel number for search.");
 
     private final int dimension;
+    private final boolean dimensionExplicitlyConfigured;
     private final LuminaVectorMetric metric;
     private final String indexType;
     private final Map<String, String> luminaOptions;
 
     public LuminaVectorIndexOptions(Options options) {
         this.dimension = validatePositive(options.get(DIMENSION), DIMENSION.key());
+        this.dimensionExplicitlyConfigured = options.contains(DIMENSION);
         this.metric = parseMetric(options.get(DISTANCE_METRIC));
         this.indexType = options.get(INDEX_TYPE);
         validateEncodingMetricCombination(options.get(ENCODING_TYPE), this.metric);
-        this.luminaOptions = buildLuminaOptions(options, this.dimension);
+        this.luminaOptions = buildLuminaOptions(options);
     }
 
     /**
@@ -128,11 +130,24 @@ public class LuminaVectorIndexOptions {
      * diskann.build.ef_construction}.
      */
     public Map<String, String> toLuminaOptions() {
-        return new LinkedHashMap<>(luminaOptions);
+        return toLuminaOptions(dimension);
+    }
+
+    public Map<String, String> toLuminaOptions(int dimension) {
+        Map<String, String> result = new LinkedHashMap<>(luminaOptions);
+        result.put(
+                toLuminaKey(DIMENSION),
+                String.valueOf(validatePositive(dimension, DIMENSION.key())));
+        capPqM(result, dimension);
+        return result;
     }
 
     public int dimension() {
         return dimension;
+    }
+
+    public boolean isDimensionExplicitlyConfigured() {
+        return dimensionExplicitlyConfigured;
     }
 
     public LuminaVectorMetric metric() {
@@ -177,7 +192,7 @@ public class LuminaVectorIndexOptions {
      * like {@code index.type} are always present in the metadata, matching paimon-cpp behavior.
      */
     @SuppressWarnings("unchecked")
-    private static Map<String, String> buildLuminaOptions(Options options, int dimension) {
+    private static Map<String, String> buildLuminaOptions(Options options) {
         Map<String, String> result = new LinkedHashMap<>();
         // Populate all known options with their resolved values (user-set or default).
         for (ConfigOption<?> opt : ALL_OPTIONS) {
@@ -193,8 +208,6 @@ public class LuminaVectorIndexOptions {
                 result.putIfAbsent(key.substring(LUMINA_PREFIX.length()), entry.getValue());
             }
         }
-        // PQ encoding requires pq.m <= dimension; auto-cap to avoid native init failures.
-        capPqM(result, dimension);
         return result;
     }
 
