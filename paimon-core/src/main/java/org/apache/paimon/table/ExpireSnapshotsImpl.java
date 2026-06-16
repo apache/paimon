@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -146,10 +147,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // (the maximum number of snapshots allowed to expire at a time)
         maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
 
-        if (maxExclusive <= earliest) {
-            return expireUntil(earliest, maxExclusive);
-        }
-
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
             // A snapshot can only be expired if its next snapshot has been alive
@@ -179,16 +176,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private int innerExpireUntil(long earliestId, long endExclusiveId)
             throws ExecutionException, InterruptedException {
-        if (endExclusiveId <= earliestId) {
-            return innerExpireUntil(earliestId, endExclusiveId, new ArrayList<>());
-        }
-        return innerExpireUntil(
-                earliestId, endExclusiveId, collectSnapshots(earliestId, endExclusiveId));
-    }
-
-    private int innerExpireUntil(
-            long earliestId, long endExclusiveId, List<Snapshot> collectedSnapshots)
-            throws ExecutionException, InterruptedException {
         long startTime = currentTimeMillis.get();
 
         if (endExclusiveId <= earliestId) {
@@ -204,10 +191,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // collect all snapshots
-        List<Snapshot> snapshotsIncludingEnd =
-                collectedSnapshots.stream()
-                        .filter(s -> s.id() >= earliestId && s.id() <= endExclusiveId)
-                        .collect(Collectors.toList());
+        List<Snapshot> snapshotsIncludingEnd = collectSnapshots(earliestId, endExclusiveId);
         if (snapshotsIncludingEnd.isEmpty()) {
             return 0;
         }
@@ -469,7 +453,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         for (CompletableFuture<Optional<Snapshot>> future : futures) {
             future.get().ifPresent(snapshots::add);
         }
-        snapshots.sort((left, right) -> Long.compare(left.id(), right.id()));
+        snapshots.sort(Comparator.comparingLong(Snapshot::id));
         return snapshots;
     }
 
