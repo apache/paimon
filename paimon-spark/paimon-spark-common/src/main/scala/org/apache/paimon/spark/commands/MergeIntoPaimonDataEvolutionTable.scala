@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.SparkTable
@@ -594,9 +595,9 @@ case class MergeIntoPaimonDataEvolutionTable(
         if (globalIndexMeta == null) {
           false
         } else {
-          val fieldName = rowType.getField(globalIndexMeta.indexFieldId()).name()
+          val indexedNames = globalIndexMeta.getIndexedFieldNames(rowType).asScala
           affectedParts.contains(entry.partition()) && updateColumns.exists(
-            _.name.equals(fieldName))
+            col => indexedNames.contains(col.name))
         }
       }
 
@@ -613,8 +614,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         case GlobalIndexColumnUpdateAction.THROW_ERROR =>
           val updatedColNames = updateColumns.map(_.name)
           val conflicted = affectedIndexEntries
-            .map(_.indexFile().globalIndexMeta().indexFieldId())
-            .map(id => rowType.getField(id).name())
+            .flatMap(e => e.indexFile().globalIndexMeta().getIndexedFieldNames(rowType).asScala)
             .toSet
           throw new RuntimeException(
             s"""MergeInto: update columns contain globally indexed columns, not supported now.

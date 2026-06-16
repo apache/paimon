@@ -100,10 +100,12 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                     GlobalIndexMeta globalIndexMeta =
                                             entry.indexFile().globalIndexMeta();
                                     if (globalIndexMeta != null) {
-                                        String fieldName =
-                                                rowType.getField(globalIndexMeta.indexFieldId())
-                                                        .name();
-                                        return updatedColumns.contains(fieldName)
+                                        List<String> indexedNames =
+                                                globalIndexMeta.getIndexedFieldNames(rowType);
+                                        boolean overlaps =
+                                                indexedNames.stream()
+                                                        .anyMatch(updatedColumns::contains);
+                                        return overlaps
                                                 && affectedPartitions.contains(entry.partition());
                                     }
                                     return false;
@@ -116,8 +118,8 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                 case THROW_ERROR:
                     Set<String> conflictedColumns =
                             affectedEntries.stream()
-                                    .map(file -> file.indexFile().globalIndexMeta().indexFieldId())
-                                    .map(id -> rowType.getField(id).name())
+                                    .map(file -> file.indexFile().globalIndexMeta())
+                                    .flatMap(meta -> meta.getIndexedFieldNames(rowType).stream())
                                     .collect(Collectors.toSet());
 
                     throw new RuntimeException(

@@ -20,10 +20,12 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 
@@ -32,8 +34,11 @@ import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -85,11 +90,23 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 tableId);
 
         RowType rowType = table.rowType();
+        List<String> indexColumns =
+                Arrays.stream(indexColumn.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
         checkArgument(
-                rowType.containsField(indexColumn),
-                "Column '%s' does not exist in table '%s'.",
-                indexColumn,
-                tableId);
+                indexColumns.size() == new HashSet<>(indexColumns).size(),
+                "Duplicate index columns are not allowed: %s",
+                indexColumns);
+        for (String col : indexColumns) {
+            checkArgument(
+                    rowType.containsField(col),
+                    "Column '%s' does not exist in table '%s'.",
+                    col,
+                    tableId);
+        }
 
         // Parse partition predicate
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
@@ -99,12 +116,29 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
+        if (indexColumns.size() > 1) {
+            // Fail fast before submitting the job: index types that do not support multi-column
+            // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.
+            DataField indexField = rowType.getField(indexColumns.get(0));
+            List<DataField> extraFields =
+                    indexColumns.subList(1, indexColumns.size()).stream()
+                            .map(rowType::getField)
+                            .collect(Collectors.toList());
+            try {
+                GlobalIndexer.create(indexType, indexField, extraFields, userOptions);
+            } catch (UnsupportedOperationException e) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Index type '%s' does not support multi-column index, got columns: %s",
+                                indexType, indexColumns));
+            }
+        }
         try {
             if ("btree".equals(indexType)) {
                 BTreeIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
-                        indexColumn,
+                        indexColumns.get(0),
                         partitionPredicate,
                         userOptions);
                 return new String[] {
@@ -114,7 +148,8 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 GenericIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
-                        indexColumn,
+                        indexColumns.get(0),
+                        indexColumns.subList(1, indexColumns.size()),
                         indexType,
                         partitionPredicate,
                         userOptions);
@@ -122,8 +157,8 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(
-                            "Failed to create %s index for column '%s' on table '%s'.",
-                            indexType, indexColumn, table.name()),
+                            "Failed to create %s index for columns '%s' on table '%s'.",
+                            indexType, indexColumns, table.name()),
                     e);
         }
         return new String[] {

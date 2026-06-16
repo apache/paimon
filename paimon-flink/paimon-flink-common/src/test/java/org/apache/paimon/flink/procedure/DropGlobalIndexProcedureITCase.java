@@ -299,6 +299,6 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
         assertThat(dropResult.get(0).getField(0))
                 .isInstanceOf(String.class)
                 .asString()
-                .contains("No btree global index found for column 'name'");
+                .contains("No btree global index found for columns 'name'");
     }
 }
