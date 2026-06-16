@@ -261,7 +261,12 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // delete snapshot file finally
-        deleteSnapshotFiles(snapshotsExcludingEnd);
+        for (Snapshot snapshot : snapshotsExcludingEnd) {
+            if (expireConfig.isChangelogDecoupled()) {
+                commitChangelog(new Changelog(snapshot));
+            }
+            snapshotManager.deleteSnapshot(snapshot.id());
+        }
 
         writeEarliestHint(endExclusiveId);
         long duration = currentTimeMillis.get() - startTime;
@@ -411,15 +416,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return result;
     }
 
-    private void deleteSnapshotFiles(List<Snapshot> snapshots) {
-        for (Snapshot snapshot : snapshots) {
-            if (expireConfig.isChangelogDecoupled()) {
-                commitChangelog(new Changelog(snapshot));
-            }
-            snapshotManager.deleteSnapshot(snapshot.id());
-        }
-    }
-
     private List<Snapshot> collectSnapshots(long earliestId, long endExclusiveId)
             throws InterruptedException, ExecutionException {
         List<CompletableFuture<Optional<Snapshot>>> futures = new ArrayList<>();
@@ -444,7 +440,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return snapshots;
     }
 
-    private List<Snapshot> collectTaggedSnapshots() throws InterruptedException, ExecutionException {
+    private List<Snapshot> collectTaggedSnapshots()
+            throws InterruptedException, ExecutionException {
         List<Path> tagPaths;
         try {
             tagPaths = tagManager.tagPaths(path -> true);
