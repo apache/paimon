@@ -1021,7 +1021,7 @@ class DataEvolutionSplitRead(SplitRead):
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
                 # The file only contains columns from when it was written.
-                file_schema = self.table.schema_manager.get_schema(first_file.schema_id)
+                file_schema = self._resolve_schema(first_file.schema_id)
                 field_ids = [field.id for field in file_schema.fields]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
