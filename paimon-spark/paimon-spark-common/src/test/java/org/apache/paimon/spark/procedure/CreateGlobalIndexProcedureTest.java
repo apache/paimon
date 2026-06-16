@@ -377,6 +377,33 @@ public class CreateGlobalIndexProcedureTest {
     }
 
     @Test
+    void testGroupFilesIntoShardsByPartitionMergeNonContiguousFiles() {
+        BinaryRow partition = createPartition(0);
+
+        DataFileMeta file1 = createDataFileMeta(100L, 100L);
+        DataFileMeta file2 = createDataFileMeta(300L, 100L);
+
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        createManifestEntry(partition, file1),
+                        createManifestEntry(partition, file2));
+
+        Map<BinaryRow, List<ManifestEntry>> entriesByPartition = new HashMap<>();
+        entriesByPartition.put(partition, entries);
+
+        Map<BinaryRow, List<IndexedSplit>> result =
+                DefaultGlobalIndexTopoBuilder.groupFilesIntoShardsByPartition(
+                        entriesByPartition, 1000L, pathFactory, true);
+
+        assertThat(result).hasSize(1);
+        List<IndexedSplit> shardSplits = result.get(partition);
+        assertThat(shardSplits).hasSize(1);
+        assertThat(shardSplits.get(0).rowRanges())
+                .containsExactly(new Range(100L, 199L), new Range(300L, 399L));
+        assertThat(shardSplits.get(0).dataSplit().dataFiles()).containsExactly(file1, file2);
+    }
+
+    @Test
     void testGroupFilesIntoShardsByPartitionMixedContiguousAndNonContiguous() {
         // Create a partition
         BinaryRow partition = createPartition(0);

@@ -30,4 +30,9 @@ class BTreeIndexOptionsTest {
         assertThat(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.defaultValue())
                 .isEqualTo(10_000_000L);
     }
+
+    @Test
+    void testDefaultMergeDiscontinuousRowRanges() {
+        assertThat(BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES.defaultValue()).isFalse();
+    }
 }

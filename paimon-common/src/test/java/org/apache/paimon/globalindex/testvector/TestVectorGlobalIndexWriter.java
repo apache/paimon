@@ -20,9 +20,11 @@ package org.apache.paimon.globalindex.testvector;
 
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -40,25 +42,32 @@ import java.util.List;
  * <pre>
  *   [4 bytes] dimension (int)
  *   [4 bytes] count (int)
- *   [count * dim * 4 bytes] float vectors (row-major order)
+ *   For each vector:
+ *     [8 bytes] row id (long)
+ *     [dim * 4 bytes] float vector
  * </pre>
  */
-public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
+public class TestVectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
 
     private static final String FILE_NAME_PREFIX = "test-vector";
 
     private final GlobalIndexFileWriter fileWriter;
     private final int dimension;
+    private final List<Long> rowIds;
     private final List<float[]> vectors;
 
     public TestVectorGlobalIndexWriter(GlobalIndexFileWriter fileWriter, int dimension) {
         this.fileWriter = fileWriter;
         this.dimension = dimension;
+        this.rowIds = new ArrayList<>();
         this.vectors = new ArrayList<>();
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(@Nullable Object fieldData, long relativeRowId) {
+        if (relativeRowId < 0) {
+            throw new IllegalArgumentException("Row ID must be non-negative: " + relativeRowId);
+        }
         if (fieldData == null) {
             throw new IllegalArgumentException("Vector field data must not be null");
         }
@@ -90,6 +99,7 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
                             "Vector dimension mismatch: expected %d, but got %d",
                             expectedDim, vector.length));
         }
+        rowIds.add(relativeRowId);
         vectors.add(vector);
     }
 
@@ -113,9 +123,16 @@ public class TestVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
                 out.write(header.array());
 
                 // Vector data
+                ByteBuffer rowIdBuf = ByteBuffer.allocate(Long.BYTES);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
                 ByteBuffer vectorBuf = ByteBuffer.allocate(dim * Float.BYTES);
                 vectorBuf.order(ByteOrder.LITTLE_ENDIAN);
-                for (float[] vec : vectors) {
+                for (int row = 0; row < vectors.size(); row++) {
+                    rowIdBuf.clear();
+                    rowIdBuf.putLong(rowIds.get(row));
+                    out.write(rowIdBuf.array());
+
+                    float[] vec = vectors.get(row);
                     vectorBuf.clear();
                     for (int i = 0; i < dim; i++) {
                         vectorBuf.putFloat(vec[i]);

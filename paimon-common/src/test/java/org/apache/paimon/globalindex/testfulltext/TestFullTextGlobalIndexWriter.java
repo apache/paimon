@@ -20,9 +20,11 @@ package org.apache.paimon.globalindex.testfulltext;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -41,24 +43,30 @@ import java.util.List;
  * <pre>
  *   [4 bytes] count (int)
  *   For each document:
+ *     [8 bytes] row id (long)
  *     [4 bytes] text length in bytes (int)
  *     [N bytes] UTF-8 text
  * </pre>
  */
-public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter {
+public class TestFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWriter {
 
     private static final String FILE_NAME_PREFIX = "test-fulltext";
 
     private final GlobalIndexFileWriter fileWriter;
+    private final List<Long> rowIds;
     private final List<String> documents;
 
     public TestFullTextGlobalIndexWriter(GlobalIndexFileWriter fileWriter) {
         this.fileWriter = fileWriter;
+        this.rowIds = new ArrayList<>();
         this.documents = new ArrayList<>();
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(@Nullable Object fieldData, long relativeRowId) {
+        if (relativeRowId < 0) {
+            throw new IllegalArgumentException("Row ID must be non-negative: " + relativeRowId);
+        }
         if (fieldData == null) {
             throw new IllegalArgumentException("Text field data must not be null");
         }
@@ -72,6 +80,7 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter
             throw new IllegalArgumentException(
                     "Unsupported text type: " + fieldData.getClass().getName());
         }
+        rowIds.add(relativeRowId);
         documents.add(text);
     }
 
@@ -91,7 +100,14 @@ public class TestFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter
                 out.write(header.array());
 
                 // Documents
-                for (String doc : documents) {
+                ByteBuffer rowIdBuf = ByteBuffer.allocate(Long.BYTES);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
+                for (int row = 0; row < documents.size(); row++) {
+                    rowIdBuf.clear();
+                    rowIdBuf.putLong(rowIds.get(row));
+                    out.write(rowIdBuf.array());
+
+                    String doc = documents.get(row);
                     byte[] textBytes = doc.getBytes(StandardCharsets.UTF_8);
                     ByteBuffer lenBuf = ByteBuffer.allocate(4);
                     lenBuf.order(ByteOrder.LITTLE_ENDIAN);

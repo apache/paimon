@@ -23,11 +23,14 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
-import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -45,7 +48,6 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -200,6 +202,75 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(rowIds.toRangeList()).containsExactly(new Range(0L, oldRowCount - 1));
     }
 
+    @Test
+    public void testBuildBTreeGlobalIndexWithDiscontinuousRowIdRanges() throws Exception {
+        Schema schema = schemaDefault();
+        schema.options().put(BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES.key(), "true");
+        catalog.createTable(identifier(), schema, false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 0; i < 5; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                setFirstRowId(commitMessages, 10L);
+                commit.commit(commitMessages);
+            }
+        }
+
+        writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 10; i < 15; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        createIndex("f1", Arrays.asList(new Range(0, 4), new Range(10, 14)));
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        List<IndexManifestEntry> entries =
+                table.store().newIndexFileHandler().scan(table.latestSnapshot().get(), "btree");
+        assertThat(entries).hasSize(1);
+        GlobalIndexMeta globalIndexMeta = entries.get(0).indexFile().globalIndexMeta();
+        assertNotNull(globalIndexMeta);
+        assertThat(globalIndexMeta.rowRange()).isEqualTo(new Range(0, 14));
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a2"),
+                                        BinaryString.fromString("a12")));
+
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
+        assertNotNull(rowIds);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(2, 2), new Range(12, 12));
+
+        List<String> readF1 = new ArrayList<>();
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> readF1.add(row.getString(1).toString()));
+
+        assertThat(readF1).containsExactlyInAnyOrder("a2", "a12");
+    }
+
     private void createIndex(String fieldName) throws Exception {
         createIndex(fieldName, null);
     }
@@ -216,25 +287,21 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         new IllegalStateException(
                                                 "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : indexSplits(table, rowRanges, dataSplits)) {
-            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        for (Split split : indexSplits(table, rowRanges, dataSplits)) {
+            commitMessages.addAll(builder.build(split, ioManager));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }
     }
 
-    private List<DataSplit> indexSplits(
+    private List<Split> indexSplits(
             FileStoreTable table, List<Range> rowRanges, List<DataSplit> fallbackSplits) {
         if (rowRanges == null) {
-            return fallbackSplits;
+            return new ArrayList<>(fallbackSplits);
         }
 
-        List<Split> splits =
-                table.newReadBuilder().withRowRanges(rowRanges).newScan().plan().splits();
-        return splits.stream()
-                .map(split -> ((IndexedSplit) split).dataSplit())
-                .collect(Collectors.toList());
+        return table.newReadBuilder().withRowRanges(rowRanges).newScan().plan().splits();
     }
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)

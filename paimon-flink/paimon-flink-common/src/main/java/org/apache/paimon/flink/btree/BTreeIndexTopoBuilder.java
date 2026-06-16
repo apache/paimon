@@ -37,7 +37,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.options.Options;
@@ -78,7 +78,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.prepareDataSplitsForBuild;
 
 /** The {@link BTreeIndexTopoBuilder} for BTree index in Flink. */
 public class BTreeIndexTopoBuilder {
@@ -109,12 +109,15 @@ public class BTreeIndexTopoBuilder {
             }
 
             Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
-            List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
+            boolean mergeDiscontinuousRowRanges =
+                    userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES);
+            List<DataSplit> splits =
+                    prepareDataSplitsForBuild(scanResult.getRight(), mergeDiscontinuousRowRanges);
             if (splits.isEmpty()) {
                 continue;
             }
             Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
-                    groupSplitsByRange(scanResult.getLeft(), splits);
+                    groupSplitsByRange(scanResult.getLeft(), splits, mergeDiscontinuousRowRanges);
             if (partitionRangeSplits.isEmpty()) {
                 continue;
             }
@@ -377,7 +380,7 @@ public class BTreeIndexTopoBuilder {
         private transient long counter;
         private transient BTreeBuildTask currentTask;
         private transient BinaryRow currentPartition;
-        private transient GlobalIndexParallelWriter currentWriter;
+        private transient GlobalIndexSingleColumnWriter currentWriter;
         private transient List<CommitMessage> commitMessages;
         private transient Map<Integer, BTreeBuildTask> buildTasksById;
         private transient InternalRow.FieldGetter indexFieldGetter;

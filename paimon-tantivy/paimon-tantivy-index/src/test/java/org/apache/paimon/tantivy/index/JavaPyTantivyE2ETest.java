@@ -25,7 +25,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -199,8 +199,8 @@ public class JavaPyTantivyE2ETest {
             indexOptions.set(TantivyFullTextIndexOptions.REMOVE_STOP_WORDS, true);
         }
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TantivyFullTextGlobalIndexerFactory.IDENTIFIER,
@@ -208,8 +208,8 @@ public class JavaPyTantivyE2ETest {
                                 indexOptions);
 
         // Write the same text data to the index.
-        for (String content : contents) {
-            writer.write(BinaryString.fromString(content));
+        for (int i = 0; i < contents.size(); i++) {
+            writer.write(BinaryString.fromString(contents.get(i)), i);
         }
 
         List<ResultEntry> entries = writer.finish();

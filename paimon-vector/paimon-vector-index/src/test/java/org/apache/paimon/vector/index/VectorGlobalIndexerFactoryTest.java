@@ -44,6 +44,15 @@ public class VectorGlobalIndexerFactoryTest {
     }
 
     @Test
+    public void testVectorIndexBuildMergeRowRangesOption() {
+        Options options = new Options();
+        assertThat(options.get(VectorIndexOptions.VECTOR_INDEX_BUILD_MERGE_ROW_RANGES)).isFalse();
+
+        options.set(VectorIndexOptions.VECTOR_INDEX_BUILD_MERGE_ROW_RANGES, true);
+        assertThat(options.get(VectorIndexOptions.VECTOR_INDEX_BUILD_MERGE_ROW_RANGES)).isTrue();
+    }
+
+    @Test
     public void testLoadByIdentifier() {
         assertThat(GlobalIndexerFactoryUtils.load("ivf-flat"))
                 .isExactlyInstanceOf(IvfFlatVectorGlobalIndexerFactory.class);

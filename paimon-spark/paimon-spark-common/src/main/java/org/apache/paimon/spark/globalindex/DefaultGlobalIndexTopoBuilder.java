@@ -68,6 +68,9 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         return "default";
     }
 
+    private static final String VECTOR_INDEX_BUILD_MERGE_ROW_RANGES =
+            "vector-index.build.merge-row-ranges";
+
     @Override
     public List<CommitMessage> buildIndex(
             SparkSession spark,
@@ -125,7 +128,13 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         schemaManager, entries, indexColumns);
         entries = GlobalIndexBuilderUtils.filterEntriesBefore(entries, boundaryRowId);
         // generate splits for each partition && shard
-        Map<BinaryRow, List<IndexedSplit>> splits = split(table, entries, rowsPerShard);
+        Map<BinaryRow, List<IndexedSplit>> splits =
+                split(
+                        table,
+                        entries,
+                        rowsPerShard,
+                        isVectorIndex(indexType)
+                                && options.getBoolean(VECTOR_INDEX_BUILD_MERGE_ROW_RANGES, false));
 
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
         List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
@@ -134,9 +143,6 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             List<IndexedSplit> partitions = entry.getValue();
 
             for (IndexedSplit indexedSplit : partitions) {
-                checkArgument(
-                        indexedSplit.rowRanges().size() == 1,
-                        "Each IndexedSplit should contain exactly one row range.");
                 DefaultGlobalIndexBuilder builder =
                         new DefaultGlobalIndexBuilder(
                                 table,
@@ -145,7 +151,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                                 indexField,
                                 extraFields,
                                 indexType,
-                                indexedSplit.rowRanges().get(0),
+                                envelope(indexedSplit.rowRanges()),
                                 options);
                 byte[] builderBytes = InstantiationUtil.serializeObject(builder);
                 byte[] splitBytes = InstantiationUtil.serializeObject(indexedSplit);
@@ -182,7 +188,10 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
     }
 
     private static Map<BinaryRow, List<IndexedSplit>> split(
-            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
+            FileStoreTable table,
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            boolean mergeDiscontinuousRowRanges) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
 
         // Group manifest entries by partition
@@ -190,7 +199,10 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
 
         return groupFilesIntoShardsByPartition(
-                entriesByPartition, rowsPerShard, pathFactory::bucketPath);
+                entriesByPartition,
+                rowsPerShard,
+                pathFactory::bucketPath,
+                mergeDiscontinuousRowRanges);
     }
 
     /**
@@ -206,6 +218,15 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, Path> pathFactory) {
+        return groupFilesIntoShardsByPartition(
+                entriesByPartition, rowsPerShard, pathFactory, false);
+    }
+
+    public static Map<BinaryRow, List<IndexedSplit>> groupFilesIntoShardsByPartition(
+            Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
+            long rowsPerShard,
+            BiFunction<BinaryRow, Integer, Path> pathFactory,
+            boolean mergeDiscontinuousRowRanges) {
         Map<BinaryRow, List<IndexedSplit>> result = new HashMap<>();
 
         for (Map.Entry<BinaryRow, List<ManifestEntry>> partitionEntry :
@@ -250,6 +271,17 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
 
                 // Sort files by firstRowId to ensure sequential order
                 shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+                if (mergeDiscontinuousRowRanges) {
+                    createDataSplitForGroup(
+                            shardFiles,
+                            shardStart,
+                            shardEnd,
+                            partition,
+                            pathFactory,
+                            shardSplits,
+                            true);
+                    continue;
+                }
 
                 // Group contiguous files and create separate DataSplits for each group
                 List<DataFileMeta> currentGroup = new ArrayList<>();
@@ -275,7 +307,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                                 shardEnd,
                                 partition,
                                 pathFactory,
-                                shardSplits);
+                                shardSplits,
+                                false);
                         currentGroup = new ArrayList<>();
                         currentGroup.add(file);
                         currentGroupEnd = fileEnd;
@@ -290,7 +323,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                             shardEnd,
                             partition,
                             pathFactory,
-                            shardSplits);
+                            shardSplits,
+                            false);
                 }
             }
 
@@ -308,7 +342,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             long shardEnd,
             BinaryRow partition,
             BiFunction<BinaryRow, Integer, Path> pathFactory,
-            List<IndexedSplit> shardSplits) {
+            List<IndexedSplit> shardSplits,
+            boolean mergeDiscontinuousRowRanges) {
         // Calculate the actual row range covered by the files
         long groupMinRowId = files.get(0).nonNullFirstRowId();
         long groupMaxRowId =
@@ -320,6 +355,17 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         long rangeTo = Math.min(groupMaxRowId, shardEnd);
 
         Range range = new Range(rangeFrom, rangeTo);
+        List<Range> rowRanges = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            Range intersection = Range.intersection(range, file.nonNullRowIdRange());
+            if (intersection != null) {
+                rowRanges.add(intersection);
+            }
+        }
+        rowRanges = Range.sortAndMergeOverlap(rowRanges, true);
+        if (!mergeDiscontinuousRowRanges) {
+            rowRanges = Collections.singletonList(range);
+        }
 
         DataSplit dataSplit =
                 DataSplit.builder()
@@ -330,6 +376,18 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                         .rawConvertible(false)
                         .build();
 
-        shardSplits.add(new IndexedSplit(dataSplit, Collections.singletonList(range), null));
+        shardSplits.add(new IndexedSplit(dataSplit, rowRanges, null));
+    }
+
+    private static Range envelope(List<Range> ranges) {
+        checkArgument(!ranges.isEmpty(), "Row ranges must not be empty.");
+        return new Range(ranges.get(0).from, ranges.get(ranges.size() - 1).to);
+    }
+
+    private static boolean isVectorIndex(String indexType) {
+        return "ivf-flat".equals(indexType)
+                || "ivf-pq".equals(indexType)
+                || "ivf-hnsw-flat".equals(indexType)
+                || "ivf-hnsw-sq".equals(indexType);
     }
 }

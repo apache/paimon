@@ -136,6 +136,23 @@ class GenericIndexTopoBuilderTest {
     }
 
     @Test
+    void testMergeFilesWithGapInSameShard() throws IOException {
+        // Two files [0, 29] and [70, 99] can be merged into one envelope shard
+        // while preserving the exact row ranges to read.
+        List<ManifestEntry> entries = new ArrayList<>();
+        entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 30));
+        entries.add(createEntry(BinaryRow.EMPTY_ROW, 70L, 30));
+
+        List<GenericIndexTopoBuilder.ShardTask> tasks =
+                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100, -1, true);
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).shardRange).isEqualTo(new Range(0, 99));
+        assertThat(tasks.get(0).rowRanges).containsExactly(new Range(0, 29), new Range(70, 99));
+        assertThat(tasks.get(0).split.dataFiles()).hasSize(2);
+    }
+
+    @Test
     void testFileWithNullFirstRowIdSkipped() throws IOException {
         // One file with null firstRowId + one normal file
         List<ManifestEntry> entries = new ArrayList<>();

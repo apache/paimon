@@ -28,6 +28,7 @@ import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.NativeLoader;
+import org.apache.paimon.index.vector.VectorIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -45,7 +46,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -73,6 +73,15 @@ public class VectorGlobalIndexTest {
     private static boolean isNativeAvailable() {
         try {
             NativeLoader.loadJni();
+            try (VectorIndexWriter ignored =
+                    new VectorIndexWriter(
+                            VectorGlobalIndexerFactory.nativeOptions(
+                                    new ArrayType(new FloatType()),
+                                    createDefaultOptions(2),
+                                    IVF_PQ_IDENTIFIER,
+                                    "vec"))) {
+                // Validate that the loaded native library exposes the required symbols.
+            }
             return true;
         } catch (Throwable t) {
             return false;
@@ -106,7 +115,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         float[] wrongDimVector = new float[32];
-        assertThatThrownBy(() -> writer.write(wrongDimVector))
+        assertThatThrownBy(() -> writer.write(wrongDimVector, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dimension mismatch");
     }
@@ -130,7 +139,7 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}))
+        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=0")
                 .hasMessageContaining("index=1")
@@ -144,12 +153,26 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(null); // row 0 - null, advances logicalRowId
-        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}))
+        writer.write(null, 0); // row 0 - null
+        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=1")
                 .hasMessageContaining("index=0")
                 .hasMessageContaining("Infinity");
+    }
+
+    @Test
+    public void testExplicitRowIdUsedInValidation() {
+        Options options = createDefaultOptions(2);
+        options.setInteger("ivf-pq.pq.m", 1);
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+
+        writer.write(null, 9);
+        assertThatThrownBy(() -> writer.write(new float[] {Float.NaN, 0.0f}, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rowId=10")
+                .hasMessageContaining("NaN");
     }
 
     @Test
@@ -159,9 +182,9 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(null);
-        writer.write(null);
-        writer.write(null);
+        writer.write(null, 0);
+        writer.write(null, 1);
+        writer.write(null, 2);
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).isEmpty();
@@ -223,7 +246,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -260,7 +285,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -300,12 +327,12 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(vectors[0]); // row 0
-        writer.write(null); // row 1 - null
-        writer.write(vectors[1]); // row 2
-        writer.write(null); // row 3 - null
-        writer.write(null); // row 4 - null
-        writer.write(vectors[2]); // row 5
+        writer.write(vectors[0], 0); // row 0
+        writer.write(null, 1); // row 1 - null
+        writer.write(vectors[1], 2); // row 2
+        writer.write(null, 3); // row 3 - null
+        writer.write(null, 4); // row 4 - null
+        writer.write(vectors[2], 5); // row 5
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -324,6 +351,48 @@ public class VectorGlobalIndexTest {
             assertThat(result.results().contains(1L)).isFalse();
             assertThat(result.results().contains(3L)).isFalse();
             assertThat(result.results().contains(4L)).isFalse();
+        }
+    }
+
+    @Test
+    public void testExplicitRowIdGapWithCorrectIds() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.0f, 1.0f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+
+        writer.write(vectors[0], 0);
+        writer.write(vectors[1], 4);
+        writer.write(vectors[2], 9);
+
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).rowCount()).isEqualTo(10);
+
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (VectorGlobalIndexReader reader =
+                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
+            ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
+            assertThat(result.results().getLongCardinality()).isEqualTo(3);
+            assertThat(result.results().contains(0L)).isTrue();
+            assertThat(result.results().contains(4L)).isTrue();
+            assertThat(result.results().contains(9L)).isTrue();
+            assertThat(result.results().contains(1L)).isFalse();
+            assertThat(result.results().contains(5L)).isFalse();
         }
     }
 
@@ -352,7 +421,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = (VectorGlobalIndexWriter) indexer.createWriter(fileWriter);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -378,7 +449,7 @@ public class VectorGlobalIndexTest {
                 IVF_PQ_IDENTIFIER);
     }
 
-    private Options createDefaultOptions(int dimension) {
+    private static Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("ivf-pq.dimension", dimension);
         options.setString("ivf-pq.metric", "l2");

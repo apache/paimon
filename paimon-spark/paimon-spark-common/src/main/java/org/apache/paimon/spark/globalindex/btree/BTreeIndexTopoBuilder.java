@@ -59,7 +59,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.prepareDataSplitsForBuild;
 
 /** The {@link GlobalIndexTopologyBuilder} for BTree index. */
 public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
@@ -93,13 +93,16 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         }
 
         Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
-        List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
+        boolean mergeDiscontinuousRowRanges =
+                options.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES);
+        List<DataSplit> splits =
+                prepareDataSplitsForBuild(scanResult.getRight(), mergeDiscontinuousRowRanges);
         if (splits.isEmpty()) {
             return Collections.emptyList();
         }
 
         Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
-                groupSplitsByRange(scanResult.getKey(), splits);
+                groupSplitsByRange(scanResult.getKey(), splits, mergeDiscontinuousRowRanges);
         if (partitionRangeSplits.isEmpty()) {
             return Collections.emptyList();
         }

@@ -25,7 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
@@ -316,15 +316,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
-        for (String doc : documents) {
-            writer.write(doc);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(documents[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -359,15 +359,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         int mid = documents.length / 2;
 
         // Build first index file covering rows [0, mid)
-        GlobalIndexSingletonWriter writer1 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer1 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
         for (int i = 0; i < mid; i++) {
-            writer1.write(documents[i]);
+            writer1.write(documents[i], i);
         }
         List<ResultEntry> entries1 = writer1.finish();
         Range rowRange1 = new Range(0, mid - 1);
@@ -382,15 +382,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         entries1);
 
         // Build second index file covering rows [mid, end)
-        GlobalIndexSingletonWriter writer2 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer2 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
         for (int i = mid; i < documents.length; i++) {
-            writer2.write(documents[i]);
+            writer2.write(documents[i], i - mid);
         }
         List<ResultEntry> entries2 = writer2.finish();
         Range rowRange2 = new Range(mid, documents.length - 1);

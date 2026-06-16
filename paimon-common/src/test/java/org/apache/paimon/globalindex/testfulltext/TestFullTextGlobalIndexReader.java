@@ -54,6 +54,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexIOMeta ioMeta;
 
     private String[] documents;
+    private long[] rowIds;
     private int count;
 
     public TestFullTextGlobalIndexReader(
@@ -90,10 +91,10 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 continue;
             }
             if (topK.size() < effectiveK) {
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             } else if (score > topK.peek().score) {
                 topK.poll();
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             }
         }
 
@@ -138,7 +139,14 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
 
             // Read documents
             documents = new String[count];
+            rowIds = new long[count];
             for (int i = 0; i < count; i++) {
+                byte[] rowIdBytes = new byte[Long.BYTES];
+                readFully(in, rowIdBytes);
+                ByteBuffer rowIdBuf = ByteBuffer.wrap(rowIdBytes);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
+                rowIds[i] = rowIdBuf.getLong();
+
                 byte[] lenBytes = new byte[4];
                 readFully(in, lenBytes);
                 ByteBuffer lenBuf = ByteBuffer.wrap(lenBytes);
@@ -170,6 +178,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         documents = null;
+        rowIds = null;
     }
 
     // =================== unsupported predicate operations =====================

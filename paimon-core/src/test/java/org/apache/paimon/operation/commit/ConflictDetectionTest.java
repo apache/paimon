@@ -635,6 +635,7 @@ class ConflictDetectionTest {
                 false,
                 true,
                 false,
+                false,
                 null,
                 null,
                 null);

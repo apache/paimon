@@ -1171,6 +1171,7 @@ public class FileStoreCommitTest {
                                 options.deletionVectorsEnabled(),
                                 dataEvolutionEnabled,
                                 options.pkClusteringOverride(),
+                                false,
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
                                 scanner),

@@ -212,8 +212,8 @@ public class LuminaVectorGlobalIndexScanTest {
         LuminaVectorGlobalIndexWriter indexWriter =
                 new LuminaVectorGlobalIndexWriter(
                         fileWriter, new ArrayType(DataTypes.FLOAT()), indexOptions);
-        for (float[] vec : vectors) {
-            indexWriter.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            indexWriter.write(vectors[i], i);
         }
 
         List<ResultEntry> entries = indexWriter.finish();
@@ -302,8 +302,8 @@ public class LuminaVectorGlobalIndexScanTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(
                         fileWriter, new ArrayType(DataTypes.FLOAT()), indexOptions);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
 
         List<ResultEntry> entries = writer.finish();

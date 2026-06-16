@@ -20,13 +20,15 @@ package org.apache.paimon.tantivy.index;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.tantivy.TantivyIndexWriter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.File;
@@ -48,7 +50,7 @@ import java.util.List;
  * <p>Text data is written to a local Tantivy index via JNI. On {@link #finish()}, the index
  * directory is packed into a single file and written to the global index file system.
  */
-public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
+public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "tantivy";
     private static final Logger LOG =
@@ -84,9 +86,12 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(@Nullable Object fieldData, long relativeRowId) {
+        if (relativeRowId < 0) {
+            throw new IllegalArgumentException("Row ID must be non-negative: " + relativeRowId);
+        }
         if (fieldData == null) {
-            rowId++;
+            rowId = Math.max(rowId, relativeRowId + 1);
             return;
         }
 
@@ -100,8 +105,8 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
                     "Unsupported field type: " + fieldData.getClass().getName());
         }
 
-        writer.addDocument(rowId, text);
-        rowId++;
+        writer.addDocument(relativeRowId, text);
+        rowId = Math.max(rowId, relativeRowId + 1);
     }
 
     @Override

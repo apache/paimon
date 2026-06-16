@@ -30,7 +30,7 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
@@ -94,6 +94,8 @@ public class GenericIndexTopoBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(GenericIndexTopoBuilder.class);
     public static final long NO_MAX_INDEXED_ROW_ID = -1L;
+    private static final String VECTOR_INDEX_BUILD_MERGE_ROW_RANGES =
+            "vector-index.build.merge-row-ranges";
 
     public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
@@ -312,6 +314,9 @@ public class GenericIndexTopoBuilder {
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
+        boolean mergeDiscontinuousRowRanges =
+                isVectorIndex(indexType)
+                        && mergedOptions.getBoolean(VECTOR_INDEX_BUILD_MERGE_ROW_RANGES, false);
 
         long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
@@ -320,7 +325,8 @@ public class GenericIndexTopoBuilder {
 
         // Compute shard tasks at file level from the provided entries
         List<ShardTask> shardTasks =
-                computeShardTasks(table, entries, rowsPerShard, maxIndexedRowId);
+                computeShardTasks(
+                        table, entries, rowsPerShard, maxIndexedRowId, mergeDiscontinuousRowRanges);
         if (shardTasks.isEmpty()) {
             LOG.info("No shard tasks generated, nothing to index.");
             return false;
@@ -404,6 +410,15 @@ public class GenericIndexTopoBuilder {
             List<ManifestEntry> entries,
             long rowsPerShard,
             long maxIndexedRowId) {
+        return computeShardTasks(table, entries, rowsPerShard, maxIndexedRowId, false);
+    }
+
+    static List<ShardTask> computeShardTasks(
+            FileStoreTable table,
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            long maxIndexedRowId,
+            boolean mergeDiscontinuousRowRanges) {
         // Group by partition (bucket is always 0 for unaware-bucket tables)
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
@@ -457,6 +472,17 @@ public class GenericIndexTopoBuilder {
                 }
 
                 shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
+                if (mergeDiscontinuousRowRanges) {
+                    tasks.add(
+                            createShardTask(
+                                    shardFiles,
+                                    effectiveStart,
+                                    shardEnd,
+                                    partition,
+                                    partBucketPath,
+                                    true));
+                    continue;
+                }
 
                 // Group contiguous files; gaps produce separate tasks
                 List<DataFileMeta> currentGroup = new ArrayList<>();
@@ -479,7 +505,8 @@ public class GenericIndexTopoBuilder {
                                         effectiveStart,
                                         shardEnd,
                                         partition,
-                                        partBucketPath));
+                                        partBucketPath,
+                                        false));
                         currentGroup = new ArrayList<>();
                         currentGroup.add(file);
                         currentGroupEnd = fileEnd;
@@ -492,7 +519,8 @@ public class GenericIndexTopoBuilder {
                                     effectiveStart,
                                     shardEnd,
                                     partition,
-                                    partBucketPath));
+                                    partBucketPath,
+                                    false));
                 }
             }
         }
@@ -504,7 +532,8 @@ public class GenericIndexTopoBuilder {
             long effectiveStart,
             long shardEnd,
             BinaryRow partition,
-            String bucketPath) {
+            String bucketPath,
+            boolean mergeDiscontinuousRowRanges) {
         long groupMinRowId = files.get(0).nonNullFirstRowId();
         long groupMaxRowId =
                 files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().getAsLong();
@@ -512,6 +541,19 @@ public class GenericIndexTopoBuilder {
         // Clamp to effective boundaries
         long rangeFrom = Math.max(groupMinRowId, effectiveStart);
         long rangeTo = Math.min(groupMaxRowId, shardEnd);
+        Range shardRange = new Range(rangeFrom, rangeTo);
+
+        List<Range> rowRanges = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            Range intersection = Range.intersection(shardRange, file.nonNullRowIdRange());
+            if (intersection != null) {
+                rowRanges.add(intersection);
+            }
+        }
+        rowRanges = Range.sortAndMergeOverlap(rowRanges, true);
+        if (!mergeDiscontinuousRowRanges) {
+            rowRanges = Collections.singletonList(shardRange);
+        }
 
         DataSplit dataSplit =
                 DataSplit.builder()
@@ -522,7 +564,7 @@ public class GenericIndexTopoBuilder {
                         .rawConvertible(false)
                         .build();
 
-        return new ShardTask(dataSplit, new Range(rangeFrom, rangeTo));
+        return new ShardTask(dataSplit, shardRange, rowRanges);
     }
 
     private static List<Committable> createDeleteCommittables(
@@ -564,10 +606,12 @@ public class GenericIndexTopoBuilder {
 
         final DataSplit split;
         final Range shardRange;
+        final List<Range> rowRanges;
 
-        ShardTask(DataSplit split, Range shardRange) {
+        ShardTask(DataSplit split, Range shardRange, List<Range> rowRanges) {
             this.split = split;
             this.shardRange = shardRange;
+            this.rowRanges = rowRanges;
         }
     }
 
@@ -682,15 +726,16 @@ public class GenericIndexTopoBuilder {
                         if (currentRowId > task.shardRange.to) {
                             break;
                         }
-                        // Only write rows within this shard's range
-                        if (currentRowId >= task.shardRange.from) {
+                        // Only write rows within this shard's actual ranges
+                        if (containsRowId(task.rowRanges, currentRowId)) {
                             if (multiColumn) {
                                 long rowId = currentRowId - task.shardRange.from;
                                 ((GlobalIndexMultiColumnWriter) indexWriter)
                                         .write(rowId, writerProjection.replaceRow(row));
                             } else {
                                 Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
-                                ((GlobalIndexSingletonWriter) indexWriter).write(fieldData);
+                                ((GlobalIndexSingleColumnWriter) indexWriter)
+                                        .write(fieldData, currentRowId - task.shardRange.from);
                             }
                             rowsSeen++;
                         }
@@ -698,7 +743,9 @@ public class GenericIndexTopoBuilder {
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
-                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
+                if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)
+                        && !resultEntries.isEmpty()
+                        && resultEntries.get(0).rowCount() != rowsSeen) {
                     LOG.warn(
                             "rowCount mismatch: writer reported {} but caller saw {} rows",
                             resultEntries.get(0).rowCount(),
@@ -746,6 +793,25 @@ public class GenericIndexTopoBuilder {
         public void endInput() {
             // All work is done in processElement
         }
+    }
+
+    private static boolean containsRowId(List<Range> ranges, long rowId) {
+        for (Range range : ranges) {
+            if (rowId < range.from) {
+                return false;
+            }
+            if (rowId <= range.to) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isVectorIndex(String indexType) {
+        return "ivf-flat".equals(indexType)
+                || "ivf-pq".equals(indexType)
+                || "ivf-hnsw-flat".equals(indexType)
+                || "ivf-hnsw-sq".equals(indexType);
     }
 
     private static CommitMessage flushIndex(

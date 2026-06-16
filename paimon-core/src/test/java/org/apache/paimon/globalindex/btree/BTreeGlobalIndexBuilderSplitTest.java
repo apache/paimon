@@ -98,10 +98,67 @@ public class BTreeGlobalIndexBuilderSplitTest {
         assertIndexedSplitRowRanges(ranges.get(new Range(5938, 7599)), new Range(5938, 7599));
     }
 
-    private static void assertIndexedSplitRowRanges(List<Split> splits, Range rowRange) {
+    @Test
+    public void testGroupSplitsCanMergeDiscontinuousRowRangeIndex() {
+        DataFileMeta file1 = createDataFileMeta(1L, 5L);
+        DataFileMeta file2 = createDataFileMeta(10L, 6L);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(file1, file2))
+                        .isStreaming(false)
+                        .rawConvertible(false)
+                        .build();
+
+        Map<BinaryRow, Map<Range, List<Split>>> result =
+                BTreeGlobalIndexBuilder.groupSplitsByRange(
+                        RowRangeIndex.create(Arrays.asList(new Range(1, 5), new Range(10, 15))),
+                        Collections.singletonList(split),
+                        true);
+
+        assertThat(result).containsOnlyKeys(BinaryRow.EMPTY_ROW);
+        Map<Range, List<Split>> ranges = result.get(BinaryRow.EMPTY_ROW);
+        assertThat(ranges).containsOnlyKeys(new Range(1, 15));
+        assertIndexedSplitRowRanges(
+                ranges.get(new Range(1, 15)), new Range(1, 5), new Range(10, 15));
+    }
+
+    @Test
+    public void testGroupSplitsDoesNotMergeAcrossExistingDataRange() {
+        DataFileMeta file1 = createDataFileMeta(1L, 5L);
+        DataFileMeta file2 = createDataFileMeta(6L, 4L);
+        DataFileMeta file3 = createDataFileMeta(10L, 6L);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(file1, file2, file3))
+                        .isStreaming(false)
+                        .rawConvertible(false)
+                        .build();
+
+        Map<BinaryRow, Map<Range, List<Split>>> result =
+                BTreeGlobalIndexBuilder.groupSplitsByRange(
+                        RowRangeIndex.create(Arrays.asList(new Range(1, 5), new Range(10, 15))),
+                        Collections.singletonList(split),
+                        true);
+
+        assertThat(result).containsOnlyKeys(BinaryRow.EMPTY_ROW);
+        Map<Range, List<Split>> ranges = result.get(BinaryRow.EMPTY_ROW);
+        assertThat(ranges).containsOnlyKeys(new Range(1, 5), new Range(10, 15));
+        assertIndexedSplitRowRanges(ranges.get(new Range(1, 5)), new Range(1, 5));
+        assertIndexedSplitRowRanges(ranges.get(new Range(10, 15)), new Range(10, 15));
+    }
+
+    private static void assertIndexedSplitRowRanges(List<Split> splits, Range... rowRanges) {
         assertThat(splits).hasSize(1);
         assertThat(splits.get(0)).isInstanceOf(IndexedSplit.class);
-        assertThat(((IndexedSplit) splits.get(0)).rowRanges()).containsExactly(rowRange);
+        assertThat(((IndexedSplit) splits.get(0)).rowRanges()).containsExactly(rowRanges);
     }
 
     private static DataFileMeta createDataFileMeta(long firstRowId, long rowCount) {

@@ -26,7 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -91,6 +91,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     private final RowType rowType;
     private final Options options;
     private final long recordsPerRange;
+    private final boolean mergeDiscontinuousRowRanges;
 
     private DataField indexField;
 
@@ -106,6 +107,8 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         this.options = this.table.coreOptions().toConfiguration();
         this.recordsPerRange =
                 (long) (options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE) * FLOATING);
+        this.mergeDiscontinuousRowRanges =
+                options.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES);
     }
 
     public BTreeGlobalIndexBuilder withIndexField(String indexField) {
@@ -212,8 +215,20 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     @VisibleForTesting
     public List<CommitMessage> build(DataSplit split, IOManager ioManager) throws IOException {
-        BinaryRow partition = split.partition();
-        Range rowRange = calcRowRange(split);
+        return build((Split) split, ioManager);
+    }
+
+    @VisibleForTesting
+    public List<CommitMessage> build(Split split, IOManager ioManager) throws IOException {
+        DataSplit dataSplit =
+                split instanceof IndexedSplit
+                        ? ((IndexedSplit) split).dataSplit()
+                        : (DataSplit) split;
+        BinaryRow partition = dataSplit.partition();
+        Range rowRange =
+                split instanceof IndexedSplit
+                        ? envelope(((IndexedSplit) split).rowRanges())
+                        : calcRowRange(dataSplit);
 
         CoreOptions options = new CoreOptions(this.options);
         BinaryExternalSortBuffer buffer =
@@ -253,10 +268,14 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return recordsPerRange;
     }
 
+    public boolean mergeDiscontinuousRowRanges() {
+        return mergeDiscontinuousRowRanges;
+    }
+
     public List<CommitMessage> buildForSinglePartition(
             Range rowRange, BinaryRow partition, Iterator<InternalRow> data) throws IOException {
         long counter = 0;
-        GlobalIndexParallelWriter currentWriter = null;
+        GlobalIndexSingleColumnWriter currentWriter = null;
         List<CommitMessage> commitMessages = new ArrayList<>();
         FieldGetter indexFieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
 
@@ -284,15 +303,15 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return commitMessages;
     }
 
-    public GlobalIndexParallelWriter createWriter() throws IOException {
-        GlobalIndexParallelWriter currentWriter;
+    public GlobalIndexSingleColumnWriter createWriter() throws IOException {
+        GlobalIndexSingleColumnWriter currentWriter;
         GlobalIndexWriter indexWriter = createIndexWriter(table, INDEX_TYPE, indexField, options);
-        if (!(indexWriter instanceof GlobalIndexParallelWriter)) {
+        if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
-                    "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexParallelWriter, but found: "
+                    "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexSingleColumnWriter, but found: "
                             + indexWriter.getClass().getName());
         }
-        currentWriter = (GlobalIndexParallelWriter) indexWriter;
+        currentWriter = (GlobalIndexSingleColumnWriter) indexWriter;
         return currentWriter;
     }
 
@@ -315,6 +334,11 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     public static List<Pair<Range, Split>> splitByRowRangeIndex(
             RowRangeIndex rowRangeIndex, DataSplit dataSplit) {
+        return splitByRowRangeIndex(rowRangeIndex, dataSplit, false);
+    }
+
+    public static List<Pair<Range, Split>> splitByRowRangeIndex(
+            RowRangeIndex rowRangeIndex, DataSplit dataSplit, boolean mergeDiscontinuousRowRanges) {
         if (rowRangeIndex == null) {
             Range range = calcRowRange(dataSplit);
             return range == null
@@ -328,14 +352,16 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                                 Collections.singletonList(dataSplit), rowRangeIndex, null)
                         .splits()) {
             IndexedSplit indexedSplit = (IndexedSplit) split;
+            if (mergeDiscontinuousRowRanges
+                    && canMergeRanges(
+                            indexedSplit.rowRanges(),
+                            dataFileRowRanges(indexedSplit.dataSplit().dataFiles()))) {
+                Range rowRange = envelope(indexedSplit.rowRanges());
+                result.add(Pair.of(rowRange, indexedSplit));
+                continue;
+            }
             for (Range rowRange : indexedSplit.rowRanges()) {
-                result.add(
-                        Pair.of(
-                                rowRange,
-                                new IndexedSplit(
-                                        indexedSplit.dataSplit(),
-                                        Collections.singletonList(rowRange),
-                                        null)));
+                result.add(Pair.of(rowRange, copyIndexedSplit(indexedSplit, rowRange)));
             }
         }
         return result;
@@ -369,9 +395,21 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     public static Map<BinaryRow, Map<Range, List<Split>>> groupSplitsByRange(
             RowRangeIndex rowRangeIndex, List<DataSplit> splits) {
+        return groupSplitsByRange(rowRangeIndex, splits, false);
+    }
+
+    public static Map<BinaryRow, Map<Range, List<Split>>> groupSplitsByRange(
+            RowRangeIndex rowRangeIndex,
+            List<DataSplit> splits,
+            boolean mergeDiscontinuousRowRanges) {
         Map<BinaryRow, List<Pair<Range, Split>>> partitionSplitRanges = new HashMap<>();
+        Map<BinaryRow, List<Range>> partitionDataRanges =
+                mergeDiscontinuousRowRanges
+                        ? dataRangesByPartition(splits)
+                        : Collections.emptyMap();
         for (DataSplit split : splits) {
-            for (Pair<Range, Split> keyPair : splitByRowRangeIndex(rowRangeIndex, split)) {
+            for (Pair<Range, Split> keyPair :
+                    splitByRowRangeIndex(rowRangeIndex, split, mergeDiscontinuousRowRanges)) {
                 Range splitRange = keyPair.getKey();
                 Split splitWithRange = keyPair.getValue();
                 if (splitRange == null) {
@@ -387,6 +425,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
         for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
                 partitionSplitRanges.entrySet()) {
+            BinaryRow partition = partitionEntry.getKey();
             List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
             splitRanges.sort(
                     Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
@@ -402,7 +441,16 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                     currentSplits.add(entry.getValue());
                     continue;
                 }
-                Range merged = Range.union(current, splitRange);
+                Range merged;
+                if (mergeDiscontinuousRowRanges) {
+                    merged =
+                            canMergeAcrossGap(
+                                            current, splitRange, partitionDataRanges.get(partition))
+                                    ? span(current, splitRange)
+                                    : null;
+                } else {
+                    merged = Range.union(current, splitRange);
+                }
                 if (merged != null) {
                     current = merged;
                     currentSplits.add(entry.getValue());
@@ -416,10 +464,85 @@ public class BTreeGlobalIndexBuilder implements Serializable {
             if (current != null) {
                 partitionRanges.put(current, currentSplits);
             }
-            result.put(partitionEntry.getKey(), partitionRanges);
+            result.put(partition, partitionRanges);
         }
 
         return result;
+    }
+
+    public static List<DataSplit> prepareDataSplitsForBuild(
+            List<DataSplit> splits, boolean mergeDiscontinuousRowRanges) {
+        return mergeDiscontinuousRowRanges ? splits : splitByContiguousRowRange(splits);
+    }
+
+    private static Range envelope(List<Range> ranges) {
+        Preconditions.checkArgument(ranges != null && !ranges.isEmpty(), "Ranges cannot be empty.");
+        long min = Long.MAX_VALUE;
+        long max = Long.MIN_VALUE;
+        for (Range range : ranges) {
+            min = Math.min(min, range.from);
+            max = Math.max(max, range.to);
+        }
+        return new Range(min, max);
+    }
+
+    private static Range span(Range left, Range right) {
+        return new Range(Math.min(left.from, right.from), Math.max(left.to, right.to));
+    }
+
+    private static IndexedSplit copyIndexedSplit(IndexedSplit indexedSplit, Range rowRange) {
+        return new IndexedSplit(
+                indexedSplit.dataSplit(), Collections.singletonList(rowRange), null);
+    }
+
+    private static Map<BinaryRow, List<Range>> dataRangesByPartition(List<DataSplit> splits) {
+        Map<BinaryRow, List<Range>> result = new HashMap<>();
+        for (DataSplit split : splits) {
+            result.computeIfAbsent(split.partition(), ignored -> new ArrayList<>())
+                    .addAll(dataFileRowRanges(split.dataFiles()));
+        }
+        for (Map.Entry<BinaryRow, List<Range>> entry : result.entrySet()) {
+            entry.setValue(Range.sortAndMergeOverlap(entry.getValue(), true));
+        }
+        return result;
+    }
+
+    private static List<Range> dataFileRowRanges(List<DataFileMeta> dataFiles) {
+        List<Range> result = new ArrayList<>();
+        for (DataFileMeta file : dataFiles) {
+            result.add(file.nonNullRowIdRange());
+        }
+        return result;
+    }
+
+    private static boolean canMergeRanges(List<Range> rowRanges, List<Range> dataRanges) {
+        List<Range> sorted = Range.sortAndMergeOverlap(rowRanges, true);
+        for (int i = 1; i < sorted.size(); i++) {
+            Range previous = sorted.get(i - 1);
+            Range current = sorted.get(i);
+            if (!canMergeAcrossGap(previous, current, dataRanges)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean canMergeAcrossGap(
+            Range previous, Range current, @Nullable List<Range> dataRanges) {
+        long gapStart = Math.min(previous.to, current.to) + 1;
+        long gapEnd = Math.max(previous.from, current.from) - 1;
+        if (gapStart > gapEnd) {
+            return true;
+        }
+        if (dataRanges == null) {
+            return true;
+        }
+        for (Range dataRange : dataRanges) {
+            if (Range.intersect(gapStart, gapEnd, dataRange.from, dataRange.to)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<DataSplit> splitByContiguousRowRange(DataSplit split) {

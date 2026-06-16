@@ -85,6 +85,7 @@ public class ConflictDetection {
     private final boolean deletionVectorsEnabled;
     private final boolean dataEvolutionEnabled;
     private final boolean pkClusteringOverride;
+    private final boolean globalIndexMergeDiscontinuousRowRanges;
     private final IndexFileHandler indexFileHandler;
     private final SnapshotManager snapshotManager;
     private final CommitScanner commitScanner;
@@ -109,6 +110,7 @@ public class ConflictDetection {
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled,
             boolean pkClusteringOverride,
+            boolean globalIndexMergeDiscontinuousRowRanges,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -121,6 +123,7 @@ public class ConflictDetection {
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.pkClusteringOverride = pkClusteringOverride;
+        this.globalIndexMergeDiscontinuousRowRanges = globalIndexMergeDiscontinuousRowRanges;
         this.indexFileHandler = indexFileHandler;
         this.snapshotManager = snapshotManager;
         this.commitScanner = commitScanner;
@@ -585,7 +588,9 @@ public class ConflictDetection {
             Range indexRange = globalIndex.rowRange();
             RowRangeIndex rowRangeIndex =
                     rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
-            if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
+            if (rowRangeIndex == null
+                    || !globalIndexRowRangeExists(
+                            rowRangeIndex, dataRanges, indexEntry, indexRange)) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
@@ -598,6 +603,34 @@ public class ConflictDetection {
             }
         }
         return Optional.empty();
+    }
+
+    private boolean globalIndexRowRangeExists(
+            RowRangeIndex rowRangeIndex,
+            Map<Pair<BinaryRow, Integer>, List<Range>> dataRanges,
+            IndexManifestEntry indexEntry,
+            Range indexRange) {
+        if (rowRangeIndex.contains(indexRange)) {
+            return true;
+        }
+        if (!globalIndexMergeDiscontinuousRowRanges) {
+            return false;
+        }
+
+        List<Range> ranges = dataRanges.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
+        if (ranges == null || ranges.isEmpty()) {
+            return false;
+        }
+
+        boolean hasStart = false;
+        boolean hasEnd = false;
+        for (Range range : ranges) {
+            if (Range.intersect(indexRange.from, indexRange.to, range.from, range.to)) {
+                hasStart |= range.from <= indexRange.from && range.to >= indexRange.from;
+                hasEnd |= range.from <= indexRange.to && range.to >= indexRange.to;
+            }
+        }
+        return hasStart && hasEnd;
     }
 
     private List<IndexManifestEntry> globalIndexFileAdditions(

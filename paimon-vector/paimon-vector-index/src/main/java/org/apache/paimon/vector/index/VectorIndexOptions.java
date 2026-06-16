@@ -16,11 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.vector.index;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
-/** Index writer for global index. */
-public interface GlobalIndexSingletonWriter extends GlobalIndexWriter {
-    void write(@Nullable Object key);
+/** Options for vector index. */
+public class VectorIndexOptions {
+
+    public static final ConfigOption<Boolean> VECTOR_INDEX_BUILD_MERGE_ROW_RANGES =
+            ConfigOptions.key("vector-index.build.merge-row-ranges")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to merge discontinuous row id ranges when building vector "
+                                    + "indexes. This should only be enabled when row id gaps are "
+                                    + "permanent and will never be filled by later writes.");
 }

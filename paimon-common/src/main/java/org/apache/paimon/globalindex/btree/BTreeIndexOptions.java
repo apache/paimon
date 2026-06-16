@@ -66,4 +66,13 @@ public class BTreeIndexOptions {
                     .intType()
                     .defaultValue(4096)
                     .withDescription("The max parallelism of Flink/Spark for building BTreeIndex.");
+
+    public static final ConfigOption<Boolean> BTREE_INDEX_BUILD_MERGE_ROW_RANGES =
+            ConfigOptions.key("btree-index.build.merge-row-ranges")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to merge discontinuous row id ranges when building BTreeIndex. "
+                                    + "This should only be enabled when row id gaps are permanent and "
+                                    + "will never be filled by later writes.");
 }

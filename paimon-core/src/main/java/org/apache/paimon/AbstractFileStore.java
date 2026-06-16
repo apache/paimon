@@ -89,6 +89,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
+import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_BUILD_MERGE_ROW_RANGES;
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -98,6 +99,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * @param <T> type of record to read and write.
  */
 abstract class AbstractFileStore<T> implements FileStore<T> {
+
+    private static final String VECTOR_INDEX_BUILD_MERGE_ROW_RANGES =
+            "vector-index.build.merge-row-ranges";
 
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
@@ -303,6 +307,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 options.deletionVectorsEnabled(),
                                 options.dataEvolutionEnabled(),
                                 options.pkClusteringOverride(),
+                                options.toConfiguration().get(BTREE_INDEX_BUILD_MERGE_ROW_RANGES)
+                                        || options.toConfiguration()
+                                                .getBoolean(
+                                                        VECTOR_INDEX_BUILD_MERGE_ROW_RANGES, false),
                                 newIndexFileHandler(),
                                 snapshotManager,
                                 scanner);
