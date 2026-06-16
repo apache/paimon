@@ -436,6 +436,41 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: REPLACE TABLE AS SELECT from same table preserves data") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      // Self-referencing RTAS: should read old data, not the truncated data
+      sql("CREATE OR REPLACE TABLE t TBLPROPERTIES ('bucket' = '-1') AS SELECT * FROM t")
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(1, "a") :: Row(2, "b") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: REPLACE TABLE AS SELECT with time travel reads specified snapshot") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'v1')")
+      val snapshotId1 = loadTable("t").snapshotManager().latestSnapshotId()
+      sql("INSERT INTO t VALUES (2, 'v2')")
+
+      // RTAS with VERSION AS OF should read the specified snapshot, not the latest
+      sql(
+        s"CREATE OR REPLACE TABLE t TBLPROPERTIES ('bucket' = '-1') AS SELECT * FROM t VERSION AS OF $snapshotId1")
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(1, "v1") :: Nil)
+    }
+  }
+
   fileFormats.foreach {
     format =>
       test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {

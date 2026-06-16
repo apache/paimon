@@ -56,7 +56,7 @@ Note: `insertInto` ignores the column names and just uses position-based write,
 if you need to write by column name, use `saveAsTable` or `save` instead.
 
 ### Insert Overwrite
-You can achieve INSERT OVERWRITE semantics by setting the mode to `overwrite` with `insertInto`.
+You can achieve INSERT OVERWRITE semantics by setting the mode to `overwrite`.
 
 It supports dynamic partition overwritten for partitioned table.
 To enable dynamic overwritten you need to set the Spark session configuration `spark.sql.sources.partitionOverwriteMode` to `dynamic`.
@@ -66,25 +66,18 @@ val data: DataFrame = ...
 
 data.write.format("paimon")
   .mode("overwrite")
-  .insertInto("test_tbl")
+  .insertInto("test_tbl") // or .saveAsTable("test_tbl")
 ```
 
-## Replace Table
-You can achieve REPLACE TABLE semantics by setting the mode to `overwrite` with `saveAsTable` or `save`.
+{{< hint info >}}
+Since Spark 3.4, `saveAsTable` with `overwrite` mode only overwrites data and preserves
+the existing table definition (partitions, primary keys, and properties).
+If you need to replace the table definition, use SQL `CREATE OR REPLACE TABLE ... AS SELECT`.
 
-It first drops the existing table and then create a new one,
-so you need to specify the table's properties or partition columns if needed.
-
-```scala
-val data: DataFrame = ...
-
-data.write.format("paimon")
-  .option("primary-key", "a,pt")
-  .option("k1", "v1")
-  .partitionBy("pt")
-  .mode("overwrite")
-  .saveAsTable("test_tbl") // or .save("/path/to/default.db/test_tbl")
-```
+Before Spark 3.4, `saveAsTable` with `overwrite` mode drops and recreates the table, so the
+table definition is reset to the DataFrame's schema and only the partitions and options
+explicitly re-specified via `partitionBy()` / write options are kept.
+{{< /hint >}}
 
 ## Query
 

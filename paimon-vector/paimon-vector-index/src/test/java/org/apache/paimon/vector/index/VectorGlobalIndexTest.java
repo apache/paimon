@@ -347,7 +347,7 @@ public class VectorGlobalIndexTest {
                 new VectorGlobalIndexer(
                         vectorType,
                         VectorGlobalIndexerFactory.nativeOptions(
-                                vectorType, options, IVF_PQ_IDENTIFIER),
+                                vectorType, options, IVF_PQ_IDENTIFIER, fieldName),
                         IVF_PQ_IDENTIFIER);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
@@ -373,7 +373,8 @@ public class VectorGlobalIndexTest {
         return new VectorGlobalIndexWriter(
                 fileWriter,
                 fieldType,
-                VectorGlobalIndexerFactory.nativeOptions(fieldType, options, IVF_PQ_IDENTIFIER),
+                VectorGlobalIndexerFactory.nativeOptions(
+                        fieldType, options, IVF_PQ_IDENTIFIER, fieldName),
                 IVF_PQ_IDENTIFIER);
     }
 

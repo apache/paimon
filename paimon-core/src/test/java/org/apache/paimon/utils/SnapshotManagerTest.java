@@ -93,6 +93,19 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.earliestSnapshot().id()).isEqualTo(isRaceCondition ? 1 : 0);
     }
 
+    @Test
+    public void testEarliestSnapshotThrowsWhenRetryExhausted() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), true);
+        Snapshot snapshot = createSnapshotWithMillis(0, 1684726826L);
+        localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(0), snapshot.toJson());
+
+        assertThatThrownBy(snapshotManager::earliestSnapshot)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find earliest snapshot");
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testEarlierOrEqualWatermark(boolean isRaceCondition) throws IOException {
@@ -116,7 +129,7 @@ public class SnapshotManagerTest {
         long base = System.currentTimeMillis();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
-        int numSnapshots = random.nextInt(1, 20);
+        int numSnapshots = isRaceCondition ? random.nextInt(2, 20) : random.nextInt(1, 20);
         Set<Long> set = new HashSet<>();
         while (set.size() < numSnapshots) {
             set.add(base + random.nextLong(0, 1_000_000));
@@ -146,25 +159,13 @@ public class SnapshotManagerTest {
                     TimeTravelUtil.earlierThanTimeMills(snapshotManager, null, time, false, false);
 
             if (millis.get(numSnapshots - 1) < time) {
-                if (isRaceCondition && millis.size() == 1) {
-                    if (tries == 0) {
-                        assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
-                    } else {
-                        assertThat(actual).isNull();
-                    }
-                } else {
-                    assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
-                }
+                assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
             } else {
                 for (int i = 0; i < numSnapshots; i++) {
                     if (millis.get(i) >= time) {
                         if (isRaceCondition && i == 0) {
                             // The first snapshot expired during invocation
-                            if (millis.size() == 1 && tries > 0) {
-                                assertThat(actual).isNull();
-                            } else {
-                                assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
-                            }
+                            assertThat(actual).isLessThanOrEqualTo(firstSnapshotId);
                         } else {
                             assertThat(actual).isLessThanOrEqualTo(firstSnapshotId + i - 1);
                         }
@@ -173,6 +174,22 @@ public class SnapshotManagerTest {
                 }
             }
         }
+    }
+
+    @Test
+    public void testEarlierThanTimeMillisThrowsWhenEarliestRetryExhausted() throws IOException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new TestSnapshotManager(localFileIO, new Path(tempDir.toString()), true);
+        Snapshot snapshot = createSnapshotWithMillis(0, 1684726826L);
+        localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(0), snapshot.toJson());
+
+        assertThatThrownBy(
+                        () ->
+                                TimeTravelUtil.earlierThanTimeMills(
+                                        snapshotManager, null, 1684726827L, false, false))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot find earliest snapshot");
     }
 
     @ParameterizedTest

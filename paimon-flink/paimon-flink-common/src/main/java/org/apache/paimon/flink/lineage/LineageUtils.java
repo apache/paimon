@@ -41,8 +41,6 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Lineage utilities for building {@link SourceLineageVertex} and {@link LineageVertex} from a
@@ -52,9 +50,6 @@ public class LineageUtils {
 
     private static final String PAIMON_DATASET_PREFIX = "paimon://";
     private static final String DEFAULT_CATALOG_IDENTIFIER = FlinkCatalogFactory.IDENTIFIER;
-
-    private static final Set<String> PAIMON_OPTION_KEYS =
-            CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
 
     /** Extracts the {@link CatalogContext} from a table, or null if not available. */
     @Nullable
@@ -69,17 +64,15 @@ public class LineageUtils {
     }
 
     /**
-     * Builds the config map for a dataset facet from a {@link Table}. Includes filtered Paimon
-     * {@link CoreOptions}, partition keys, primary keys, and the table comment (if present).
+     * Builds the config map for a dataset facet from a {@link Table}. Includes all table options,
+     * partition keys, and primary keys.
      */
     private static Map<String, String> buildConfigMap(Table table) {
         Map<String, String> config = new HashMap<>();
         config.put("partition-keys", String.join(",", table.partitionKeys()));
         config.put("primary-keys", String.join(",", table.primaryKeys()));
 
-        table.options().entrySet().stream()
-                .filter(e -> PAIMON_OPTION_KEYS.contains(e.getKey()))
-                .forEach(e -> config.put(e.getKey(), e.getValue()));
+        config.putAll(table.options());
 
         return config;
     }

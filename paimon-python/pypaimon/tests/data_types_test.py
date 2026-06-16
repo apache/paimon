@@ -42,6 +42,23 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(str(AtomicType("INT")),
                          str(AtomicType.from_dict(AtomicType("INT").to_dict())))
 
+    def test_parameterized_atomic_type_not_null_roundtrip(self):
+        # ``to_dict`` appends " NOT NULL" to the type string; the parser must
+        # strip it back into ``nullable`` instead of keeping it inside
+        # ``AtomicType.type``. Parameterized types take the paren branch where
+        # this used to be missed, so a re-serialize doubled the suffix and
+        # ``from_paimon_type`` blew up with "... NOT NULL NOT NULL".
+        for type_str in ("DECIMAL(12, 2)", "VARCHAR(10)", "CHAR(5)",
+                         "TIMESTAMP(3)", "TIME(0)", "BINARY(12)"):
+            original = AtomicType(type_str, nullable=False)
+            parsed = AtomicType.from_dict(original.to_dict())
+            self.assertEqual(parsed.type, type_str, type_str)
+            self.assertFalse(parsed.nullable, type_str)
+            self.assertEqual(parsed, original, type_str)
+            # Round-trips stably and stays materializable as a PyArrow type.
+            self.assertEqual(parsed.to_dict(), original.to_dict(), type_str)
+            PyarrowFieldParser.from_paimon_type(parsed)
+
     @parameterized.expand([
         (ArrayType, AtomicType("TIMESTAMP(6)"), "ARRAY<TIMESTAMP(6)>", "ARRAY<ARRAY<TIMESTAMP(6)>>"),
         (MultisetType, AtomicType("TIMESTAMP(6)"), "MULTISET<TIMESTAMP(6)>", "MULTISET<MULTISET<TIMESTAMP(6)>>")

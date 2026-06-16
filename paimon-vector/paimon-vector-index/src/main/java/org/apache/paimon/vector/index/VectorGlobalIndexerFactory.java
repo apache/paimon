@@ -37,14 +37,20 @@ public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory
     public GlobalIndexer create(DataField field, Options options) {
         String identifier = identifier();
         return new VectorGlobalIndexer(
-                field.type(), nativeOptions(field.type(), options, identifier), identifier);
+                field.type(),
+                nativeOptions(field.type(), options, identifier, field.name()),
+                identifier);
     }
 
     static Map<String, String> nativeOptions(
-            DataType fieldType, Options tableOptions, String identifier) {
+            DataType fieldType, Options tableOptions, String identifier, String fieldName) {
         Map<String, String> nativeOptions = new LinkedHashMap<>();
         String optionPrefix = identifier + ".";
-        for (Map.Entry<String, String> entry : tableOptions.toMap().entrySet()) {
+        String fieldPrefix = "fields." + fieldName + ".";
+        Map<String, String> tableOptionsMap = tableOptions.toMap();
+
+        // First collect index-type level options, e.g. <index-type>.xxx.
+        for (Map.Entry<String, String> entry : tableOptionsMap.entrySet()) {
             String optionKey = entry.getKey();
             if (optionKey.startsWith(optionPrefix)) {
                 String nativeKey = nativeOptionKey(optionKey.substring(optionPrefix.length()));
@@ -53,6 +59,19 @@ public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory
                 }
             }
         }
+
+        // Then collect field level options, e.g. fields.<field-name>.xxx, which take precedence
+        // over the index-type level options for this field.
+        for (Map.Entry<String, String> entry : tableOptionsMap.entrySet()) {
+            String optionKey = entry.getKey();
+            if (optionKey.startsWith(fieldPrefix)) {
+                String nativeKey = nativeOptionKey(optionKey.substring(fieldPrefix.length()));
+                if (nativeKey != null) {
+                    nativeOptions.put(nativeKey, entry.getValue());
+                }
+            }
+        }
+
         nativeOptions.put("index.type", identifier.replace('-', '_'));
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
