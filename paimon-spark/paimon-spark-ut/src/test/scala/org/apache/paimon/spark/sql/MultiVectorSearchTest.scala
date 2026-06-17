@@ -59,23 +59,6 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                |SELECT id, __paimon_vector_search_score
                |FROM multi_vector_search(
                |  'T',
-               |  map(
-               |    'title_vec', array(1.0f, 0.0f),
-               |    'body_vec', array(0.0f, 1.0f)),
-               |  2,
-               |  map('ranker', 'rrf', 'candidate_limit', '2', 'ivf.nprobe', '16'))
-               |""".stripMargin)
-        .collect()
-
-      assert(result.length == 2)
-      assert(result.map(_.getInt(0)).contains(1))
-      assert(result.forall(row => !row.isNullAt(1)))
-
-      val configuredRoutesResult = spark
-        .sql("""
-               |SELECT id, __paimon_vector_search_score
-               |FROM multi_vector_search(
-               |  'T',
                |  array(
                |    named_struct(
                |      'vector_column', 'title_vec',
@@ -94,9 +77,9 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                |""".stripMargin)
         .collect()
 
-      assert(configuredRoutesResult.length == 2)
-      assert(configuredRoutesResult.map(_.getInt(0)).contains(1))
-      assert(configuredRoutesResult.forall(row => !row.isNullAt(1)))
+      assert(result.length == 2)
+      assert(result.map(_.getInt(0)).contains(1))
+      assert(result.forall(row => !row.isNullAt(1)))
     }
   }
 }

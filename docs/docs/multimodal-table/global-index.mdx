@@ -264,11 +264,10 @@ Multi-vector search supports the following query options:
 |---|---|---|
 | `ranker` | `rrf` | Ranking strategy for combining results from multiple vector columns. Supported values are `rrf` and `weighted_score`. |
 | `candidate_limit` | Final limit | Top K candidates to retrieve from each vector column before ranking. |
-| `weights` | `1.0` for every route | Comma-separated per-column weights, for example `title_embedding=2.0,body_embedding=1.0`. |
 | Other vector search options | N/A | Options such as `ivf.nprobe` and `hnsw.ef_search` are passed to every vector route. |
 
-For Spark SQL, the second argument can be either a map from vector column to query vector, or an
-array of route configs created by `named_struct`. A route config supports `vector_column`,
+For Spark SQL, the second argument is an array of route configs created by `named_struct`.
+A route config supports `vector_column`,
 `query_vector`, `limit`, `weight`, and `options`, matching the Java API's
 `VectorSearch.vectorColumn`, `queryVector`, `limit`, `option`, and route weight. `vector_column`
 and `query_vector` are required; `limit`, `weight`, and `options` override the shared defaults
@@ -301,9 +300,7 @@ FROM multi_vector_search(
 ```
 
 The third argument is the final number of ranked results to return. Spark SQL adds
-`__paimon_vector_search_score` to expose the ranked score. For simple searches, the second
-argument can still use `map('title_embedding', array(...), 'body_embedding', array(...))` and put
-shared route defaults in the options map.
+`__paimon_vector_search_score` to expose the ranked score.
 
 </TabItem>
 

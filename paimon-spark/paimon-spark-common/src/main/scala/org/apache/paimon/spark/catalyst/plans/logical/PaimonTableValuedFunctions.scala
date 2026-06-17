@@ -451,10 +451,10 @@ case class VectorSearchQuery(override val args: Seq[Expression])
 /**
  * Plan for the [[MULTI_VECTOR_SEARCH]] table-valued function.
  *
- * Usage: multi_vector_search(table_name, query_map_or_routes, limit[, options])
+ * Usage: multi_vector_search(table_name, routes, limit[, options])
  *   - table_name: the Paimon table to search
- *   - query_map_or_routes: map from vector column name to query vector, or route config array with
- *     vector_column, query_vector, limit, weight, and options fields
+ *   - routes: route config array with vector_column, query_vector, limit, weight, and options
+ *     fields
  *   - limit: the final number of ranked top results to return
  *   - options: optional options as a map or semicolon-separated key-value string
  */
@@ -471,7 +471,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     if (argsWithoutTable.size != 2 && argsWithoutTable.size != 3) {
       throw new RuntimeException(
         s"$MULTI_VECTOR_SEARCH needs two or three parameters after table_name: " +
-          s"query_map_or_routes, limit[, options]. " +
+          s"routes, limit[, options]. " +
           s"Got ${argsWithoutTable.size} parameters after table_name.")
     }
     val finalLimit = parsePositiveLimit(argsWithoutTable(1).eval())
@@ -484,11 +484,10 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     val candidateLimit =
       options.get("candidate_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(finalLimit)
     val ranker = options.getOrElse("ranker", MultiVectorSearch.RRF_RANKER)
-    val weights = parseWeights(options.getOrElse("weights", ""))
-    val multiVectorOptionKeys = Set("ranker", "candidate_limit", "weights")
+    val multiVectorOptionKeys = Set("ranker", "candidate_limit")
     val routeOptions = options.filter { case (key, _) => !multiVectorOptionKeys.contains(key) }
 
-    val routes = extractRoutes(argsWithoutTable.head, candidateLimit, weights, routeOptions).map {
+    val routes = extractRoutes(argsWithoutTable.head, candidateLimit, routeOptions).map {
       route =>
         val columnName = route.fieldName()
         if (!innerTable.rowType().containsField(columnName)) {
@@ -504,27 +503,10 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
   private def extractRoutes(
       expr: Expression,
       defaultLimit: Int,
-      weights: Map[String, Float],
       defaultOptions: Map[String, String]): Seq[MultiVectorSearchRoute] = {
     expr match {
-      case CreateMap(children, _) if children != null =>
-        children
-          .grouped(2)
-          .map {
-            case Seq(keyExpr, valueExpr) =>
-              val columnName = VectorSearchQuery(Seq.empty).extractString(keyExpr)
-              new MultiVectorSearchRoute(
-                columnName,
-                VectorSearchQuery(Seq.empty).extractQueryVector(valueExpr),
-                defaultLimit,
-                weights.getOrElse(columnName, 1.0f),
-                defaultOptions.asJava)
-            case other =>
-              throw new RuntimeException(s"Invalid query map entries: $other")
-          }
-          .toSeq
       case CreateArray(elements, _) if elements != null =>
-        elements.map(extractRoute(_, defaultLimit, weights, defaultOptions))
+        elements.map(extractRoute(_, defaultLimit, defaultOptions))
       case _ =>
         throw new RuntimeException(s"Cannot extract multi-vector routes from expression: $expr")
     }
@@ -533,11 +515,10 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
   private def extractRoute(
       expr: Expression,
       defaultLimit: Int,
-      weights: Map[String, Float],
       defaultOptions: Map[String, String]): MultiVectorSearchRoute = {
     expr match {
       case CreateNamedStruct(children) if children != null =>
-        extractConfiguredRoute(children, defaultLimit, weights, defaultOptions)
+        extractConfiguredRoute(children, defaultLimit, defaultOptions)
       case _ =>
         throw new RuntimeException(s"Cannot extract multi-vector route from expression: $expr")
     }
@@ -546,7 +527,6 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
   private def extractConfiguredRoute(
       children: Seq[Expression],
       defaultLimit: Int,
-      weights: Map[String, Float],
       defaultOptions: Map[String, String]): MultiVectorSearchRoute = {
     var columnName: Option[String] = None
     var queryVector: Option[Array[Float]] = None
@@ -585,7 +565,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
         throw new IllegalArgumentException(
           s"Multi-vector route for column $routeColumn must define query_vector.")),
       limit.getOrElse(defaultLimit),
-      weight.getOrElse(weights.getOrElse(routeColumn, 1.0f)),
+      weight.getOrElse(1.0f),
       (defaultOptions ++ options).asJava
     )
   }
@@ -606,24 +586,6 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     parsed
   }
 
-  private def parseWeights(weights: String): Map[String, Float] = {
-    if (weights == null || weights.trim.isEmpty) {
-      Map.empty
-    } else {
-      weights
-        .split(",")
-        .map {
-          kvString =>
-            val kv = kvString.split("=", 2)
-            if (kv.length != 2) {
-              throw new IllegalArgumentException(
-                s"Invalid weight '$kvString'. Please use format 'column=weight'.")
-            }
-            (kv(0).trim, kv(1).trim.toFloat)
-        }
-        .toMap
-    }
-  }
 }
 
 /**

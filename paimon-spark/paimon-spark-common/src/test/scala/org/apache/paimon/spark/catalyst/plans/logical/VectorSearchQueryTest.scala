@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.catalyst.plans.logical
 
-import org.apache.paimon.predicate.MultiVectorSearch
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.types.{ArrayType, DataType, DataTypes, RowType}
 
@@ -29,39 +28,6 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
-
-  test("create multi vector search with query map and ranker options") {
-    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
-      innerTable,
-      Seq(
-        CreateMap(
-          Seq(
-            Literal("title_vec"),
-            CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
-            Literal("body_vec"),
-            CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
-        Literal(3),
-        CreateMap(
-          Seq(
-            Literal("ranker"),
-            Literal("rrf"),
-            Literal("candidate_limit"),
-            Literal("10"),
-            Literal("weights"),
-            Literal("title_vec=2.0,body_vec=1.0")))
-      )
-    )
-
-    assert(search.isInstanceOf[MultiVectorSearch])
-    assert(search.limit() == 3)
-    assert(search.ranker() == "rrf")
-    assert(search.routes().size() == 2)
-    assert(search.routes().get(0).fieldName() == "title_vec")
-    assert(search.routes().get(0).limit() == 10)
-    assert(search.routes().get(0).weight() == 2.0f)
-    assert(search.routes().get(1).fieldName() == "body_vec")
-    assert(search.routes().get(1).weight() == 1.0f)
-  }
 
   test("create multi vector search with route configs") {
     val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
@@ -114,6 +80,25 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(1).limit() == 10)
     assert(search.routes().get(1).weight() == 1.0f)
     assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
+  }
+
+  test("reject multi vector search query map") {
+    val exception = intercept[RuntimeException] {
+      MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+        innerTable,
+        Seq(
+          CreateMap(
+            Seq(
+              Literal("title_vec"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("body_vec"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
+          Literal(3)
+        )
+      )
+    }
+
+    assert(exception.getMessage.contains("Cannot extract multi-vector routes"))
   }
 
   test("create vector search with string options") {
