@@ -241,8 +241,6 @@ class ConflictDetection:
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
 
-            key = (entry.partition, entry.bucket,
-                   entry.file.first_row_id, entry.file.row_count)
             if not any(
                     base.partition == entry.partition
                     and base.bucket == entry.bucket

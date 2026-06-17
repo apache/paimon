@@ -16,7 +16,7 @@
 # under the License.
 
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 import pyarrow as pa
 
