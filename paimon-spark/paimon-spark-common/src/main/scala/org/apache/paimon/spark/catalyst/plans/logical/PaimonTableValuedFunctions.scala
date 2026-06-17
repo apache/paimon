@@ -836,11 +836,11 @@ case class DynamicVectorSearchRelation(
     relationOutput: Seq[Attribute])
   extends LeafNode {
 
-  private lazy val outputWithScore: Seq[Attribute] =
+  private lazy val outputWithMetaFields: Seq[Attribute] =
     relationOutput ++
-      Seq(PaimonMetadataColumn.SEARCH_SCORE.toAttribute)
+      Seq(PaimonMetadataColumn.ROW_ID.toAttribute, PaimonMetadataColumn.SEARCH_SCORE.toAttribute)
 
-  override def output: Seq[Attribute] = outputWithScore
+  override def output: Seq[Attribute] = outputWithMetaFields
 }
 
 case class LateralVectorSearch(
