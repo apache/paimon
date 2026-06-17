@@ -632,6 +632,10 @@ class CoreOptions:
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
+        .with_description(
+            "Defines the action to take when an update modifies columns that "
+            "are covered by a global index."
+        )
     )
 
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
