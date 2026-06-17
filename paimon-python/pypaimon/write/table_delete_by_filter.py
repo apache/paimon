@@ -22,7 +22,10 @@ import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.push_down_utils import rewrite_predicate_indices
+from pypaimon.read.push_down_utils import (
+    _get_all_fields,
+    rewrite_predicate_indices,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.table.row.offset_row import OffsetRow
@@ -122,7 +125,7 @@ class TableDeleteByFilter:
                 )
 
     def _matched_row_ids(self, predicate: Predicate) -> List[int]:
-        projection = list(self._predicate_fields(predicate))
+        projection = list(_get_all_fields(predicate))
         unknown_fields = [
             field for field in projection
             if field not in self.table.field_names
@@ -159,14 +162,6 @@ class TableDeleteByFilter:
                 raise RuntimeError(
                     f"Read row with _ROW_ID {row_id} does not match predicate."
                 )
-
-    def _predicate_fields(self, predicate: Predicate) -> Set[str]:
-        if predicate.field is not None:
-            return {predicate.field}
-        fields = set()
-        for child in predicate.literals or []:
-            fields.update(self._predicate_fields(child))
-        return fields
 
     def _validate_row_ids_exist(self, row_ids: List[int]) -> None:
         if len(row_ids) != len(set(row_ids)):
