@@ -266,6 +266,25 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testDropAndAddColumnsInOneBatch() {
+        createTable("testDropAndAddColumnsInOneBatch");
+
+        // A batch that drops some (but not all) existing columns and adds new ones is an ordinary
+        // combination of schema changes, not REPLACE COLUMNS, so it must still be allowed.
+        spark.sql("ALTER TABLE testDropAndAddColumnsInOneBatch DROP COLUMN b, ADD COLUMN d STRING");
+
+        List<Row> afterAlter =
+                spark.sql("SHOW CREATE TABLE testDropAndAddColumnsInOneBatch").collectAsList();
+        assertThat(afterAlter.toString())
+                .contains(
+                        showCreateString(
+                                "testDropAndAddColumnsInOneBatch",
+                                "a INT NOT NULL",
+                                "c STRING",
+                                "d STRING"));
+    }
+
+    @Test
     public void testDropPartitionKey() {
         spark.sql(
                 "CREATE TABLE testDropPartitionKey (\n"

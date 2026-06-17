@@ -350,16 +350,9 @@ public class SparkCatalog extends SparkBaseCatalog
     @Override
     public org.apache.spark.sql.connector.catalog.Table alterTable(
             Identifier ident, TableChange... changes) throws NoSuchTableException {
+        List<SchemaChange> schemaChanges =
+                Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
         try {
-            if (isReplaceColumns(changes)) {
-                throw new UnsupportedOperationException(
-                        "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. "
-                                + "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, "
-                                + "and ADD COLUMN instead.");
-            }
-
-            List<SchemaChange> schemaChanges =
-                    Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
             catalog.alterTable(toIdentifier(ident, catalogName), schemaChanges, false);
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
@@ -367,36 +360,6 @@ public class SparkCatalog extends SparkBaseCatalog
         } catch (Catalog.ColumnAlreadyExistException | Catalog.ColumnNotExistException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * Detects whether the given changes originate from an {@code ALTER TABLE ... REPLACE COLUMNS}
-     * statement.
-     *
-     * <p>Spark translates {@code REPLACE COLUMNS} into a batch that drops every existing column and
-     * re-adds the new set, i.e. a combination of {@link TableChange.DeleteColumn} and {@link
-     * TableChange.AddColumn} only. Other column changes such as rename or type update are never
-     * produced by {@code REPLACE COLUMNS}, so we match exclusively on these two types to avoid
-     * mistaking a legitimate mixed batch (e.g. a programmatic DROP + RENAME) for a replace.
-     *
-     * <p>This operation must be rejected because re-adding columns assigns brand-new field ids
-     * while existing data files keep the old ids; same-named columns would then be treated as new
-     * columns and read back as null, silently corrupting data.
-     */
-    private boolean isReplaceColumns(TableChange[] changes) {
-        boolean hasDeleteColumn = false;
-        boolean hasAddColumn = false;
-        for (TableChange change : changes) {
-            if (change instanceof TableChange.DeleteColumn) {
-                hasDeleteColumn = true;
-            } else if (change instanceof TableChange.AddColumn) {
-                hasAddColumn = true;
-            } else {
-                return false;
-            }
-        }
-
-        return hasDeleteColumn && hasAddColumn;
     }
 
     @Override
