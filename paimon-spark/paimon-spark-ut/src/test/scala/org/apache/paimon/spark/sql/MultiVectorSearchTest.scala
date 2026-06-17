@@ -73,7 +73,7 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                |      'weight', 1.0f,
                |      'options', map('ivf.nprobe', '16'))),
                |  2,
-               |  map('ranker', 'weighted_score'))
+               |  'weighted_score')
                |""".stripMargin)
         .collect()
 

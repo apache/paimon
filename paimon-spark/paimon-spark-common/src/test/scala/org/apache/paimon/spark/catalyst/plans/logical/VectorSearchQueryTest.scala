@@ -61,14 +61,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
             ))
           )),
         Literal(3),
-        CreateMap(
-          Seq(
-            Literal("ranker"),
-            Literal("weighted_score"),
-            Literal("candidate_limit"),
-            Literal("5"),
-            Literal("ivf.nprobe"),
-            Literal("8")))
+        Literal("weighted_score")
       )
     )
 
@@ -80,6 +73,30 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(1).limit() == 10)
     assert(search.routes().get(1).weight() == 1.0f)
     assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
+  }
+
+  test("default multi vector route limit to final limit") {
+    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(
+              Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
+              )))),
+        Literal(7)
+      )
+    )
+
+    assert(search.limit() == 7)
+    assert(search.ranker() == "rrf")
+    assert(search.routes().get(0).limit() == 7)
+    assert(search.routes().get(0).weight() == 1.0f)
+    assert(search.routes().get(0).options().isEmpty)
   }
 
   test("reject multi vector search query map") {

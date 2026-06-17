@@ -451,12 +451,12 @@ case class VectorSearchQuery(override val args: Seq[Expression])
 /**
  * Plan for the [[MULTI_VECTOR_SEARCH]] table-valued function.
  *
- * Usage: multi_vector_search(table_name, routes, limit[, options])
+ * Usage: multi_vector_search(table_name, routes, limit[, ranker])
  *   - table_name: the Paimon table to search
  *   - routes: route config array with vector_column, query_vector, limit, weight, and options
  *     fields
  *   - limit: the final number of ranked top results to return
- *   - options: optional options as a map or semicolon-separated key-value string
+ *   - ranker: optional ranker for combining results from multiple vector columns
  */
 case class MultiVectorSearchQuery(override val args: Seq[Expression])
   extends PaimonTableValueFunction(MULTI_VECTOR_SEARCH) {
@@ -471,23 +471,18 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     if (argsWithoutTable.size != 2 && argsWithoutTable.size != 3) {
       throw new RuntimeException(
         s"$MULTI_VECTOR_SEARCH needs two or three parameters after table_name: " +
-          s"routes, limit[, options]. " +
+          s"routes, limit[, ranker]. " +
           s"Got ${argsWithoutTable.size} parameters after table_name.")
     }
     val finalLimit = parsePositiveLimit(argsWithoutTable(1).eval())
-    val options =
+    val ranker =
       if (argsWithoutTable.size == 3) {
-        VectorSearchQuery(Seq.empty).extractOptions(argsWithoutTable(2))
+        VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(2))
       } else {
-        Map.empty[String, String]
+        MultiVectorSearch.RRF_RANKER
       }
-    val candidateLimit =
-      options.get("candidate_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(finalLimit)
-    val ranker = options.getOrElse("ranker", MultiVectorSearch.RRF_RANKER)
-    val multiVectorOptionKeys = Set("ranker", "candidate_limit")
-    val routeOptions = options.filter { case (key, _) => !multiVectorOptionKeys.contains(key) }
 
-    val routes = extractRoutes(argsWithoutTable.head, candidateLimit, routeOptions).map {
+    val routes = extractRoutes(argsWithoutTable.head, finalLimit).map {
       route =>
         val columnName = route.fieldName()
         if (!innerTable.rowType().containsField(columnName)) {
@@ -500,25 +495,19 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     new MultiVectorSearch(routes.asJava, finalLimit, ranker)
   }
 
-  private def extractRoutes(
-      expr: Expression,
-      defaultLimit: Int,
-      defaultOptions: Map[String, String]): Seq[MultiVectorSearchRoute] = {
+  private def extractRoutes(expr: Expression, defaultLimit: Int): Seq[MultiVectorSearchRoute] = {
     expr match {
       case CreateArray(elements, _) if elements != null =>
-        elements.map(extractRoute(_, defaultLimit, defaultOptions))
+        elements.map(extractRoute(_, defaultLimit))
       case _ =>
         throw new RuntimeException(s"Cannot extract multi-vector routes from expression: $expr")
     }
   }
 
-  private def extractRoute(
-      expr: Expression,
-      defaultLimit: Int,
-      defaultOptions: Map[String, String]): MultiVectorSearchRoute = {
+  private def extractRoute(expr: Expression, defaultLimit: Int): MultiVectorSearchRoute = {
     expr match {
       case CreateNamedStruct(children) if children != null =>
-        extractConfiguredRoute(children, defaultLimit, defaultOptions)
+        extractConfiguredRoute(children, defaultLimit)
       case _ =>
         throw new RuntimeException(s"Cannot extract multi-vector route from expression: $expr")
     }
@@ -526,8 +515,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
 
   private def extractConfiguredRoute(
       children: Seq[Expression],
-      defaultLimit: Int,
-      defaultOptions: Map[String, String]): MultiVectorSearchRoute = {
+      defaultLimit: Int): MultiVectorSearchRoute = {
     var columnName: Option[String] = None
     var queryVector: Option[Array[Float]] = None
     var limit: Option[Int] = None
@@ -566,7 +554,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
           s"Multi-vector route for column $routeColumn must define query_vector.")),
       limit.getOrElse(defaultLimit),
       weight.getOrElse(1.0f),
-      (defaultOptions ++ options).asJava
+      options.asJava
     )
   }
 

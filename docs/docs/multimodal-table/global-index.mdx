@@ -258,21 +258,23 @@ CALL sys.create_global_index(
 );
 ```
 
-Multi-vector search supports the following query options:
+For Spark SQL, use the `multi_vector_search(table_name, routes, limit[, ranker])`
+table-valued function. The third argument is the final number of ranked results to return.
+The optional fourth argument selects the ranker. Supported rankers are `rrf` and
+`weighted_score`; the default is `rrf`.
 
-| Option | Default | Description |
-|---|---|---|
-| `ranker` | `rrf` | Ranking strategy for combining results from multiple vector columns. Supported values are `rrf` and `weighted_score`. |
-| `candidate_limit` | Final limit | Top K candidates to retrieve from each vector column before ranking. |
-| Other vector search options | N/A | Options such as `ivf.nprobe` and `hnsw.ef_search` are passed to every vector route. |
+The second argument is an array of route configs created by `named_struct`:
 
-For Spark SQL, the second argument is an array of route configs created by `named_struct`.
-A route config supports `vector_column`,
-`query_vector`, `limit`, `weight`, and `options`, matching the Java API's
-`VectorSearch.vectorColumn`, `queryVector`, `limit`, `option`, and route weight. `vector_column`
-and `query_vector` are required; `limit`, `weight`, and `options` override the shared defaults
-for that route. When using an array of route configs, every `named_struct` should use the same
-fields because Spark requires array elements to have the same struct type.
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `vector_column` | Yes | N/A | Vector column to search. |
+| `query_vector` | Yes | N/A | Query vector for this route. |
+| `limit` | No | Final limit | Top K results to retrieve from this vector column before ranking. |
+| `weight` | No | `1.0` | Weight for this route when ranking results. |
+| `options` | No | Empty map | Route-specific vector search options such as `ivf.nprobe` and `hnsw.ef_search`. |
+
+When using an array of route configs, every `named_struct` should use the same fields because
+Spark requires array elements to have the same struct type.
 
 <Tabs groupId="multi-vector-search">
 
@@ -296,11 +298,10 @@ FROM multi_vector_search(
       'weight', 1.0f,
       'options', map('ivf.nprobe', '16'))),
   10,
-  map('ranker', 'rrf'));
+  'rrf');
 ```
 
-The third argument is the final number of ranked results to return. Spark SQL adds
-`__paimon_vector_search_score` to expose the ranked score.
+Spark SQL adds `__paimon_vector_search_score` to expose the ranked score.
 
 </TabItem>
 
