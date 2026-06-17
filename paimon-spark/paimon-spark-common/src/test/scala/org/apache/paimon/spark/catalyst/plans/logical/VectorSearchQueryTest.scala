@@ -30,7 +30,7 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
 
-  test("create multi vector search with query map and fusion options") {
+  test("create multi vector search with query map and ranker options") {
     val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
       innerTable,
       Seq(
@@ -43,9 +43,9 @@ class VectorSearchQueryTest extends AnyFunSuite {
         Literal(3),
         CreateMap(
           Seq(
-            Literal("fusion"),
+            Literal("ranker"),
             Literal("rrf"),
-            Literal("route_limit"),
+            Literal("candidate_limit"),
             Literal("10"),
             Literal("weights"),
             Literal("title_vec=2.0,body_vec=1.0")))
@@ -54,7 +54,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
 
     assert(search.isInstanceOf[MultiVectorSearch])
     assert(search.limit() == 3)
-    assert(search.fusion() == "rrf")
+    assert(search.ranker() == "rrf")
     assert(search.routes().size() == 2)
     assert(search.routes().get(0).fieldName() == "title_vec")
     assert(search.routes().get(0).limit() == 10)

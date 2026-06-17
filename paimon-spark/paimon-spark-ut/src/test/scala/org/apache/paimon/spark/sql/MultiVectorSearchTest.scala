@@ -24,7 +24,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 /** Tests for multi-vector search. */
 class MultiVectorSearchTest extends PaimonSparkTestBase {
 
-  test("multi vector search fuses results from multiple vector columns") {
+  test("multi vector search ranks results from multiple vector columns") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, title_vec ARRAY<FLOAT>, body_vec ARRAY<FLOAT>)
@@ -61,7 +61,7 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                |    'title_vec', array(1.0f, 0.0f),
                |    'body_vec', array(0.0f, 1.0f)),
                |  2,
-               |  map('fusion', 'rrf', 'route_limit', '2'))
+               |  map('ranker', 'rrf', 'candidate_limit', '2'))
                |""".stripMargin)
         .collect()
 

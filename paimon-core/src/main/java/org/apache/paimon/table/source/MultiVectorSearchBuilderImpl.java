@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.MultiVectorSearchFusion;
+import org.apache.paimon.globalindex.MultiVectorSearchRanker;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.MultiVectorSearch;
@@ -95,20 +95,20 @@ public class MultiVectorSearchBuilderImpl implements MultiVectorSearchBuilder {
     }
 
     @Override
-    public ScoredGlobalIndexResult fuse(List<RouteResult> routeResults) {
+    public ScoredGlobalIndexResult rank(List<RouteResult> routeResults) {
         Objects.requireNonNull(multiVectorSearch, "Multi-vector search must be set");
 
-        List<MultiVectorSearchFusion.WeightedResult> weightedResults =
+        List<MultiVectorSearchRanker.WeightedResult> weightedResults =
                 new ArrayList<>(routeResults.size());
         for (RouteResult routeResult : routeResults) {
             if (!routeResult.result().results().isEmpty()) {
                 weightedResults.add(
-                        new MultiVectorSearchFusion.WeightedResult(
+                        new MultiVectorSearchRanker.WeightedResult(
                                 routeResult.result(), routeResult.route().weight()));
             }
         }
-        return MultiVectorSearchFusion.fuse(
-                multiVectorSearch.fusion(), weightedResults, multiVectorSearch.limit());
+        return MultiVectorSearchRanker.rank(
+                multiVectorSearch.ranker(), weightedResults, multiVectorSearch.limit());
     }
 
     protected VectorSearchBuilder newVectorSearchBuilder(MultiVectorSearchRoute route) {

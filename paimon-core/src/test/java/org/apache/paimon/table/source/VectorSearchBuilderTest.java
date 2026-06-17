@@ -118,20 +118,20 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         MultiVectorSearch search =
                 MultiVectorSearch.builder()
-                        .addRoute(
-                                MultiVectorSearchRoute.builder()
+                        .addVectorSearch(
+                                VectorSearch.builder()
                                         .vectorColumn("title_vec")
                                         .queryVector(new float[] {1.0f, 0.0f})
                                         .limit(2)
                                         .build())
-                        .addRoute(
-                                MultiVectorSearchRoute.builder()
+                        .addVectorSearch(
+                                VectorSearch.builder()
                                         .vectorColumn("body_vec")
                                         .queryVector(new float[] {0.0f, 1.0f})
                                         .limit(2)
                                         .build())
                         .limit(2)
-                        .fusionRrf()
+                        .rrfRanker()
                         .build();
 
         ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);
@@ -175,7 +175,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                                         .weight(2.0f)
                                         .build())
                         .limit(2)
-                        .fusionWeightedScore()
+                        .weightedScoreRanker()
                         .build();
 
         MultiVectorSearchBuilder builder =
@@ -189,10 +189,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
             routeResults.add(
                     builder.toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
         }
-        ScoredGlobalIndexResult fused = builder.fuse(routeResults);
+        ScoredGlobalIndexResult ranked = builder.rank(routeResults);
 
-        assertThat(fused.results().getIntCardinality()).isEqualTo(2);
-        assertThat(fused.results()).contains(1L);
+        assertThat(ranked.results().getIntCardinality()).isEqualTo(2);
+        assertThat(ranked.results()).contains(1L);
     }
 
     @Test

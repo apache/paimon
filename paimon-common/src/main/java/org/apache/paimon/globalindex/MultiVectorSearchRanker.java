@@ -29,25 +29,25 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Fusion utilities for multi-vector search results. */
-public class MultiVectorSearchFusion {
+/** Ranker utilities for multi-vector search results. */
+public class MultiVectorSearchRanker {
 
     private static final float RRF_K = 60.0f;
 
-    private MultiVectorSearchFusion() {}
+    private MultiVectorSearchRanker() {}
 
-    public static ScoredGlobalIndexResult fuse(
-            String fusion, List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
+    public static ScoredGlobalIndexResult rank(
+            String ranker, List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
         List<WeightedResult> weightedResults = new ArrayList<>(results.size());
         for (int i = 0; i < results.size(); i++) {
             weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
         }
-        return fuse(fusion, weightedResults, limit);
+        return rank(ranker, weightedResults, limit);
     }
 
-    public static ScoredGlobalIndexResult fuse(
-            String fusion, List<WeightedResult> results, int limit) {
-        if (MultiVectorSearch.FUSION_WEIGHTED_SCORE.equals(fusion)) {
+    public static ScoredGlobalIndexResult rank(
+            String ranker, List<WeightedResult> results, int limit) {
+        if (MultiVectorSearch.WEIGHTED_SCORE_RANKER.equals(ranker)) {
             return weightedScore(results, limit);
         }
         return rrf(results, limit);

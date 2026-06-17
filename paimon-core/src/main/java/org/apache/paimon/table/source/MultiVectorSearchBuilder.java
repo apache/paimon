@@ -47,8 +47,8 @@ public interface MultiVectorSearchBuilder extends Serializable {
     /** Convert a vector-search result into a weighted route result. */
     RouteResult toRouteResult(Route route, GlobalIndexResult result);
 
-    /** Fuse route results. */
-    ScoredGlobalIndexResult fuse(List<RouteResult> routeResults);
+    /** Rank route results. */
+    ScoredGlobalIndexResult rank(List<RouteResult> routeResults);
 
     /** Execute multi-vector index search in local. */
     default ScoredGlobalIndexResult executeLocal() {
@@ -57,7 +57,7 @@ public interface MultiVectorSearchBuilder extends Serializable {
         for (Route route : routes) {
             routeResults.add(toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
         }
-        return fuse(routeResults);
+        return rank(routeResults);
     }
 
     /** A route and its configured vector-search builder. */

@@ -235,7 +235,7 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 
 ## Multi-Vector Search
 
-Multi-vector search queries multiple vector columns in one request and fuses the scored results
+Multi-vector search queries multiple vector columns in one request and ranks the scored results
 before reading table rows. This is useful when one table stores several embeddings for the same
 record, such as title, body, image, or audio embeddings.
 
@@ -262,8 +262,8 @@ Multi-vector search supports the following query options:
 
 | Option | Default | Description |
 |---|---|---|
-| `fusion` | `rrf` | Fusion strategy for route results. Supported values are `rrf` and `weighted_score`. |
-| `route_limit` | Final limit | Top K to retrieve from each vector column before fusion. |
+| `ranker` | `rrf` | Ranking strategy for combining results from multiple vector columns. Supported values are `rrf` and `weighted_score`. |
+| `candidate_limit` | Final limit | Top K candidates to retrieve from each vector column before ranking. |
 | `weights` | `1.0` for every route | Comma-separated per-column weights, for example `title_embedding=2.0,body_embedding=1.0`. |
 | Other vector search options | N/A | Options such as `ivf.nprobe` and `hnsw.ef_search` are passed to every vector route. |
 
@@ -280,15 +280,15 @@ FROM multi_vector_search(
     'body_embedding', array(0.0f, 1.0f, 0.0f)),
   10,
   map(
-    'fusion', 'rrf',
-    'route_limit', '50',
+    'ranker', 'rrf',
+    'candidate_limit', '50',
     'weights', 'title_embedding=2.0,body_embedding=1.0',
     'ivf.nprobe', '16'));
 ```
 
 The second argument is a map from vector column name to query vector. The third argument is the
-final number of fused results to return. Spark SQL adds `__paimon_vector_search_score` to expose
-the fused score.
+final number of ranked results to return. Spark SQL adds `__paimon_vector_search_score` to expose
+the ranked score.
 
 </TabItem>
 
@@ -299,23 +299,23 @@ Table table = catalog.getTable(identifier);
 
 MultiVectorSearch search =
         MultiVectorSearch.builder()
-                .addRoute(
-                        MultiVectorSearchRoute.builder()
+                .addVectorSearch(
+                        VectorSearch.builder()
                                 .vectorColumn("title_embedding")
                                 .queryVector(new float[] {1.0f, 0.0f, 0.0f})
                                 .limit(50)
-                                .weight(2.0f)
                                 .option("ivf.nprobe", "16")
-                                .build())
-                .addRoute(
-                        MultiVectorSearchRoute.builder()
+                                .build(),
+                        2.0f)
+                .addVectorSearch(
+                        VectorSearch.builder()
                                 .vectorColumn("body_embedding")
                                 .queryVector(new float[] {0.0f, 1.0f, 0.0f})
                                 .limit(50)
                                 .option("ivf.nprobe", "16")
                                 .build())
                 .limit(10)
-                .fusionRrf()
+                .rrfRanker()
                 .build();
 
 ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);

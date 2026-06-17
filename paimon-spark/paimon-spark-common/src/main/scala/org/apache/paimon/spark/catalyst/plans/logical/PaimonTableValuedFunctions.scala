@@ -454,7 +454,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
  * Usage: multi_vector_search(table_name, query_map, limit[, options])
  *   - table_name: the Paimon table to search
  *   - query_map: map from vector column name to query vector
- *   - limit: the final number of fused top results to return
+ *   - limit: the final number of ranked top results to return
  *   - options: optional options as a map or semicolon-separated key-value string
  */
 case class MultiVectorSearchQuery(override val args: Seq[Expression])
@@ -481,11 +481,11 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
-    val routeLimit =
-      options.get("route_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(finalLimit)
-    val fusion = options.getOrElse("fusion", MultiVectorSearch.FUSION_RRF)
+    val candidateLimit =
+      options.get("candidate_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(finalLimit)
+    val ranker = options.getOrElse("ranker", MultiVectorSearch.RRF_RANKER)
     val weights = parseWeights(options.getOrElse("weights", ""))
-    val multiVectorOptionKeys = Set("fusion", "route_limit", "weights")
+    val multiVectorOptionKeys = Set("ranker", "candidate_limit", "weights")
     val routeOptions = options.filter { case (key, _) => !multiVectorOptionKeys.contains(key) }
 
     val routes = queryVectors.map {
@@ -497,12 +497,12 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
         new MultiVectorSearchRoute(
           columnName,
           queryVector,
-          routeLimit,
+          candidateLimit,
           weights.getOrElse(columnName, 1.0f),
           routeOptions.asJava)
     }.toList
 
-    new MultiVectorSearch(routes.asJava, finalLimit, fusion)
+    new MultiVectorSearch(routes.asJava, finalLimit, ranker)
   }
 
   private def extractQueryVectorMap(expr: Expression): Seq[(String, Array[Float])] = {

@@ -30,34 +30,34 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-/** Tests for {@link MultiVectorSearchFusion}. */
-public class MultiVectorSearchFusionTest {
+/** Tests for {@link MultiVectorSearchRanker}. */
+public class MultiVectorSearchRankerTest {
 
     @Test
     public void testRrfFavorsRowsReturnedByMultipleRoutes() {
         ScoredGlobalIndexResult first = result(new long[] {1, 2}, new float[] {0.9f, 0.8f});
         ScoredGlobalIndexResult second = result(new long[] {2, 3}, new float[] {0.7f, 0.6f});
 
-        ScoredGlobalIndexResult fused =
-                MultiVectorSearchFusion.rrf(
+        ScoredGlobalIndexResult ranked =
+                MultiVectorSearchRanker.rrf(
                         Arrays.asList(first, second), new float[] {1.0f, 1.0f}, 2);
 
-        assertThat(fused.results().getIntCardinality()).isEqualTo(2);
-        assertThat(fused.results()).contains(2L);
-        assertThat(fused.scoreGetter().score(2L)).isGreaterThan(fused.scoreGetter().score(1L));
+        assertThat(ranked.results().getIntCardinality()).isEqualTo(2);
+        assertThat(ranked.results()).contains(2L);
+        assertThat(ranked.scoreGetter().score(2L)).isGreaterThan(ranked.scoreGetter().score(1L));
     }
 
     @Test
     public void testWeightedScoreUsesAlignedWeightsAfterEmptyRouteIsSkipped() {
         ScoredGlobalIndexResult result = result(new long[] {1, 2}, new float[] {0.3f, 0.2f});
 
-        ScoredGlobalIndexResult fused =
-                MultiVectorSearchFusion.weightedScore(
+        ScoredGlobalIndexResult ranked =
+                MultiVectorSearchRanker.weightedScore(
                         Collections.singletonList(result), new float[] {3.0f}, 1);
 
-        assertThat(fused.results().getIntCardinality()).isEqualTo(1);
-        assertThat(fused.results()).contains(1L);
-        assertThat(fused.scoreGetter().score(1L)).isCloseTo(0.9f, within(0.000001f));
+        assertThat(ranked.results().getIntCardinality()).isEqualTo(1);
+        assertThat(ranked.results()).contains(1L);
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(0.9f, within(0.000001f));
     }
 
     private ScoredGlobalIndexResult result(long[] rowIds, float[] scores) {

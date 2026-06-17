@@ -30,14 +30,14 @@ public class MultiVectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String FUSION_RRF = "rrf";
-    public static final String FUSION_WEIGHTED_SCORE = "weighted_score";
+    public static final String RRF_RANKER = "rrf";
+    public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
 
     private final List<MultiVectorSearchRoute> routes;
     private final int limit;
-    private final String fusion;
+    private final String ranker;
 
-    public MultiVectorSearch(List<MultiVectorSearchRoute> routes, int limit, String fusion) {
+    public MultiVectorSearch(List<MultiVectorSearchRoute> routes, int limit, String ranker) {
         if (routes == null || routes.isEmpty()) {
             throw new IllegalArgumentException("Routes cannot be null or empty");
         }
@@ -46,7 +46,7 @@ public class MultiVectorSearch implements Serializable {
         }
         this.routes = Collections.unmodifiableList(new ArrayList<>(routes));
         this.limit = limit;
-        this.fusion = normalizeFusion(fusion);
+        this.ranker = normalizeRanker(ranker);
     }
 
     @Experimental
@@ -62,25 +62,24 @@ public class MultiVectorSearch implements Serializable {
         return limit;
     }
 
-    public String fusion() {
-        return fusion;
+    public String ranker() {
+        return ranker;
     }
 
-    private static String normalizeFusion(String fusion) {
-        if (fusion == null || fusion.trim().isEmpty()) {
-            return FUSION_RRF;
+    private static String normalizeRanker(String ranker) {
+        if (ranker == null || ranker.trim().isEmpty()) {
+            return RRF_RANKER;
         }
-        String normalized = fusion.trim().toLowerCase();
-        if (!FUSION_RRF.equals(normalized) && !FUSION_WEIGHTED_SCORE.equals(normalized)) {
-            throw new IllegalArgumentException(
-                    "Unsupported multi-vector fusion strategy: " + fusion);
+        String normalized = ranker.trim().toLowerCase();
+        if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
+            throw new IllegalArgumentException("Unsupported multi-vector ranker: " + ranker);
         }
         return normalized;
     }
 
     @Override
     public String toString() {
-        return "Fusion(" + fusion + "), Limit(" + limit + "), Routes(" + routes + ")";
+        return "Ranker(" + ranker + "), Limit(" + limit + "), Routes(" + routes + ")";
     }
 
     /** Builder for {@link MultiVectorSearch}. */
@@ -89,11 +88,28 @@ public class MultiVectorSearch implements Serializable {
 
         private final List<MultiVectorSearchRoute> routes = new ArrayList<>();
         private int limit;
-        private String fusion = FUSION_RRF;
+        private String ranker = RRF_RANKER;
 
         public Builder addRoute(MultiVectorSearchRoute route) {
             this.routes.add(route);
             return this;
+        }
+
+        public Builder addVectorSearch(VectorSearch vectorSearch) {
+            return addVectorSearch(vectorSearch, 1.0f);
+        }
+
+        public Builder addVectorSearch(VectorSearch vectorSearch, float weight) {
+            if (vectorSearch == null) {
+                throw new IllegalArgumentException("Vector search cannot be null");
+            }
+            return addRoute(
+                    new MultiVectorSearchRoute(
+                            vectorSearch.fieldName(),
+                            vectorSearch.vector(),
+                            vectorSearch.limit(),
+                            weight,
+                            vectorSearch.options()));
         }
 
         public Builder routes(List<MultiVectorSearchRoute> routes) {
@@ -109,21 +125,21 @@ public class MultiVectorSearch implements Serializable {
             return this;
         }
 
-        public Builder fusion(String fusion) {
-            this.fusion = fusion;
+        public Builder ranker(String ranker) {
+            this.ranker = ranker;
             return this;
         }
 
-        public Builder fusionRrf() {
-            return fusion(FUSION_RRF);
+        public Builder rrfRanker() {
+            return ranker(RRF_RANKER);
         }
 
-        public Builder fusionWeightedScore() {
-            return fusion(FUSION_WEIGHTED_SCORE);
+        public Builder weightedScoreRanker() {
+            return ranker(WEIGHTED_SCORE_RANKER);
         }
 
         public MultiVectorSearch build() {
-            return new MultiVectorSearch(routes, limit, fusion);
+            return new MultiVectorSearch(routes, limit, ranker);
         }
     }
 }

@@ -159,7 +159,7 @@ public interface ReadBuilder extends Serializable {
      * Push multi-vector search.
      *
      * <p>Each route is evaluated against its vector column global index during scan planning, and
-     * the route results are fused before restricting returned splits to matched row ids.
+     * the route results are ranked before restricting returned splits to matched row ids.
      */
     @Experimental
     default ReadBuilder withMultiVectorSearch(MultiVectorSearch multiVectorSearch) {
