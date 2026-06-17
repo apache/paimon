@@ -28,8 +28,8 @@ import java.util.List;
 /**
  * Multi-vector search over multiple vector columns.
  *
- * <p>This is an internal pushdown representation. Use {@code
- * Table.newMultiVectorSearchBuilder()} to configure multi-vector search from Java.
+ * <p>This is an internal pushdown representation. Use {@code Table.newMultiVectorSearchBuilder()}
+ * to configure multi-vector search from Java.
  */
 public class MultiVectorSearch implements Serializable {
 

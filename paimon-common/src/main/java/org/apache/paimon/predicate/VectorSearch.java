@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -29,7 +28,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/** VectorSearch to perform vector similarity search. * */
+/**
+ * VectorSearch to perform vector similarity search.
+ *
+ * <p>This is an internal pushdown representation. Use {@code Table.newVectorSearchBuilder()} to
+ * configure vector search from Java.
+ */
 public class VectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -62,11 +66,6 @@ public class VectorSearch implements Serializable {
                 options == null
                         ? Collections.emptyMap()
                         : Collections.unmodifiableMap(new HashMap<>(options));
-    }
-
-    @Experimental
-    public static Builder builder() {
-        return new Builder();
     }
 
     public float[] vector() {
@@ -113,54 +112,5 @@ public class VectorSearch implements Serializable {
     @Override
     public String toString() {
         return String.format("FieldName(%s), Limit(%s)", fieldName, limit);
-    }
-
-    /** Builder for {@link VectorSearch}. */
-    @Experimental
-    public static class Builder {
-
-        private float[] vector;
-        private String fieldName;
-        private int limit;
-        private Map<String, String> options = new HashMap<>();
-
-        public Builder queryVector(float[] vector) {
-            this.vector = vector;
-            return this;
-        }
-
-        public Builder vector(float[] vector) {
-            return queryVector(vector);
-        }
-
-        public Builder vectorColumn(String fieldName) {
-            this.fieldName = fieldName;
-            return this;
-        }
-
-        public Builder field(String fieldName) {
-            return vectorColumn(fieldName);
-        }
-
-        public Builder limit(int limit) {
-            this.limit = limit;
-            return this;
-        }
-
-        public Builder option(String key, String value) {
-            this.options.put(key, value);
-            return this;
-        }
-
-        public Builder options(Map<String, String> options) {
-            if (options != null) {
-                this.options.putAll(options);
-            }
-            return this;
-        }
-
-        public VectorSearch build() {
-            return new VectorSearch(vector, limit, fieldName, options);
-        }
     }
 }

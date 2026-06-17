@@ -23,7 +23,6 @@ import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -61,25 +60,6 @@ public interface MultiVectorSearchBuilder extends Serializable {
             float weight,
             Map<String, String> options) {
         return addRoute(new MultiVectorSearchRoute(vectorColumn, vector, limit, weight, options));
-    }
-
-    /** Add an existing vector search as a route. */
-    default MultiVectorSearchBuilder addVectorSearch(VectorSearch vectorSearch) {
-        return addVectorSearch(vectorSearch, 1.0f);
-    }
-
-    /** Add an existing vector search as a route. */
-    default MultiVectorSearchBuilder addVectorSearch(VectorSearch vectorSearch, float weight) {
-        if (vectorSearch == null) {
-            throw new IllegalArgumentException("Vector search cannot be null");
-        }
-        return addRoute(
-                new MultiVectorSearchRoute(
-                        vectorSearch.fieldName(),
-                        vectorSearch.vector(),
-                        vectorSearch.limit(),
-                        weight,
-                        vectorSearch.options()));
     }
 
     /** The final top k ranked results to return. */

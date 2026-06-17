@@ -229,6 +229,9 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
+For Java, use `Table.newVectorSearchBuilder()` to produce a global index result, then pass
+the result to `TableScan.withGlobalIndexResult`.
+
 </TabItem>
 
 </Tabs>
@@ -337,8 +340,8 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
-For Java, use `Table.newMultiVectorSearchBuilder()` to produce a global index result, then pass
-the result to `TableScan.withGlobalIndexResult`.
+For Java, use `Table.newMultiVectorSearchBuilder()` to configure routes, final limit, and ranker
+directly. `VectorSearch` and `MultiVectorSearch` are internal pushdown representations.
 
 </TabItem>
 
