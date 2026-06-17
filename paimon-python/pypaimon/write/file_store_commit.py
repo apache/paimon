@@ -165,18 +165,28 @@ class FileStoreCommit:
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
                 apply_global_index_update_action,
+                validate_no_global_index_for_full_row_rewrite,
             )
             updated_cols = set()
             written_partitions = set()
+            full_row_rewrite_partitions = set()
             for msg in commit_messages:
                 if msg.check_from_snapshot == -1:
                     continue
+                if msg.deleted_files:
+                    full_row_rewrite_partitions.add(msg.partition)
                 for f in msg.new_files:
-                    if f.write_cols:
+                    if f.write_cols is None:
+                        full_row_rewrite_partitions.add(msg.partition)
+                    elif f.write_cols:
                         updated_cols.update(f.write_cols)
                         written_partitions.add(msg.partition)
-            if updated_cols:
+            if updated_cols or full_row_rewrite_partitions:
                 snapshot = self.snapshot_manager.get_latest_snapshot()
+                validate_no_global_index_for_full_row_rewrite(
+                    self.table, snapshot, full_row_rewrite_partitions,
+                )
+            if updated_cols:
                 index_msgs = apply_global_index_update_action(
                     self.table, snapshot, list(updated_cols), written_partitions,
                 )

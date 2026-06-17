@@ -47,6 +47,38 @@ def build_index_delete_msgs(entries) -> list:
     ]
 
 
+def validate_no_global_index_for_full_row_rewrite(
+    table,
+    snapshot,
+    rewritten_partitions: Set[Tuple],
+) -> None:
+    if snapshot is None or not rewritten_partitions:
+        return
+    entries = scan_global_index_entries(table, snapshot)
+    if not entries:
+        return
+    affected = [
+        e for e in entries
+        if tuple(e.partition.values) in rewritten_partitions
+    ]
+    if not affected:
+        return
+    field_by_id = {f.id: f.name for f in table.fields}
+    conflicted = sorted({
+        field_by_id.get(
+            e.index_file.global_index_meta.index_field_id,
+            str(e.index_file.global_index_meta.index_field_id),
+        )
+        for e in affected
+    })
+    raise RuntimeError(
+        "Full-row rewrite or delete is not supported when global indexes "
+        "exist in affected partitions.\n"
+        f"Affected partitions: {sorted(rewritten_partitions)}\n"
+        f"Conflicted columns: {conflicted}"
+    )
+
+
 def apply_global_index_update_action(
     table,
     snapshot,

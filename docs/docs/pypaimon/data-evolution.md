@@ -195,6 +195,8 @@ the old file group is removed and the remaining rows are written back as continu
 - If the predicate explicitly references `_ROW_ID`, the requested row IDs must exist in the current snapshot.
 - Tables with dedicated blob or vector files are supported. The normal data file and its `.blob` / `.vector.*`
   companion files are deleted and rewritten together for the affected row-id range.
+- Tables with global indexes in affected partitions are not currently supported, because deleting rows rewrites full
+  file groups and would otherwise leave stale global index entries.
 
 ### Batch Mode
 

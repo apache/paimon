@@ -514,6 +514,95 @@ class TestFileStoreCommit(unittest.TestCase):
             [tuple(entry.partition.values) for entry in entries],
         )
 
+    @patch('pypaimon.write.global_index_update_checker.scan_global_index_entries')
+    def test_delete_rewrite_with_global_index_throws(
+            self, mock_scan_global_index_entries,
+            mock_manifest_list_manager, mock_manifest_file_manager):
+        from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+        from pypaimon.index.index_file_meta import IndexFileMeta
+        from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.partition_keys = ['dt']
+        self.mock_table.partition_keys_fields = [
+            DataField(0, 'dt', AtomicType('STRING'))
+        ]
+        self.mock_table.fields = [
+            DataField(0, 'dt', AtomicType('STRING')),
+            DataField(1, 'payload', AtomicType('STRING')),
+        ]
+        self.mock_table.total_buckets = None
+
+        partition = GenericRow(
+            ['2024-01-15'], self.mock_table.partition_keys_fields)
+        index_entry = IndexManifestEntry(
+            kind=0,
+            partition=partition,
+            bucket=0,
+            index_file=IndexFileMeta(
+                index_type='btree',
+                file_name='global-index-payload.index',
+                file_size=100,
+                row_count=5,
+                global_index_meta=GlobalIndexMeta(
+                    row_range_start=0,
+                    row_range_end=4,
+                    index_field_id=1,
+                ),
+            ),
+        )
+        mock_scan_global_index_entries.return_value = [index_entry]
+        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = Mock()
+        file_store_commit._try_commit = Mock()
+
+        deleted_file = DataFileMeta.create(
+            file_name="old.parquet",
+            file_size=100,
+            row_count=5,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=1,
+            max_sequence_number=1,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+        )
+        new_file = DataFileMeta.create(
+            file_name="left.parquet",
+            file_size=40,
+            row_count=2,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+            write_cols=None,
+        )
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Full-row rewrite or delete is not supported"):
+            file_store_commit.commit([
+                CommitMessage(
+                    partition=('2024-01-15',),
+                    bucket=0,
+                    new_files=[new_file],
+                    deleted_files=[deleted_file],
+                    check_from_snapshot=1,
+                )
+            ], commit_identifier=42)
+
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         from pypaimon.data.timestamp import Timestamp
