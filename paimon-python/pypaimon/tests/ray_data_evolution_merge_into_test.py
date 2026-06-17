@@ -2372,6 +2372,45 @@ class TargetProjectionTest(unittest.TestCase):
         self.assertIn('age', cols)
         self.assertIn('id', cols)
 
+    def test_matched_source_projection_prunes_unneeded_cols(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import (
+            LiteralValue,
+            SourceColumnRef,
+            TargetColumnRef,
+        )
+
+        cols = _resolve_source_projection(
+            [
+                self._clause(
+                    {
+                        'age': SourceColumnRef('id'),
+                        'name': TargetColumnRef('name'),
+                        'note': LiteralValue('literal'),
+                    },
+                    condition="s.status = 't.fake' AND s.score > t.score",
+                )
+            ],
+            ['uid'],
+            ['uid', 'id', 'name', 'status', 'score', 'payload'],
+        )
+        self.assertEqual(['uid', 'id', 'status', 'score'], cols)
+
+    def test_literal_update_source_projection_keeps_only_join_key(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            _resolve_source_projection,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import LiteralValue
+
+        cols = _resolve_source_projection(
+            [self._clause({'name': LiteralValue('updated')})],
+            ['id'],
+            ['id', 'name', 'age', 'payload'],
+        )
+        self.assertEqual(['id'], cols)
+
 
 class MergeConditionUnitTest(unittest.TestCase):
 
