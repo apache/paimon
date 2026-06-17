@@ -37,8 +37,11 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.MultiVectorSearch;
+import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -65,6 +68,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VectorSearchBuilder} using test-only brute-force vector index. */
 public class VectorSearchBuilderTest extends TableTestBase {
@@ -83,6 +87,112 @@ public class VectorSearchBuilderTest extends TableTestBase {
                 .option("test.vector.dimension", String.valueOf(DIMENSION))
                 .option("test.vector.metric", "l2")
                 .build();
+    }
+
+    @Test
+    public void testReadBuilderWithMultiVectorSearch() throws Exception {
+        catalog.createTable(
+                identifier("multi_vector_api_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("title_vec", new ArrayType(DataTypes.FLOAT()))
+                        .column("body_vec", new ArrayType(DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                        .option("test.vector.metric", "l2")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("multi_vector_api_table"));
+
+        float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
+        float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
+        writeTwoVectorColumns(table, titleVectors, bodyVectors);
+        buildAndCommitIndex(table, "title_vec", titleVectors);
+        buildAndCommitIndex(table, "body_vec", bodyVectors);
+
+        MultiVectorSearch search =
+                MultiVectorSearch.builder()
+                        .addRoute(
+                                MultiVectorSearchRoute.builder()
+                                        .vectorColumn("title_vec")
+                                        .queryVector(new float[] {1.0f, 0.0f})
+                                        .limit(2)
+                                        .build())
+                        .addRoute(
+                                MultiVectorSearchRoute.builder()
+                                        .vectorColumn("body_vec")
+                                        .queryVector(new float[] {0.0f, 1.0f})
+                                        .limit(2)
+                                        .build())
+                        .limit(2)
+                        .fusionRrf()
+                        .build();
+
+        ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+
+        assertThat(ids).hasSize(2);
+        assertThat(ids).contains(1);
+    }
+
+    @Test
+    public void testReadBuilderWithVectorSearch() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.1f, 0.95f},
+            {0.98f, 0.05f},
+            {0.0f, 1.0f},
+            {0.05f, 0.98f}
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        VectorSearch search =
+                VectorSearch.builder()
+                        .vectorColumn(VECTOR_FIELD_NAME)
+                        .queryVector(new float[] {0.85f, 0.15f})
+                        .limit(3)
+                        .build();
+
+        ReadBuilder readBuilder = table.newReadBuilder().withVectorSearch(search);
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+
+        assertThat(ids).isNotEmpty();
+        assertThat(ids.size()).isLessThanOrEqualTo(3);
+        assertThat(ids).contains(0);
+    }
+
+    @Test
+    public void testReadBuilderVectorSearchOnlySupportsBatchScan() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        VectorSearch search =
+                VectorSearch.builder()
+                        .vectorColumn(VECTOR_FIELD_NAME)
+                        .queryVector(new float[] {1.0f, 0.0f})
+                        .limit(1)
+                        .build();
+
+        assertThatThrownBy(() -> table.newReadBuilder().withVectorSearch(search).newStreamScan())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "Vector search and multi-vector search are only supported in batch scan.");
     }
 
     @Test
@@ -553,9 +663,30 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
+    private void writeTwoVectorColumns(
+            FileStoreTable table, float[][] titleVectors, float[][] bodyVectors) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < titleVectors.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                new GenericArray(titleVectors[i]),
+                                new GenericArray(bodyVectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
+        buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors);
+    }
+
+    private void buildAndCommitIndex(FileStoreTable table, String fieldName, float[][] vectors)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
-        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+        DataField vectorField = table.rowType().getField(fieldName);
 
         GlobalIndexSingletonWriter writer =
                 (GlobalIndexSingletonWriter)

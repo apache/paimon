@@ -19,6 +19,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.annotation.Experimental;
+
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,6 +69,11 @@ public class MultiVectorSearchRoute implements Serializable {
                         : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
+    @Experimental
+    public static Builder builder() {
+        return new Builder();
+    }
+
     public String fieldName() {
         return fieldName;
     }
@@ -94,5 +101,60 @@ public class MultiVectorSearchRoute implements Serializable {
     @Override
     public String toString() {
         return "FieldName(" + fieldName + "), Limit(" + limit + "), Weight(" + weight + ")";
+    }
+
+    /** Builder for {@link MultiVectorSearchRoute}. */
+    @Experimental
+    public static class Builder {
+
+        private String fieldName;
+        private float[] vector;
+        private int limit;
+        private float weight = 1.0f;
+        private Map<String, String> options = new HashMap<>();
+
+        public Builder vectorColumn(String fieldName) {
+            this.fieldName = fieldName;
+            return this;
+        }
+
+        public Builder field(String fieldName) {
+            return vectorColumn(fieldName);
+        }
+
+        public Builder queryVector(float[] vector) {
+            this.vector = vector;
+            return this;
+        }
+
+        public Builder vector(float[] vector) {
+            return queryVector(vector);
+        }
+
+        public Builder limit(int limit) {
+            this.limit = limit;
+            return this;
+        }
+
+        public Builder weight(float weight) {
+            this.weight = weight;
+            return this;
+        }
+
+        public Builder option(String key, String value) {
+            this.options.put(key, value);
+            return this;
+        }
+
+        public Builder options(Map<String, String> options) {
+            if (options != null) {
+                this.options.putAll(options);
+            }
+            return this;
+        }
+
+        public MultiVectorSearchRoute build() {
+            return new MultiVectorSearchRoute(fieldName, vector, limit, weight, options);
+        }
     }
 }

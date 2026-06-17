@@ -19,6 +19,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.annotation.Experimental;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -48,6 +50,11 @@ public class MultiVectorSearch implements Serializable {
         this.fusion = normalizeFusion(fusion);
     }
 
+    @Experimental
+    public static Builder builder() {
+        return new Builder();
+    }
+
     public List<MultiVectorSearchRoute> routes() {
         return routes;
     }
@@ -75,5 +82,49 @@ public class MultiVectorSearch implements Serializable {
     @Override
     public String toString() {
         return "Fusion(" + fusion + "), Limit(" + limit + "), Routes(" + routes + ")";
+    }
+
+    /** Builder for {@link MultiVectorSearch}. */
+    @Experimental
+    public static class Builder {
+
+        private final List<MultiVectorSearchRoute> routes = new ArrayList<>();
+        private int limit;
+        private String fusion = FUSION_RRF;
+
+        public Builder addRoute(MultiVectorSearchRoute route) {
+            this.routes.add(route);
+            return this;
+        }
+
+        public Builder routes(List<MultiVectorSearchRoute> routes) {
+            this.routes.clear();
+            if (routes != null) {
+                this.routes.addAll(routes);
+            }
+            return this;
+        }
+
+        public Builder limit(int limit) {
+            this.limit = limit;
+            return this;
+        }
+
+        public Builder fusion(String fusion) {
+            this.fusion = fusion;
+            return this;
+        }
+
+        public Builder fusionRrf() {
+            return fusion(FUSION_RRF);
+        }
+
+        public Builder fusionWeightedScore() {
+            return fusion(FUSION_WEIGHTED_SCORE);
+        }
+
+        public MultiVectorSearch build() {
+            return new MultiVectorSearch(routes, limit, fusion);
+        }
     }
 }

@@ -19,10 +19,13 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -52,6 +55,8 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Integer limit = null;
     private TopN topN = null;
+    private VectorSearch vectorSearch = null;
+    private MultiVectorSearch multiVectorSearch = null;
 
     private Integer shardIndexOfThisSubtask;
     private Integer shardNumberOfParallelSubtasks;
@@ -137,6 +142,18 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
+        this.vectorSearch = vectorSearch;
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withMultiVectorSearch(MultiVectorSearch multiVectorSearch) {
+        this.multiVectorSearch = multiVectorSearch;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         this.shardIndexOfThisSubtask = indexOfThisSubtask;
         this.shardNumberOfParallelSubtasks = numberOfParallelSubtasks;
@@ -186,11 +203,41 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (topN != null) {
             tableScan.withTopN(topN);
         }
+        checkState(
+                vectorSearch == null || multiVectorSearch == null,
+                "Vector search and multi-vector search cannot be used together.");
+        if (vectorSearch != null) {
+            tableScan.withGlobalIndexResult(evalVectorSearch());
+        }
+        if (multiVectorSearch != null) {
+            tableScan.withGlobalIndexResult(
+                    new MultiVectorSearchExecutor(table, multiVectorSearch, partitionFilter, filter)
+                            .execute());
+        }
         return tableScan;
+    }
+
+    private GlobalIndexResult evalVectorSearch() {
+        VectorSearchBuilder vectorSearchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(vectorSearch.vector())
+                        .withVectorColumn(vectorSearch.fieldName())
+                        .withLimit(vectorSearch.limit())
+                        .withOptions(vectorSearch.options());
+        if (partitionFilter != null) {
+            vectorSearchBuilder.withPartitionFilter(partitionFilter);
+        }
+        if (filter != null) {
+            vectorSearchBuilder.withFilter(filter);
+        }
+        return vectorSearchBuilder.executeLocal();
     }
 
     @Override
     public StreamTableScan newStreamScan() {
+        checkState(
+                vectorSearch == null && multiVectorSearch == null,
+                "Vector search and multi-vector search are only supported in batch scan.");
         return (StreamTableScan) configureScan(table.newStreamScan());
     }
 
