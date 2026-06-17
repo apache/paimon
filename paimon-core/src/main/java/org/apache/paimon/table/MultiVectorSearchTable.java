@@ -19,7 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.types.RowType;
@@ -28,26 +28,27 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A table wrapper to hold vector search information. This is used to pass vector search pushdown
- * information from logical plan optimization to physical plan execution. For now, it is only used
- * by internal for Spark engine.
+ * A table wrapper to hold multi-vector search information. This is used to pass multi-vector search
+ * pushdown information from logical plan optimization to physical plan execution. For now, it is
+ * only used by internal for Spark engine.
  */
-public class VectorSearchTable implements ReadonlyTable {
+public class MultiVectorSearchTable implements ReadonlyTable {
 
     private final InnerTable origin;
-    private final VectorSearch vectorSearch;
+    private final MultiVectorSearch multiVectorSearch;
 
-    private VectorSearchTable(InnerTable origin, VectorSearch vectorSearch) {
+    private MultiVectorSearchTable(InnerTable origin, MultiVectorSearch multiVectorSearch) {
         this.origin = origin;
-        this.vectorSearch = vectorSearch;
+        this.multiVectorSearch = multiVectorSearch;
     }
 
-    public static VectorSearchTable create(InnerTable origin, VectorSearch vectorSearch) {
-        return new VectorSearchTable(origin, vectorSearch);
+    public static MultiVectorSearchTable create(
+            InnerTable origin, MultiVectorSearch multiVectorSearch) {
+        return new MultiVectorSearchTable(origin, multiVectorSearch);
     }
 
-    public VectorSearch vectorSearch() {
-        return vectorSearch;
+    public MultiVectorSearch multiVectorSearch() {
+        return multiVectorSearch;
     }
 
     public InnerTable origin() {
@@ -96,6 +97,7 @@ public class VectorSearchTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new VectorSearchTable((InnerTable) origin.copy(dynamicOptions), vectorSearch);
+        return new MultiVectorSearchTable(
+                (InnerTable) origin.copy(dynamicOptions), multiVectorSearch);
     }
 }

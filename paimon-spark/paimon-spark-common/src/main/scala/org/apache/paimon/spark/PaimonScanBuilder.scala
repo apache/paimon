@@ -131,14 +131,9 @@ class PaimonScanBuilder(val table: InnerTable)
       case None =>
         val (actualTable, vectorSearch, multiVectorSearch, fullTextSearch) = table match {
           case vst: org.apache.paimon.table.VectorSearchTable =>
-            val tableVectorSearch = Option(vst.vectorSearch())
-            val tableMultiVectorSearch = Option(vst.multiVectorSearch())
-            val vs = (tableVectorSearch, pushedVectorSearch) match {
-              case (Some(_), _) => tableVectorSearch
-              case (None, Some(_)) => pushedVectorSearch
-              case (None, None) => None
-            }
-            (vst.origin(), vs, tableMultiVectorSearch, None)
+            (vst.origin(), Option(vst.vectorSearch()), None, None)
+          case mvst: org.apache.paimon.table.MultiVectorSearchTable =>
+            (mvst.origin(), None, Option(mvst.multiVectorSearch()), None)
           case ftst: org.apache.paimon.table.FullTextSearchTable =>
             (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
           case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)

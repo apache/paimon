@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{FullTextSearch, MultiVectorSearch, MultiVectorSearchRoute, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.{DataTable, FullTextSearchTable, InnerTable, VectorSearchTable}
+import org.apache.paimon.table.{DataTable, FullTextSearchTable, InnerTable, MultiVectorSearchTable, VectorSearchTable}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -175,9 +175,9 @@ object PaimonTableValuedFunctions {
     sparkTable match {
       case st @ SparkTable(innerTable: InnerTable) =>
         val multiVectorSearch = mvsq.createMultiVectorSearch(innerTable, argsWithoutTable)
-        val vectorSearchTable = VectorSearchTable.create(innerTable, multiVectorSearch)
+        val multiVectorSearchTable = MultiVectorSearchTable.create(innerTable, multiVectorSearch)
         DataSourceV2Relation.create(
-          st.copy(table = vectorSearchTable),
+          st.copy(table = multiVectorSearchTable),
           Some(sparkCatalog),
           Some(ident),
           CaseInsensitiveStringMap.empty())
