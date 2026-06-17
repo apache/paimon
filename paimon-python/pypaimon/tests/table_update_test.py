@@ -23,6 +23,7 @@ import unittest
 import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -106,6 +107,21 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self._apply_commit(tc, msgs, cid)
         tc.close()
         return msgs
+
+    @staticmethod
+    def _fixed_size_float_vectors(values):
+        return pa.FixedSizeListArray.from_arrays(
+            pa.array([item for row in values for item in row], type=pa.float32()),
+            len(values[0]),
+        )
+
+    @staticmethod
+    def _current_files(table):
+        return [
+            file
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        ]
 
     # ==================================================================
     # Shared tests (run under both batch and stream modes)
@@ -658,6 +674,221 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(
             [(0, 2), (3, 2)],
             sorted((file.first_row_id, file.row_count) for file in files),
+        )
+
+    def test_delete_by_filter_rewrites_blob_files(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('picture', pa.large_binary()),
+        ])
+        table = self._create_table(pa_schema=pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'blob.target-file-size': '1 b',
+        })
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['a', 'b', 'c', 'd', 'e'],
+            'picture': [b'p1', b'p2', b'p3', b'p4', b'p5'],
+        }, schema=pa_schema))
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        msgs = self._do_delete(table, predicate)
+
+        deleted_files = [file for msg in msgs for file in msg.deleted_files]
+        new_files = [file for msg in msgs for file in msg.new_files]
+        blob_deleted_files = [
+            file for file in deleted_files
+            if DataFileMeta.is_blob_file(file.file_name)
+        ]
+        blob_new_files = [
+            file for file in new_files
+            if DataFileMeta.is_blob_file(file.file_name)
+        ]
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in new_files))
+        self.assertGreater(len(blob_deleted_files), len(blob_new_files))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+        self.assertEqual([b'p1', b'p2', b'p4', b'p5'],
+                         result['picture'].to_pylist())
+
+        self.assertEqual(
+            [(0, 2), (0, 2), (3, 2), (3, 2)],
+            sorted(
+                (file.first_row_id, file.row_count)
+                for file in self._current_files(table)
+            ),
+        )
+
+    def test_delete_by_filter_rewrites_vector_files(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('embedding', pa.list_(pa.float32(), 3)),
+        ])
+        table = self._create_table(pa_schema=pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+            'vector.file.format': 'parquet',
+        })
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['a', 'b', 'c', 'd', 'e'],
+            'embedding': self._fixed_size_float_vectors([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0],
+            ]),
+        }, schema=pa_schema))
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        msgs = self._do_delete(table, predicate)
+
+        deleted_files = [file for msg in msgs for file in msg.deleted_files]
+        new_files = [file for msg in msgs for file in msg.new_files]
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in new_files))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+             [1.0, 1.0, 0.0], [0.0, 1.0, 1.0]],
+            result['embedding'].to_pylist(),
+        )
+
+        self.assertEqual(
+            [(0, 2), (0, 2), (3, 2), (3, 2)],
+            sorted(
+                (file.first_row_id, file.row_count)
+                for file in self._current_files(table)
+            ),
+        )
+
+    def test_delete_by_filter_rewrites_blob_and_vector_files(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('doc', pa.large_binary()),
+            ('embedding', pa.list_(pa.float32(), 3)),
+        ])
+        table = self._create_table(pa_schema=pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+            'vector.file.format': 'parquet',
+        })
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'doc': [b'd1', b'd2', b'd3', b'd4', b'd5'],
+            'embedding': self._fixed_size_float_vectors([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0],
+            ]),
+        }, schema=pa_schema))
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        msgs = self._do_delete(table, predicate)
+
+        deleted_files = [file for msg in msgs for file in msg.deleted_files]
+        new_files = [file for msg in msgs for file in msg.new_files]
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in new_files))
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in new_files))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+        self.assertEqual([b'd1', b'd2', b'd4', b'd5'],
+                         result['doc'].to_pylist())
+        self.assertEqual(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+             [1.0, 1.0, 0.0], [0.0, 1.0, 1.0]],
+            result['embedding'].to_pylist(),
+        )
+
+        self.assertEqual(
+            [(0, 2), (0, 2), (0, 2), (3, 2), (3, 2), (3, 2)],
+            sorted(
+                (file.first_row_id, file.row_count)
+                for file in self._current_files(table)
+            ),
+        )
+
+    def test_delete_by_filter_after_update_rewrites_dedicated_files(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('doc', pa.large_binary()),
+            ('embedding', pa.list_(pa.float32(), 3)),
+        ])
+        table = self._create_table(pa_schema=pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': 'parquet',
+            'vector.file.format': 'parquet',
+        })
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['a', 'b', 'c', 'd', 'e'],
+            'doc': [b'd1', b'd2', b'd3', b'd4', b'd5'],
+            'embedding': self._fixed_size_float_vectors([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 1.0],
+            ]),
+        }, schema=pa_schema))
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [1], 'name': ['bb']}),
+            ['name'],
+        )
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        msgs = self._do_delete(table, predicate)
+
+        deleted_files = [file for msg in msgs for file in msg.deleted_files]
+        new_files = [file for msg in msgs for file in msg.new_files]
+        self.assertTrue(any(file.write_cols == ['name']
+                            for file in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in deleted_files))
+        self.assertTrue(any(DataFileMeta.is_blob_file(f.file_name)
+                            for f in new_files))
+        self.assertTrue(any(DataFileMeta.is_vector_file(f.file_name)
+                            for f in new_files))
+        self.assertFalse(any(file.write_cols == ['name']
+                             for file in new_files))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+        self.assertEqual(['a', 'bb', 'd', 'e'], result['name'].to_pylist())
+        self.assertEqual([b'd1', b'd2', b'd4', b'd5'],
+                         result['doc'].to_pylist())
+        self.assertEqual(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+             [1.0, 1.0, 0.0], [0.0, 1.0, 1.0]],
+            result['embedding'].to_pylist(),
         )
 
     # ------------------------------------------------------------------

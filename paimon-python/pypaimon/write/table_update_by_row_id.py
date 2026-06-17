@@ -113,10 +113,10 @@ class TableUpdateByRowId:
             ]
             data_files = [
                 file for file in files_with_row_id
-                if not DataFileMeta.is_blob_file(file.file_name)
+                if not self._is_dedicated_file(file)
             ]
             for file in split.files:
-                if file.first_row_id is None or DataFileMeta.is_blob_file(file.file_name):
+                if file.first_row_id is None or self._is_dedicated_file(file):
                     continue
                 row_id_ranges.append(file.row_id_range())
             for file in data_files:
@@ -154,6 +154,11 @@ class TableUpdateByRowId:
     @staticmethod
     def _overlaps(left: Range, right: Range) -> bool:
         return left.from_ <= right.to and right.from_ <= left.to
+
+    @staticmethod
+    def _is_dedicated_file(file: DataFileMeta) -> bool:
+        return (DataFileMeta.is_blob_file(file.file_name)
+                or DataFileMeta.is_vector_file(file.file_name))
 
     def update_columns(self, data: pa.Table, column_names: List[str]) -> List[CommitMessage]:
         """

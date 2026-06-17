@@ -42,8 +42,7 @@ class BlobWriter(AppendOnlyDataWriter):
         # Store blob column name for use in metadata creation
         self.blob_column = blob_column
 
-        options = self.table.options
-        self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
+        self.blob_target_file_size = CoreOptions.blob_target_file_size(self.options)
 
         self._blob_consumer = blob_consumer
         self.current_writer: Optional[BlobFileWriter] = None

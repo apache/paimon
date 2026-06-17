@@ -63,11 +63,6 @@ class TableDeleteByFilter:
             raise NotImplementedError(
                 "delete_by_filter is only supported for append-only "
                 "data-evolution tables.")
-        if self._has_dedicated_files():
-            raise NotImplementedError(
-                "delete_by_filter is not yet supported for tables with "
-                "dedicated blob or vector files.")
-
         self._validate_row_id_predicate(predicate)
         row_ids = self._matched_row_ids(predicate)
         if not row_ids:
@@ -184,8 +179,7 @@ class TableDeleteByFilter:
             split, files = self._first_row_id_index[first_row_id]
             data_files = [
                 file for file in files
-                if not DataFileMeta.is_blob_file(file.file_name)
-                and not DataFileMeta.is_vector_file(file.file_name)
+                if not self._is_dedicated_file(file)
             ]
             if not data_files:
                 raise ValueError(
@@ -197,7 +191,7 @@ class TableDeleteByFilter:
                     f"Row IDs {sorted(delete_row_ids)} do not belong to "
                     f"file range [{old_range.from_}, {old_range.to}].")
 
-            original_data = self._read_file_data(split, data_files)
+            original_data = self._read_file_data(split, files)
             new_files = self._write_remaining_segments(
                 split, old_range, original_data, delete_row_ids)
             commit_messages.append(CommitMessage(
@@ -205,7 +199,7 @@ class TableDeleteByFilter:
                 bucket=split.bucket,
                 new_files=new_files,
                 check_from_snapshot=self.snapshot_id,
-                deleted_files=data_files,
+                deleted_files=files,
             ))
 
         return commit_messages
@@ -213,7 +207,7 @@ class TableDeleteByFilter:
     def _first_row_id_for(self, row_id: int) -> int:
         for first_row_id, (split, files) in self._first_row_id_index.items():
             for file in files:
-                if DataFileMeta.is_blob_file(file.file_name):
+                if self._is_dedicated_file(file):
                     continue
                 file_range = file.row_id_range()
                 if file_range is not None and file_range.contains(row_id):
@@ -274,13 +268,7 @@ class TableDeleteByFilter:
         finally:
             file_store_write.close()
 
-    def _has_dedicated_files(self) -> bool:
-        for field in self.table.fields:
-            if getattr(field.type, 'type', None) == 'BLOB':
-                return True
-        for split, files in self._first_row_id_index.values():
-            for file in files:
-                if (DataFileMeta.is_blob_file(file.file_name)
-                        or DataFileMeta.is_vector_file(file.file_name)):
-                    return True
-        return False
+    @staticmethod
+    def _is_dedicated_file(file: DataFileMeta) -> bool:
+        return (DataFileMeta.is_blob_file(file.file_name)
+                or DataFileMeta.is_vector_file(file.file_name))

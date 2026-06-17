@@ -30,6 +30,11 @@ from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.write.commit.commit_scanner import CommitScanner
 
 
+def _is_dedicated_file(file_name):
+    return (DataFileMeta.is_blob_file(file_name)
+            or DataFileMeta.is_vector_file(file_name))
+
+
 class RowIdColumnConflictChecker:
     """Checks for row ID × column conflicts between delta files and committed files.
 
@@ -211,7 +216,7 @@ class ConflictDetection:
         for base in base_entries:
             if base.file.first_row_id is not None:
                 existing_identifiers.add(base.identifier())
-                if not DataFileMeta.is_blob_file(base.file.file_name):
+                if not _is_dedicated_file(base.file.file_name):
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
         for entry in delta_entries:
@@ -237,7 +242,7 @@ class ConflictDetection:
                     and not entry.file.row_id_range().exclude(own_deleted_ranges)
                     and not entry.file.row_id_range().exclude(base_ranges)):
                 continue
-            if DataFileMeta.is_blob_file(entry.file.file_name):
+            if _is_dedicated_file(entry.file.file_name):
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
 
@@ -280,7 +285,7 @@ class ConflictDetection:
         for group in merged_groups:
             data_files = [
                 entry for entry in group
-                if not DataFileMeta.is_blob_file(entry.file.file_name)
+                if not _is_dedicated_file(entry.file.file_name)
             ]
             if not range_helper.are_all_ranges_same(data_files):
                 file_descriptions = [
@@ -319,13 +324,14 @@ class ConflictDetection:
         check_next_row_id = check_snapshot.next_row_id
 
         # Pair each delta with its anchor file type so a parquet-only
-        # compact does not flag a blob delta whose .blob anchor is intact.
+        # compact does not flag a blob/vector delta whose dedicated anchor
+        # is intact.
         delta_signatures = []
         for f in delta_files:
             r = f.row_id_range()
             if r is not None:
                 delta_signatures.append(
-                    (DataFileMeta.is_blob_file(f.file_name), r.from_, r.to))
+                    (self._file_kind(f.file_name), r.from_, r.to))
 
         for snapshot_id in range(
                 self._row_id_check_from_snapshot + 1,
@@ -364,8 +370,8 @@ class ConflictDetection:
         staged delta; otherwise None.
 
         File-type match guards against `write_cols=None` ambiguity (an
-        initial full-row parquet does not actually contain blob columns);
-        column_checker guards against unrelated column-write shards
+        initial full-row parquet does not actually contain blob/vector
+        columns); column_checker guards against unrelated column-write shards
         (compacting an f1-only parquet must not block an f2 update on
         the same row range).
         """
@@ -379,16 +385,16 @@ class ConflictDetection:
             file_range = entry.file.row_id_range()
             if file_range is None:
                 continue
-            deleted_is_blob = DataFileMeta.is_blob_file(entry.file.file_name)
-            for delta_is_blob, from_, to in delta_signatures:
-                if delta_is_blob != deleted_is_blob:
+            deleted_kind = self._file_kind(entry.file.file_name)
+            for delta_kind, from_, to in delta_signatures:
+                if delta_kind != deleted_kind:
                     continue
                 if file_range.from_ > to or from_ > file_range.to:
                     continue
                 if not column_checker.conflicts_with(entry.file):
                     continue
                 return RuntimeError(
-                    "Blob/row-id update conflicts with concurrent COMPACT "
+                    "Dedicated/row-id update conflicts with concurrent COMPACT "
                     "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
                     "was compacted away, overlaps staged delta "
                     "[{df}, {dt}].".format(
@@ -399,3 +405,11 @@ class ConflictDetection:
                         df=from_,
                         dt=to))
         return None
+
+    @staticmethod
+    def _file_kind(file_name):
+        if DataFileMeta.is_blob_file(file_name):
+            return "blob"
+        if DataFileMeta.is_vector_file(file_name):
+            return "vector"
+        return "data"

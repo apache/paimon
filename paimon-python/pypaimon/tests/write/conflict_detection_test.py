@@ -157,10 +157,27 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNone(
             detection.check_row_id_existence(base, delta, next_row_id=200))
 
+    def test_no_conflict_when_vector_file_range_is_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.vector.parquet", kind=0,
+                             first_row_id=20, row_count=10)]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=200))
+
     def test_conflict_when_blob_file_range_is_not_covered(self):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
         delta = [_make_entry("p1.blob", kind=0, first_row_id=95, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
+    def test_conflict_when_vector_file_range_is_not_covered(self):
+        detection = self._make_detection()
+        base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]
+        delta = [_make_entry("p1.vector.parquet", kind=0,
+                             first_row_id=95, row_count=10)]
         result = detection.check_row_id_existence(base, delta, next_row_id=200)
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
@@ -182,6 +199,19 @@ class TestCheckRowIdExistence(unittest.TestCase):
             _make_entry("p0.blob", kind=0, first_row_id=50, row_count=50),
         ]
         delta = [_make_entry("p1.blob", kind=0, first_row_id=60, row_count=10)]
+        result = detection.check_row_id_existence(base, delta, next_row_id=200)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
+    def test_conflict_when_vector_file_range_is_only_covered_by_base_vector_file(self):
+        detection = self._make_detection()
+        base = [
+            _make_entry("f1", kind=0, first_row_id=0, row_count=50),
+            _make_entry("p0.vector.parquet", kind=0,
+                        first_row_id=50, row_count=50),
+        ]
+        delta = [_make_entry("p1.vector.parquet", kind=0,
+                             first_row_id=60, row_count=10)]
         result = detection.check_row_id_existence(base, delta, next_row_id=200)
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
@@ -281,6 +311,10 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         return [_make_entry("d.blob", first_row_id=0, row_count=51,
                             write_cols=["col_a"])]
 
+    def _vector_delta(self):
+        return [_make_entry("d.vector.parquet", first_row_id=0, row_count=51,
+                            write_cols=["col_a"])]
+
     def test_compact_blob_delete_raises_at_first_match(self):
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
         compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
@@ -292,6 +326,24 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         detection = self._make_detection(
             [check_snap, compact1, compact2], entries)
         result = detection.check_row_id_from_snapshot(compact2, self._blob_delta())
+        self.assertIsNotNone(result)
+        self.assertIn("snapshot 2", str(result))
+        self.assertIn("COMPACT", str(result))
+
+    def test_compact_vector_delete_raises_at_first_match(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        compact1 = _FakeSnapshot(2, "COMPACT", next_row_id=200)
+        compact2 = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        entries = {
+            2: [_make_entry("first.vector.parquet", kind=1,
+                            first_row_id=0, row_count=200)],
+            3: [_make_entry("second.vector.parquet", kind=1,
+                            first_row_id=0, row_count=200)],
+        }
+        detection = self._make_detection(
+            [check_snap, compact1, compact2], entries)
+        result = detection.check_row_id_from_snapshot(
+            compact2, self._vector_delta())
         self.assertIsNotNone(result)
         self.assertIn("snapshot 2", str(result))
         self.assertIn("COMPACT", str(result))

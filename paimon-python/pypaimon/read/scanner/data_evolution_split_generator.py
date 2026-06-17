@@ -54,9 +54,12 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 if manifest_entry.file.first_row_id is not None
                 else float('-inf')
             )
-            is_blob = 1 if DataFileMeta.is_blob_file(manifest_entry.file.file_name) else 0
+            is_special = (
+                1 if DataEvolutionSplitGenerator._is_dedicated_file(
+                    manifest_entry.file.file_name) else 0
+            )
             max_seq = manifest_entry.file.max_sequence_number
-            return first_row_id, is_blob, -max_seq
+            return first_row_id, is_special, -max_seq
 
         sorted_entries = sorted(file_entries, key=sort_key)
 
@@ -242,25 +245,26 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     def _filter_files_by_row_ranges(partitioned_files: defaultdict, row_ranges: List[Range]) -> defaultdict:
         """
         Filter files by Row ID ranges. Keep files that overlap with the given ranges.
-        Blob files are only included if they overlap with non-blob files that match the ranges.
+        Dedicated blob/vector files are only included if they overlap with
+        non-dedicated files that match the ranges.
         """
         filtered_partitioned_files = defaultdict(list)
 
         for key, file_entries in partitioned_files.items():
-            # Separate blob and non-blob files
-            non_blob_entries = []
-            blob_entries = []
+            # Separate dedicated field files and row-range carrier files.
+            non_dedicated_entries = []
+            dedicated_entries = []
             
             for entry in file_entries:
-                if DataFileMeta.is_blob_file(entry.file.file_name):
-                    blob_entries.append(entry)
+                if DataEvolutionSplitGenerator._is_dedicated_file(
+                        entry.file.file_name):
+                    dedicated_entries.append(entry)
                 else:
-                    non_blob_entries.append(entry)
+                    non_dedicated_entries.append(entry)
             
-            # First, filter non-blob files based on row ranges
-            filtered_non_blob_entries = []
-            non_blob_ranges = []
-            for entry in non_blob_entries:
+            filtered_non_dedicated_entries = []
+            non_dedicated_ranges = []
+            for entry in non_dedicated_entries:
                 file_range = entry.file.row_id_range()
 
                 # Check if file overlaps with any of the row ranges
@@ -271,28 +275,32 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                         break
                 
                 if overlaps:
-                    filtered_non_blob_entries.append(entry)
-                    non_blob_ranges.append(file_range)
+                    filtered_non_dedicated_entries.append(entry)
+                    non_dedicated_ranges.append(file_range)
             
-            # Then, filter blob files based on row ID range of non-blob files
-            filtered_blob_entries = []
-            non_blob_ranges = Range.sort_and_merge_overlap(non_blob_ranges, True, True)
-            # Only keep blob files that overlap with merged non-blob ranges
-            for entry in blob_entries:
-                blob_range = entry.file.row_id_range()
-                # Check if blob file overlaps with any merged range
-                for merged_range in non_blob_ranges:
-                    if merged_range.overlaps(blob_range):
-                        filtered_blob_entries.append(entry)
+            filtered_dedicated_entries = []
+            non_dedicated_ranges = Range.sort_and_merge_overlap(
+                non_dedicated_ranges, True, True)
+            for entry in dedicated_entries:
+                dedicated_range = entry.file.row_id_range()
+                for merged_range in non_dedicated_ranges:
+                    if merged_range.overlaps(dedicated_range):
+                        filtered_dedicated_entries.append(entry)
                         break
             
-            # Combine filtered non-blob and blob files
-            filtered_entries = filtered_non_blob_entries + filtered_blob_entries
+            filtered_entries = (
+                filtered_non_dedicated_entries + filtered_dedicated_entries
+            )
             
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
         return filtered_partitioned_files
+
+    @staticmethod
+    def _is_dedicated_file(file_name: str) -> bool:
+        return (DataFileMeta.is_blob_file(file_name)
+                or DataFileMeta.is_vector_file(file_name))
 
     @staticmethod
     def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:

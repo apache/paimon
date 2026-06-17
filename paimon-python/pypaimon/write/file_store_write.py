@@ -21,10 +21,12 @@ from typing import Dict, List, Tuple
 
 import pyarrow as pa
 
+from pypaimon.common.memory_size import MemorySize
+from pypaimon.common.options.core_options import CoreOptions
+
 
 logger = logging.getLogger(__name__)
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -55,8 +57,10 @@ class FileStoreWrite:
 
     def disable_rolling(self):
         """Disable file rolling by setting target_file_size to max."""
-        self.options.set(
-            CoreOptions.TARGET_FILE_SIZE, str(2 ** 63 - 1))
+        max_size = MemorySize.MAX_VALUE
+        self.options.set(CoreOptions.TARGET_FILE_SIZE, max_size)
+        self.options.set(CoreOptions.BLOB_TARGET_FILE_SIZE, max_size)
+        self.options.set(CoreOptions.VECTOR_TARGET_FILE_SIZE, max_size)
 
     def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
         key = (partition, bucket)
