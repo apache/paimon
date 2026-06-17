@@ -48,7 +48,9 @@ class VectorSearchQueryTest extends AnyFunSuite {
             Literal("route_limit"),
             Literal("10"),
             Literal("weights"),
-            Literal("title_vec=2.0,body_vec=1.0")))))
+            Literal("title_vec=2.0,body_vec=1.0")))
+      )
+    )
 
     assert(search.isInstanceOf[MultiVectorSearch])
     assert(search.limit() == 3)
@@ -99,7 +101,8 @@ class VectorSearchQueryTest extends AnyFunSuite {
                 new ArrayType(DataTypes.FLOAT()),
                 new ArrayType(DataTypes.FLOAT()),
                 new ArrayType(DataTypes.FLOAT())),
-              Array[String]("v", "title_vec", "body_vec"))
+              Array[String]("v", "title_vec", "body_vec")
+            )
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
             method.getName match {

@@ -481,8 +481,8 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
       } else {
         Map.empty[String, String]
       }
-    val routeLimit = options.get("route_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(
-      finalLimit)
+    val routeLimit =
+      options.get("route_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(finalLimit)
     val fusion = options.getOrElse("fusion", MultiVectorSearch.FUSION_RRF)
     val weights = parseWeights(options.getOrElse("weights", ""))
     val multiVectorOptionKeys = Set("fusion", "route_limit", "weights")
@@ -508,13 +508,18 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
   private def extractQueryVectorMap(expr: Expression): Seq[(String, Array[Float])] = {
     expr match {
       case CreateMap(children, _) if children != null =>
-        children.grouped(2).map {
-          case Seq(keyExpr, valueExpr) =>
-            (VectorSearchQuery(Seq.empty).extractString(keyExpr), VectorSearchQuery(Seq.empty)
-              .extractQueryVector(valueExpr))
-          case other =>
-            throw new RuntimeException(s"Invalid query map entries: $other")
-        }.toSeq
+        children
+          .grouped(2)
+          .map {
+            case Seq(keyExpr, valueExpr) =>
+              (
+                VectorSearchQuery(Seq.empty).extractString(keyExpr),
+                VectorSearchQuery(Seq.empty)
+                  .extractQueryVector(valueExpr))
+            case other =>
+              throw new RuntimeException(s"Invalid query map entries: $other")
+          }
+          .toSeq
       case _ =>
         throw new RuntimeException(s"Cannot extract query vector map from expression: $expr")
     }
@@ -524,15 +529,18 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     if (weights == null || weights.trim.isEmpty) {
       Map.empty
     } else {
-      weights.split(",").map {
-        kvString =>
-          val kv = kvString.split("=", 2)
-          if (kv.length != 2) {
-            throw new IllegalArgumentException(
-              s"Invalid weight '$kvString'. Please use format 'column=weight'.")
-          }
-          (kv(0).trim, kv(1).trim.toFloat)
-      }.toMap
+      weights
+        .split(",")
+        .map {
+          kvString =>
+            val kv = kvString.split("=", 2)
+            if (kv.length != 2) {
+              throw new IllegalArgumentException(
+                s"Invalid weight '$kvString'. Please use format 'column=weight'.")
+            }
+            (kv(0).trim, kv(1).trim.toFloat)
+        }
+        .toMap
     }
   }
 }
