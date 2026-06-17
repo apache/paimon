@@ -68,7 +68,11 @@ public interface ClientPool<C, E extends Exception> {
                     client = ensureActiveClient(client);
                     return action.run(client);
                 } finally {
-                    clients.addFirst(client);
+                    if (this.clients != null) {
+                        clients.addFirst(client);
+                    } else {
+                        close(client);
+                    }
                 }
             }
         }
@@ -92,6 +96,10 @@ public interface ClientPool<C, E extends Exception> {
         }
 
         protected abstract void close(C client);
+
+        public boolean isClosed() {
+            return this.clients == null;
+        }
 
         @Override
         public void close() {

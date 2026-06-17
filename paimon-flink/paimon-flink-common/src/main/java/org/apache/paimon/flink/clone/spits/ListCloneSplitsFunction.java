@@ -78,6 +78,19 @@ public class ListCloneSplitsFunction extends ProcessFunction<CloneSchemaInfo, Cl
     }
 
     @Override
+    public void close() throws Exception {
+        super.close();
+        if (sourceCatalog != null) {
+            sourceCatalog.close();
+            sourceCatalog = null;
+        }
+        if (targetCatalog != null) {
+            targetCatalog.close();
+            targetCatalog = null;
+        }
+    }
+
+    @Override
     public void processElement(
             CloneSchemaInfo cloneSchemaInfo,
             ProcessFunction<CloneSchemaInfo, CloneSplitInfo>.Context context,

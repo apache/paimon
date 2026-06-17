@@ -18,15 +18,23 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link JdbcClientPool} connection validation. */
 public class JdbcClientPoolTest {
@@ -148,5 +156,90 @@ public class JdbcClientPoolTest {
         } finally {
             pool.close();
         }
+    }
+
+    @Test
+    public void testIsClosedReportsCorrectly() {
+        JdbcClientPool pool = createPool(1);
+        assertThat(pool.isClosed()).isFalse();
+        pool.close();
+        assertThat(pool.isClosed()).isTrue();
+    }
+
+    @Test
+    public void testConnectionClosedWhenPoolClosedDuringAction() throws Exception {
+        JdbcClientPool pool = createPool(1);
+        AtomicReference<Connection> connRef = new AtomicReference<>();
+        CountDownLatch actionStarted = new CountDownLatch(1);
+        CountDownLatch poolClosed = new CountDownLatch(1);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> future =
+                    executor.submit(
+                            () -> {
+                                try {
+                                    pool.run(
+                                            connection -> {
+                                                connRef.set(connection);
+                                                actionStarted.countDown();
+                                                try {
+                                                    poolClosed.await();
+                                                } catch (InterruptedException e) {
+                                                    Thread.currentThread().interrupt();
+                                                }
+                                                return null;
+                                            });
+                                } catch (Exception e) {
+                                    // expected
+                                }
+                            });
+
+            actionStarted.await();
+            pool.close();
+            poolClosed.countDown();
+            future.get();
+
+            assertThat(connRef.get().isClosed()).isTrue();
+        } finally {
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    public void testPoolThrowsAfterClose() {
+        JdbcClientPool pool = createPool(1);
+        pool.close();
+
+        assertThatThrownBy(
+                        () ->
+                                pool.run(
+                                        connection -> {
+                                            return null;
+                                        }))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("closed pool");
+    }
+
+    @Test
+    public void testLockContextRecreatesPoolAfterClose() {
+        String dbUrl =
+                "jdbc:sqlite:file::memory:?ic" + UUID.randomUUID().toString().replace("-", "");
+        Options options = new Options();
+        options.set(CatalogOptions.CLIENT_POOL_SIZE, 1);
+        options.set(CatalogOptions.URI.key(), dbUrl);
+
+        JdbcCatalogLockContext context = new JdbcCatalogLockContext("test-catalog", options);
+
+        JdbcClientPool firstPool = context.connections();
+        assertThat(firstPool.isClosed()).isFalse();
+
+        firstPool.close();
+        assertThat(firstPool.isClosed()).isTrue();
+
+        JdbcClientPool secondPool = context.connections();
+        assertThat(secondPool).isNotSameAs(firstPool);
+        assertThat(secondPool.isClosed()).isFalse();
+        secondPool.close();
     }
 }

@@ -67,6 +67,19 @@ public class CloneSplitsFunction extends ProcessFunction<CloneSplitInfo, CommitM
     }
 
     @Override
+    public void close() throws Exception {
+        super.close();
+        if (sourceCatalog != null) {
+            sourceCatalog.close();
+            sourceCatalog = null;
+        }
+        if (targetCatalog != null) {
+            targetCatalog.close();
+            targetCatalog = null;
+        }
+    }
+
+    @Override
     public void processElement(
             CloneSplitInfo cloneSplitInfo,
             ProcessFunction<CloneSplitInfo, CommitMessageInfo>.Context context,

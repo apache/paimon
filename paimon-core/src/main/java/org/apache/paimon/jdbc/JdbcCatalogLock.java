@@ -83,7 +83,7 @@ public class JdbcCatalogLock implements CatalogLock {
 
     @Override
     public void close() throws IOException {
-        // Do nothing
+        connections.close();
     }
 
     public static long checkMaxSleep(Map<String, String> conf) {

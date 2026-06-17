@@ -40,7 +40,7 @@ public class JdbcCatalogLockContext implements CatalogLockContext {
     }
 
     public JdbcClientPool connections() {
-        if (connections == null) {
+        if (connections == null || connections.isClosed()) {
             connections =
                     new JdbcClientPool(
                             options.get(CatalogOptions.CLIENT_POOL_SIZE),
