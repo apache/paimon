@@ -18,14 +18,17 @@
 
 package org.apache.paimon.lumina.index;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Options for the Lumina vector index. */
 public class LuminaVectorIndexOptions {
@@ -125,6 +128,53 @@ public class LuminaVectorIndexOptions {
     }
 
     /**
+     * Resolves per-field Lumina options for {@code fieldName} into an effective {@link Options}.
+     *
+     * <p>Following the convention shared with {@code paimon-vector-index} (PR #8239), a field-level
+     * option is written {@code fields.<fieldName>.<option>} — <b>without</b> the {@code lumina.}
+     * index-type prefix — and overrides the column-agnostic {@code lumina.<option>} for that field
+     * only. For example {@code fields.embed.distance.metric} overrides {@code
+     * lumina.distance.metric} for column {@code embed}. The {@code <option>} suffix is exactly the
+     * key used after {@code lumina.} at the table level.
+     *
+     * <p>Only recognized Lumina options (the keys in {@code FIELD_OVERRIDABLE_KEYS}) are accepted;
+     * any other {@code fields.<fieldName>.*} key (e.g. a merge/aggregation option) is left
+     * untouched, mirroring how {@code paimon-vector-index} ignores keys it does not recognize.
+     *
+     * <p>Each recognized field option is flattened back to its plain {@code lumina.*} form, so the
+     * rest of this class still sees only {@code lumina.*} keys and the metadata produced from these
+     * options keeps the exact same native-key shape as before (no {@code fields.*} keys ever reach
+     * the meta) — only the resolved value changes. This is what lets the reader consume the meta
+     * unchanged.
+     *
+     * <p>The same resolution runs on both the write and read paths, since both build the indexer
+     * through {@link LuminaVectorGlobalIndexerFactory#create}.
+     */
+    public static Options resolveFieldOptions(String fieldName, Options options) {
+        String fieldPrefix = CoreOptions.FIELDS_PREFIX + "." + fieldName + ".";
+        Map<String, String> result = new LinkedHashMap<>();
+        // Base: table-level options, including the column-agnostic lumina.* options. Drop all
+        // fields.* keys; this field's recognized options are re-added below as lumina.* keys.
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            if (!entry.getKey().startsWith(CoreOptions.FIELDS_PREFIX + ".")) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        // Overlay this field's options. fields.<field>.<option> (no lumina. prefix) overrides the
+        // column-agnostic lumina.<option>. Only recognized Lumina options are taken.
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith(fieldPrefix)) {
+                String option = key.substring(fieldPrefix.length());
+                if (FIELD_OVERRIDABLE_KEYS.contains(option)) {
+                    result.put(LUMINA_PREFIX + option, entry.getValue());
+                }
+            }
+        }
+        return Options.fromMap(result);
+    }
+
+    /**
      * Returns all {@code lumina.*} options with the prefix stripped, producing native Lumina keys.
      * For example, {@code lumina.diskann.build.ef_construction} becomes {@code
      * diskann.build.ef_construction}.
@@ -185,6 +235,22 @@ public class LuminaVectorIndexOptions {
                     DISKANN_SEARCH_BEAM_WIDTH,
                     ENCODING_PQ_M,
                     SEARCH_PARALLEL_NUMBER);
+
+    /**
+     * Native Lumina keys (the {@code lumina.} prefix stripped) that may be overridden per field via
+     * {@code fields.<fieldName>.<key>}. Any {@code fields.<fieldName>.*} key outside this set is
+     * ignored, so unrelated per-field options do not leak into the Lumina index metadata.
+     */
+    private static final Set<String> FIELD_OVERRIDABLE_KEYS = buildFieldOverridableKeys();
+
+    private static Set<String> buildFieldOverridableKeys() {
+        Set<String> keys = new HashSet<>();
+        for (ConfigOption<?> opt : ALL_OPTIONS) {
+            keys.add(toLuminaKey(opt));
+        }
+        keys.add(toLuminaKey(DISKANN_SEARCH_LIST_SIZE));
+        return keys;
+    }
 
     /**
      * Builds native Lumina options by first populating all known ConfigOptions (with defaults) and
