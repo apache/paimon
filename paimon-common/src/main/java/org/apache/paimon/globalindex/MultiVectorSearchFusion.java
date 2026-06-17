@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -37,18 +38,35 @@ public class MultiVectorSearchFusion {
 
     public static ScoredGlobalIndexResult fuse(
             String fusion, List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
-        if (MultiVectorSearch.FUSION_WEIGHTED_SCORE.equals(fusion)) {
-            return weightedScore(results, weights, limit);
+        List<WeightedResult> weightedResults = new ArrayList<>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
         }
-        return rrf(results, weights, limit);
+        return fuse(fusion, weightedResults, limit);
+    }
+
+    public static ScoredGlobalIndexResult fuse(
+            String fusion, List<WeightedResult> results, int limit) {
+        if (MultiVectorSearch.FUSION_WEIGHTED_SCORE.equals(fusion)) {
+            return weightedScore(results, limit);
+        }
+        return rrf(results, limit);
     }
 
     public static ScoredGlobalIndexResult rrf(
             List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
-        Map<Long, Float> scores = new HashMap<>();
+        List<WeightedResult> weightedResults = new ArrayList<>(results.size());
         for (int i = 0; i < results.size(); i++) {
-            ScoredGlobalIndexResult result = results.get(i);
-            float weight = weightAt(weights, i);
+            weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
+        }
+        return rrf(weightedResults, limit);
+    }
+
+    public static ScoredGlobalIndexResult rrf(List<WeightedResult> results, int limit) {
+        Map<Long, Float> scores = new HashMap<>();
+        for (WeightedResult weightedResult : results) {
+            ScoredGlobalIndexResult result = weightedResult.result();
+            float weight = weightedResult.weight();
             List<Long> ranked = rankedRowIds(result);
             for (int rank = 0; rank < ranked.size(); rank++) {
                 Long rowId = ranked.get(rank);
@@ -62,10 +80,18 @@ public class MultiVectorSearchFusion {
 
     public static ScoredGlobalIndexResult weightedScore(
             List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
-        Map<Long, Float> scores = new HashMap<>();
+        List<WeightedResult> weightedResults = new ArrayList<>(results.size());
         for (int i = 0; i < results.size(); i++) {
-            ScoredGlobalIndexResult result = results.get(i);
-            float weight = weightAt(weights, i);
+            weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
+        }
+        return weightedScore(weightedResults, limit);
+    }
+
+    public static ScoredGlobalIndexResult weightedScore(List<WeightedResult> results, int limit) {
+        Map<Long, Float> scores = new HashMap<>();
+        for (WeightedResult weightedResult : results) {
+            ScoredGlobalIndexResult result = weightedResult.result();
+            float weight = weightedResult.weight();
             ScoreGetter scoreGetter = result.scoreGetter();
             for (long rowId : result.results()) {
                 float contribution = weight * scoreGetter.score(rowId);
@@ -127,5 +153,27 @@ public class MultiVectorSearchFusion {
             return 1.0f;
         }
         return weights[index];
+    }
+
+    /** Weighted result from one vector-search route. */
+    public static class WeightedResult implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final ScoredGlobalIndexResult result;
+        private final float weight;
+
+        public WeightedResult(ScoredGlobalIndexResult result, float weight) {
+            this.result = result;
+            this.weight = weight;
+        }
+
+        public ScoredGlobalIndexResult result() {
+            return result;
+        }
+
+        public float weight() {
+            return weight;
+        }
     }
 }

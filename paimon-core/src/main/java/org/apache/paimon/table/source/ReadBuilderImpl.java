@@ -210,9 +210,7 @@ public class ReadBuilderImpl implements ReadBuilder {
             tableScan.withGlobalIndexResult(evalVectorSearch());
         }
         if (multiVectorSearch != null) {
-            tableScan.withGlobalIndexResult(
-                    new MultiVectorSearchExecutor(table, multiVectorSearch, partitionFilter, filter)
-                            .execute());
+            tableScan.withGlobalIndexResult(evalMultiVectorSearch());
         }
         return tableScan;
     }
@@ -231,6 +229,18 @@ public class ReadBuilderImpl implements ReadBuilder {
             vectorSearchBuilder.withFilter(filter);
         }
         return vectorSearchBuilder.executeLocal();
+    }
+
+    private GlobalIndexResult evalMultiVectorSearch() {
+        MultiVectorSearchBuilder multiVectorSearchBuilder =
+                table.newMultiVectorSearchBuilder().withMultiVectorSearch(multiVectorSearch);
+        if (partitionFilter != null) {
+            multiVectorSearchBuilder.withPartitionFilter(partitionFilter);
+        }
+        if (filter != null) {
+            multiVectorSearchBuilder.withFilter(filter);
+        }
+        return multiVectorSearchBuilder.executeLocal();
     }
 
     @Override

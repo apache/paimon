@@ -142,6 +142,65 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testMultiVectorSearchBuilderExposesRouteBuilders() throws Exception {
+        catalog.createTable(
+                identifier("multi_vector_builder_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("title_vec", new ArrayType(DataTypes.FLOAT()))
+                        .column("body_vec", new ArrayType(DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                        .option("test.vector.metric", "l2")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("multi_vector_builder_table"));
+
+        float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
+        float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
+        writeTwoVectorColumns(table, titleVectors, bodyVectors);
+        buildAndCommitIndex(table, "title_vec", titleVectors);
+        buildAndCommitIndex(table, "body_vec", bodyVectors);
+
+        MultiVectorSearch search =
+                MultiVectorSearch.builder()
+                        .addRoute(
+                                MultiVectorSearchRoute.builder()
+                                        .vectorColumn("title_vec")
+                                        .queryVector(new float[] {1.0f, 0.0f})
+                                        .limit(2)
+                                        .build())
+                        .addRoute(
+                                MultiVectorSearchRoute.builder()
+                                        .vectorColumn("body_vec")
+                                        .queryVector(new float[] {0.0f, 1.0f})
+                                        .limit(2)
+                                        .weight(2.0f)
+                                        .build())
+                        .limit(2)
+                        .fusionWeightedScore()
+                        .build();
+
+        MultiVectorSearchBuilder builder =
+                table.newMultiVectorSearchBuilder().withMultiVectorSearch(search);
+        List<MultiVectorSearchBuilder.Route> routes = builder.routeBuilders();
+
+        assertThat(routes).hasSize(2);
+
+        List<MultiVectorSearchBuilder.RouteResult> routeResults = new ArrayList<>();
+        for (MultiVectorSearchBuilder.Route route : routes) {
+            routeResults.add(
+                    builder.toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
+        }
+        ScoredGlobalIndexResult fused = builder.fuse(routeResults);
+
+        assertThat(fused.results().getIntCardinality()).isEqualTo(2);
+        assertThat(fused.results()).contains(1L);
+    }
+
+    @Test
     public void testReadBuilderWithVectorSearch() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

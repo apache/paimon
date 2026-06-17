@@ -19,11 +19,11 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.globalindex.{GlobalIndexResult, MultiVectorSearchFusion, ScoredGlobalIndexResult}
+import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{MultiVectorSearchRoute, PredicateBuilder}
+import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkVectorSearchBuilderImpl}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkMultiVectorSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
@@ -106,49 +106,20 @@ abstract class PaimonBaseScan(table: InnerTable)
 
   private def evalMultiVectorSearch(): GlobalIndexResult = {
     val multiVectorSearch = pushedMultiVectorSearch.get
-    val results = new java.util.ArrayList[ScoredGlobalIndexResult]()
-    val weights = new java.util.ArrayList[java.lang.Float]()
-    multiVectorSearch.routes().asScala.foreach {
-      route =>
-        evalMultiVectorRoute(route) match {
-          case scored: ScoredGlobalIndexResult =>
-            if (!scored.results().isEmpty) {
-              results.add(scored)
-              weights.add(route.weight())
-            }
-          case empty if empty.results().isEmpty =>
-          case other =>
-            throw new UnsupportedOperationException(
-              "Multi-vector search requires scored vector index results, but got: " +
-                other.getClass.getName)
-        }
-    }
-    MultiVectorSearchFusion.fuse(
-      multiVectorSearch.fusion(),
-      results,
-      weights.asScala.map(_.floatValue()).toArray,
-      multiVectorSearch.limit())
-  }
-
-  private def evalMultiVectorRoute(route: MultiVectorSearchRoute): GlobalIndexResult = {
-    val vectorSearchBuilder =
+    val multiVectorSearchBuilder =
       if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
-        new SparkVectorSearchBuilderImpl(table)
+        new SparkMultiVectorSearchBuilderImpl(table)
       } else {
-        table.newVectorSearchBuilder()
+        table.newMultiVectorSearchBuilder()
       }
-    val vectorBuilder = vectorSearchBuilder
-      .withVector(route.vector())
-      .withVectorColumn(route.fieldName())
-      .withLimit(route.limit())
-      .withOptions(route.options())
+    val builder = multiVectorSearchBuilder.withMultiVectorSearch(multiVectorSearch)
     if (pushedPartitionFilters.nonEmpty) {
-      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+      builder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
     if (pushedDataFilters.nonEmpty) {
-      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+      builder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
-    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+    builder.executeLocal()
   }
 
   private def evalFullTextSearch(): GlobalIndexResult = {

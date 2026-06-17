@@ -29,6 +29,8 @@ import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.FullTextSearchBuilderImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.MultiVectorSearchBuilder;
+import org.apache.paimon.table.source.MultiVectorSearchBuilderImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -60,6 +62,11 @@ public interface InnerTable extends Table {
     @Override
     default VectorSearchBuilder newVectorSearchBuilder() {
         return new VectorSearchBuilderImpl(this);
+    }
+
+    @Override
+    default MultiVectorSearchBuilder newMultiVectorSearchBuilder() {
+        return new MultiVectorSearchBuilderImpl(this);
     }
 
     @Override
