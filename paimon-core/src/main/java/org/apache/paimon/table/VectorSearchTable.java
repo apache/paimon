@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -36,18 +37,34 @@ public class VectorSearchTable implements ReadonlyTable {
 
     private final InnerTable origin;
     private final VectorSearch vectorSearch;
+    private final MultiVectorSearch multiVectorSearch;
 
     private VectorSearchTable(InnerTable origin, VectorSearch vectorSearch) {
         this.origin = origin;
         this.vectorSearch = vectorSearch;
+        this.multiVectorSearch = null;
+    }
+
+    private VectorSearchTable(InnerTable origin, MultiVectorSearch multiVectorSearch) {
+        this.origin = origin;
+        this.vectorSearch = null;
+        this.multiVectorSearch = multiVectorSearch;
     }
 
     public static VectorSearchTable create(InnerTable origin, VectorSearch vectorSearch) {
         return new VectorSearchTable(origin, vectorSearch);
     }
 
+    public static VectorSearchTable create(InnerTable origin, MultiVectorSearch multiVectorSearch) {
+        return new VectorSearchTable(origin, multiVectorSearch);
+    }
+
     public VectorSearch vectorSearch() {
         return vectorSearch;
+    }
+
+    public MultiVectorSearch multiVectorSearch() {
+        return multiVectorSearch;
     }
 
     public InnerTable origin() {
@@ -96,6 +113,10 @@ public class VectorSearchTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
+        if (multiVectorSearch != null) {
+            return new VectorSearchTable(
+                    (InnerTable) origin.copy(dynamicOptions), multiVectorSearch);
+        }
         return new VectorSearchTable((InnerTable) origin.copy(dynamicOptions), vectorSearch);
     }
 }

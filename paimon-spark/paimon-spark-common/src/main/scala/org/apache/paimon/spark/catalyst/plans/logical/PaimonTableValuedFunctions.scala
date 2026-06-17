@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.predicate.{FullTextSearch, VectorSearch}
+import org.apache.paimon.predicate.{FullTextSearch, MultiVectorSearch, MultiVectorSearchRoute, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
 import org.apache.paimon.table.{DataTable, FullTextSearchTable, InnerTable, VectorSearchTable}
@@ -46,6 +46,7 @@ object PaimonTableValuedFunctions {
   val INCREMENTAL_BETWEEN_TIMESTAMP = "paimon_incremental_between_timestamp"
   val INCREMENTAL_TO_AUTO_TAG = "paimon_incremental_to_auto_tag"
   val VECTOR_SEARCH = "vector_search"
+  val MULTI_VECTOR_SEARCH = "multi_vector_search"
   val FULL_TEXT_SEARCH = "full_text_search"
 
   val supportedFnNames: Seq[String] =
@@ -54,6 +55,7 @@ object PaimonTableValuedFunctions {
       INCREMENTAL_BETWEEN_TIMESTAMP,
       INCREMENTAL_TO_AUTO_TAG,
       VECTOR_SEARCH,
+      MULTI_VECTOR_SEARCH,
       FULL_TEXT_SEARCH)
 
   def parsePositiveLimit(value: Any): Int = {
@@ -85,6 +87,8 @@ object PaimonTableValuedFunctions {
         FunctionRegistryBase.build[IncrementalToAutoTag](fnName, since = None)
       case VECTOR_SEARCH =>
         FunctionRegistryBase.build[VectorSearchQuery](fnName, since = None)
+      case MULTI_VECTOR_SEARCH =>
+        FunctionRegistryBase.build[MultiVectorSearchQuery](fnName, since = None)
       case FULL_TEXT_SEARCH =>
         FunctionRegistryBase.build[FullTextSearchQuery](fnName, since = None)
       case _ =>
@@ -121,6 +125,8 @@ object PaimonTableValuedFunctions {
     tvf match {
       case vsq: VectorSearchQuery =>
         resolveVectorSearchQuery(sparkTable, sparkCatalog, ident, vsq, args.tail)
+      case mvsq: MultiVectorSearchQuery =>
+        resolveMultiVectorSearchQuery(sparkTable, sparkCatalog, ident, mvsq, args.tail)
       case ftsq: FullTextSearchQuery =>
         resolveFullTextSearchQuery(sparkTable, sparkCatalog, ident, ftsq, args.tail)
       case _ =>
@@ -156,6 +162,28 @@ object PaimonTableValuedFunctions {
       case _ =>
         throw new RuntimeException(
           "vector_search only supports Paimon SparkTable backed by InnerTable, " +
+            s"but got table implementation: ${sparkTable.getClass.getName}")
+    }
+  }
+
+  private def resolveMultiVectorSearchQuery(
+      sparkTable: Table,
+      sparkCatalog: TableCatalog,
+      ident: Identifier,
+      mvsq: MultiVectorSearchQuery,
+      argsWithoutTable: Seq[Expression]): LogicalPlan = {
+    sparkTable match {
+      case st @ SparkTable(innerTable: InnerTable) =>
+        val multiVectorSearch = mvsq.createMultiVectorSearch(innerTable, argsWithoutTable)
+        val vectorSearchTable = VectorSearchTable.create(innerTable, multiVectorSearch)
+        DataSourceV2Relation.create(
+          st.copy(table = vectorSearchTable),
+          Some(sparkCatalog),
+          Some(ident),
+          CaseInsensitiveStringMap.empty())
+      case _ =>
+        throw new RuntimeException(
+          "multi_vector_search only supports Paimon SparkTable backed by InnerTable, " +
             s"but got table implementation: ${sparkTable.getClass.getName}")
     }
   }
@@ -338,7 +366,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     new VectorSearch(queryVector, limit, columnName, options.asJava)
   }
 
-  private def extractQueryVector(expr: Expression): Array[Float] = {
+  def extractQueryVector(expr: Expression): Array[Float] = {
     expr match {
       case Literal(arrayData, _) if arrayData != null =>
         val arr = arrayData.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
@@ -356,7 +384,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     }
   }
 
-  private def extractOptions(expr: Expression): Map[String, String] = {
+  def extractOptions(expr: Expression): Map[String, String] = {
     expr match {
       case CreateMap(children, _) if children != null =>
         children
@@ -410,13 +438,102 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     }
   }
 
-  private def extractString(expr: Expression): String = stringValue(expr.eval())
+  def extractString(expr: Expression): String = stringValue(expr.eval())
 
   private def stringValue(value: Any): String = {
     if (value == null) {
       throw new IllegalArgumentException("Option key and value cannot be null.")
     }
     value.toString
+  }
+}
+
+/**
+ * Plan for the [[MULTI_VECTOR_SEARCH]] table-valued function.
+ *
+ * Usage: multi_vector_search(table_name, query_map, limit[, options])
+ *   - table_name: the Paimon table to search
+ *   - query_map: map from vector column name to query vector
+ *   - limit: the final number of fused top results to return
+ *   - options: optional options as a map or semicolon-separated key-value string
+ */
+case class MultiVectorSearchQuery(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(MULTI_VECTOR_SEARCH) {
+
+  override def parseArgs(args: Seq[Expression]): Map[String, String] = {
+    Map.empty
+  }
+
+  def createMultiVectorSearch(
+      innerTable: InnerTable,
+      argsWithoutTable: Seq[Expression]): MultiVectorSearch = {
+    if (argsWithoutTable.size != 2 && argsWithoutTable.size != 3) {
+      throw new RuntimeException(
+        s"$MULTI_VECTOR_SEARCH needs two or three parameters after table_name: " +
+          s"query_map, limit[, options]. " +
+          s"Got ${argsWithoutTable.size} parameters after table_name.")
+    }
+    val queryVectors = extractQueryVectorMap(argsWithoutTable.head)
+    val finalLimit = parsePositiveLimit(argsWithoutTable(1).eval())
+    val options =
+      if (argsWithoutTable.size == 3) {
+        VectorSearchQuery(Seq.empty).extractOptions(argsWithoutTable(2))
+      } else {
+        Map.empty[String, String]
+      }
+    val routeLimit = options.get("route_limit").map(v => parsePositiveLimit(v.toLong)).getOrElse(
+      finalLimit)
+    val fusion = options.getOrElse("fusion", MultiVectorSearch.FUSION_RRF)
+    val weights = parseWeights(options.getOrElse("weights", ""))
+    val multiVectorOptionKeys = Set("fusion", "route_limit", "weights")
+    val routeOptions = options.filter { case (key, _) => !multiVectorOptionKeys.contains(key) }
+
+    val routes = queryVectors.map {
+      case (columnName, queryVector) =>
+        if (!innerTable.rowType().containsField(columnName)) {
+          throw new RuntimeException(
+            s"Column $columnName does not exist in table ${innerTable.name()}")
+        }
+        new MultiVectorSearchRoute(
+          columnName,
+          queryVector,
+          routeLimit,
+          weights.getOrElse(columnName, 1.0f),
+          routeOptions.asJava)
+    }.toList
+
+    new MultiVectorSearch(routes.asJava, finalLimit, fusion)
+  }
+
+  private def extractQueryVectorMap(expr: Expression): Seq[(String, Array[Float])] = {
+    expr match {
+      case CreateMap(children, _) if children != null =>
+        children.grouped(2).map {
+          case Seq(keyExpr, valueExpr) =>
+            (VectorSearchQuery(Seq.empty).extractString(keyExpr), VectorSearchQuery(Seq.empty)
+              .extractQueryVector(valueExpr))
+          case other =>
+            throw new RuntimeException(s"Invalid query map entries: $other")
+        }.toSeq
+      case _ =>
+        throw new RuntimeException(s"Cannot extract query vector map from expression: $expr")
+    }
+  }
+
+  private def parseWeights(weights: String): Map[String, Float] = {
+    if (weights == null || weights.trim.isEmpty) {
+      Map.empty
+    } else {
+      weights.split(",").map {
+        kvString =>
+          val kv = kvString.split("=", 2)
+          if (kv.length != 2) {
+            throw new IllegalArgumentException(
+              s"Invalid weight '$kvString'. Please use format 'column=weight'.")
+          }
+          (kv(0).trim, kv(1).trim.toFloat)
+      }.toMap
+    }
   }
 }
 

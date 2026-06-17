@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.plans.logical
 
+import org.apache.paimon.predicate.MultiVectorSearch
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.types.{ArrayType, DataType, DataTypes, RowType}
 
@@ -28,6 +29,37 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
+
+  test("create multi vector search with query map and fusion options") {
+    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      innerTable,
+      Seq(
+        CreateMap(
+          Seq(
+            Literal("title_vec"),
+            CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+            Literal("body_vec"),
+            CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
+        Literal(3),
+        CreateMap(
+          Seq(
+            Literal("fusion"),
+            Literal("rrf"),
+            Literal("route_limit"),
+            Literal("10"),
+            Literal("weights"),
+            Literal("title_vec=2.0,body_vec=1.0")))))
+
+    assert(search.isInstanceOf[MultiVectorSearch])
+    assert(search.limit() == 3)
+    assert(search.fusion() == "rrf")
+    assert(search.routes().size() == 2)
+    assert(search.routes().get(0).fieldName() == "title_vec")
+    assert(search.routes().get(0).limit() == 10)
+    assert(search.routes().get(0).weight() == 2.0f)
+    assert(search.routes().get(1).fieldName() == "body_vec")
+    assert(search.routes().get(1).weight() == 1.0f)
+  }
 
   test("create vector search with string options") {
     val vectorSearch = createVectorSearch(
@@ -62,7 +94,12 @@ class VectorSearchQueryTest extends AnyFunSuite {
         Array(classOf[InnerTable]),
         new InvocationHandler {
           private val rowType =
-            RowType.of(Array[DataType](new ArrayType(DataTypes.FLOAT())), Array[String]("v"))
+            RowType.of(
+              Array[DataType](
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT())),
+              Array[String]("v", "title_vec", "body_vec"))
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
             method.getName match {
