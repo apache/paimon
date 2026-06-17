@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
@@ -79,13 +80,14 @@ public class LineageUtils {
     private static Map<String, String> buildConfigMap(
             Table table, @Nullable CatalogContext catalogContext) {
         Map<String, String> config = new HashMap<>();
-        config.put("type", "paimon");
         config.put("partition-keys", String.join(",", table.partitionKeys()));
         config.put("primary-keys", String.join(",", table.primaryKeys()));
 
         table.options().entrySet().stream()
                 .filter(e -> PAIMON_OPTION_KEYS.contains(e.getKey()))
                 .forEach(e -> config.put(e.getKey(), e.getValue()));
+
+        config.put("type", "paimon");
 
         if (catalogContext != null) {
             catalogContext
@@ -103,15 +105,19 @@ public class LineageUtils {
     }
 
     /**
-     * Returns the catalog warehouse path as the lineage namespace, or {@code "paimon"} when the
-     * warehouse is not available.
+     * Returns the catalog warehouse path as the lineage namespace. Falls back to the table path
+     * when no warehouse is configured, or {@code "paimon"} as a last resort.
      */
-    public static String getNamespace(@Nullable CatalogContext catalogContext) {
+    public static String getNamespace(Table table, @Nullable CatalogContext catalogContext) {
         if (catalogContext != null) {
             String warehouse = catalogContext.options().get(CatalogOptions.WAREHOUSE);
             if (warehouse != null) {
                 return warehouse;
             }
+        }
+        Path path = CoreOptions.path(table.options());
+        if (path != null) {
+            return path.toString();
         }
         return DEFAULT_NAMESPACE;
     }
@@ -127,7 +133,8 @@ public class LineageUtils {
             String name, boolean isBounded, Table table) {
         CatalogContext ctx = catalogContext(table);
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(ctx), buildConfigMap(table, ctx));
+                new PaimonLineageDataset(
+                        name, getNamespace(table, ctx), buildConfigMap(table, ctx));
         Boundedness boundedness =
                 isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
         return new PaimonSourceLineageVertex(boundedness, Collections.singletonList(dataset));
@@ -142,7 +149,8 @@ public class LineageUtils {
     public static LineageVertex sinkLineageVertex(String name, Table table) {
         CatalogContext ctx = catalogContext(table);
         LineageDataset dataset =
-                new PaimonLineageDataset(name, getNamespace(ctx), buildConfigMap(table, ctx));
+                new PaimonLineageDataset(
+                        name, getNamespace(table, ctx), buildConfigMap(table, ctx));
         return new PaimonSinkLineageVertex(Collections.singletonList(dataset));
     }
 }
