@@ -331,10 +331,10 @@ MultiVectorSearch search =
                 .rrfRanker()
                 .build();
 
-GlobalIndexResult result =
+MultiVectorSearchBuilder searchBuilder =
         table.newMultiVectorSearchBuilder()
-                .withMultiVectorSearch(search)
-                .executeLocal();
+                .withMultiVectorSearch(search);
+GlobalIndexResult result = searchBuilder.executeLocal();
 
 ReadBuilder readBuilder = table.newReadBuilder();
 TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
@@ -345,8 +345,8 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
-For Java, execute `MultiVectorSearchBuilder` to produce a global index result, then pass the
-result to `TableScan.withGlobalIndexResult`.
+For Java, use `Table.newMultiVectorSearchBuilder()` to produce a global index result, then pass
+the result to `TableScan.withGlobalIndexResult`.
 
 </TabItem>
 
