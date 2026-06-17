@@ -171,12 +171,12 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
         m0.put(1, BinaryString.fromString("a"));
         InternalRow populated =
                 GenericRow.of(
-                        new GenericArray(
-                                new BinaryString[] {BinaryString.fromString("x"), null}),
+                        new GenericArray(new BinaryString[] {BinaryString.fromString("x"), null}),
                         new GenericMap(m0));
         InternalRow nulls = GenericRow.of(null, null);
         InternalRow empties =
-                GenericRow.of(new GenericArray(new BinaryString[0]), new GenericMap(new HashMap<>()));
+                GenericRow.of(
+                        new GenericArray(new BinaryString[0]), new GenericMap(new HashMap<>()));
 
         FormatWriterFactory factory = fileFormat().createWriterFactory(rowType);
         write(factory, file, populated, nulls, empties);
@@ -187,7 +187,8 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 fileFormat()
                         .createReaderFactory(rowType, rowType, new ArrayList<>())
-                        .createReader(new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             reader.forEachRemaining(
                     r -> {
                         arrSummary.add(
@@ -195,7 +196,8 @@ class MosaicFormatReadWriteTest extends FormatReadWriteTest {
                                         ? "null"
                                         : r.getArray(0).size()
                                                 + ":"
-                                                + (r.getArray(0).size() > 1 && r.getArray(0).isNullAt(1)));
+                                                + (r.getArray(0).size() > 1
+                                                        && r.getArray(0).isNullAt(1)));
                         mapSummary.add(r.isNullAt(1) ? "null" : String.valueOf(r.getMap(1).size()));
                     });
         }
