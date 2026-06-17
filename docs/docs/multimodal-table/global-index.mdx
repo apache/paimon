@@ -267,6 +267,14 @@ Multi-vector search supports the following query options:
 | `weights` | `1.0` for every route | Comma-separated per-column weights, for example `title_embedding=2.0,body_embedding=1.0`. |
 | Other vector search options | N/A | Options such as `ivf.nprobe` and `hnsw.ef_search` are passed to every vector route. |
 
+For Spark SQL, the second argument can be either a map from vector column to query vector, or an
+array of route configs created by `named_struct`. A route config supports `vector_column`,
+`query_vector`, `limit`, `weight`, and `options`, matching the Java API's
+`VectorSearch.vectorColumn`, `queryVector`, `limit`, `option`, and route weight. `vector_column`
+and `query_vector` are required; `limit`, `weight`, and `options` override the shared defaults
+for that route. When using an array of route configs, every `named_struct` should use the same
+fields because Spark requires array elements to have the same struct type.
+
 <Tabs groupId="multi-vector-search">
 
 <TabItem value="spark-sql" label="Spark SQL">
@@ -275,20 +283,27 @@ Multi-vector search supports the following query options:
 SELECT id, __paimon_vector_search_score
 FROM multi_vector_search(
   'my_table',
-  map(
-    'title_embedding', array(1.0f, 0.0f, 0.0f),
-    'body_embedding', array(0.0f, 1.0f, 0.0f)),
+  array(
+    named_struct(
+      'vector_column', 'title_embedding',
+      'query_vector', array(1.0f, 0.0f, 0.0f),
+      'limit', 50,
+      'weight', 2.0f,
+      'options', map('ivf.nprobe', '32')),
+    named_struct(
+      'vector_column', 'body_embedding',
+      'query_vector', array(0.0f, 1.0f, 0.0f),
+      'limit', 50,
+      'weight', 1.0f,
+      'options', map('ivf.nprobe', '16'))),
   10,
-  map(
-    'ranker', 'rrf',
-    'candidate_limit', '50',
-    'weights', 'title_embedding=2.0,body_embedding=1.0',
-    'ivf.nprobe', '16'));
+  map('ranker', 'rrf'));
 ```
 
-The second argument is a map from vector column name to query vector. The third argument is the
-final number of ranked results to return. Spark SQL adds `__paimon_vector_search_score` to expose
-the ranked score.
+The third argument is the final number of ranked results to return. Spark SQL adds
+`__paimon_vector_search_score` to expose the ranked score. For simple searches, the second
+argument can still use `map('title_embedding', array(...), 'body_embedding', array(...))` and put
+shared route defaults in the options map.
 
 </TabItem>
 
@@ -304,7 +319,7 @@ MultiVectorSearch search =
                                 .vectorColumn("title_embedding")
                                 .queryVector(new float[] {1.0f, 0.0f, 0.0f})
                                 .limit(50)
-                                .option("ivf.nprobe", "16")
+                                .option("ivf.nprobe", "32")
                                 .build(),
                         2.0f)
                 .addVectorSearch(

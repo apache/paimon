@@ -22,7 +22,7 @@ import org.apache.paimon.predicate.MultiVectorSearch
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.types.{ArrayType, DataType, DataTypes, RowType}
 
-import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, CreateNamedStruct, Expression, Literal}
 import org.scalatest.funsuite.AnyFunSuite
 
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
@@ -61,6 +61,59 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).weight() == 2.0f)
     assert(search.routes().get(1).fieldName() == "body_vec")
     assert(search.routes().get(1).weight() == 1.0f)
+  }
+
+  test("create multi vector search with route configs") {
+    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("title_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("limit"),
+              Literal(20),
+              Literal("weight"),
+              Literal(2.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("32")))
+            )),
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("body_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))),
+              Literal("limit"),
+              Literal(10),
+              Literal("weight"),
+              Literal(1.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("16")))
+            ))
+          )),
+        Literal(3),
+        CreateMap(
+          Seq(
+            Literal("ranker"),
+            Literal("weighted_score"),
+            Literal("candidate_limit"),
+            Literal("5"),
+            Literal("ivf.nprobe"),
+            Literal("8")))
+      )
+    )
+
+    assert(search.ranker() == "weighted_score")
+    assert(search.routes().size() == 2)
+    assert(search.routes().get(0).limit() == 20)
+    assert(search.routes().get(0).weight() == 2.0f)
+    assert(search.routes().get(0).options().get("ivf.nprobe") == "32")
+    assert(search.routes().get(1).limit() == 10)
+    assert(search.routes().get(1).weight() == 1.0f)
+    assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
   }
 
   test("create vector search with string options") {

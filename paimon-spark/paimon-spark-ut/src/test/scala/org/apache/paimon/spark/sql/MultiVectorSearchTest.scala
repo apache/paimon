@@ -33,7 +33,9 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                   |  'global-index.row-count-per-shard' = '10000',
                   |  'row-tracking.enabled' = 'true',
                   |  'data-evolution.enabled' = 'true',
-                  |  'test.vector.dimension' = '2')
+                  |  'test.vector.dimension' = '2',
+                  |  'test.vector.required-option.key' = 'ivf.nprobe',
+                  |  'test.vector.required-option.value' = '16')
                   |""".stripMargin)
 
       spark.sql("""
@@ -61,13 +63,40 @@ class MultiVectorSearchTest extends PaimonSparkTestBase {
                |    'title_vec', array(1.0f, 0.0f),
                |    'body_vec', array(0.0f, 1.0f)),
                |  2,
-               |  map('ranker', 'rrf', 'candidate_limit', '2'))
+               |  map('ranker', 'rrf', 'candidate_limit', '2', 'ivf.nprobe', '16'))
                |""".stripMargin)
         .collect()
 
       assert(result.length == 2)
       assert(result.map(_.getInt(0)).contains(1))
       assert(result.forall(row => !row.isNullAt(1)))
+
+      val configuredRoutesResult = spark
+        .sql("""
+               |SELECT id, __paimon_vector_search_score
+               |FROM multi_vector_search(
+               |  'T',
+               |  array(
+               |    named_struct(
+               |      'vector_column', 'title_vec',
+               |      'query_vector', array(1.0f, 0.0f),
+               |      'limit', 2,
+               |      'weight', 2.0f,
+               |      'options', map('ivf.nprobe', '16')),
+               |    named_struct(
+               |      'vector_column', 'body_vec',
+               |      'query_vector', array(0.0f, 1.0f),
+               |      'limit', 2,
+               |      'weight', 1.0f,
+               |      'options', map('ivf.nprobe', '16'))),
+               |  2,
+               |  map('ranker', 'weighted_score'))
+               |""".stripMargin)
+        .collect()
+
+      assert(configuredRoutesResult.length == 2)
+      assert(configuredRoutesResult.map(_.getInt(0)).contains(1))
+      assert(configuredRoutesResult.forall(row => !row.isNullAt(1)))
     }
   }
 }
