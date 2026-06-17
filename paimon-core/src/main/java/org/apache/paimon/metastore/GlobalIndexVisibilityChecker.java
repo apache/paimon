@@ -39,7 +39,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 
 /** Checks whether newly added data files are covered by existing global indexes. */
 class GlobalIndexVisibilityChecker {
@@ -128,8 +127,7 @@ class GlobalIndexVisibilityChecker {
             return false;
         }
 
-        String fileName = file.fileName();
-        return !isBlobFile(fileName) && !isVectorStoreFile(fileName);
+        return !isBlobFile(file.fileName());
     }
 
     private static Set<GlobalIndexIdentifier> collectGlobalIndexesToTrack(
