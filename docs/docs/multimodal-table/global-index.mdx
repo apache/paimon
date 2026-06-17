@@ -233,6 +233,108 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 
 </Tabs>
 
+## Multi-Vector Search
+
+Multi-vector search queries multiple vector columns in one request and fuses the scored results
+before reading table rows. This is useful when one table stores several embeddings for the same
+record, such as title, body, image, or audio embeddings.
+
+Before running multi-vector search, create a vector global index for every vector column used by
+the query:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'title_embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+);
+
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'body_embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+);
+```
+
+Multi-vector search supports the following query options:
+
+| Option | Default | Description |
+|---|---|---|
+| `fusion` | `rrf` | Fusion strategy for route results. Supported values are `rrf` and `weighted_score`. |
+| `route_limit` | Final limit | Top K to retrieve from each vector column before fusion. |
+| `weights` | `1.0` for every route | Comma-separated per-column weights, for example `title_embedding=2.0,body_embedding=1.0`. |
+| Other vector search options | N/A | Options such as `ivf.nprobe` and `hnsw.ef_search` are passed to every vector route. |
+
+<Tabs groupId="multi-vector-search">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+SELECT id, __paimon_vector_search_score
+FROM multi_vector_search(
+  'my_table',
+  map(
+    'title_embedding', array(1.0f, 0.0f, 0.0f),
+    'body_embedding', array(0.0f, 1.0f, 0.0f)),
+  10,
+  map(
+    'fusion', 'rrf',
+    'route_limit', '50',
+    'weights', 'title_embedding=2.0,body_embedding=1.0',
+    'ivf.nprobe', '16'));
+```
+
+The second argument is a map from vector column name to query vector. The third argument is the
+final number of fused results to return. Spark SQL adds `__paimon_vector_search_score` to expose
+the fused score.
+
+</TabItem>
+
+<TabItem value="java-api" label="Java API">
+
+```java
+Table table = catalog.getTable(identifier);
+
+MultiVectorSearch search =
+        MultiVectorSearch.builder()
+                .addRoute(
+                        MultiVectorSearchRoute.builder()
+                                .vectorColumn("title_embedding")
+                                .queryVector(new float[] {1.0f, 0.0f, 0.0f})
+                                .limit(50)
+                                .weight(2.0f)
+                                .option("ivf.nprobe", "16")
+                                .build())
+                .addRoute(
+                        MultiVectorSearchRoute.builder()
+                                .vectorColumn("body_embedding")
+                                .queryVector(new float[] {0.0f, 1.0f, 0.0f})
+                                .limit(50)
+                                .option("ivf.nprobe", "16")
+                                .build())
+                .limit(10)
+                .fusionRrf()
+                .build();
+
+ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);
+TableScan.Plan plan = readBuilder.newScan().plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> {
+        System.out.println("id=" + row.getInt(0));
+    });
+}
+```
+
+The Java API also supports single-column vector pushdown with
+`table.newReadBuilder().withVectorSearch(VectorSearch.builder()...)`. Vector search and
+multi-vector search are batch scan APIs.
+
+</TabItem>
+
+</Tabs>
+
 ## Full-Text Index
 
 Full-Text Index provides text search capabilities powered by Tantivy. It is suitable for text retrieval scenarios
