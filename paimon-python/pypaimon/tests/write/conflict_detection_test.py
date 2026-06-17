@@ -127,6 +127,29 @@ class TestCheckRowIdExistence(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("Row ID existence conflict", str(result))
 
+    def test_no_conflict_when_replacement_ranges_are_deleted_in_same_commit(self):
+        detection = self._make_detection()
+        base = [_make_entry("old", kind=0, first_row_id=0, row_count=5)]
+        delta = [
+            _make_entry("old", kind=1, first_row_id=0, row_count=5),
+            _make_entry("left", kind=0, first_row_id=0, row_count=2),
+            _make_entry("right", kind=0, first_row_id=3, row_count=2),
+        ]
+        self.assertIsNone(
+            detection.check_row_id_existence(base, delta, next_row_id=5))
+
+    def test_conflict_when_delete_entry_does_not_match_base_file_identity(self):
+        detection = self._make_detection()
+        base = [_make_entry("old", kind=0, first_row_id=0, row_count=5)]
+        delta = [
+            _make_entry("other", kind=1, first_row_id=0, row_count=5),
+            _make_entry("left", kind=0, first_row_id=0, row_count=2),
+            _make_entry("right", kind=0, first_row_id=3, row_count=2),
+        ]
+        result = detection.check_row_id_existence(base, delta, next_row_id=5)
+        self.assertIsNotNone(result)
+        self.assertIn("Row ID existence conflict", str(result))
+
     def test_no_conflict_when_blob_file_range_is_covered(self):
         detection = self._make_detection()
         base = [_make_entry("f1", kind=0, first_row_id=0, row_count=100)]

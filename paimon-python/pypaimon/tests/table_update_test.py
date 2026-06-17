@@ -22,6 +22,7 @@ import unittest
 
 import pyarrow as pa
 
+from pypaimon.common.predicate import Predicate
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
@@ -48,6 +49,9 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
     # ------------------------------------------------------------------
 
     def _apply_update(self, table_update, data, cid):
+        raise NotImplementedError
+
+    def _apply_delete(self, table_update, predicate, cid):
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -86,6 +90,17 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         tu = wb.new_update().with_update_type(columns)
         cid = self._next_commit_id()
         msgs = self._apply_update(tu, data, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _do_delete(self, table, predicate):
+        """End-to-end ``delete_by_filter`` + commit."""
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete(tu, predicate, cid)
         tc = wb.new_commit()
         self._apply_commit(tc, msgs, cid)
         tc.close()
@@ -401,6 +416,187 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(0, all_files[0].first_row_id)
         self.assertEqual(N, all_files[0].row_count)
 
+    def test_delete_by_filter_splits_file(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'age': [25, 30, 35, 40, 45],
+            'city': ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete(tu, predicate, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+
+        files = [
+            file
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        ]
+        ranges = sorted(
+            (file.first_row_id, file.row_count)
+            for file in files
+            if not file.file_name.endswith('.blob')
+        )
+        self.assertEqual([(0, 2), (3, 2)], ranges)
+
+    def test_delete_by_filter_empty_match_returns_no_commit_messages(self):
+        table = self._create_seeded_table()
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 999)
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete(tu, predicate, cid)
+
+        self.assertEqual([], msgs)
+        self.assertEqual([1, 2, 3, 4, 5], self._read_all(table).sort_by('id')['id'].to_pylist())
+
+    def test_delete_by_filter_deletes_whole_file(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'age': [25, 30, 35],
+            'city': ['NYC', 'LA', 'Chicago'],
+        }, schema=self.pa_schema))
+
+        predicate = table.new_read_builder().new_predicate_builder().less_or_equal('id', 3)
+        msgs = self._do_delete(table, predicate)
+
+        self.assertEqual(1, len(msgs))
+        self.assertEqual([], msgs[0].new_files)
+        self.assertEqual(1, len(msgs[0].deleted_files))
+        self.assertEqual([], self._read_all(table)['id'].to_pylist())
+
+    def test_delete_by_filter_deleted_row_id_cannot_be_updated(self):
+        table = self._create_seeded_table()
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        self._do_delete(table, predicate)
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age'])
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_update(
+                tu,
+                pa.Table.from_pydict({'_ROW_ID': [2], 'age': [999]}),
+                self._next_commit_id(),
+            )
+        self.assertIn('does not belong to any valid range', str(ctx.exception))
+
+    def test_delete_by_filter_invalid_row_id_raises(self):
+        table = self._create_seeded_table()
+        predicate = Predicate('equal', 0, '_ROW_ID', [999])
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_delete(tu, predicate, self._next_commit_id())
+        self.assertIn('Row ID 999 does not belong', str(ctx.exception))
+
+    def test_delete_by_filter_row_id_between_splits_file(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'age': [25, 30, 35, 40, 45],
+            'city': ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
+        predicate = Predicate('between', 0, '_ROW_ID', [1, 3])
+
+        self._do_delete(table, predicate)
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 5], result['id'].to_pylist())
+
+        files = [
+            file
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        ]
+        self.assertEqual(
+            [(0, 1), (4, 1)],
+            sorted((file.first_row_id, file.row_count) for file in files),
+        )
+
+    def test_delete_by_filter_validates_row_id_inside_or_predicate(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        predicate = Predicate(
+            'or',
+            None,
+            None,
+            [Predicate('equal', 0, '_ROW_ID', [999]), pb.equal('id', 1)],
+        )
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_delete(tu, predicate, self._next_commit_id())
+        self.assertIn('Row ID 999 does not belong', str(ctx.exception))
+
+    def test_delete_by_filter_requires_data_evolution(self):
+        table = self._create_table(options={'row-tracking.enabled': 'true'})
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'age': [25],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 1)
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_delete(tu, predicate, self._next_commit_id())
+        self.assertIn('data-evolution.enabled', str(ctx.exception))
+
+    def test_delete_by_filter_unknown_predicate_field_raises(self):
+        table = self._create_seeded_table()
+        predicate = Predicate('equal', 0, 'missing_field', [1])
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_delete(tu, predicate, self._next_commit_id())
+        self.assertIn('missing_field', str(ctx.exception))
+
+    def test_delete_by_filter_after_update_removes_delta_files(self):
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [2], 'age': [99]}),
+            ['age'],
+        )
+
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        self._do_delete(table, predicate)
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4, 5], result['id'].to_pylist())
+        self.assertEqual([25, 30, 40, 45], result['age'].to_pylist())
+
+        files = [
+            file
+            for split in table.new_read_builder().new_scan().plan().splits()
+            for file in split.files
+        ]
+        self.assertTrue(all(file.write_cols is None for file in files))
+        self.assertEqual(
+            [(0, 2), (3, 2)],
+            sorted((file.first_row_id, file.row_count) for file in files),
+        )
+
     # ------------------------------------------------------------------
     # Validation tests
     # ------------------------------------------------------------------
@@ -659,10 +855,16 @@ class _BatchModeMixin(BatchModeMixin):
     def _apply_update(self, table_update, data, cid):
         return table_update.update_by_arrow_with_row_id(data)
 
+    def _apply_delete(self, table_update, predicate, cid):
+        return table_update.delete_by_filter(predicate)
+
 
 class _StreamModeMixin(StreamModeMixin):
     def _apply_update(self, table_update, data, cid):
         return table_update.update_by_arrow_with_row_id(data, cid)
+
+    def _apply_delete(self, table_update, predicate, cid):
+        return table_update.delete_by_filter(predicate, cid)
 
 
 # ======================================================================

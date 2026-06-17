@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 import pyarrow
 import pyarrow as pa
 
+from pypaimon.common.predicate import Predicate
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -173,6 +174,15 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier
         ).upsert(table, upsert_keys, self.update_cols)
 
+    def _delete_by_filter(
+            self, predicate: Predicate, commit_identifier: int
+    ) -> List[CommitMessage]:
+        from pypaimon.write.table_delete_by_filter import TableDeleteByFilter
+
+        return TableDeleteByFilter(
+            self.table, self.commit_user, commit_identifier
+        ).delete_by_filter(predicate)
+
 
 class BatchTableUpdate(TableUpdate):
     """Batch-mode table update; commit messages always use
@@ -189,6 +199,10 @@ class BatchTableUpdate(TableUpdate):
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, BATCH_COMMIT_IDENTIFIER
         )
+
+    def delete_by_filter(self, predicate: Predicate) -> List[CommitMessage]:
+        """Delete rows matching ``predicate`` from a data-evolution table."""
+        return self._delete_by_filter(predicate, BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableUpdate(TableUpdate):
@@ -213,6 +227,12 @@ class StreamTableUpdate(TableUpdate):
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, commit_identifier
         )
+
+    def delete_by_filter(
+            self, predicate: Predicate, commit_identifier: int
+    ) -> List[CommitMessage]:
+        """Delete rows matching ``predicate`` from a data-evolution table."""
+        return self._delete_by_filter(predicate, commit_identifier)
 
 
 class ShardTableUpdator:

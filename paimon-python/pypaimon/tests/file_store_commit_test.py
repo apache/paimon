@@ -448,6 +448,72 @@ class TestFileStoreCommit(unittest.TestCase):
             snapshot_commit.commit.call_args[0][0].index_manifest
         )
 
+    def test_commit_messages_emit_delete_manifest_entries(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        from pypaimon.schema.data_types import AtomicType, DataField
+
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.partition_keys = ['dt']
+        self.mock_table.partition_keys_fields = [
+            DataField(0, 'dt', AtomicType('STRING'))
+        ]
+        self.mock_table.total_buckets = None
+        self.mock_table.options.row_tracking_enabled.return_value = False
+
+        deleted_file = DataFileMeta.create(
+            file_name="old.parquet",
+            file_size=100,
+            row_count=5,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=1,
+            max_sequence_number=1,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+        )
+        new_file = DataFileMeta.create(
+            file_name="left.parquet",
+            file_size=40,
+            row_count=2,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+        )
+
+        captured = {}
+        file_store_commit._try_commit = Mock(
+            side_effect=lambda **kwargs: captured.update(kwargs))
+
+        file_store_commit.commit([
+            CommitMessage(
+                partition=('2024-01-15',),
+                bucket=0,
+                new_files=[new_file],
+                deleted_files=[deleted_file],
+            )
+        ], commit_identifier=42)
+
+        entries = captured['commit_entries_plan'](None)
+        self.assertEqual([1, 0], [entry.kind for entry in entries])
+        self.assertEqual([deleted_file, new_file], [entry.file for entry in entries])
+        self.assertEqual(
+            [('2024-01-15',), ('2024-01-15',)],
+            [tuple(entry.partition.values) for entry in entries],
+        )
+
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):
         from pypaimon.data.timestamp import Timestamp

@@ -137,6 +137,14 @@ class FileStoreCommit:
         commit_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.deleted_files:
+                commit_entries.append(ManifestEntry(
+                    kind=1,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file
+                ))
             for file in msg.new_files:
                 commit_entries.append(ManifestEntry(
                     kind=0,

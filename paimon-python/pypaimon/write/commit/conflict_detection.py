@@ -205,31 +205,50 @@ class ConflictDetection:
         if not files_to_check:
             return None
 
-        existing_index = set()
+        existing_identifiers = set()
         existing_ranges = {}
+        deleted_ranges = {}
         for base in base_entries:
             if base.file.first_row_id is not None:
-                existing_index.add((
-                    base.partition, base.bucket,
-                    base.file.first_row_id, base.file.row_count))
+                existing_identifiers.add(base.identifier())
                 if not DataFileMeta.is_blob_file(base.file.file_name):
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
+        for entry in delta_entries:
+            if (entry.kind == 1
+                    and entry.file.first_row_id is not None
+                    and entry.identifier() in existing_identifiers):
+                deleted_ranges.setdefault((entry.partition, entry.bucket), []).append(
+                    entry.file.row_id_range())
 
         existing_ranges = {
             key: Range.sort_and_merge_overlap(ranges, True, True)
             for key, ranges in existing_ranges.items()
         }
+        deleted_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in deleted_ranges.items()
+        }
 
         for entry in files_to_check:
+            base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
+            own_deleted_ranges = deleted_ranges.get((entry.partition, entry.bucket), [])
+            if (own_deleted_ranges
+                    and not entry.file.row_id_range().exclude(own_deleted_ranges)
+                    and not entry.file.row_id_range().exclude(base_ranges)):
+                continue
             if DataFileMeta.is_blob_file(entry.file.file_name):
-                base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
                 if not entry.file.row_id_range().exclude(base_ranges):
                     continue
 
             key = (entry.partition, entry.bucket,
                    entry.file.first_row_id, entry.file.row_count)
-            if key not in existing_index:
+            if not any(
+                    base.partition == entry.partition
+                    and base.bucket == entry.bucket
+                    and base.file.first_row_id == entry.file.first_row_id
+                    and base.file.row_count == entry.file.row_count
+                    for base in base_entries):
                 return RuntimeError(
                     "Row ID existence conflict: file '{}' references "
                     "firstRowId={}, rowCount={} in bucket {}, "
