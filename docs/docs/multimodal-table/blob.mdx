@@ -72,18 +72,21 @@ For details about the blob file format structure, see [File Format - BLOB](../co
 
 ## Storage Modes
 
-Paimon supports four storage modes for BLOB fields, selected via **comment directives** on the column:
+Paimon supports four storage modes for BLOB fields, selected via **table options**. In SQL DDL,
+set these options explicitly so the catalog can convert the corresponding `BYTES`/`BINARY` columns
+to Paimon `BLOB` fields when the table is created. Column **comment directives** are also supported
+as a shorthand, but explicit options are recommended for portable Flink SQL and Spark SQL examples.
 
-1. **Default blob storage** (`__BLOB_FIELD`)
+1. **Default blob storage** (`blob-field`, or `__BLOB_FIELD` directive)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
 
-2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
+2. **Descriptor-only storage** (`blob-descriptor-field`, or `__BLOB_DESCRIPTOR_FIELD` directive)
    Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
 
-3. **External-storage descriptor mode** (`__BLOB_EXTERNAL_STORAGE_FIELD`)
+3. **External-storage descriptor mode** (`blob-descriptor-field` + `blob-external-storage-field`, or `__BLOB_EXTERNAL_STORAGE_FIELD` directive)
    At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
 
-4. **Blob view storage** (`__BLOB_VIEW_FIELD`)
+4. **Blob view storage** (`blob-view-field`, or `__BLOB_VIEW_FIELD` directive)
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
 This allows one table to mix different storage modes for different BLOB columns.
@@ -101,6 +104,42 @@ This allows one table to mix different storage modes for different BLOB columns.
       </tr>
     </thead>
     <tbody>
+    <tr>
+      <td><h5>blob-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated field names to store as normal BLOB fields. In Flink SQL these fields must be <code>BYTES</code>; in Spark SQL they must be <code>BINARY</code>. The catalog converts them to Paimon <code>BLOB</code> fields when the table is created.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-descriptor-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated field names to store as serialized <code>BlobDescriptor</code> bytes inline in data files. These fields are also converted to Paimon <code>BLOB</code> fields.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-view-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated field names to store as serialized <code>BlobViewStruct</code> bytes inline in data files and resolve from upstream tables at read time. These fields are also converted to Paimon <code>BLOB</code> fields.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-external-storage-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated BLOB field names whose raw data is written to <code>blob-external-storage-path</code> at write time. These fields must also be listed in <code>blob-descriptor-field</code>.
+      </td>
+    </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
       <td>No</td>
@@ -134,7 +173,7 @@ This allows one table to mix different storage modes for different BLOB columns.
       <td style={{wordWrap: "break-word"}}>(none)</td>
       <td>String</td>
       <td>
-        External storage path for fields declared with <code>__BLOB_EXTERNAL_STORAGE_FIELD</code>.
+        External storage path for fields declared with <code>blob-external-storage-field</code>.
         Orphan file cleanup is not applied to this path.
       </td>
     </tr>
@@ -162,7 +201,7 @@ This allows one table to mix different storage modes for different BLOB columns.
     </tbody>
 </table>
 
-*Required for blob functionality to work correctly.
+Note: `row-tracking.enabled` and `data-evolution.enabled` are required for blob functionality to work correctly.
 
 Specifically, if the storage system of the input BlobDescriptor differs from that used by Paimon, 
 you can specify the storage configuration for the input blob descriptor using the prefix 
@@ -172,8 +211,9 @@ you can configure it as below (using flink sql as an example):
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES COMMENT '__BLOB_FIELD'
+    image BYTES COMMENT 'product image'
 ) WITH (
+    'blob-field' = 'image',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'fs.oss.endpoint' = 'aaa',                   -- This is for Paimon's own config
@@ -183,7 +223,13 @@ CREATE TABLE image_table (
 
 ## Creating a Table
 
-The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column type to `BLOB` and registers it in the corresponding option.
+The recommended way to create a blob table in SQL is to set the corresponding table option:
+`blob-field`, `blob-descriptor-field`, `blob-view-field`, or `blob-external-storage-field`. Paimon
+converts the configured `BYTES`/`BINARY` columns to `BLOB` when the table is created.
+
+Comment directives such as `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, and `__BLOB_VIEW_FIELD` can
+still be used as shorthand. If you use directives, Paimon automatically registers the field in the
+corresponding table option.
 
 <Tabs groupId="blob-create-table">
 
@@ -193,8 +239,9 @@ The recommended way to create a blob table in SQL is to use the **comment direct
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES COMMENT '__BLOB_FIELD; product image'
+    image BYTES COMMENT 'product image'
 ) WITH (
+    'blob-field' = 'image',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -202,10 +249,13 @@ CREATE TABLE image_table (
 -- Multiple blob columns with different storage modes
 CREATE TABLE media_table (
     id INT,
-    photo BYTES COMMENT '__BLOB_FIELD; original photo',
-    thumbnail BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; thumbnail descriptor',
-    preview BYTES COMMENT '__BLOB_VIEW_FIELD; preview from upstream'
+    photo BYTES COMMENT 'original photo',
+    thumbnail BYTES COMMENT 'thumbnail descriptor',
+    preview BYTES COMMENT 'preview from upstream'
 ) WITH (
+    'blob-field' = 'photo',
+    'blob-descriptor-field' = 'thumbnail',
+    'blob-view-field' = 'preview',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -219,8 +269,23 @@ CREATE TABLE media_table (
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BINARY COMMENT '__BLOB_FIELD; product image'
+    image BINARY COMMENT 'product image'
 ) TBLPROPERTIES (
+    'blob-field' = 'image',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true'
+);
+
+-- Multiple blob columns with different storage modes
+CREATE TABLE media_table (
+    id INT,
+    photo BINARY COMMENT 'original photo',
+    thumbnail BINARY COMMENT 'thumbnail descriptor',
+    preview BINARY COMMENT 'preview from upstream'
+) TBLPROPERTIES (
+    'blob-field' = 'photo',
+    'blob-descriptor-field' = 'thumbnail',
+    'blob-view-field' = 'preview',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -231,11 +296,12 @@ CREATE TABLE image_table (
 <TabItem value="java" label="Java API">
 
 ```java
-// Java API uses BlobType directly, with comment directive for auto option registration
+// Java API can use BlobType directly and set blob field options explicitly.
 Schema schema = Schema.newBuilder()
         .column("id", DataTypes.INT())
         .column("name", DataTypes.STRING())
-        .column("image", DataTypes.BYTES(), "__BLOB_FIELD; product image")
+        .column("image", DataTypes.BLOB(), "product image")
+        .option("blob-field", "image")
         .option("row-tracking.enabled", "true")
         .option("data-evolution.enabled", "true")
         .build();
@@ -259,6 +325,7 @@ pa_schema = pa.schema([
 schema = Schema.from_pyarrow_schema(
     pa_schema,
     options={
+        'blob-field': 'image',
         'row-tracking.enabled': 'true',
         'data-evolution.enabled': 'true',
     }
@@ -282,7 +349,9 @@ Supported directives:
 
 ## Adding a Blob Column
 
-The same comment directive works with `ALTER TABLE ADD COLUMN`:
+For table creation, prefer explicit blob field options. For `ALTER TABLE ADD COLUMN`, the same
+comment directives work as a shorthand to add the column and update the corresponding blob option in
+one schema change:
 
 <Tabs groupId="blob-add-column">
 
@@ -445,13 +514,15 @@ Blob blob = Blob.fromDescriptor(uriReader, descriptor);                        /
 
 ## Descriptor-Only Storage
 
-If you want downstream tables to **reuse** upstream blob files (no copying and no new `.blob` files), use `__BLOB_DESCRIPTOR_FIELD`:
+If you want downstream tables to **reuse** upstream blob files (no copying and no new `.blob` files),
+list the column in `blob-descriptor-field`:
 
 ```sql
 CREATE TABLE descriptor_table (
     id INT,
-    image BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; reused image'
+    image BYTES COMMENT 'reused image'
 ) WITH (
+    'blob-descriptor-field' = 'image',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -461,13 +532,17 @@ Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Readi
 
 ## External Storage
 
-If you want Paimon to write raw blob data to a separate external location while keeping only descriptor bytes inline, use `__BLOB_EXTERNAL_STORAGE_FIELD`:
+If you want Paimon to write raw blob data to a separate external location while keeping only
+descriptor bytes inline, list the column in both `blob-descriptor-field` and
+`blob-external-storage-field`:
 
 ```sql
 CREATE TABLE external_table (
     id INT,
-    image BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
+    image BYTES COMMENT 'external image'
 ) WITH (
+    'blob-descriptor-field' = 'image',
+    'blob-external-storage-field' = 'image',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'blob-external-storage-path' = 'oss://bucket/path/'
@@ -488,7 +563,7 @@ Blob view is useful when a downstream table should reference BLOB values already
 Blob view requires:
 
 - the upstream table to have row tracking enabled, so each row has a stable `_ROW_ID`
-- the downstream field to be declared with `__BLOB_VIEW_FIELD` comment directive
+- the downstream field to be listed in `blob-view-field`
 - writes to provide a serialized `BlobViewStruct`; in Flink SQL, use the built-in `sys.blob_view` function
 
 The Flink SQL function signature is:
@@ -509,8 +584,9 @@ The following example writes a downstream table whose `image_ref` field views th
 CREATE TABLE image_table (
     id INT,
     name STRING,
-    image BYTES COMMENT '__BLOB_FIELD'
+    image BYTES COMMENT 'source image'
 ) WITH (
+    'blob-field' = 'image',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -518,8 +594,9 @@ CREATE TABLE image_table (
 CREATE TABLE image_view_table (
     id INT,
     label STRING,
-    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
+    image_ref BYTES COMMENT 'image reference from upstream'
 ) WITH (
+    'blob-view-field' = 'image_ref',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -546,7 +623,7 @@ Reads from `image_view_table.image_ref` return the referenced BLOB bytes in the 
 By default, reading a blob view field resolves the `BlobViewStruct` and returns the upstream BLOB
 content. If you want to import data from one blob view table into another blob view table without
 copying the BLOB bytes, read the source table with `blob-view.resolve.enabled=false` and write the
-result into a target field declared with `__BLOB_VIEW_FIELD`.
+result into a target field listed in `blob-view-field`.
 
 With this option disabled, Paimon preserves the serialized `BlobViewStruct` during reads. When the
 preserved value is written to another blob view field, the target table stores the same upstream
@@ -558,8 +635,9 @@ For example, if table `T1` contains blob view references to BLOBs in table `T0`,
 ```sql
 CREATE TABLE t2 (
     id INT,
-    image_ref BYTES COMMENT '__BLOB_VIEW_FIELD'
+    image_ref BYTES COMMENT 'forwarded image reference'
 ) WITH (
+    'blob-view-field' = 'image_ref',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true'
 );
@@ -594,12 +672,12 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 2. **Set Appropriate Target File Size**: Configure `blob.target-file-size` based on your blob sizes. Larger values mean fewer files but larger individual files.
 
-3. **Use Descriptor Fields When Reusing External Blob Files**: Use `__BLOB_DESCRIPTOR_FIELD` for fields that should keep descriptor references instead of writing new `.blob` files.
+3. **Use Descriptor Fields When Reusing External Blob Files**: Use `blob-descriptor-field` for fields that should keep descriptor references instead of writing new `.blob` files.
 
-4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Use `__BLOB_EXTERNAL_STORAGE_FIELD` with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
+4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Use `blob-external-storage-field` with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
 
 5. **Manage External Storage Lifecycle Separately**: Files written to `blob-external-storage-path` are not cleaned up by Paimon, so retention and deletion should be managed externally.
 
-6. **Use Blob View to Avoid Copying BLOB Data**: Use `__BLOB_VIEW_FIELD` when a downstream table only needs to reference BLOB values from an upstream table.
+6. **Use Blob View to Avoid Copying BLOB Data**: Use `blob-view-field` when a downstream table only needs to reference BLOB values from an upstream table.
 
 7. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
