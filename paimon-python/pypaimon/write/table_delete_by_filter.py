@@ -22,8 +22,10 @@ import pyarrow as pa
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.read.push_down_utils import rewrite_predicate_indices
 from pypaimon.read.split import DataSplit
 from pypaimon.table.special_fields import SpecialFields
+from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
@@ -140,8 +142,23 @@ class TableDeleteByFilter:
             read_builder.new_scan().plan().splits())
         if table is None or table.num_rows == 0:
             return []
+        self._validate_matched_rows(predicate, table, read_builder.read_type())
         row_ids = table[SpecialFields.ROW_ID.name].to_pylist()
         return sorted(set(row_ids))
+
+    @staticmethod
+    def _validate_matched_rows(
+            predicate: Predicate, table: pa.Table, read_type
+    ) -> None:
+        predicate_for_rows = rewrite_predicate_indices(predicate, read_type)
+        for row in table.to_pylist():
+            row_tuple = tuple(row[field.name] for field in read_type)
+            offset_row = OffsetRow(row_tuple, 0, len(row_tuple))
+            if not predicate_for_rows.test(offset_row):
+                row_id = row.get(SpecialFields.ROW_ID.name)
+                raise RuntimeError(
+                    f"Read row with _ROW_ID {row_id} does not match predicate."
+                )
 
     def _predicate_fields(self, predicate: Predicate) -> Set[str]:
         if predicate.field is not None:

@@ -28,6 +28,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     DataEvolutionTestBase,
     StreamModeMixin,
 )
+from pypaimon.table.special_fields import SpecialFields
 
 
 # ======================================================================
@@ -570,6 +571,68 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         with self.assertRaises(ValueError) as ctx:
             self._apply_delete(tu, predicate, self._next_commit_id())
         self.assertIn('missing_field', str(ctx.exception))
+
+    def test_delete_by_filter_validates_read_rows_match_predicate(self):
+        from pypaimon.write.table_delete_by_filter import TableDeleteByFilter
+
+        table = self._create_seeded_table()
+        predicate = table.new_read_builder().new_predicate_builder().equal('id', 3)
+        deleter = TableDeleteByFilter(table, 'test_user', self._next_commit_id())
+        original_new_read_builder = table.new_read_builder
+
+        class _FakePlan:
+            def splits(self):
+                return []
+
+        class _FakeScan:
+            def plan(self):
+                return _FakePlan()
+
+        class _FakeRead:
+            def __init__(self, builder):
+                self.builder = builder
+
+            def to_arrow(self, splits):
+                values = {
+                    'id': [3, 4],
+                    SpecialFields.ROW_ID.name: [2, 3],
+                }
+                return pa.Table.from_pydict({
+                    name: values[name] for name in self.builder.projection
+                })
+
+        class _FakeReadBuilder:
+            def __init__(self):
+                self.projection = None
+
+            def with_projection(self, projection):
+                self.projection = projection
+                return self
+
+            def with_filter(self, predicate):
+                return self
+
+            def new_scan(self):
+                return _FakeScan()
+
+            def new_read(self):
+                return _FakeRead(self)
+
+            def read_type(self):
+                return (
+                    original_new_read_builder()
+                    .with_projection(self.projection)
+                    .read_type()
+                )
+
+        try:
+            table.new_read_builder = lambda: _FakeReadBuilder()
+            with self.assertRaises(RuntimeError) as ctx:
+                deleter._matched_row_ids(predicate)
+        finally:
+            table.new_read_builder = original_new_read_builder
+
+        self.assertIn('does not match predicate', str(ctx.exception))
 
     def test_delete_by_filter_after_update_removes_delta_files(self):
         table = self._create_seeded_table()
