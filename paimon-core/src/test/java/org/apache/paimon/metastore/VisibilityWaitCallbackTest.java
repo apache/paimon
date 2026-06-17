@@ -19,9 +19,12 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
@@ -31,12 +34,14 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -100,12 +105,54 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
         }
     }
 
+    @Test
+    public void testDoNotWaitForGlobalIndexBuildOfUnindexedPartition() throws Exception {
+        Identifier identifier = identifier("PartitionedTable");
+        catalog.createTable(identifier, partitionedSchema(), false);
+        FileStoreTable table = getTable(identifier);
+
+        writePartitionRows(table, "a", 0, 3);
+        buildPartitionIndex(table, "a");
+
+        writePartitionRows(getTable(identifier), "b", 3, 2);
+    }
+
+    private Schema partitionedSchema() {
+        return Schema.newBuilder()
+                .column("pt", DataTypes.STRING())
+                .column("f0", DataTypes.INT())
+                .column("f1", DataTypes.STRING())
+                .partitionKeys("pt")
+                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                .option(CoreOptions.VISIBILITY_CALLBACK_ENABLED.key(), "true")
+                .option(CoreOptions.VISIBILITY_CALLBACK_CHECK_INTERVAL.key(), "100 ms")
+                .option(CoreOptions.VISIBILITY_CALLBACK_TIMEOUT.key(), "1 s")
+                .build();
+    }
+
     private void writeRows(FileStoreTable table, int start, int count) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = builder.newWrite();
                 BatchTableCommit commit = builder.newCommit()) {
             for (int i = start; i < start + count; i++) {
                 write.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void writePartitionRows(FileStoreTable table, String partition, int start, int count)
+            throws Exception {
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            for (int i = start; i < start + count; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(partition),
+                                i,
+                                BinaryString.fromString("a" + i)));
             }
             commit.commit(write.prepareCommit());
         }
@@ -125,6 +172,33 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }
+    }
+
+    private void buildPartitionIndex(FileStoreTable table, String partition) throws Exception {
+        BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table)
+                        .withIndexField("f1")
+                        .withPartitionPredicate(partitionPredicate(table, partition));
+        Optional<Pair<RowRangeIndex, List<DataSplit>>> scan = builder.scan();
+        assertThat(scan).isPresent();
+
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : scan.get().getRight()) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
+
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
+    }
+
+    private PartitionPredicate partitionPredicate(FileStoreTable table, String partition) {
+        RowType partType = table.rowType().project("pt");
+        Predicate predicate =
+                PartitionPredicate.createPartitionPredicate(
+                        partType,
+                        Collections.singletonMap("pt", BinaryString.fromString(partition)));
+        return PartitionPredicate.fromPredicate(partType, predicate);
     }
 
     private void waitUntil(BooleanSupplier condition) throws Exception {

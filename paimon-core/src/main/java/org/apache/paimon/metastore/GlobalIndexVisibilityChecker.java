@@ -19,6 +19,7 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -44,57 +45,73 @@ import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 class GlobalIndexVisibilityChecker {
 
     private final FileStoreTable table;
-    private final List<Range> rowIdRangesToTrack;
-    private final Set<GlobalIndexIdentifier> globalIndexesToTrack;
+    private final Map<BinaryRow, List<Range>> rowIdRangesByPartition;
+    private final Map<BinaryRow, Set<GlobalIndexIdentifier>> globalIndexesByPartition;
 
     private GlobalIndexVisibilityChecker(
             FileStoreTable table,
-            List<Range> rowIdRangesToTrack,
-            Set<GlobalIndexIdentifier> globalIndexesToTrack) {
+            Map<BinaryRow, List<Range>> rowIdRangesByPartition,
+            Map<BinaryRow, Set<GlobalIndexIdentifier>> globalIndexesByPartition) {
         this.table = table;
-        this.rowIdRangesToTrack = rowIdRangesToTrack;
-        this.globalIndexesToTrack = globalIndexesToTrack;
+        this.rowIdRangesByPartition = rowIdRangesByPartition;
+        this.globalIndexesByPartition = globalIndexesByPartition;
     }
 
     static GlobalIndexVisibilityChecker create(
             FileStoreTable table, Snapshot snapshot, List<ManifestEntry> deltaFiles) {
-        List<Range> rowIdRangesToTrack = collectRowIdRangesToTrack(deltaFiles);
-        Set<GlobalIndexIdentifier> globalIndexesToTrack =
-                rowIdRangesToTrack.isEmpty()
-                        ? new HashSet<>()
-                        : collectGlobalIndexesToTrack(table, snapshot);
-        return new GlobalIndexVisibilityChecker(table, rowIdRangesToTrack, globalIndexesToTrack);
+        Map<BinaryRow, List<Range>> rowIdRangesByPartition =
+                collectRowIdRangesByPartition(deltaFiles);
+        Map<BinaryRow, Set<GlobalIndexIdentifier>> globalIndexesByPartition =
+                rowIdRangesByPartition.isEmpty()
+                        ? new HashMap<>()
+                        : collectGlobalIndexesByPartition(
+                                table, snapshot, rowIdRangesByPartition.keySet());
+        return new GlobalIndexVisibilityChecker(
+                table, rowIdRangesByPartition, globalIndexesByPartition);
     }
 
     boolean noNeedToWait() {
-        return rowIdRangesToTrack.isEmpty() || globalIndexesToTrack.isEmpty();
+        return globalIndexesByPartition.isEmpty();
     }
 
     boolean visibleIn(Snapshot snapshot) {
-        Map<GlobalIndexIdentifier, List<Range>> indexedRanges = new HashMap<>();
+        Map<BinaryRow, Map<GlobalIndexIdentifier, List<Range>>> indexedRangesByPartition =
+                new HashMap<>();
         for (IndexManifestEntry entry : scanGlobalIndexes(table, snapshot)) {
             GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
             if (globalIndex == null) {
                 continue;
             }
 
-            GlobalIndexIdentifier identifier =
-                    new GlobalIndexIdentifier(
-                            entry.indexFile().indexType(),
-                            globalIndex.indexFieldId(),
-                            globalIndex.extraFieldIds());
-            if (globalIndexesToTrack.contains(identifier)) {
-                indexedRanges
+            Set<GlobalIndexIdentifier> identifiers =
+                    globalIndexesByPartition.get(entry.partition());
+            if (identifiers == null) {
+                continue;
+            }
+
+            GlobalIndexIdentifier identifier = identifierOf(entry);
+            if (identifiers.contains(identifier)) {
+                indexedRangesByPartition
+                        .computeIfAbsent(entry.partition().copy(), k -> new HashMap<>())
                         .computeIfAbsent(identifier, k -> new ArrayList<>())
                         .add(globalIndex.rowRange());
             }
         }
 
-        for (GlobalIndexIdentifier identifier : globalIndexesToTrack) {
-            List<Range> ranges = Range.sortAndMergeOverlap(indexedRanges.get(identifier), true);
-            for (Range rowIdRange : rowIdRangesToTrack) {
-                if (!rowIdRange.exclude(ranges).isEmpty()) {
-                    return false;
+        for (Map.Entry<BinaryRow, Set<GlobalIndexIdentifier>> partitionIndexes :
+                globalIndexesByPartition.entrySet()) {
+            BinaryRow partition = partitionIndexes.getKey();
+            List<Range> rowIdRanges = rowIdRangesByPartition.get(partition);
+            Map<GlobalIndexIdentifier, List<Range>> indexedRanges =
+                    indexedRangesByPartition.get(partition);
+            for (GlobalIndexIdentifier identifier : partitionIndexes.getValue()) {
+                List<Range> ranges =
+                        Range.sortAndMergeOverlap(
+                                indexedRanges == null ? null : indexedRanges.get(identifier), true);
+                for (Range rowIdRange : rowIdRanges) {
+                    if (!rowIdRange.exclude(ranges).isEmpty()) {
+                        return false;
+                    }
                 }
             }
         }
@@ -102,14 +119,20 @@ class GlobalIndexVisibilityChecker {
         return true;
     }
 
-    private static List<Range> collectRowIdRangesToTrack(List<ManifestEntry> deltaFiles) {
-        List<Range> ranges = new ArrayList<>();
+    private static Map<BinaryRow, List<Range>> collectRowIdRangesByPartition(
+            List<ManifestEntry> deltaFiles) {
+        Map<BinaryRow, List<Range>> rangesByPartition = new HashMap<>();
         for (ManifestEntry entry : deltaFiles) {
             if (shouldTrackGlobalIndex(entry)) {
-                ranges.add(entry.file().nonNullRowIdRange());
+                rangesByPartition
+                        .computeIfAbsent(entry.partition().copy(), k -> new ArrayList<>())
+                        .add(entry.file().nonNullRowIdRange());
             }
         }
-        return Range.sortAndMergeOverlap(ranges, true);
+        for (Map.Entry<BinaryRow, List<Range>> entry : rangesByPartition.entrySet()) {
+            entry.setValue(Range.sortAndMergeOverlap(entry.getValue(), true));
+        }
+        return rangesByPartition;
     }
 
     private static boolean shouldTrackGlobalIndex(ManifestEntry entry) {
@@ -130,20 +153,18 @@ class GlobalIndexVisibilityChecker {
         return !isBlobFile(file.fileName());
     }
 
-    private static Set<GlobalIndexIdentifier> collectGlobalIndexesToTrack(
-            FileStoreTable table, Snapshot snapshot) {
-        Set<GlobalIndexIdentifier> indexes = new HashSet<>();
+    private static Map<BinaryRow, Set<GlobalIndexIdentifier>> collectGlobalIndexesByPartition(
+            FileStoreTable table, Snapshot snapshot, Set<BinaryRow> partitionsToTrack) {
+        Map<BinaryRow, Set<GlobalIndexIdentifier>> indexesByPartition = new HashMap<>();
         for (IndexManifestEntry entry : scanGlobalIndexes(table, snapshot)) {
             GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-            if (globalIndex != null) {
-                indexes.add(
-                        new GlobalIndexIdentifier(
-                                entry.indexFile().indexType(),
-                                globalIndex.indexFieldId(),
-                                globalIndex.extraFieldIds()));
+            if (globalIndex != null && partitionsToTrack.contains(entry.partition())) {
+                indexesByPartition
+                        .computeIfAbsent(entry.partition().copy(), k -> new HashSet<>())
+                        .add(identifierOf(entry));
             }
         }
-        return indexes;
+        return indexesByPartition;
     }
 
     private static List<IndexManifestEntry> scanGlobalIndexes(
@@ -151,6 +172,14 @@ class GlobalIndexVisibilityChecker {
         return table.store()
                 .newIndexFileHandler()
                 .scan(snapshot, entry -> entry.indexFile().globalIndexMeta() != null);
+    }
+
+    private static GlobalIndexIdentifier identifierOf(IndexManifestEntry entry) {
+        GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
+        return new GlobalIndexIdentifier(
+                entry.indexFile().indexType(),
+                globalIndex.indexFieldId(),
+                globalIndex.extraFieldIds());
     }
 
     private static class GlobalIndexIdentifier {
