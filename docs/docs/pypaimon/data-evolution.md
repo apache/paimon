@@ -53,6 +53,7 @@ Method signatures that differ between modes:
 |---------------------------------|------------------------------------------------|-------------------------------------------------------------------|
 | `prepare_commit()`              | `write.prepare_commit()`                       | `write.prepare_commit(commit_identifier)`                         |
 | `update_by_arrow_with_row_id()` | `update.update_by_arrow_with_row_id(table)`    | `update.update_by_arrow_with_row_id(table, commit_identifier)`    |
+| `delete_by_filter()`            | `update.delete_by_filter(predicate)`           | `update.delete_by_filter(predicate, commit_identifier)`           |
 | `upsert_by_arrow_with_key()`    | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |
 | `commit()`                      | `commit.commit(messages)`                      | `commit.commit(messages, commit_identifier)`                      |
 
@@ -178,6 +179,87 @@ Requires the same [Prerequisites](#prerequisites) (row-tracking and data-evoluti
 pb = table.new_read_builder().new_predicate_builder()
 rb = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 0))
 result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+```
+
+## Delete By Filter
+
+You can use `delete_by_filter` to delete rows matching a PyPaimon `Predicate` from an append-only data evolution
+table. The delete operation rewrites only the affected file groups: when a row in the middle of a file is deleted,
+the old file group is removed and the remaining rows are written back as continuous row-id segments.
+
+**Requirements**
+
+- The table must have `data-evolution.enabled = true` and `row-tracking.enabled = true`.
+- Only append-only tables are supported; primary-key tables are not supported.
+- The predicate may reference table fields and `_ROW_ID`.
+- If the predicate explicitly references `_ROW_ID`, the requested row IDs must exist in the current snapshot.
+- Tables with dedicated blob or vector files are supported. The normal data file and its `.blob` / `.vector.*`
+  companion files are deleted and rewritten together for the affected row-id range.
+
+### Batch Mode
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('age', pa.int32()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.users_delete', schema, False)
+table = catalog.get_table('default.users_delete')
+
+# write initial data
+write_builder = table.new_batch_write_builder()
+write = write_builder.new_write()
+commit = write_builder.new_commit()
+write.write_arrow(pa.Table.from_pydict(
+    {
+        'id': [1, 2, 3, 4],
+        'name': ['Alice', 'Bob', 'Charlie', 'David'],
+        'age': [30, 25, 28, 40],
+    },
+    schema=pa_schema,
+))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+
+# delete rows matching the predicate
+pb = table.new_read_builder().new_predicate_builder()
+predicate = pb.equal('id', 3)
+
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+table_commit = write_builder.new_commit()
+cmts = table_update.delete_by_filter(predicate)
+table_commit.commit(cmts)
+table_commit.close()
+
+# content should contain ids: 1, 2, 4
+```
+
+### Stream Mode
+
+```python
+stream_builder = table.new_stream_write_builder()
+table_update = stream_builder.new_update()
+table_commit = stream_builder.new_commit()
+
+pb = table.new_read_builder().new_predicate_builder()
+predicate = pb.between('_ROW_ID', 10, 20)
+
+cmts = table_update.delete_by_filter(predicate, commit_identifier=1)
+table_commit.commit(cmts, commit_identifier=1)
+table_commit.close()
 ```
 
 ## Upsert By Key
