@@ -331,8 +331,13 @@ MultiVectorSearch search =
                 .rrfRanker()
                 .build();
 
-ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);
-TableScan.Plan plan = readBuilder.newScan().plan();
+GlobalIndexResult result =
+        table.newMultiVectorSearchBuilder()
+                .withMultiVectorSearch(search)
+                .executeLocal();
+
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
 try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
     reader.forEachRemaining(row -> {
         System.out.println("id=" + row.getInt(0));
@@ -340,9 +345,8 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
-The Java API also supports single-column vector pushdown with
-`table.newReadBuilder().withVectorSearch(VectorSearch.builder()...)`. Vector search and
-multi-vector search are batch scan APIs.
+For Java, execute `MultiVectorSearchBuilder` to produce a global index result, then pass the
+result to `TableScan.withGlobalIndexResult`.
 
 </TabItem>
 

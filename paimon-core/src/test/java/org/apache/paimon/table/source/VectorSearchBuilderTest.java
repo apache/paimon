@@ -41,7 +41,6 @@ import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -68,7 +67,6 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VectorSearchBuilder} using test-only brute-force vector index. */
 public class VectorSearchBuilderTest extends TableTestBase {
@@ -102,47 +100,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                 .option("test.vector.dimension", String.valueOf(DIMENSION))
                 .option("test.vector.metric", "l2");
-    }
-
-    @Test
-    public void testReadBuilderWithMultiVectorSearch() throws Exception {
-        catalog.createTable(
-                identifier("multi_vector_api_table"), multiVectorSchemaBuilder().build(), false);
-        FileStoreTable table = getTable(identifier("multi_vector_api_table"));
-
-        float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
-        float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
-        writeTwoVectorColumns(table, titleVectors, bodyVectors);
-        buildAndCommitIndex(table, "title_vec", titleVectors);
-        buildAndCommitIndex(table, "body_vec", bodyVectors);
-
-        MultiVectorSearch search =
-                MultiVectorSearch.builder()
-                        .addVectorSearch(
-                                VectorSearch.builder()
-                                        .vectorColumn("title_vec")
-                                        .queryVector(new float[] {1.0f, 0.0f})
-                                        .limit(2)
-                                        .build())
-                        .addVectorSearch(
-                                VectorSearch.builder()
-                                        .vectorColumn("body_vec")
-                                        .queryVector(new float[] {0.0f, 1.0f})
-                                        .limit(2)
-                                        .build())
-                        .limit(2)
-                        .rrfRanker()
-                        .build();
-
-        ReadBuilder readBuilder = table.newReadBuilder().withMultiVectorSearch(search);
-        List<Integer> ids = new ArrayList<>();
-        try (RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
-            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
-        }
-
-        assertThat(ids).hasSize(2);
-        assertThat(ids).contains(1);
     }
 
     @Test
@@ -193,60 +150,6 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         assertThat(ranked.results().getIntCardinality()).isEqualTo(2);
         assertThat(ranked.results()).contains(1L);
-    }
-
-    @Test
-    public void testReadBuilderWithVectorSearch() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-
-        float[][] vectors = {
-            {1.0f, 0.0f},
-            {0.95f, 0.1f},
-            {0.1f, 0.95f},
-            {0.98f, 0.05f},
-            {0.0f, 1.0f},
-            {0.05f, 0.98f}
-        };
-
-        writeVectors(table, vectors);
-        buildAndCommitIndex(table, vectors);
-
-        VectorSearch search =
-                VectorSearch.builder()
-                        .vectorColumn(VECTOR_FIELD_NAME)
-                        .queryVector(new float[] {0.85f, 0.15f})
-                        .limit(3)
-                        .build();
-
-        ReadBuilder readBuilder = table.newReadBuilder().withVectorSearch(search);
-        List<Integer> ids = new ArrayList<>();
-        try (RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
-            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
-        }
-
-        assertThat(ids).isNotEmpty();
-        assertThat(ids.size()).isLessThanOrEqualTo(3);
-        assertThat(ids).contains(0);
-    }
-
-    @Test
-    public void testReadBuilderVectorSearchOnlySupportsBatchScan() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-
-        VectorSearch search =
-                VectorSearch.builder()
-                        .vectorColumn(VECTOR_FIELD_NAME)
-                        .queryVector(new float[] {1.0f, 0.0f})
-                        .limit(1)
-                        .build();
-
-        assertThatThrownBy(() -> table.newReadBuilder().withVectorSearch(search).newStreamScan())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Vector search and multi-vector search are only supported in batch scan.");
     }
 
     @Test

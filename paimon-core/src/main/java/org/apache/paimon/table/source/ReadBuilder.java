@@ -18,15 +18,12 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -143,28 +140,6 @@ public interface ReadBuilder extends Serializable {
      * is a complete filter.
      */
     ReadBuilder withTopN(TopN topN);
-
-    /**
-     * Push vector search.
-     *
-     * <p>The search is evaluated against the table global vector index during scan planning, and
-     * the returned splits are restricted to matched row ids.
-     */
-    @Experimental
-    default ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
-        throw new UnsupportedOperationException("Vector search is not supported.");
-    }
-
-    /**
-     * Push multi-vector search.
-     *
-     * <p>Each route is evaluated against its vector column global index during scan planning, and
-     * the route results are ranked before restricting returned splits to matched row ids.
-     */
-    @Experimental
-    default ReadBuilder withMultiVectorSearch(MultiVectorSearch multiVectorSearch) {
-        throw new UnsupportedOperationException("Multi-vector search is not supported.");
-    }
 
     /**
      * Specify the shard to be read, and allocate sharded files to read records. Note that this
