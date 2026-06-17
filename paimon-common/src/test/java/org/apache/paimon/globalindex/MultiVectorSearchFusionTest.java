@@ -9,12 +9,11 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.paimon.globalindex;
@@ -40,7 +39,8 @@ public class MultiVectorSearchFusionTest {
         ScoredGlobalIndexResult second = result(new long[] {2, 3}, new float[] {0.7f, 0.6f});
 
         ScoredGlobalIndexResult fused =
-                MultiVectorSearchFusion.rrf(Arrays.asList(first, second), new float[] {1.0f, 1.0f}, 2);
+                MultiVectorSearchFusion.rrf(
+                        Arrays.asList(first, second), new float[] {1.0f, 1.0f}, 2);
 
         assertThat(fused.results().getIntCardinality()).isEqualTo(2);
         assertThat(fused.results()).contains(2L);
