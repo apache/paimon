@@ -831,6 +831,39 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimitWithoutSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B")));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+    }
+
+    @Test
     public void testFieldNestedUpdateAggWithSequenceField() {
         DataType elementRowType =
                 DataTypes.ROW(
@@ -1074,6 +1107,42 @@ public class FieldAggregatorTest {
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
                         Arrays.asList(row(0, 1, "B_updated", 2), row(1, 2, "C", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimit() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        Collections.singletonList("seq"),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D", 5)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
     }
 
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {

@@ -123,35 +123,23 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         InternalArray acc = (InternalArray) accumulator;
         InternalArray input = (InternalArray) inputField;
 
-        if (acc.size() >= countLimit) {
-            return accumulator;
-        }
-
-        int remainCount = countLimit - acc.size();
-
-        List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
-        addNonNullRows(acc, rows);
-        addNonNullRows(input, rows, remainCount);
-
-        if (keyProjection != null) {
-            Map<BinaryRow, InternalRow> map = new HashMap<>();
-            for (InternalRow row : rows) {
-                BinaryRow key = keyProjection.apply(row).copy();
-                if (hasSequenceField) {
-                    // When sequence field is configured, only update if the new sequence is greater
-                    InternalRow existing = map.get(key);
-                    if (existing == null || compareSequence(row, existing) >= 0) {
-                        map.put(key, row);
-                    }
-                } else {
-                    map.put(key, row);
-                }
+        if (keyProjection == null) {
+            if (acc.size() >= countLimit) {
+                return accumulator;
             }
 
-            rows = new ArrayList<>(map.values());
+            int remainCount = countLimit - acc.size();
+
+            List<InternalRow> rows = new ArrayList<>(acc.size() + input.size());
+            addNonNullRows(acc, rows);
+            addNonNullRows(input, rows, remainCount);
+            return new GenericArray(rows.toArray());
         }
 
-        return new GenericArray(rows.toArray());
+        Map<BinaryRow, InternalRow> map = new HashMap<>();
+        addNestedRows(acc, map, false);
+        addNestedRows(input, map, true);
+        return new GenericArray(new ArrayList<>(map.values()).toArray());
     }
 
     @Override
@@ -233,6 +221,28 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             }
             rows.add(array.getRow(i, nestedFields));
             count++;
+        }
+    }
+
+    private void addNestedRows(
+            InternalArray array, Map<BinaryRow, InternalRow> rows, boolean limitNewKeys) {
+        checkNotNull(keyProjection);
+
+        for (int i = 0; i < array.size(); i++) {
+            if (array.isNullAt(i)) {
+                continue;
+            }
+
+            InternalRow row = array.getRow(i, nestedFields);
+            BinaryRow key = keyProjection.apply(row).copy();
+            InternalRow existing = rows.get(key);
+            if (existing != null) {
+                if (!hasSequenceField || compareSequence(row, existing) >= 0) {
+                    rows.put(key, row);
+                }
+            } else if (!limitNewKeys || rows.size() < countLimit) {
+                rows.put(key, row);
+            }
         }
     }
 }
