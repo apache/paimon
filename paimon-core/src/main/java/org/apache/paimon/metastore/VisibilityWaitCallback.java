@@ -21,38 +21,24 @@ package org.apache.paimon.metastore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.index.GlobalIndexMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitCallback;
-import org.apache.paimon.utils.Range;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link CommitCallback} to wait for compaction and global indexes for visibility. */
@@ -82,11 +68,8 @@ public class VisibilityWaitCallback implements CommitCallback {
 
         Set<String> namesToTrack = new HashSet<>();
         Set<BinaryRow> partitionsToTrack = new HashSet<>();
-        List<Range> rowIdRangesToTrack = collectRowIdRangesToTrack(context.deltaFiles);
-        Set<GlobalIndexIdentifier> globalIndexesToTrack =
-                rowIdRangesToTrack.isEmpty()
-                        ? Collections.emptySet()
-                        : collectGlobalIndexesToTrack(context.snapshot);
+        GlobalIndexVisibilityChecker globalIndexVisibilityChecker =
+                GlobalIndexVisibilityChecker.create(table, context.snapshot, context.deltaFiles);
         for (ManifestEntry entry : context.deltaFiles) {
             if (shouldBeTracked(entry)) {
                 namesToTrack.add(entry.fileName());
@@ -94,8 +77,7 @@ public class VisibilityWaitCallback implements CommitCallback {
             }
         }
 
-        if (namesToTrack.isEmpty()
-                && (rowIdRangesToTrack.isEmpty() || globalIndexesToTrack.isEmpty())) {
+        if (namesToTrack.isEmpty() && globalIndexVisibilityChecker.noNeedToWait()) {
             return;
         }
 
@@ -104,8 +86,7 @@ public class VisibilityWaitCallback implements CommitCallback {
                     context.snapshot,
                     namesToTrack,
                     partitionsToTrack,
-                    rowIdRangesToTrack,
-                    globalIndexesToTrack);
+                    globalIndexVisibilityChecker);
         } catch (InterruptedException | TimeoutException e) {
             throw new RuntimeException(e);
         }
@@ -120,12 +101,11 @@ public class VisibilityWaitCallback implements CommitCallback {
             Snapshot fromSnapshot,
             Set<String> namesToTrack,
             Set<BinaryRow> partitionsToTrack,
-            List<Range> rowIdRangesToTrack,
-            Set<GlobalIndexIdentifier> globalIndexesToTrack)
+            GlobalIndexVisibilityChecker globalIndexVisibilityChecker)
             throws InterruptedException, TimeoutException {
         long startTime = System.currentTimeMillis();
         boolean compactionDone = namesToTrack.isEmpty();
-        boolean globalIndexDone = rowIdRangesToTrack.isEmpty() || globalIndexesToTrack.isEmpty();
+        boolean globalIndexDone = globalIndexVisibilityChecker.noNeedToWait();
         Snapshot checkedSnapshot = fromSnapshot;
         while (System.currentTimeMillis() - startTime < timeout.toMillis()) {
             Snapshot latest = table.snapshotManager().latestSnapshot();
@@ -136,8 +116,7 @@ public class VisibilityWaitCallback implements CommitCallback {
                     && !stillInLatest(latest, namesToTrack, partitionsToTrack)) {
                 compactionDone = true;
             }
-            if (!globalIndexDone
-                    && globalIndexesBuilt(latest, rowIdRangesToTrack, globalIndexesToTrack)) {
+            if (!globalIndexDone && globalIndexVisibilityChecker.visibleIn(latest)) {
                 globalIndexDone = true;
             }
             if (compactionDone && globalIndexDone) {
@@ -188,133 +167,8 @@ public class VisibilityWaitCallback implements CommitCallback {
         return entry.bucket() == BucketMode.POSTPONE_BUCKET;
     }
 
-    private List<Range> collectRowIdRangesToTrack(List<ManifestEntry> deltaFiles) {
-        List<Range> ranges = new ArrayList<>();
-        for (ManifestEntry entry : deltaFiles) {
-            if (shouldTrackGlobalIndex(entry)) {
-                ranges.add(entry.file().nonNullRowIdRange());
-            }
-        }
-        return Range.sortAndMergeOverlap(ranges, true);
-    }
-
-    private boolean shouldTrackGlobalIndex(ManifestEntry entry) {
-        if (!FileKind.ADD.equals(entry.kind())) {
-            return false;
-        }
-
-        DataFileMeta file = entry.file();
-        if (file.firstRowId() == null || file.rowCount() <= 0) {
-            return false;
-        }
-
-        Optional<FileSource> fileSource = file.fileSource();
-        if (!fileSource.isPresent() || !FileSource.APPEND.equals(fileSource.get())) {
-            return false;
-        }
-
-        String fileName = file.fileName();
-        return !isBlobFile(fileName) && !isVectorStoreFile(fileName);
-    }
-
-    private Set<GlobalIndexIdentifier> collectGlobalIndexesToTrack(Snapshot snapshot) {
-        Set<GlobalIndexIdentifier> indexes = new HashSet<>();
-        for (IndexManifestEntry entry : scanGlobalIndexes(snapshot)) {
-            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-            if (globalIndex != null) {
-                indexes.add(
-                        new GlobalIndexIdentifier(
-                                entry.indexFile().indexType(),
-                                globalIndex.indexFieldId(),
-                                globalIndex.extraFieldIds()));
-            }
-        }
-        return indexes;
-    }
-
-    private boolean globalIndexesBuilt(
-            Snapshot snapshot,
-            List<Range> rowIdRangesToTrack,
-            Set<GlobalIndexIdentifier> globalIndexesToTrack) {
-        Map<GlobalIndexIdentifier, List<Range>> indexedRanges = new HashMap<>();
-        for (IndexManifestEntry entry : scanGlobalIndexes(snapshot)) {
-            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
-            if (globalIndex == null) {
-                continue;
-            }
-
-            GlobalIndexIdentifier identifier =
-                    new GlobalIndexIdentifier(
-                            entry.indexFile().indexType(),
-                            globalIndex.indexFieldId(),
-                            globalIndex.extraFieldIds());
-            if (globalIndexesToTrack.contains(identifier)) {
-                indexedRanges
-                        .computeIfAbsent(identifier, k -> new ArrayList<>())
-                        .add(globalIndex.rowRange());
-            }
-        }
-
-        for (GlobalIndexIdentifier identifier : globalIndexesToTrack) {
-            List<Range> ranges = Range.sortAndMergeOverlap(indexedRanges.get(identifier), true);
-            for (Range rowIdRange : rowIdRangesToTrack) {
-                if (!rowIdRange.exclude(ranges).isEmpty()) {
-                    return false;
-                }
-            }
-        }
-
-        return true;
-    }
-
-    private List<IndexManifestEntry> scanGlobalIndexes(Snapshot snapshot) {
-        return table.store().newIndexFileHandler().scan(snapshot, this::isGlobalIndex);
-    }
-
-    private boolean isGlobalIndex(IndexManifestEntry entry) {
-        return entry.indexFile().globalIndexMeta() != null;
-    }
-
     @Override
     public void close() throws Exception {
         // No resources to close
-    }
-
-    private static class GlobalIndexIdentifier {
-
-        private final String indexType;
-        private final int indexFieldId;
-        private final int[] extraFieldIds;
-
-        private GlobalIndexIdentifier(String indexType, int indexFieldId, int[] extraFieldIds) {
-            this.indexType = indexType;
-            this.indexFieldId = indexFieldId;
-            this.extraFieldIds =
-                    extraFieldIds == null
-                            ? null
-                            : Arrays.copyOf(extraFieldIds, extraFieldIds.length);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof GlobalIndexIdentifier)) {
-                return false;
-            }
-
-            GlobalIndexIdentifier that = (GlobalIndexIdentifier) o;
-            return indexFieldId == that.indexFieldId
-                    && Objects.equals(indexType, that.indexType)
-                    && Arrays.equals(extraFieldIds, that.extraFieldIds);
-        }
-
-        @Override
-        public int hashCode() {
-            int result = Objects.hash(indexType, indexFieldId);
-            result = 31 * result + Arrays.hashCode(extraFieldIds);
-            return result;
-        }
     }
 }
