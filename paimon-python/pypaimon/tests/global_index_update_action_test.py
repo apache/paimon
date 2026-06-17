@@ -42,7 +42,7 @@ def _partition_row(values):
     return GenericRow(list(values), fields)
 
 
-def _index_entry(file_name, partition, field_id):
+def _index_entry(file_name, partition, field_id, extra_field_ids=None):
     index_file = IndexFileMeta(
         index_type="BTREE",
         file_name=file_name,
@@ -52,6 +52,7 @@ def _index_entry(file_name, partition, field_id):
             row_range_start=0,
             row_range_end=0,
             index_field_id=field_id,
+            extra_field_ids=extra_field_ids,
             index_meta=b"",
         ),
     )
@@ -91,7 +92,9 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
 
         self.assertEqual(
             "DROP_PARTITION_INDEX",
-            options.options.to_map()[CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key()],
+            options.options.to_map()[
+                CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key()
+            ],
         )
         self.assertEqual(
             GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX,
@@ -108,6 +111,20 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
                 return_value=entries):
             with self.assertRaisesRegex(RuntimeError, "Conflicted columns"):
                 apply_global_index_update_action(table, object(), ["name"], {()})
+
+    def test_default_action_rejects_extra_global_index_columns(self):
+        table = _Table(CoreOptions.from_dict({}))
+        entries = [_index_entry("idx-name-age", (), 1, extra_field_ids=[2])]
+
+        with mock.patch(
+                "pypaimon.write.global_index_update_checker."
+                "scan_global_index_entries",
+                return_value=entries):
+            with self.assertRaises(RuntimeError) as ctx:
+                apply_global_index_update_action(table, object(), ["age"], {()})
+
+        self.assertIn("'age'", str(ctx.exception))
+        self.assertIn("Conflicted columns: ['age']", str(ctx.exception))
 
     def test_drop_partition_index_builds_deletes_for_affected_partition(self):
         options = CoreOptions.from_dict({
@@ -138,6 +155,36 @@ class GlobalIndexUpdateActionTest(unittest.TestCase):
             [d.index_file.file_name for d in messages[0].index_deletes],
         )
         self.assertEqual([1], [d.kind for d in messages[0].index_deletes])
+
+    def test_drop_partition_index_builds_deletes_for_extra_column_update(self):
+        options = CoreOptions.from_dict({
+            CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(): "DROP_PARTITION_INDEX",
+        })
+        table = _Table(options)
+        entries = [
+            _index_entry(
+                "idx-name-age-p0",
+                ("2026-06-17",),
+                1,
+                extra_field_ids=[2],
+            ),
+        ]
+
+        with mock.patch(
+                "pypaimon.write.global_index_update_checker."
+                "scan_global_index_entries",
+                return_value=entries):
+            messages = apply_global_index_update_action(
+                table,
+                object(),
+                ["age"],
+                {("2026-06-17",)},
+            )
+
+        self.assertEqual(
+            ["idx-name-age-p0"],
+            [d.index_file.file_name for d in messages[0].index_deletes],
+        )
 
 
 if __name__ == "__main__":
