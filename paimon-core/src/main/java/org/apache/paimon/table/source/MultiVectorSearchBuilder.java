@@ -21,25 +21,78 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** Builder to build multi-vector search. */
 public interface MultiVectorSearchBuilder extends Serializable {
-
-    /** Set multi-vector search predicate. */
-    MultiVectorSearchBuilder withMultiVectorSearch(MultiVectorSearch multiVectorSearch);
 
     /** Push partition filters. */
     MultiVectorSearchBuilder withPartitionFilter(PartitionPredicate partitionPredicate);
 
     /** Push pre-filter for vector search. */
     MultiVectorSearchBuilder withFilter(Predicate predicate);
+
+    /** Add a vector-search route. */
+    MultiVectorSearchBuilder addRoute(MultiVectorSearchRoute route);
+
+    /** Add a vector-search route. */
+    default MultiVectorSearchBuilder addRoute(String vectorColumn, float[] vector, int limit) {
+        return addRoute(vectorColumn, vector, limit, 1.0f);
+    }
+
+    /** Add a vector-search route. */
+    default MultiVectorSearchBuilder addRoute(
+            String vectorColumn, float[] vector, int limit, float weight) {
+        return addRoute(new MultiVectorSearchRoute(vectorColumn, vector, limit, weight));
+    }
+
+    /** Add a vector-search route. */
+    default MultiVectorSearchBuilder addRoute(
+            String vectorColumn,
+            float[] vector,
+            int limit,
+            float weight,
+            Map<String, String> options) {
+        return addRoute(new MultiVectorSearchRoute(vectorColumn, vector, limit, weight, options));
+    }
+
+    /** Add an existing vector search as a route. */
+    default MultiVectorSearchBuilder addVectorSearch(VectorSearch vectorSearch) {
+        return addVectorSearch(vectorSearch, 1.0f);
+    }
+
+    /** Add an existing vector search as a route. */
+    default MultiVectorSearchBuilder addVectorSearch(VectorSearch vectorSearch, float weight) {
+        if (vectorSearch == null) {
+            throw new IllegalArgumentException("Vector search cannot be null");
+        }
+        return addRoute(
+                new MultiVectorSearchRoute(
+                        vectorSearch.fieldName(),
+                        vectorSearch.vector(),
+                        vectorSearch.limit(),
+                        weight,
+                        vectorSearch.options()));
+    }
+
+    /** The final top k ranked results to return. */
+    MultiVectorSearchBuilder withLimit(int limit);
+
+    /** Ranker for combining route results. */
+    MultiVectorSearchBuilder withRanker(String ranker);
+
+    /** Use reciprocal rank fusion to combine route results. */
+    MultiVectorSearchBuilder withRrfRanker();
+
+    /** Use weighted score to combine route results. */
+    MultiVectorSearchBuilder withWeightedScoreRanker();
 
     /** Create one vector-search builder for each route so engines can dispatch route work. */
     List<Route> routeBuilders();

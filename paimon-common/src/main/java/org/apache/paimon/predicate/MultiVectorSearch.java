@@ -18,20 +18,22 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.globalindex.MultiVectorSearchRanker;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** Multi-vector search over multiple vector columns. */
+/**
+ * Multi-vector search over multiple vector columns.
+ *
+ * <p>This is an internal pushdown representation. Use {@code
+ * Table.newMultiVectorSearchBuilder()} to configure multi-vector search from Java.
+ */
 public class MultiVectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    public static final String RRF_RANKER = "rrf";
-    public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
 
     private final List<MultiVectorSearchRoute> routes;
     private final int limit;
@@ -46,12 +48,7 @@ public class MultiVectorSearch implements Serializable {
         }
         this.routes = Collections.unmodifiableList(new ArrayList<>(routes));
         this.limit = limit;
-        this.ranker = normalizeRanker(ranker);
-    }
-
-    @Experimental
-    public static Builder builder() {
-        return new Builder();
+        this.ranker = MultiVectorSearchRanker.normalizeRanker(ranker);
     }
 
     public List<MultiVectorSearchRoute> routes() {
@@ -66,80 +63,8 @@ public class MultiVectorSearch implements Serializable {
         return ranker;
     }
 
-    private static String normalizeRanker(String ranker) {
-        if (ranker == null || ranker.trim().isEmpty()) {
-            return RRF_RANKER;
-        }
-        String normalized = ranker.trim().toLowerCase();
-        if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
-            throw new IllegalArgumentException("Unsupported multi-vector ranker: " + ranker);
-        }
-        return normalized;
-    }
-
     @Override
     public String toString() {
         return "Ranker(" + ranker + "), Limit(" + limit + "), Routes(" + routes + ")";
-    }
-
-    /** Builder for {@link MultiVectorSearch}. */
-    @Experimental
-    public static class Builder {
-
-        private final List<MultiVectorSearchRoute> routes = new ArrayList<>();
-        private int limit;
-        private String ranker = RRF_RANKER;
-
-        public Builder addRoute(MultiVectorSearchRoute route) {
-            this.routes.add(route);
-            return this;
-        }
-
-        public Builder addVectorSearch(VectorSearch vectorSearch) {
-            return addVectorSearch(vectorSearch, 1.0f);
-        }
-
-        public Builder addVectorSearch(VectorSearch vectorSearch, float weight) {
-            if (vectorSearch == null) {
-                throw new IllegalArgumentException("Vector search cannot be null");
-            }
-            return addRoute(
-                    new MultiVectorSearchRoute(
-                            vectorSearch.fieldName(),
-                            vectorSearch.vector(),
-                            vectorSearch.limit(),
-                            weight,
-                            vectorSearch.options()));
-        }
-
-        public Builder routes(List<MultiVectorSearchRoute> routes) {
-            this.routes.clear();
-            if (routes != null) {
-                this.routes.addAll(routes);
-            }
-            return this;
-        }
-
-        public Builder limit(int limit) {
-            this.limit = limit;
-            return this;
-        }
-
-        public Builder ranker(String ranker) {
-            this.ranker = ranker;
-            return this;
-        }
-
-        public Builder rrfRanker() {
-            return ranker(RRF_RANKER);
-        }
-
-        public Builder weightedScoreRanker() {
-            return ranker(WEIGHTED_SCORE_RANKER);
-        }
-
-        public MultiVectorSearch build() {
-            return new MultiVectorSearch(routes, limit, ranker);
-        }
     }
 }

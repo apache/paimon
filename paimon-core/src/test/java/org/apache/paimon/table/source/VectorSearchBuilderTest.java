@@ -37,8 +37,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.MultiVectorSearch;
-import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -116,27 +114,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitIndex(table, "title_vec", titleVectors);
         buildAndCommitIndex(table, "body_vec", bodyVectors);
 
-        MultiVectorSearch search =
-                MultiVectorSearch.builder()
-                        .addRoute(
-                                MultiVectorSearchRoute.builder()
-                                        .vectorColumn("title_vec")
-                                        .queryVector(new float[] {1.0f, 0.0f})
-                                        .limit(2)
-                                        .build())
-                        .addRoute(
-                                MultiVectorSearchRoute.builder()
-                                        .vectorColumn("body_vec")
-                                        .queryVector(new float[] {0.0f, 1.0f})
-                                        .limit(2)
-                                        .weight(2.0f)
-                                        .build())
-                        .limit(2)
-                        .weightedScoreRanker()
-                        .build();
-
         MultiVectorSearchBuilder builder =
-                table.newMultiVectorSearchBuilder().withMultiVectorSearch(search);
+                table.newMultiVectorSearchBuilder()
+                        .addRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
+                        .addRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
+                        .withLimit(2)
+                        .withWeightedScoreRanker();
         List<MultiVectorSearchBuilder.Route> routes = builder.routeBuilders();
 
         assertThat(routes).hasSize(2);

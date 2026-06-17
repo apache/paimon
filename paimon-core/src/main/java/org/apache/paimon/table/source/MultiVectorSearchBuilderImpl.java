@@ -22,7 +22,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.MultiVectorSearchRanker;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.predicate.MultiVectorSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -39,18 +38,14 @@ public class MultiVectorSearchBuilderImpl implements MultiVectorSearchBuilder {
 
     protected final InnerTable table;
 
-    protected MultiVectorSearch multiVectorSearch;
+    protected final List<MultiVectorSearchRoute> routes = new ArrayList<>();
+    protected int limit;
+    protected String ranker = MultiVectorSearchRanker.RRF_RANKER;
     protected PartitionPredicate partitionFilter;
     protected Predicate filter;
 
     public MultiVectorSearchBuilderImpl(InnerTable table) {
         this.table = table;
-    }
-
-    @Override
-    public MultiVectorSearchBuilder withMultiVectorSearch(MultiVectorSearch multiVectorSearch) {
-        this.multiVectorSearch = multiVectorSearch;
-        return this;
     }
 
     @Override
@@ -70,15 +65,68 @@ public class MultiVectorSearchBuilderImpl implements MultiVectorSearchBuilder {
     }
 
     @Override
-    public List<Route> routeBuilders() {
-        Objects.requireNonNull(multiVectorSearch, "Multi-vector search must be set");
+    public MultiVectorSearchBuilder addRoute(MultiVectorSearchRoute route) {
+        this.routes.add(Objects.requireNonNull(route, "Route cannot be null"));
+        return this;
+    }
 
-        List<Route> routes = new ArrayList<>(multiVectorSearch.routes().size());
-        for (MultiVectorSearchRoute route : multiVectorSearch.routes()) {
+    @Override
+    public MultiVectorSearchBuilder withLimit(int limit) {
+        this.limit = limit;
+        return this;
+    }
+
+    @Override
+    public MultiVectorSearchBuilder withRanker(String ranker) {
+        this.ranker = MultiVectorSearchRanker.normalizeRanker(ranker);
+        return this;
+    }
+
+    @Override
+    public MultiVectorSearchBuilder withRrfRanker() {
+        return withRanker(MultiVectorSearchRanker.RRF_RANKER);
+    }
+
+    @Override
+    public MultiVectorSearchBuilder withWeightedScoreRanker() {
+        return withRanker(MultiVectorSearchRanker.WEIGHTED_SCORE_RANKER);
+    }
+
+    @Override
+    public List<Route> routeBuilders() {
+        validateSearch();
+
+        List<Route> routeBuilders = new ArrayList<>(routes.size());
+        for (MultiVectorSearchRoute route : routes) {
             VectorSearchBuilder vectorSearchBuilder = newVectorSearchBuilder(route);
-            routes.add(new Route(route, vectorSearchBuilder));
+            routeBuilders.add(new Route(route, vectorSearchBuilder));
         }
-        return routes;
+        return routeBuilders;
+    }
+
+    private void validateSearch() {
+        if (routes.isEmpty()) {
+            throw new IllegalArgumentException("Routes cannot be empty");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("Limit must be positive, got: " + limit);
+        }
+    }
+
+    @Override
+    public ScoredGlobalIndexResult rank(List<RouteResult> routeResults) {
+        validateSearch();
+
+        List<MultiVectorSearchRanker.WeightedResult> weightedResults =
+                new ArrayList<>(routeResults.size());
+        for (RouteResult routeResult : routeResults) {
+            if (!routeResult.result().results().isEmpty()) {
+                weightedResults.add(
+                        new MultiVectorSearchRanker.WeightedResult(
+                                routeResult.result(), routeResult.route().weight()));
+            }
+        }
+        return MultiVectorSearchRanker.rank(ranker, weightedResults, limit);
     }
 
     @Override
@@ -92,23 +140,6 @@ public class MultiVectorSearchBuilderImpl implements MultiVectorSearchBuilder {
                     "Multi-vector search requires scored vector index results, but got: "
                             + result.getClass().getName());
         }
-    }
-
-    @Override
-    public ScoredGlobalIndexResult rank(List<RouteResult> routeResults) {
-        Objects.requireNonNull(multiVectorSearch, "Multi-vector search must be set");
-
-        List<MultiVectorSearchRanker.WeightedResult> weightedResults =
-                new ArrayList<>(routeResults.size());
-        for (RouteResult routeResult : routeResults) {
-            if (!routeResult.result().results().isEmpty()) {
-                weightedResults.add(
-                        new MultiVectorSearchRanker.WeightedResult(
-                                routeResult.result(), routeResult.route().weight()));
-            }
-        }
-        return MultiVectorSearchRanker.rank(
-                multiVectorSearch.ranker(), weightedResults, multiVectorSearch.limit());
     }
 
     protected VectorSearchBuilder newVectorSearchBuilder(MultiVectorSearchRoute route) {

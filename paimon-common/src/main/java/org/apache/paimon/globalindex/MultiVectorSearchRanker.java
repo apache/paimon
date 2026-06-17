@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.predicate.MultiVectorSearch;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.Serializable;
@@ -31,6 +30,9 @@ import java.util.Map;
 
 /** Ranker utilities for multi-vector search results. */
 public class MultiVectorSearchRanker {
+
+    public static final String RRF_RANKER = "rrf";
+    public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
 
     private static final float RRF_K = 60.0f;
 
@@ -47,10 +49,21 @@ public class MultiVectorSearchRanker {
 
     public static ScoredGlobalIndexResult rank(
             String ranker, List<WeightedResult> results, int limit) {
-        if (MultiVectorSearch.WEIGHTED_SCORE_RANKER.equals(ranker)) {
+        if (WEIGHTED_SCORE_RANKER.equals(normalizeRanker(ranker))) {
             return weightedScore(results, limit);
         }
         return rrf(results, limit);
+    }
+
+    public static String normalizeRanker(String ranker) {
+        if (ranker == null || ranker.trim().isEmpty()) {
+            return RRF_RANKER;
+        }
+        String normalized = ranker.trim().toLowerCase();
+        if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
+            throw new IllegalArgumentException("Unsupported multi-vector ranker: " + ranker);
+        }
+        return normalized;
     }
 
     public static ScoredGlobalIndexResult rrf(

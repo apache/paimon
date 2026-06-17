@@ -310,30 +310,22 @@ Spark SQL adds `__paimon_vector_search_score` to expose the ranked score.
 ```java
 Table table = catalog.getTable(identifier);
 
-MultiVectorSearch search =
-        MultiVectorSearch.builder()
-                .addVectorSearch(
-                        VectorSearch.builder()
-                                .vectorColumn("title_embedding")
-                                .queryVector(new float[] {1.0f, 0.0f, 0.0f})
-                                .limit(50)
-                                .option("ivf.nprobe", "32")
-                                .build(),
-                        2.0f)
-                .addVectorSearch(
-                        VectorSearch.builder()
-                                .vectorColumn("body_embedding")
-                                .queryVector(new float[] {0.0f, 1.0f, 0.0f})
-                                .limit(50)
-                                .option("ivf.nprobe", "16")
-                                .build())
-                .limit(10)
-                .rrfRanker()
-                .build();
-
 MultiVectorSearchBuilder searchBuilder =
         table.newMultiVectorSearchBuilder()
-                .withMultiVectorSearch(search);
+                .addRoute(
+                        "title_embedding",
+                        new float[] {1.0f, 0.0f, 0.0f},
+                        50,
+                        2.0f,
+                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                .addRoute(
+                        "body_embedding",
+                        new float[] {0.0f, 1.0f, 0.0f},
+                        50,
+                        1.0f,
+                        java.util.Collections.singletonMap("ivf.nprobe", "16"))
+                .withLimit(10)
+                .withRrfRanker();
 GlobalIndexResult result = searchBuilder.executeLocal();
 
 ReadBuilder readBuilder = table.newReadBuilder();

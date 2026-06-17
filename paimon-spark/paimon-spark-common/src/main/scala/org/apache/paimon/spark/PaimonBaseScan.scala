@@ -112,7 +112,10 @@ abstract class PaimonBaseScan(table: InnerTable)
       } else {
         table.newMultiVectorSearchBuilder()
       }
-    val builder = multiVectorSearchBuilder.withMultiVectorSearch(multiVectorSearch)
+    val builder = multiVectorSearchBuilder
+      .withLimit(multiVectorSearch.limit())
+      .withRanker(multiVectorSearch.ranker())
+    multiVectorSearch.routes().asScala.foreach(route => builder.addRoute(route))
     if (pushedPartitionFilters.nonEmpty) {
       builder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }

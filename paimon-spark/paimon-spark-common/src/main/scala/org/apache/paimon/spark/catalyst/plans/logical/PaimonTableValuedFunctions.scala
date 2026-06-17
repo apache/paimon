@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.globalindex.MultiVectorSearchRanker
 import org.apache.paimon.predicate.{FullTextSearch, MultiVectorSearch, MultiVectorSearchRoute, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
@@ -479,7 +480,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
       if (argsWithoutTable.size == 3) {
         VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(2))
       } else {
-        MultiVectorSearch.RRF_RANKER
+        MultiVectorSearchRanker.RRF_RANKER
       }
 
     val routes = extractRoutes(argsWithoutTable.head, finalLimit).map {
