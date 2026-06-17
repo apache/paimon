@@ -152,17 +152,18 @@ public class LuminaVectorIndexOptions {
      */
     public static Options resolveFieldOptions(String fieldName, Options options) {
         String fieldPrefix = CoreOptions.FIELDS_PREFIX + "." + fieldName + ".";
+        Map<String, String> tableOptions = options.toMap();
         Map<String, String> result = new LinkedHashMap<>();
         // Base: table-level options, including the column-agnostic lumina.* options. Drop all
         // fields.* keys; this field's recognized options are re-added below as lumina.* keys.
-        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+        for (Map.Entry<String, String> entry : tableOptions.entrySet()) {
             if (!entry.getKey().startsWith(CoreOptions.FIELDS_PREFIX + ".")) {
                 result.put(entry.getKey(), entry.getValue());
             }
         }
         // Overlay this field's options. fields.<field>.<option> (no lumina. prefix) overrides the
         // column-agnostic lumina.<option>. Only recognized Lumina options are taken.
-        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+        for (Map.Entry<String, String> entry : tableOptions.entrySet()) {
             String key = entry.getKey();
             if (key.startsWith(fieldPrefix)) {
                 String option = key.substring(fieldPrefix.length());
