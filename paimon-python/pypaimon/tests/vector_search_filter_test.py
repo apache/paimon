@@ -1595,5 +1595,88 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         mock.patch.stopall()
 
 
+class BatchVectorSearchTest(unittest.TestCase):
+    """Batch vector search returns one result per query vector, in input order."""
+
+    def test_batch_returns_per_query_results_in_order(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index",
+                       row_range_start=0, row_range_end=99)
+        table = _StubTable(fields=[embedding_field], entries=[entry])
+        _patch_snapshot(self, [entry])
+
+        # The fake reader routes each query vector to a distinct row id derived
+        # from the vector itself, so result i must reflect query_vectors[i].
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader:
+                def visit_vector_search(self_inner, vs):
+                    row_id = int(vs.vector[0])
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: 1.0}))
+
+                def close(self_inner):
+                    pass
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *a):
+                    return False
+            return _FakeReader()
+
+        query_vectors = [[10.0], [20.0], [30.0]]
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            results = (
+                BatchVectorSearchBuilderImpl(table)
+                .with_vector_column("embedding")
+                .with_query_vectors(query_vectors)
+                .with_limit(5)
+                .execute_batch_local()
+            )
+
+        self.assertEqual(len(results), len(query_vectors))
+        for i, query_vector in enumerate(query_vectors):
+            expected_row = int(query_vector[0])
+            self.assertTrue(results[i].results().contains(expected_row))
+            self.assertEqual(results[i].results().cardinality(), 1)
+        # Different query vectors yield different results.
+        self.assertNotEqual(
+            list(results[0].results()), list(results[1].results()))
+
+    def test_batch_empty_splits_returns_empty_per_query(self):
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        _patch_snapshot(self, [])
+
+        results = (
+            BatchVectorSearchBuilderImpl(table)
+            .with_vector_column("embedding")
+            .with_query_vectors([[1.0], [2.0]])
+            .with_limit(5)
+            .execute_batch_local()
+        )
+        self.assertEqual(len(results), 2)
+        for result in results:
+            self.assertEqual(result.results().cardinality(), 0)
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+
 if __name__ == "__main__":
     unittest.main()

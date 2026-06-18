@@ -182,6 +182,21 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
+Batch results keep the same order as input vectors.
+
+```java
+float[][] queryVectors = {
+    {1.0f, 2.0f, 3.0f},
+    {3.0f, 2.0f, 1.0f}
+};
+List<GlobalIndexResult> batchResults = table.newBatchVectorSearchBuilder()
+        .withVectors(queryVectors)
+        .withLimit(5)
+        .withVectorColumn("embedding")
+        .executeBatchLocal();
+// batchResults.get(i) corresponds to queryVectors[i].
+```
+
 For Java, use `Table.newVectorSearchBuilder()` to produce a global index result, then pass
 the result to `TableScan.withGlobalIndexResult`.
 

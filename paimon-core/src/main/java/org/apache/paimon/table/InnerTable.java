@@ -25,6 +25,8 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilderImpl;
 import org.apache.paimon.table.sink.WriteSelector;
+import org.apache.paimon.table.source.BatchVectorSearchBuilder;
+import org.apache.paimon.table.source.BatchVectorSearchBuilderImpl;
 import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.FullTextSearchBuilderImpl;
 import org.apache.paimon.table.source.HybridSearchBuilder;
@@ -67,6 +69,11 @@ public interface InnerTable extends Table {
     @Override
     default HybridSearchBuilder newHybridSearchBuilder() {
         return new HybridSearchBuilderImpl(this);
+    }
+
+    @Override
+    default BatchVectorSearchBuilder newBatchVectorSearchBuilder() {
+        return new BatchVectorSearchBuilderImpl(this);
     }
 
     @Override

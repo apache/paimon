@@ -30,7 +30,9 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.vector.VectorIndexInput;
 import org.apache.paimon.index.vector.VectorIndexMetadata;
 import org.apache.paimon.index.vector.VectorIndexReader;
+import org.apache.paimon.index.vector.VectorSearchBatchResult;
 import org.apache.paimon.index.vector.VectorSearchResult;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -107,6 +109,74 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
                 executor);
     }
 
+    @Override
+    public CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> visitBatchVectorSearch(
+            BatchVectorSearch batchVectorSearch) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        ensureLoaded();
+                        return searchBatch(batchVectorSearch);
+                    } catch (IOException e) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Failed batch vector index search: field=%s, limit=%d, vectorCount=%d",
+                                        batchVectorSearch.fieldName(),
+                                        batchVectorSearch.limit(),
+                                        batchVectorSearch.vectorCount()),
+                                e);
+                    }
+                },
+                executor);
+    }
+
+    private List<Optional<ScoredGlobalIndexResult>> searchBatch(BatchVectorSearch batchVectorSearch)
+            throws IOException {
+        int n = batchVectorSearch.vectorCount();
+        // Single vector: reuse the scalar path; no batching benefit.
+        if (n == 1) {
+            List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(1);
+            results.add(Optional.ofNullable(search(batchVectorSearch.forIndex(0))));
+            return results;
+        }
+
+        float[][] vectors = batchVectorSearch.vectors();
+        for (float[] vector : vectors) {
+            validateSearchVector(vector);
+        }
+        int dim = nativeMeta.dimension();
+        int nprobe = nprobe(batchVectorSearch.options());
+        int efSearch = efSearch(batchVectorSearch.options());
+        String metric = nativeMeta.metric();
+
+        SearchScope scope =
+                resolveScope(batchVectorSearch.includeRowIds(), batchVectorSearch.limit());
+        if (scope == null) {
+            return emptyResults(n);
+        }
+
+        // Flatten query vectors into one contiguous array for a single native call.
+        float[] queries = new float[n * dim];
+        for (int i = 0; i < n; i++) {
+            System.arraycopy(vectors[i], 0, queries, i * dim, dim);
+        }
+
+        VectorSearchBatchResult batchResult =
+                scope.filterBytes != null
+                        ? vectorReader.searchBatch(
+                                queries, n, scope.effectiveK, nprobe, efSearch, scope.filterBytes)
+                        : vectorReader.searchBatch(queries, n, scope.effectiveK, nprobe, efSearch);
+
+        // result i corresponds to vectors[i], matching input order.
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(
+                    buildScoredResult(
+                            batchResult.idsForQuery(i), batchResult.distancesForQuery(i), metric));
+        }
+        return results;
+    }
+
     private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateSearchVector(vectorSearch.vector());
         float[] queryVector = vectorSearch.vector().clone();
@@ -115,26 +185,23 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         int efSearch = efSearch(vectorSearch.options());
         String metric = nativeMeta.metric();
 
-        RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
-        VectorSearchResult result;
-
-        if (includeRowIds != null) {
-            long cardinality = includeRowIds.getLongCardinality();
-            if (cardinality == 0) {
-                return null;
-            }
-            byte[] filterBytes = includeRowIds.serialize();
-            int effectiveK = (int) Math.min(limit, cardinality);
-            result = vectorReader.search(queryVector, effectiveK, nprobe, efSearch, filterBytes);
-        } else {
-            result = vectorReader.search(queryVector, limit, nprobe, efSearch);
-        }
-
-        long[] ids = result.ids();
-        float[] distances = result.distances();
-
-        if (ids.length == 0) {
+        SearchScope scope = resolveScope(vectorSearch.includeRowIds(), limit);
+        if (scope == null) {
             return null;
+        }
+        VectorSearchResult result =
+                scope.filterBytes != null
+                        ? vectorReader.search(
+                                queryVector, scope.effectiveK, nprobe, efSearch, scope.filterBytes)
+                        : vectorReader.search(queryVector, scope.effectiveK, nprobe, efSearch);
+
+        return buildScoredResult(result.ids(), result.distances(), metric).orElse(null);
+    }
+
+    private static Optional<ScoredGlobalIndexResult> buildScoredResult(
+            long[] ids, float[] distances, String metric) {
+        if (ids.length == 0) {
+            return Optional.empty();
         }
 
         RoaringNavigableMap64 resultBitmap = new RoaringNavigableMap64();
@@ -151,21 +218,54 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
         }
 
         if (resultBitmap.isEmpty()) {
-            return null;
+            return Optional.empty();
         }
 
-        return ScoredGlobalIndexResult.create(
-                resultBitmap,
-                rowId -> {
-                    Float score = id2scores.get(rowId);
-                    if (score == null) {
-                        throw new IllegalArgumentException(
-                                "No score found for rowId: "
-                                        + rowId
-                                        + ". Only rowIds present in results() are valid.");
-                    }
-                    return score;
-                });
+        return Optional.of(
+                ScoredGlobalIndexResult.create(
+                        resultBitmap,
+                        rowId -> {
+                            Float score = id2scores.get(rowId);
+                            if (score == null) {
+                                throw new IllegalArgumentException(
+                                        "No score found for rowId: "
+                                                + rowId
+                                                + ". Only rowIds present in results() are valid.");
+                            }
+                            return score;
+                        }));
+    }
+
+    private static List<Optional<ScoredGlobalIndexResult>> emptyResults(int n) {
+        List<Optional<ScoredGlobalIndexResult>> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(Optional.empty());
+        }
+        return results;
+    }
+
+    /** Resolves filter bytes and effective top-K; returns null when the filter selects no rows. */
+    private static SearchScope resolveScope(RoaringNavigableMap64 includeRowIds, int limit)
+            throws IOException {
+        if (includeRowIds == null) {
+            return new SearchScope(null, limit);
+        }
+        long cardinality = includeRowIds.getLongCardinality();
+        if (cardinality == 0) {
+            return null;
+        }
+        return new SearchScope(includeRowIds.serialize(), (int) Math.min(limit, cardinality));
+    }
+
+    /** Resolved filter state for a query. {@code filterBytes} is null when no filter is set. */
+    private static final class SearchScope {
+        private final byte[] filterBytes;
+        private final int effectiveK;
+
+        private SearchScope(byte[] filterBytes, int effectiveK) {
+            this.filterBytes = filterBytes;
+            this.effectiveK = effectiveK;
+        }
     }
 
     private static float convertDistanceToScore(float distance, String metric) {
