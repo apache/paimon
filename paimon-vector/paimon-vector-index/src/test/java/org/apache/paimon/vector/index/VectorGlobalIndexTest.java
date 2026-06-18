@@ -394,7 +394,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -446,7 +448,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -501,7 +505,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 

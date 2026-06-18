@@ -772,7 +772,9 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -823,7 +825,9 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -866,7 +870,9 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-        testVectors.forEach(writer::write);
+        for (int i = 0; i < testVectors.size(); i++) {
+            writer.write(testVectors.get(i), i);
+        }
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -912,7 +918,9 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-        testVectors.forEach(writer::write);
+        for (int i = 0; i < testVectors.size(); i++) {
+            writer.write(testVectors.get(i), i);
+        }
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
