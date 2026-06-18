@@ -45,7 +45,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -106,7 +105,7 @@ public class VectorGlobalIndexTest {
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         float[] wrongDimVector = new float[32];
-        assertThatThrownBy(() -> writer.write(wrongDimVector))
+        assertThatThrownBy(() -> writer.write(wrongDimVector, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dimension mismatch");
     }
@@ -130,7 +129,7 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}))
+        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=0")
                 .hasMessageContaining("index=1")
@@ -144,8 +143,8 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(null); // row 0 - null, advances logicalRowId
-        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}))
+        writer.write(null, 0); // row 0 - null
+        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=1")
                 .hasMessageContaining("index=0")
@@ -159,9 +158,9 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(null);
-        writer.write(null);
-        writer.write(null);
+        writer.write(null, 0);
+        writer.write(null, 1);
+        writer.write(null, 2);
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).isEmpty();
@@ -223,7 +222,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -260,7 +261,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -300,12 +303,12 @@ public class VectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
-        writer.write(vectors[0]); // row 0
-        writer.write(null); // row 1 - null
-        writer.write(vectors[1]); // row 2
-        writer.write(null); // row 3 - null
-        writer.write(null); // row 4 - null
-        writer.write(vectors[2]); // row 5
+        writer.write(vectors[0], 0); // row 0
+        writer.write(null, 1); // row 1 - null
+        writer.write(vectors[1], 2); // row 2
+        writer.write(null, 3); // row 3 - null
+        writer.write(null, 4); // row 4 - null
+        writer.write(vectors[2], 5); // row 5
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -352,7 +355,9 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = (VectorGlobalIndexWriter) indexer.createWriter(fileWriter);
-        Arrays.stream(vectors).forEach(writer::write);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 

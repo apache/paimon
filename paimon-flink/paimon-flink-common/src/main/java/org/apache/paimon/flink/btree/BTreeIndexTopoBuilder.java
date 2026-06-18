@@ -37,7 +37,7 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.options.Options;
@@ -377,7 +377,7 @@ public class BTreeIndexTopoBuilder {
         private transient long counter;
         private transient BTreeBuildTask currentTask;
         private transient BinaryRow currentPartition;
-        private transient GlobalIndexParallelWriter currentWriter;
+        private transient GlobalIndexSingleColumnWriter currentWriter;
         private transient List<CommitMessage> commitMessages;
         private transient Map<Integer, BTreeBuildTask> buildTasksById;
         private transient InternalRow.FieldGetter indexFieldGetter;

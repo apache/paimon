@@ -26,7 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -256,7 +256,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     public List<CommitMessage> buildForSinglePartition(
             Range rowRange, BinaryRow partition, Iterator<InternalRow> data) throws IOException {
         long counter = 0;
-        GlobalIndexParallelWriter currentWriter = null;
+        GlobalIndexSingleColumnWriter currentWriter = null;
         List<CommitMessage> commitMessages = new ArrayList<>();
         FieldGetter indexFieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
 
@@ -284,15 +284,15 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return commitMessages;
     }
 
-    public GlobalIndexParallelWriter createWriter() throws IOException {
-        GlobalIndexParallelWriter currentWriter;
+    public GlobalIndexSingleColumnWriter createWriter() throws IOException {
+        GlobalIndexSingleColumnWriter currentWriter;
         GlobalIndexWriter indexWriter = createIndexWriter(table, INDEX_TYPE, indexField, options);
-        if (!(indexWriter instanceof GlobalIndexParallelWriter)) {
+        if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
-                    "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexParallelWriter, but found: "
+                    "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexSingleColumnWriter, but found: "
                             + indexWriter.getClass().getName());
         }
-        currentWriter = (GlobalIndexParallelWriter) indexWriter;
+        currentWriter = (GlobalIndexSingleColumnWriter) indexWriter;
         return currentWriter;
     }
 

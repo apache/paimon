@@ -54,9 +54,9 @@ public class LuminaVectorGlobalIndexWriterTest {
                                     LuminaVectorIndexOptions.DIMENSION),
                             "2");
 
-            writer.write(new float[] {1.0f, 0.0f});
+            writer.write(new float[] {1.0f, 0.0f}, 0);
 
-            assertThatThrownBy(() -> writer.write(new float[] {1.0f, 0.0f, 0.0f}))
+            assertThatThrownBy(() -> writer.write(new float[] {1.0f, 0.0f, 0.0f}, 1))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("expected 2")
                     .hasMessageContaining("got 3");
@@ -94,9 +94,9 @@ public class LuminaVectorGlobalIndexWriterTest {
         try (LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(
                         createNoopFileWriter(), arrayFieldType, indexOptions)) {
-            writer.write(new float[] {1.0f, 0.0f, 0.0f});
+            writer.write(new float[] {1.0f, 0.0f, 0.0f}, 0);
 
-            assertThatThrownBy(() -> writer.write(new float[] {1.0f, 0.0f}))
+            assertThatThrownBy(() -> writer.write(new float[] {1.0f, 0.0f}, 1))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("expected 3")
                     .hasMessageContaining("got 2");

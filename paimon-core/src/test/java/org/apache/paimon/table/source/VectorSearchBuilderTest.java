@@ -25,9 +25,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
@@ -611,15 +610,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(fieldName);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -654,15 +653,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         int mid = vectors.length / 2;
 
         // Build first index file covering rows [0, mid)
-        GlobalIndexSingletonWriter writer1 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer1 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
         for (int i = 0; i < mid; i++) {
-            writer1.write(vectors[i]);
+            writer1.write(vectors[i], i);
         }
         List<ResultEntry> entries1 = writer1.finish();
         Range rowRange1 = new Range(0, mid - 1);
@@ -677,15 +676,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         entries1);
 
         // Build second index file covering rows [mid, end)
-        GlobalIndexSingletonWriter writer2 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer2 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
         for (int i = mid; i < vectors.length; i++) {
-            writer2.write(vectors[i]);
+            writer2.write(vectors[i], i - mid);
         }
         List<ResultEntry> entries2 = writer2.finish();
         Range rowRange2 = new Range(mid, vectors.length - 1);
@@ -819,15 +818,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -859,8 +858,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField idField = table.rowType().getField("id");
 
-        GlobalIndexParallelWriter writer =
-                (GlobalIndexParallelWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
         for (int id : ids) {
@@ -898,15 +897,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 

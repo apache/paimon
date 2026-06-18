@@ -23,7 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -155,7 +155,7 @@ class BTreeIndexMetaTest {
                                 new Path(new Path(tempPath.toUri()), fileName), true);
                     }
                 };
-        GlobalIndexParallelWriter indexWriter =
+        GlobalIndexSingleColumnWriter indexWriter =
                 new BTreeGlobalIndexer(
                                 new DataField(
                                         1, "testField", new VarCharType(VarCharType.MAX_LENGTH)),
