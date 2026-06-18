@@ -258,6 +258,7 @@ public class CatalogUtils {
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
             @Nullable CatalogContext catalogContext,
+            Map<String, String> tableRuntimeOptions,
             boolean isRestCatalog)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
@@ -271,7 +272,7 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO, catalogContext);
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext, tableRuntimeOptions);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -307,7 +308,12 @@ public class CatalogUtils {
                         catalog.supportsPartitionModification());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
-                FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
+                FileStoreTableFactory.create(
+                        dataFileIO.apply(path),
+                        path,
+                        schema,
+                        Options.fromMap(tableRuntimeOptions),
+                        catalogEnv);
 
         if (identifier.isSystemTable()) {
             return CatalogUtils.createSystemTable(identifier, table);
@@ -415,14 +421,17 @@ public class CatalogUtils {
             Identifier identifier,
             TableSchema schema,
             Function<Path, FileIO> fileIO,
-            CatalogContext catalogContext) {
-        Map<String, String> options = schema.options();
+            CatalogContext catalogContext,
+            Map<String, String> tableRuntimeOptions) {
+        Map<String, String> options = new HashMap<>(schema.options());
+        options.putAll(tableRuntimeOptions);
+        String location = schema.options().get(CoreOptions.PATH.key());
+        options.put(CoreOptions.PATH.key(), location);
         FormatTable.Format format =
                 FormatTable.parseFormat(
                         options.getOrDefault(
                                 CoreOptions.FILE_FORMAT.key(),
                                 CoreOptions.FILE_FORMAT.defaultValue()));
-        String location = options.get(CoreOptions.PATH.key());
         return FormatTable.builder()
                 .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)

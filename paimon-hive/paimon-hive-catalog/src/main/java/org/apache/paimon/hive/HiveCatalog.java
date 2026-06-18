@@ -768,6 +768,7 @@ public class HiveCatalog extends AbstractCatalog {
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
                 context,
+                tableRuntimeOptions,
                 false);
     }
 

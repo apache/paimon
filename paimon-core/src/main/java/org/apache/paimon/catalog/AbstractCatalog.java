@@ -605,6 +605,7 @@ public abstract class AbstractCatalog implements Catalog {
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
                 context,
+                tableRuntimeOptions,
                 false);
     }
 

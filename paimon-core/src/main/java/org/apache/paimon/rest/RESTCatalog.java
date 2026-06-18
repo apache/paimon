@@ -319,6 +319,7 @@ public class RESTCatalog implements Catalog {
                 null,
                 null,
                 context,
+                tableRuntimeOptions,
                 true);
     }
 
@@ -507,6 +508,7 @@ public class RESTCatalog implements Catalog {
                     null,
                     null,
                     context,
+                    tableRuntimeOptions,
                     true);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);

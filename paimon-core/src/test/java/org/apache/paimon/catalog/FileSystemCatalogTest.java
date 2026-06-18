@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FileFormatProvider;
@@ -31,8 +32,10 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -40,6 +43,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import javax.annotation.Nullable;
 
@@ -49,6 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FileSystemCatalog}. */
 public class FileSystemCatalogTest extends CatalogTestBase {
@@ -109,9 +114,12 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.createTable(identifier, schema, false);
 
         assertThat(RUNTIME_PROVIDER_VALIDATIONS.get()).isGreaterThan(0);
-        assertThat(((FileStoreTable) catalog.getTable(identifier)).schema().options())
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
-                .doesNotContainKey(FileFormatProvider.FORMAT_PROVIDER);
+                .containsEntry(
+                        FileFormatProvider.FORMAT_PROVIDER,
+                        RuntimeOptionFileFormatProvider.IDENTIFIER);
         assertThat(
                         new SchemaManager(fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
@@ -132,6 +140,59 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
                 .doesNotContainKey(FileFormatProvider.FORMAT_PROVIDER);
+    }
+
+    @Test
+    public void testLoadFormatTableWithRuntimeCatalogOptions() throws Exception {
+        Options options = new Options();
+        options.set(
+                Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.READ_FORMAT_PROVIDER,
+                RuntimeOptionFileFormatProvider.IDENTIFIER);
+        String schemaPath = new Path(new Path(warehouse), "format-table-data").toString();
+        String runtimePath = new Path(new Path(warehouse), "runtime-path-ignored").toString();
+        options.set(Catalog.TABLE_RUNTIME_OPTION_PREFIX + CoreOptions.PATH.key(), runtimePath);
+        catalog =
+                new FileSystemCatalog(fileIO, new Path(warehouse), CatalogContext.create(options));
+
+        Identifier identifier = Identifier.create("test_db", "format_table");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("value", DataTypes.STRING())
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET)
+                        .option(CoreOptions.PATH.key(), schemaPath)
+                        .build();
+
+        Catalog loadCatalog = Mockito.mock(Catalog.class);
+        when(loadCatalog.supportsVersionManagement()).thenReturn(false);
+        when(loadCatalog.supportsPartitionModification()).thenReturn(false);
+        FormatTable table =
+                (FormatTable)
+                        CatalogUtils.loadTable(
+                                loadCatalog,
+                                identifier,
+                                path -> fileIO,
+                                path -> fileIO,
+                                ignored ->
+                                        new TableMetadata(
+                                                TableSchema.create(0, schema), false, null),
+                                null,
+                                null,
+                                CatalogContext.create(options),
+                                CatalogUtils.tableRuntimeOptions(options.toMap()),
+                                false);
+
+        assertThat(table.options())
+                .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET)
+                .containsEntry(CoreOptions.PATH.key(), schemaPath)
+                .containsEntry(
+                        FileFormatProvider.READ_FORMAT_PROVIDER,
+                        RuntimeOptionFileFormatProvider.IDENTIFIER);
+        assertThat(table.location()).isEqualTo(schemaPath);
+        assertThat(TableSchema.create(0, schema).options())
+                .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_PARQUET)
+                .containsEntry(CoreOptions.PATH.key(), schemaPath)
+                .doesNotContainKey(FileFormatProvider.READ_FORMAT_PROVIDER);
     }
 
     @Test
