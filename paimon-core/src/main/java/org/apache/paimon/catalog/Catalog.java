@@ -1241,6 +1241,7 @@ public interface Catalog extends AutoCloseable {
 
     // constants for table
     String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    String TABLE_RUNTIME_OPTION_PREFIX = "table-runtime.";
     String NUM_ROWS_PROP = "numRows";
     String NUM_FILES_PROP = "numFiles";
     String TOTAL_SIZE_PROP = "totalSize";

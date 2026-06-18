@@ -130,7 +130,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     public void createTableImpl(Identifier identifier, Schema schema) {
         SchemaManager schemaManager = schemaManager(identifier);
         try {
-            runWithLock(identifier, () -> uncheck(() -> schemaManager.createTable(schema)));
+            runWithLock(
+                    identifier,
+                    () -> uncheck(() -> schemaManager.createTable(schema, tableRuntimeOptions)));
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -169,7 +171,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         SchemaManager schemaManager = schemaManager(identifier);
         try {
-            runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            runWithLock(identifier, () -> schemaManager.commitChanges(changes, tableRuntimeOptions));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException

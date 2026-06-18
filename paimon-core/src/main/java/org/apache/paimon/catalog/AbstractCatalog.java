@@ -74,6 +74,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.tableRuntimeOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
@@ -86,12 +87,14 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
+    protected final Map<String, String> tableRuntimeOptions;
     protected final CatalogContext context;
     protected final @Nullable LocalCacheManager cacheManager;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
         this.tableDefaultOptions = new HashMap<>();
+        this.tableRuntimeOptions = new HashMap<>();
         this.context = CatalogContext.create(new Options());
         this.cacheManager = null;
     }
@@ -100,6 +103,7 @@ public abstract class AbstractCatalog implements Catalog {
         this.cacheManager = CachingFileIO.createCacheManager(context);
         this.fileIO = CachingFileIO.wrapWithCachingIfNeeded(fileIO, context, cacheManager);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(context.options().toMap());
+        this.tableRuntimeOptions = tableRuntimeOptions(context.options().toMap());
         this.context = context;
     }
 
@@ -573,7 +577,7 @@ public abstract class AbstractCatalog implements Catalog {
         while (true) {
             TableSchema latest = sm.latestOrThrow("Cannot replace: schema chain is empty.");
             TableSchema staged = TableSchema.create(latest.id() + 1, newSchema);
-            if (sm.commit(staged)) {
+            if (sm.commit(staged, tableRuntimeOptions)) {
                 return staged.id();
             }
         }

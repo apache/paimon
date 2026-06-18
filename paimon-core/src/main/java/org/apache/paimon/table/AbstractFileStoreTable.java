@@ -374,7 +374,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions);
 
         return copy(newTableSchema);
     }

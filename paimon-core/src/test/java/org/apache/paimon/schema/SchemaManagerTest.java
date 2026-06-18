@@ -161,6 +161,64 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testCreateTableWithDynamicOptions() throws Exception {
+        Map<String, String> schemaOptions = new HashMap<>();
+        schemaOptions.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        schemaOptions,
+                        "");
+
+        Map<String, String> dynamicOptions =
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true");
+        TableSchema tableSchema =
+                retryArtificialException(() -> manager.createTable(schema, dynamicOptions));
+
+        assertThat(tableSchema.options())
+                .containsEntry(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true")
+                .doesNotContainKey(CoreOptions.WRITE_ONLY.key());
+        assertThat(retryArtificialException(() -> manager.latest()).get().options())
+                .containsEntry(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true")
+                .doesNotContainKey(CoreOptions.WRITE_ONLY.key());
+    }
+
+    @Test
+    public void testCommitChangesWithDynamicOptions() throws Exception {
+        Map<String, String> schemaOptions = new HashMap<>();
+        schemaOptions.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        schemaOptions,
+                        "");
+
+        Map<String, String> dynamicOptions =
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true");
+        retryArtificialException(() -> manager.createTable(schema, dynamicOptions));
+        TableSchema tableSchema =
+                retryArtificialException(
+                        () ->
+                                manager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.setOption("new_k", "new_v")),
+                                        dynamicOptions));
+
+        assertThat(tableSchema.options())
+                .containsEntry(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true")
+                .containsEntry("new_k", "new_v")
+                .doesNotContainKey(CoreOptions.WRITE_ONLY.key());
+        assertThat(retryArtificialException(() -> manager.latest()).get().options())
+                .containsEntry(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true")
+                .containsEntry("new_k", "new_v")
+                .doesNotContainKey(CoreOptions.WRITE_ONLY.key());
+    }
+
+    @Test
     public void testUpdateOptions() throws Exception {
         retryArtificialException(() -> manager.createTable(this.schema));
         retryArtificialException(

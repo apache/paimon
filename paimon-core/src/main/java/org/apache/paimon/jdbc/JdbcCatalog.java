@@ -337,7 +337,8 @@ public class JdbcCatalog extends AbstractCatalog {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
             TableSchema tableSchema =
-                    runWithLock(identifier, () -> schemaManager.createTable(schema));
+                    runWithLock(
+                            identifier, () -> schemaManager.createTable(schema, tableRuntimeOptions));
             // Update schema metadata
             Path path = getTableLocation(identifier);
             if (JdbcUtils.insertTable(
@@ -412,7 +413,7 @@ public class JdbcCatalog extends AbstractCatalog {
         assertMainBranch(identifier);
         SchemaManager schemaManager = getSchemaManager(identifier);
         try {
-            runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            runWithLock(identifier, () -> schemaManager.commitChanges(changes, tableRuntimeOptions));
             if (syncTableProperties()) {
                 TableSchema updatedSchema = schemaManager.latest().get();
                 execute(

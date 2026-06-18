@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -37,6 +38,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
@@ -186,6 +188,17 @@ public class SchemaManager implements Serializable {
     }
 
     public TableSchema createTable(Schema schema, boolean externalTable) throws Exception {
+        return createTable(schema, externalTable, Collections.emptyMap());
+    }
+
+    public TableSchema createTable(Schema schema, Map<String, String> dynamicOptions)
+            throws Exception {
+        return createTable(schema, false, dynamicOptions);
+    }
+
+    public TableSchema createTable(
+            Schema schema, boolean externalTable, Map<String, String> dynamicOptions)
+            throws Exception {
         while (true) {
             Optional<TableSchema> latest = latest();
             if (latest.isPresent()) {
@@ -203,9 +216,15 @@ public class SchemaManager implements Serializable {
             TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
-            FileStoreTableFactory.create(fileIO, tableRoot, newSchema).store();
+            FileStoreTableFactory.create(
+                            fileIO,
+                            tableRoot,
+                            newSchema,
+                            Options.fromMap(dynamicOptions),
+                            CatalogEnvironment.empty())
+                    .store();
 
-            boolean success = commit(newSchema);
+            boolean success = commit(newSchema, dynamicOptions);
             if (success) {
                 return newSchema;
             }
@@ -256,6 +275,13 @@ public class SchemaManager implements Serializable {
     public TableSchema commitChanges(List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
+        return commitChanges(changes, Collections.emptyMap());
+    }
+
+    /** Update {@link SchemaChange}s. */
+    public TableSchema commitChanges(List<SchemaChange> changes, Map<String, String> dynamicOptions)
+            throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
+                    Catalog.ColumnNotExistException {
         SnapshotManager snapshotManager =
                 new SnapshotManager(fileIO, tableRoot, branch, null, null);
         LazyField<Boolean> hasSnapshots =
@@ -271,9 +297,10 @@ public class SchemaManager implements Serializable {
             LazyField<Identifier> lazyIdentifier =
                     new LazyField<>(() -> identifierFromPath(tableRoot.toString(), true, branch));
             TableSchema newTableSchema =
-                    generateTableSchema(oldTableSchema, changes, hasSnapshots, lazyIdentifier);
+                    generateTableSchema(
+                            oldTableSchema, changes, hasSnapshots, lazyIdentifier, dynamicOptions);
             try {
-                boolean success = commit(newTableSchema);
+                boolean success = commit(newTableSchema, dynamicOptions);
                 if (success) {
                     return newTableSchema;
                 }
@@ -288,6 +315,17 @@ public class SchemaManager implements Serializable {
             List<SchemaChange> changes,
             LazyField<Boolean> hasSnapshots,
             LazyField<Identifier> lazyIdentifier)
+            throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
+        return generateTableSchema(
+                oldTableSchema, changes, hasSnapshots, lazyIdentifier, Collections.emptyMap());
+    }
+
+    public static TableSchema generateTableSchema(
+            TableSchema oldTableSchema,
+            List<SchemaChange> changes,
+            LazyField<Boolean> hasSnapshots,
+            LazyField<Identifier> lazyIdentifier,
+            Map<String, String> dynamicOptions)
             throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
         Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
         Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
@@ -618,7 +656,7 @@ public class SchemaManager implements Serializable {
                         newSchema.primaryKeys(),
                         newSchema.options(),
                         newSchema.comment());
-        SchemaValidation.validateTableSchema(newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions);
         return newTableSchema;
     }
 
@@ -1151,7 +1189,12 @@ public class SchemaManager implements Serializable {
 
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
-        SchemaValidation.validateTableSchema(newSchema);
+        return commit(newSchema, Collections.emptyMap());
+    }
+
+    public boolean commit(TableSchema newSchema, Map<String, String> dynamicOptions)
+            throws Exception {
+        SchemaValidation.validateTableSchema(newSchema, dynamicOptions);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());

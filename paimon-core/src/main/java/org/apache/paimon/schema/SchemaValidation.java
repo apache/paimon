@@ -120,31 +120,60 @@ public class SchemaValidation {
      *     validations such as the {@code write-only} requirement for snapshot ordering
      */
     public static void validateTableSchema(TableSchema schema, Set<String> dynamicOptionKeys) {
-        CoreOptions options = new CoreOptions(schema.options());
+        validateTableSchema(schema, Collections.emptyMap(), dynamicOptionKeys);
+    }
 
-        validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
-        validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
-        validateOnlyContainPrimitiveType(schema.fields(), options.upsertKey(), "upsert key");
+    /**
+     * Validate the {@link TableSchema} and {@link CoreOptions}.
+     *
+     * @param schema the schema to be validated
+     * @param dynamicOptions options that are overridden dynamically at runtime. These options
+     *     participate in validation but are not required to be persisted in the table schema.
+     */
+    public static void validateTableSchema(TableSchema schema, Map<String, String> dynamicOptions) {
+        validateTableSchema(schema, dynamicOptions, dynamicOptions.keySet());
+    }
 
-        if (!options.upsertKey().isEmpty() && !schema.primaryKeys().isEmpty()) {
+    private static void validateTableSchema(
+            TableSchema schema, Map<String, String> dynamicOptions, Set<String> dynamicOptionKeys) {
+        Map<String, String> validationOptions = new HashMap<>(schema.options());
+        dynamicOptions.forEach(
+                (key, value) -> {
+                    if (value == null) {
+                        validationOptions.remove(key);
+                    } else {
+                        validationOptions.put(key, value);
+                    }
+                });
+        TableSchema validationSchema = schema.copy(validationOptions);
+        CoreOptions options = new CoreOptions(validationOptions);
+
+        validateOnlyContainPrimitiveType(
+                validationSchema.fields(), validationSchema.primaryKeys(), "primary key");
+        validateOnlyContainPrimitiveType(
+                validationSchema.fields(), validationSchema.partitionKeys(), "partition");
+        validateOnlyContainPrimitiveType(validationSchema.fields(), options.upsertKey(), "upsert key");
+
+        if (!options.upsertKey().isEmpty() && !validationSchema.primaryKeys().isEmpty()) {
             throw new RuntimeException(
                     String.format(
                             "Cannot define 'upsert-key' %s with 'primary-key' %s.",
-                            options.upsertKey(), schema.primaryKeys()));
+                            options.upsertKey(), validationSchema.primaryKeys()));
         }
 
-        validateBucket(schema, options);
+        validateBucket(validationSchema, options);
 
         validateStartupMode(options);
 
-        validateFieldsPrefix(schema, options);
+        validateFieldsPrefix(validationSchema, options);
 
-        validateSequenceField(schema, options);
+        validateSequenceField(validationSchema, options);
 
-        validateMergeFunction(schema);
+        validateMergeFunction(validationSchema);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
-        if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
+        if (validationSchema.primaryKeys().isEmpty()
+                && changelogProducer != ChangelogProducer.NONE) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Can not set %s on table without primary keys, please define primary keys.",
@@ -195,8 +224,8 @@ public class SchemaValidation {
                         + CHANGELOG_NUM_RETAINED_MAX.key());
 
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        RowType tableRowType = new RowType(schema.fields());
+                FileFormat.fromIdentifier(options.formatType(), Options.fromMap(validationOptions));
+        RowType tableRowType = new RowType(validationSchema.fields());
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -247,7 +276,7 @@ public class SchemaValidation {
         }
 
         // Check column names in schema
-        schema.fieldNames()
+        validationSchema.fieldNames()
                 .forEach(
                         f -> {
                             checkState(
@@ -262,7 +291,7 @@ public class SchemaValidation {
                                             f, KEY_FIELD_PREFIX));
                         });
 
-        if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
+        if (validationSchema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
                     String.format(
                             "Doesn't support streaming read the changes from overwrite when the primary keys are "
@@ -273,7 +302,7 @@ public class SchemaValidation {
         String recordLevelTimeField = options.recordLevelTimeField();
         if (recordLevelTimeField != null) {
             Optional<DataField> field =
-                    schema.fields().stream()
+                    validationSchema.fields().stream()
                             .filter(dataField -> dataField.name().equals(recordLevelTimeField))
                             .findFirst();
             if (!field.isPresent()) {
@@ -306,7 +335,7 @@ public class SchemaValidation {
                 .ifPresent(
                         field ->
                                 checkArgument(
-                                        schema.fieldNames().contains(field),
+                                        validationSchema.fieldNames().contains(field),
                                         "Rowkind field: '%s' can not be found in table schema.",
                                         field));
 
@@ -319,12 +348,13 @@ public class SchemaValidation {
         }
 
         if (options.snapshotSequenceOrdering()) {
-            validateSnapshotSequenceOrdering(schema, options, dynamicOptionKeys);
+            validateSnapshotSequenceOrdering(
+                    validationSchema, options, dynamicOptionKeys);
         }
 
         // vector field names must point to vector type
         Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
-        schema.fields()
+        validationSchema.fields()
                 .forEach(
                         f ->
                                 checkState(
@@ -335,26 +365,26 @@ public class SchemaValidation {
                                                         + " the type must be vector, but it is %s",
                                                 f.name(), f.type())));
         // vector field names must exist in table schema
-        schema.fieldNames().forEach(fieldNamesSpecifiedAsVector::remove);
+        validationSchema.fieldNames().forEach(fieldNamesSpecifiedAsVector::remove);
         checkArgument(
                 fieldNamesSpecifiedAsVector.isEmpty(),
                 "Some of the columns specified as vector-field are unknown.");
 
-        validateMergeFunctionFactory(schema);
+        validateMergeFunctionFactory(validationSchema);
 
-        validateFileIndex(schema);
+        validateFileIndex(validationSchema);
 
-        validateRowTracking(schema, options);
+        validateRowTracking(validationSchema, options);
 
-        validateIncrementalClustering(schema, options);
+        validateIncrementalClustering(validationSchema, options);
 
-        validateChainTable(schema, options);
+        validateChainTable(validationSchema, options);
 
-        validateChangelogReadSequenceNumber(schema, options);
+        validateChangelogReadSequenceNumber(validationSchema, options);
 
         validatePkClusteringOverride(options);
 
-        validateManifestSort(schema, options);
+        validateManifestSort(validationSchema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {

@@ -88,10 +88,10 @@ public abstract class FileFormat {
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
         String normalizedIdentifier = identifier.toLowerCase();
-        ClassLoader classLoader = FileFormat.class.getClassLoader();
         String providerIdentifier =
                 context.options().getString(FileFormatProvider.FORMAT_PROVIDER, null);
         if (providerIdentifier != null && !providerIdentifier.trim().isEmpty()) {
+            ClassLoader classLoader = providerClassLoader();
             Optional<FileFormat> providedFormat =
                     FormatFactoryUtil.discoverProvider(
                                     classLoader, providerIdentifier.trim().toLowerCase())
@@ -101,8 +101,23 @@ public abstract class FileFormat {
             }
         }
 
-        return FormatFactoryUtil.discoverFactory(classLoader, normalizedIdentifier)
+        return FormatFactoryUtil.discoverFactory(FileFormat.class.getClassLoader(), normalizedIdentifier)
                 .create(context);
+    }
+
+    private static ClassLoader providerClassLoader() {
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader != null) {
+            try {
+                if (contextClassLoader.loadClass(FileFormatProvider.class.getName())
+                        == FileFormatProvider.class) {
+                    return contextClassLoader;
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Fall back to the class loader that loaded Paimon's format API.
+            }
+        }
+        return FileFormat.class.getClassLoader();
     }
 
     protected Options getIdentifierPrefixOptions(Options options) {

@@ -92,6 +92,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.tableRuntimeOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
@@ -102,6 +103,7 @@ public class RESTCatalog implements Catalog {
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
+    private final Map<String, String> tableRuntimeOptions;
     private final @Nullable LocalCacheManager cacheManager;
 
     public RESTCatalog(CatalogContext context) {
@@ -118,6 +120,7 @@ public class RESTCatalog implements Catalog {
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
+        this.tableRuntimeOptions = tableRuntimeOptions(this.context.options().toMap());
         this.cacheManager = CachingFileIO.createCacheManager(this.context);
     }
 
@@ -1249,7 +1252,7 @@ public class RESTCatalog implements Catalog {
             Optional<TableSchema> latest = schemaManager.latest();
             if (latest.isPresent()) {
                 // Note we just validate schema here, will not create a new table
-                schemaManager.createTable(schema, true);
+                schemaManager.createTable(schema, true, tableRuntimeOptions);
                 Schema existsSchema = latest.get().toSchema();
                 // use `owner` and `path` from the user provide schema
                 if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {

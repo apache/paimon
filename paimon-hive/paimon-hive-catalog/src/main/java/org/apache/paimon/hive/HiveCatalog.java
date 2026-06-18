@@ -1113,7 +1113,8 @@ public class HiveCatalog extends AbstractCatalog {
                             identifier,
                             () ->
                                     schemaManager(identifier, location)
-                                            .createTable(schema, externalTable));
+                                            .createTable(
+                                                    schema, externalTable, tableRuntimeOptions));
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -1259,7 +1260,10 @@ public class HiveCatalog extends AbstractCatalog {
         TableSchema schema;
         try {
             // first commit changes to underlying files
-            schema = runWithLock(identifier, () -> schemaManager.commitChanges(changes));
+            schema =
+                    runWithLock(
+                            identifier,
+                            () -> schemaManager.commitChanges(changes, tableRuntimeOptions));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException

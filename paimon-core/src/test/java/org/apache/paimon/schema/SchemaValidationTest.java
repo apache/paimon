@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -584,6 +585,60 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testSnapshotSequenceOrderingHonorsDynamicWriteOnlyKey() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(CoreOptions.WRITE_ONLY.key(), "false");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(1, "f1", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        singletonList("f1"),
+                        options,
+                        "");
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        schema,
+                                        Collections.singleton(CoreOptions.WRITE_ONLY.key())));
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingHonorsDynamicWriteOnlyValue() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Arrays.asList(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(1, "f1", DataTypes.INT())),
+                        10,
+                        emptyList(),
+                        singletonList("f1"),
+                        options,
+                        "");
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        schema,
+                                        Collections.singletonMap(
+                                                CoreOptions.WRITE_ONLY.key(), "true")));
+    }
+
+    @Test
     public void testSnapshotSequenceOrderingRejectsSequenceField() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
@@ -850,5 +905,28 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testDynamicOptionsCanRemoveSchemaOptionsDuringValidation() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup");
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        options.put(BUCKET.key(), String.valueOf(-1));
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        TableSchema schema =
+                new TableSchema(
+                        1, fields, 10, singletonList("f0"), singletonList("f1"), options, "");
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), null);
+
+        assertThatCode(() -> validateTableSchema(schema, dynamicOptions))
+                .doesNotThrowAnyException();
     }
 }

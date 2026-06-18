@@ -70,6 +70,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
+import static org.apache.paimon.catalog.Catalog.TABLE_RUNTIME_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
@@ -111,6 +112,10 @@ public class CatalogUtils {
 
     public static Map<String, String> tableDefaultOptions(Map<String, String> options) {
         return convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+    }
+
+    public static Map<String, String> tableRuntimeOptions(Map<String, String> options) {
+        return convertToPropertiesPrefixKey(options, TABLE_RUNTIME_OPTION_PREFIX);
     }
 
     public static boolean isSystemDatabase(String database) {
