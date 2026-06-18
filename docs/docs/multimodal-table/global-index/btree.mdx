@@ -42,6 +42,8 @@ Supported predicate shapes include:
 | AND / OR combinations | `name = 'a200' OR name = 'a300'` |
 
 `LIKE`, `startsWith`, `contains`, and `NOT IN` predicates may still need broader index file reads.
+Use `btree-index.fallback-scan-max-size` to cap fallback range and string scans by the total
+candidate index file size.
 For keyword-style text retrieval, use [Full-Text Index](./full-text) instead.
 
 ## Build BTree Index
@@ -74,6 +76,7 @@ CALL sys.create_global_index(
 | `btree-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building BTree indexes. |
 | `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
 | `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
+| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
 | `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
 
 ## Query with BTree Index

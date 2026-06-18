@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
@@ -26,6 +25,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -34,23 +34,29 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
- * An {@link FunctionVisitor} to select candidate btree index files. All files are expected to
- * belong to the same field. The current {@code RowRangeGlobalIndexScanner} can guarantee that.
- * Please do not break this premise if you want to implement your own index scanner.
+ * Selects candidate global index files by per-index-file min/max metadata.
+ *
+ * <p>All files are expected to belong to the same field. The current {@code
+ * RowRangeGlobalIndexScanner} can guarantee that. Please do not break this premise if you want to
+ * implement your own index scanner.
  */
-public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
+public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<GlobalIndexIOMeta>>> {
 
-    private final List<Pair<GlobalIndexIOMeta, BTreeIndexMeta>> files;
-    private final Comparator<Object> comparator;
+    private final List<Pair<GlobalIndexIOMeta, SortedIndexFileMeta>> files;
     private final KeySerializer keySerializer;
+    private final Comparator<Object> comparator;
 
-    public BTreeFileMetaSelector(List<GlobalIndexIOMeta> files, KeySerializer keySerializer) {
+    public SortedFileMetaSelector(List<GlobalIndexIOMeta> files, KeySerializer keySerializer) {
         this.files =
                 files.stream()
-                        .map(meta -> Pair.of(meta, BTreeIndexMeta.deserialize(meta.metadata())))
+                        .map(
+                                meta ->
+                                        Pair.of(
+                                                meta,
+                                                SortedIndexFileMeta.deserialize(meta.metadata())))
                         .collect(Collectors.toList());
-        this.comparator = keySerializer.createComparator();
         this.keySerializer = keySerializer;
+        this.comparator = keySerializer.createComparator();
     }
 
     @Override
@@ -60,96 +66,95 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitIsNull(FieldRef fieldRef) {
-        return Optional.of(filter(BTreeIndexMeta::hasNulls));
+        return Optional.of(filter(SortedIndexFileMeta::hasNulls));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return Optional.of(filter(meta -> true));
-    }
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
 
-    @Override
-    public Optional<List<GlobalIndexIOMeta>> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return Optional.of(filter(meta -> true));
-    }
+        byte[] prefix = serialize(literal);
+        if (prefix.length == 0) {
+            return Optional.of(filter(meta -> !meta.onlyNulls()));
+        }
 
-    @Override
-    public Optional<List<GlobalIndexIOMeta>> visitContains(FieldRef fieldRef, Object literal) {
-        return Optional.of(filter(meta -> true));
-    }
-
-    @Override
-    public Optional<List<GlobalIndexIOMeta>> visitLike(FieldRef fieldRef, Object literal) {
-        return Optional.of(filter(meta -> true));
-    }
-
-    @Override
-    public Optional<List<GlobalIndexIOMeta>> visitLessThan(FieldRef fieldRef, Object literal) {
-        // `<` means file.minKey < literal
+        Object prefixKey = deserialize(prefix);
+        byte[] upperBoundBytes = prefixUpperBound(prefix);
+        Object upperBound = upperBoundBytes == null ? null : deserialize(upperBoundBytes);
         return Optional.of(
                 filter(
                         meta ->
                                 !meta.onlyNulls()
-                                        && comparator.compare(
-                                                        deserialize(meta.getFirstKey()), literal)
-                                                < 0));
+                                        && compareLastKey(meta, prefixKey) >= 0
+                                        && (upperBound == null
+                                                || compareFirstKey(meta, upperBound) < 0)));
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitEndsWith(FieldRef fieldRef, Object literal) {
+        return Optional.of(filter(meta -> literal != null && !meta.onlyNulls()));
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.of(filter(meta -> literal != null && !meta.onlyNulls()));
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitLike(FieldRef fieldRef, Object literal) {
+        return Optional.of(filter(meta -> literal != null && !meta.onlyNulls()));
+    }
+
+    @Override
+    public Optional<List<GlobalIndexIOMeta>> visitLessThan(FieldRef fieldRef, Object literal) {
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls() && compareFirstKey(meta, literal) < 0));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitGreaterOrEqual(
             FieldRef fieldRef, Object literal) {
-        // `>=` means file.maxKey >= literal
-        return Optional.of(
-                filter(
-                        meta ->
-                                !meta.onlyNulls()
-                                        && comparator.compare(
-                                                        deserialize(meta.getLastKey()), literal)
-                                                >= 0));
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls() && compareLastKey(meta, literal) >= 0));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(filter(meta -> true));
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls()));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        // `<=` means file.minKey <= literal
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
         return Optional.of(
-                filter(
-                        meta ->
-                                !meta.onlyNulls()
-                                        && comparator.compare(
-                                                        deserialize(meta.getFirstKey()), literal)
-                                                <= 0));
+                filter(meta -> !meta.onlyNulls() && compareFirstKey(meta, literal) <= 0));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitEqual(FieldRef fieldRef, Object literal) {
-        return Optional.of(
-                filter(
-                        meta -> {
-                            if (meta.onlyNulls()) {
-                                return false;
-                            }
-                            Object minKey = deserialize(meta.getFirstKey());
-                            Object maxKey = deserialize(meta.getLastKey());
-                            return comparator.compare(literal, minKey) >= 0
-                                    && comparator.compare(literal, maxKey) <= 0;
-                        }));
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls() && overlaps(meta, literal, literal)));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        // `>` means file.maxKey > literal
-        return Optional.of(
-                filter(
-                        meta ->
-                                !meta.onlyNulls()
-                                        && comparator.compare(
-                                                        deserialize(meta.getLastKey()), literal)
-                                                > 0));
+        if (literal == null) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls() && compareLastKey(meta, literal) > 0));
     }
 
     @Override
@@ -160,11 +165,8 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
                             if (meta.onlyNulls()) {
                                 return false;
                             }
-                            Object minKey = deserialize(meta.getFirstKey());
-                            Object maxKey = deserialize(meta.getLastKey());
                             for (Object literal : literals) {
-                                if (comparator.compare(literal, minKey) >= 0
-                                        && comparator.compare(literal, maxKey) <= 0) {
+                                if (literal != null && overlaps(meta, literal, literal)) {
                                     return true;
                                 }
                             }
@@ -174,24 +176,21 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        // we can't filter any file meta by NOT IN condition
-        return Optional.of(filter(meta -> true));
+        for (Object literal : literals) {
+            if (literal == null) {
+                return Optional.of(Collections.emptyList());
+            }
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls()));
     }
 
     @Override
     public Optional<List<GlobalIndexIOMeta>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
-        return Optional.of(
-                filter(
-                        meta -> {
-                            if (meta.onlyNulls()) {
-                                return false;
-                            }
-                            Object minKey = deserialize(meta.getFirstKey());
-                            Object maxKey = deserialize(meta.getLastKey());
-                            return comparator.compare(from, maxKey) <= 0
-                                    && comparator.compare(to, minKey) >= 0;
-                        }));
+        if (from == null || to == null || compareKeys(from, to) > 0) {
+            return Optional.of(Collections.emptyList());
+        }
+        return Optional.of(filter(meta -> !meta.onlyNulls() && overlaps(meta, from, to)));
     }
 
     @Override
@@ -222,7 +221,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
             if (!child.isPresent()) {
                 return Optional.empty();
             }
-            child.ifPresent(result::addAll);
+            result.addAll(child.get());
         }
         return Optional.of(new ArrayList<>(result));
     }
@@ -232,14 +231,48 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
         return Optional.empty();
     }
 
-    private Object deserialize(byte[] valueBytes) {
+    protected boolean overlaps(SortedIndexFileMeta meta, Object from, Object to) {
+        return comparator.compare(from, deserialize(meta.lastKey())) <= 0
+                && comparator.compare(to, deserialize(meta.firstKey())) >= 0;
+    }
+
+    protected int compareFirstKey(SortedIndexFileMeta meta, Object literal) {
+        return comparator.compare(deserialize(meta.firstKey()), literal);
+    }
+
+    protected int compareLastKey(SortedIndexFileMeta meta, Object literal) {
+        return comparator.compare(deserialize(meta.lastKey()), literal);
+    }
+
+    protected int compareKeys(Object left, Object right) {
+        return comparator.compare(left, right);
+    }
+
+    protected byte[] serialize(Object key) {
+        return keySerializer.serialize(key);
+    }
+
+    protected Object deserialize(byte[] valueBytes) {
         return keySerializer.deserialize(MemorySlice.wrap(valueBytes));
     }
 
-    private List<GlobalIndexIOMeta> filter(Predicate<BTreeIndexMeta> predicate) {
+    protected List<GlobalIndexIOMeta> filter(Predicate<SortedIndexFileMeta> predicate) {
         return files.stream()
                 .filter(pair -> predicate.test(pair.getRight()))
                 .map(Pair::getLeft)
                 .collect(Collectors.toList());
+    }
+
+    protected static byte[] prefixUpperBound(byte[] prefix) {
+        for (int i = prefix.length - 1; i >= 0; i--) {
+            int unsignedByte = prefix[i] & 0xFF;
+            if (unsignedByte != 0xFF) {
+                byte[] upperBound = new byte[i + 1];
+                System.arraycopy(prefix, 0, upperBound, 0, i + 1);
+                upperBound[i] = (byte) (unsignedByte + 1);
+                return upperBound;
+            }
+        }
+        return null;
     }
 }

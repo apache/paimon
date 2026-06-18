@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -45,7 +45,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.Comparator;
 
-/** This interface provides core methods to ser/de and compare btree index keys. */
+/** This interface provides core methods to ser/de and compare global index keys. */
 @ThreadSafe
 public interface KeySerializer {
 
@@ -61,7 +61,7 @@ public interface KeySerializer {
                     @Override
                     public KeySerializer defaultMethod(DataType dataType) {
                         throw new UnsupportedOperationException(
-                                "DataType: " + dataType + " is not supported by btree index now.");
+                                "DataType: " + dataType + " is not supported by global index now.");
                     }
 
                     @Override

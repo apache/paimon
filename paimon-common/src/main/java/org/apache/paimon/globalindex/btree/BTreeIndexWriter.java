@@ -21,7 +21,9 @@ package org.apache.paimon.globalindex.btree;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -171,7 +173,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
         }
 
         byte[] metaBytes =
-                new BTreeIndexMeta(
+                new SortedIndexFileMeta(
                                 firstKey == null ? null : keySerializer.serialize(firstKey),
                                 lastKey == null ? null : keySerializer.serialize(lastKey),
                                 nullBitmap.initialized())

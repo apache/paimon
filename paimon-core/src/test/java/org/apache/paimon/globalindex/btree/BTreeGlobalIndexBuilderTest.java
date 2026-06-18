@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -445,15 +446,17 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
             this.lastKey = lastKey;
         }
 
-        static FileStats fromIndexFileMeta(IndexFileMeta meta) {
+        static FileStats fromIndexFileMeta(org.apache.paimon.index.IndexFileMeta meta) {
             Assertions.assertNotNull(meta.globalIndexMeta());
             GlobalIndexMeta globalIndexMeta = meta.globalIndexMeta();
-            BTreeIndexMeta btreeMeta = BTreeIndexMeta.deserialize(globalIndexMeta.indexMeta());
+            org.apache.paimon.globalindex.SortedIndexFileMeta indexMeta =
+                    org.apache.paimon.globalindex.SortedIndexFileMeta.deserialize(
+                            globalIndexMeta.indexMeta());
 
             return new FileStats(
                     meta.rowCount(),
-                    deserialize(btreeMeta.getFirstKey()),
-                    deserialize(btreeMeta.getLastKey()));
+                    deserialize(indexMeta.getFirstKey()),
+                    deserialize(indexMeta.getLastKey()));
         }
     }
 }

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.globalindex.btree.{BTreeIndexMeta, KeySerializer}
+import org.apache.paimon.globalindex.{KeySerializer, SortedIndexFileMeta}
 import org.apache.paimon.memory.MemorySlice
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
@@ -80,7 +80,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       btreeEntries.foreach(e => assert(e.globalIndexMeta() != null))
 
       // 3. assert btree index file range non-overlapping
-      case class MetaWithKey(meta: BTreeIndexMeta, first: Object, last: Object)
+      case class MetaWithKey(meta: SortedIndexFileMeta, first: Object, last: Object)
       val keySerializer = KeySerializer.create(new VarCharType())
       val comparator = keySerializer.createComparator()
 
@@ -90,7 +90,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
 
       val btreeMetas = btreeEntries
         .map(_.globalIndexMeta().indexMeta())
-        .map(meta => BTreeIndexMeta.deserialize(meta))
+        .map(meta => SortedIndexFileMeta.deserialize(meta))
         .map(
           m => {
             assert(m.getFirstKey != null)
@@ -216,7 +216,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     val entriesByPart = btreeEntries.groupBy(_.partition())
     assert(entriesByPart.size == partCount)
 
-    case class MetaWithKey(meta: BTreeIndexMeta, first: Object, last: Object)
+    case class MetaWithKey(meta: SortedIndexFileMeta, first: Object, last: Object)
     val keySerializer = KeySerializer.create(new VarCharType())
     val comparator = keySerializer.createComparator()
 
@@ -227,7 +227,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     for ((k, v) <- entriesByPart) {
       val metas = v
         .map(_.indexFile().globalIndexMeta().indexMeta())
-        .map(bytes => BTreeIndexMeta.deserialize(bytes))
+        .map(bytes => SortedIndexFileMeta.deserialize(bytes))
         .map(
           m => {
             assert(m.getFirstKey != null)
