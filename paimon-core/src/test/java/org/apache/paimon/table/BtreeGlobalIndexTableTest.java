@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
@@ -36,6 +37,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -44,6 +46,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -128,6 +131,47 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         });
 
         assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+    }
+
+    @Test
+    public void testBTreeGlobalIndexFastSearchControlsUnindexedData() throws Exception {
+        write(500L);
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write0 = writeBuilder.newWrite()) {
+            for (int i = 500; i < 1000; i++) {
+                write0.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
+            }
+            BatchTableCommit commit = writeBuilder.newCommit();
+            commit.commit(write0.prepareCommit());
+        }
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate predicate =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a100"),
+                                        BinaryString.fromString("a700")));
+
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        List<String> fastSearchResult = readF1(readBuilder, readBuilder.newScan().plan());
+        assertThat(fastSearchResult).containsExactly("a100");
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false"));
+        readBuilder = table.newReadBuilder().withFilter(predicate);
+        List<String> slowSearchResult = readF1(readBuilder, readBuilder.newScan().plan());
+        assertThat(slowSearchResult).containsExactly("a100", "a700");
     }
 
     @Test
@@ -235,6 +279,16 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         return splits.stream()
                 .map(split -> ((IndexedSplit) split).dataSplit())
                 .collect(Collectors.toList());
+    }
+
+    private List<String> readF1(ReadBuilder readBuilder, TableScan.Plan plan)
+            throws Exception {
+        List<String> readF1 = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(plan)
+                .forEachRemaining(row -> readF1.add(row.getString(1).toString()));
+        return readF1;
     }
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)

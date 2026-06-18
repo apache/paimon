@@ -129,8 +129,17 @@ ALTER TABLE my_table SET (
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Run `create_global_index` again
-to build index files for newly uncovered data. A query that can be answered by a matching global
-index reads indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
+to build index files for newly uncovered data. By default, queries use fast search and only read
+indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
+
+To improve freshness for query types that support slow search, set:
+
+```sql
+ALTER TABLE my_table SET ('global-index.fast-search' = 'false');
+```
+
+With fast search disabled, supported global-index queries merge indexed results with a scan over
+files not covered by global indexes.
 
 To temporarily disable global-index scan acceleration while keeping the index files, set:
 
@@ -147,6 +156,7 @@ These table options affect global index build and read behavior:
 | Option | Default | Description |
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `global-index.fast-search` | `true` | Whether global index queries only search indexed files. Set to `false` to also scan files not covered by global indexes when supported. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
 | `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |

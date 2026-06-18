@@ -33,13 +33,15 @@ class TableScan:
         self,
         table,
         predicate: Optional[Predicate],
-        limit: Optional[int]
+        limit: Optional[int],
+        partition_predicate: Optional[Predicate] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
+        self.partition_predicate = partition_predicate
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
@@ -79,7 +81,9 @@ class TableScan:
             earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:
-                return FileScanner(self.table, lambda: ([], None))
+                return FileScanner(
+                    self.table, lambda: ([], None),
+                    partition_predicate=self.partition_predicate)
             start_timestamp = int(ts[0])
             end_timestamp = int(ts[1])
             if start_timestamp >= end_timestamp:
@@ -87,7 +91,9 @@ class TableScan:
                     "Ending timestamp %s should be >= starting timestamp %s." % (end_timestamp, start_timestamp))
             if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
-                return FileScanner(self.table, lambda: ([], None))
+                return FileScanner(
+                    self.table, lambda: ([], None),
+                    partition_predicate=self.partition_predicate)
 
             starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
             earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
@@ -118,7 +124,13 @@ class TableScan:
                     manifests.extend(manifest_files)
                 return manifests, end_snapshot
 
-            return FileScanner(self.table, incremental_manifest, self.predicate, self.limit)
+            return FileScanner(
+                self.table,
+                incremental_manifest,
+                self.predicate,
+                self.limit,
+                self.partition_predicate,
+            )
 
         if has_time_travel:
             def time_travel_manifest_scanner():
@@ -135,7 +147,8 @@ class TableScan:
                 self.table,
                 time_travel_manifest_scanner,
                 self.predicate,
-                self.limit
+                self.limit,
+                self.partition_predicate,
             )
 
         def all_manifests():
@@ -146,7 +159,8 @@ class TableScan:
             self.table,
             all_manifests,
             self.predicate,
-            self.limit
+            self.limit,
+            self.partition_predicate,
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':

@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -35,10 +36,15 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
@@ -55,6 +61,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
+import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
 /** Scan for data evolution table. */
@@ -244,7 +251,17 @@ public class DataEvolutionBatchScan implements DataTableScan {
             Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                RoaringNavigableMap64 rowIds = result.results();
+                List<Range> rowRanges = rowIds.toRangeList();
+                boolean scanUnindexedRanges =
+                        globalIndexResult == null
+                                && !(result instanceof ScoredGlobalIndexResult)
+                                && !table.coreOptions().globalIndexFastSearch();
+                if (scanUnindexedRanges) {
+                    rowIds = withUnindexedRows(rowIds);
+                    rowRanges = rowIds.toRangeList();
+                }
+                rowRangeIndex = RowRangeIndex.create(rowRanges);
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -257,6 +274,81 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
         List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    private RoaringNavigableMap64 withUnindexedRows(RoaringNavigableMap64 indexedResultRows) {
+        TableScan.Plan allDataPlan = allDataPlan();
+        List<Range> dataRanges = new ArrayList<>();
+        for (Split split : allDataPlan.splits()) {
+            if (!(split instanceof DataSplit)) {
+                continue;
+            }
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                if (file.firstRowId() != null) {
+                    dataRanges.add(file.nonNullRowIdRange());
+                }
+            }
+        }
+
+        List<Range> predicateIndexedRanges =
+                GlobalIndexScanner.indexedRanges(
+                        table,
+                        batchScan.snapshotReader().manifestsReader().partitionFilter(),
+                        filter,
+                        batchScan.snapshotReader().snapshotManager().snapshot(snapshotId(allDataPlan)));
+        predicateIndexedRanges = Range.sortAndMergeOverlap(predicateIndexedRanges, true);
+
+        List<Range> unindexedRanges = new ArrayList<>();
+        for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
+            unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));
+        }
+        unindexedRanges = Range.sortAndMergeOverlap(unindexedRanges, true);
+
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        rows.or(indexedResultRows);
+        rows.or(matchingRows(unindexedRanges));
+        return rows;
+    }
+
+    private RoaringNavigableMap64 matchingRows(List<Range> ranges) {
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        if (ranges.isEmpty()) {
+            return rows;
+        }
+
+        RowType readType = rowTypeWithRowId(table.rowType());
+        RowRangeIndex rowRangeIndex = RowRangeIndex.create(ranges);
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType).withFilter(filter);
+        readBuilder.withPartitionFilter(batchScan.snapshotReader().manifestsReader().partitionFilter());
+        List<Split> splits = readBuilder.withRowRangeIndex(rowRangeIndex).newScan().plan().splits();
+        int rowIdIndex = readType.getFieldIndex(ROW_ID.name());
+        try {
+            TableRead read = readBuilder.newRead();
+            try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                    read.executeFilter().createReader(splits)) {
+                reader.forEachRemaining(row -> rows.add(row.getLong(rowIdIndex)));
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to scan unindexed data for global index slow search.", e);
+        }
+        return rows;
+    }
+
+    private long snapshotId(TableScan.Plan plan) {
+        if (plan instanceof SnapshotReader.Plan) {
+            Long snapshotId = ((SnapshotReader.Plan) plan).snapshotId();
+            if (snapshotId != null) {
+                return snapshotId;
+            }
+        }
+        throw new IllegalStateException("Cannot read global index coverage without a snapshot.");
+    }
+
+    private TableScan.Plan allDataPlan() {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        readBuilder.withPartitionFilter(batchScan.snapshotReader().manifestsReader().partitionFilter());
+        return readBuilder.newScan().plan();
     }
 
     private Optional<GlobalIndexResult> evalGlobalIndex() {
@@ -296,7 +388,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
         Function<Split, List<IndexedSplit>> process =
                 split ->
                         Collections.singletonList(
-                                wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+                                split instanceof IndexedSplit
+                                        ? (IndexedSplit) split
+                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }

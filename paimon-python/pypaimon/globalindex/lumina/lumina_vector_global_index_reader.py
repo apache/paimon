@@ -118,6 +118,10 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
 
         return _completed_future(DictBasedScoredIndexResult(id_to_scores))
 
+    def vector_metric(self):
+        self._ensure_loaded()
+        return self._index_meta.distance_metric
+
     def _ensure_loaded(self):
         if self._searcher is not None:
             return

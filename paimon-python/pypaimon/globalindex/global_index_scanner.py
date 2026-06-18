@@ -122,7 +122,7 @@ class GlobalIndexScanner:
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
                 return False
-            return global_index_meta.index_field_id in filter_field_ids
+            return _indexed_field_matches(global_index_meta, filter_field_ids)
 
         if snapshot is None:
             snapshot = table.snapshot_manager().get_latest_snapshot()
@@ -139,6 +139,64 @@ class GlobalIndexScanner:
             index_files=scanned_index_files,
             thread_num=table.options.global_index_thread_num(),
         )
+
+    @staticmethod
+    def indexed_ranges(table, snapshot) -> list:
+        from pypaimon.index.index_file_handler import IndexFileHandler
+
+        index_file_handler = IndexFileHandler(table=table)
+        entries = index_file_handler.scan(snapshot, lambda entry: True)
+        ranges = []
+        for entry in entries:
+            global_index_meta = entry.index_file.global_index_meta
+            if global_index_meta is not None:
+                ranges.append(
+                    Range(global_index_meta.row_range_start,
+                          global_index_meta.row_range_end)
+                )
+        return ranges
+
+    @staticmethod
+    def predicate_indexed_ranges(table, partition_filter, predicate, snapshot) -> list:
+        if predicate is None:
+            return []
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+
+        filter_field_names = _get_all_fields(predicate)
+        filter_field_ids = set()
+        for field_item in table.fields:
+            if field_item.name in filter_field_names:
+                filter_field_ids.add(field_item.id)
+
+        def index_file_filter(entry):
+            if partition_filter is not None:
+                if not partition_filter.test(entry.partition):
+                    return False
+            global_index_meta = entry.index_file.global_index_meta
+            if global_index_meta is None:
+                return False
+            return _indexed_field_matches(global_index_meta, filter_field_ids)
+
+        index_file_handler = IndexFileHandler(table=table)
+        entries = index_file_handler.scan(snapshot, index_file_filter)
+        coverage_by_field = {}
+        for entry in entries:
+            global_index_meta = entry.index_file.global_index_meta
+            if global_index_meta is None:
+                continue
+            range_key = Range(
+                global_index_meta.row_range_start,
+                global_index_meta.row_range_end,
+            )
+            coverage_by_field.setdefault(
+                global_index_meta.index_field_id, []).append(range_key)
+            for extra_field_id in global_index_meta.extra_field_ids or []:
+                coverage_by_field.setdefault(extra_field_id, []).append(range_key)
+
+        field_by_name = {field.name: field for field in table.fields}
+        return _predicate_indexed_ranges(
+            predicate, field_by_name, coverage_by_field) or []
 
     def scan(self, predicate: Optional[Predicate]) -> Optional[GlobalIndexResult]:
         """Scan the global index with the given predicate."""
@@ -214,3 +272,51 @@ def _create_inner_readers(index_type, file_io, index_path, field, io_metas, exec
 
     raise ValueError(
         "Unsupported global-index type in scanner: '%s'" % index_type)
+
+
+def _predicate_indexed_ranges(predicate, field_by_name, coverage_by_field):
+    method = getattr(predicate, "method", None)
+    if method not in ("and", "or"):
+        field = field_by_name.get(getattr(predicate, "field", None))
+        if field is None:
+            return None
+        coverage = coverage_by_field.get(field.id)
+        if not coverage:
+            return None
+        return Range.sort_and_merge_overlap(
+            coverage, merge=True, adjacent=True)
+
+    child_coverages = [
+        _predicate_indexed_ranges(child, field_by_name, coverage_by_field)
+        for child in getattr(predicate, "literals", []) or []
+    ]
+
+    if method == "or":
+        result = None
+        for child_coverage in child_coverages:
+            if child_coverage is None:
+                return None
+            result = (
+                Range.and_(result, child_coverage)
+                if result is not None else child_coverage
+            )
+        return result
+
+    result = None
+    for child_coverage in child_coverages:
+        if child_coverage is None:
+            continue
+        result = (
+            Range.and_(result, child_coverage)
+            if result is not None else child_coverage
+        )
+    return result
+
+
+def _indexed_field_matches(global_index_meta, filter_field_ids):
+    if global_index_meta.index_field_id in filter_field_ids:
+        return True
+    for field_id in global_index_meta.extra_field_ids or []:
+        if field_id in filter_field_ids:
+            return True
+    return False

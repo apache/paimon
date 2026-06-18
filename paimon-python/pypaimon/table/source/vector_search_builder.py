@@ -244,6 +244,7 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             self._limit,
             self._vector_column,
             self._query_vector,
+            partition_filter=self._partition_filter,
             filter_=self._filter,
             options=self._options,
         )

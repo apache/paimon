@@ -2543,6 +2543,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether to enable global index for scan.");
 
+    public static final ConfigOption<Boolean> GLOBAL_INDEX_FAST_SEARCH =
+            key("global-index.fast-search")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether global index queries only search indexed files. "
+                                    + "Set to false to also scan files not covered by global indexes "
+                                    + "when supported.");
+
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
@@ -4047,6 +4056,10 @@ public class CoreOptions implements Serializable {
 
     public boolean globalIndexEnabled() {
         return options.get(GLOBAL_INDEX_ENABLED);
+    }
+
+    public boolean globalIndexFastSearch() {
+        return options.get(GLOBAL_INDEX_FAST_SEARCH);
     }
 
     public Integer globalIndexThreadNum() {

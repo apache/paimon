@@ -23,6 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -51,19 +52,39 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
             DataField vectorColumn,
             float[] vector,
             Map<String, String> options) {
-        super(table, filter, limit, vectorColumn, options);
+        this(table, null, filter, limit, vectorColumn, vector, options);
+    }
+
+    public VectorReadImpl(
+            FileStoreTable table,
+            PartitionPredicate partitionFilter,
+            Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            Map<String, String> options) {
+        super(table, partitionFilter, filter, limit, vectorColumn, options);
         this.vector = vector;
     }
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        if (splits.isEmpty()) {
+        if (splits.isEmpty() && fastSearch()) {
             return GlobalIndexResult.createEmpty();
         }
 
+        GlobalIndexer globalIndexer = splits.isEmpty() ? null : createGlobalIndexer(splits);
+        ScoredGlobalIndexResult result =
+                splits.isEmpty()
+                        ? ScoredGlobalIndexResult.createEmpty()
+                        : readIndexed(splits, globalIndexer);
+        return withSlowSearch(result, splits, globalIndexer, vector);
+    }
+
+    protected ScoredGlobalIndexResult readIndexed(
+            List<VectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
 
-        GlobalIndexer globalIndexer = createGlobalIndexer(splits);
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
@@ -93,6 +114,6 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                 merged = merged.or(splitResult.get());
             }
         }
-        return merged.topK(limit);
+        return merged;
     }
 }

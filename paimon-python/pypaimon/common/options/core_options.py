@@ -618,6 +618,17 @@ class CoreOptions:
         .with_description("Whether to enable global index for scan.")
     )
 
+    GLOBAL_INDEX_FAST_SEARCH: ConfigOption[bool] = (
+        ConfigOptions.key("global-index.fast-search")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "Whether global index queries only search indexed files. "
+            "Set to false to also scan files not covered by global indexes "
+            "when supported."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -1090,6 +1101,9 @@ class CoreOptions:
 
     def global_index_enabled(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)
+
+    def global_index_fast_search(self):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_FAST_SEARCH)
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)

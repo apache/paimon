@@ -30,6 +30,8 @@ import unittest
 from typing import List
 from unittest import mock
 
+import pyarrow as pa
+
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
@@ -50,19 +52,19 @@ from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 class _StubSchema:
-    def __init__(self):
-        self.options = {}
+    def __init__(self, options=None):
+        self.options = dict(options or {})
 
 
 class _StubTable:
     """Minimal FileStoreTable stand-in."""
 
-    def __init__(self, fields, entries, partition_fields=None):
+    def __init__(self, fields, entries, partition_fields=None, options=None):
         self.fields = fields
         self.partition_keys_fields = partition_fields or []
         self.partition_keys: List[str] = [
             f.name for f in self.partition_keys_fields]
-        self.table_schema = _StubSchema()
+        self.table_schema = _StubSchema(options)
         self.file_io = object()
         self._entries = entries
 
@@ -100,11 +102,13 @@ def _field(fid, name, dtype="INT"):
 
 
 def _entry(partition_row, field_id, index_type, file_name,
-           row_range_start, row_range_end, external_path=None):
+           row_range_start, row_range_end, external_path=None,
+           extra_field_ids=None):
     meta = GlobalIndexMeta(
         row_range_start=row_range_start,
         row_range_end=row_range_end,
         index_field_id=field_id,
+        extra_field_ids=extra_field_ids,
         index_meta=b"",
     )
     index_file = IndexFileMeta(
@@ -875,6 +879,29 @@ class VectorSearchFilterTest(unittest.TestCase):
                          (splits_sorted[1].row_range_start,
                           splits_sorted[1].row_range_end))
 
+    def test_scan_attaches_scalar_index_when_filter_hits_extra_field(self):
+        category_field = _field(2, "category")
+        entry = _entry(
+            None, field_id=0, index_type="btree",
+            file_name="id-category-btree.index",
+            row_range_start=0, row_range_end=9,
+            extra_field_ids=[category_field.id])
+        self.entries = [self.entries[0], self.entries[1], entry]
+        self.table = _StubTable(
+            fields=[self.id_field, self.embedding_field, category_field],
+            entries=self.entries)
+        mock.patch.stopall()
+        _patch_snapshot(self, self.entries)
+
+        filter_pred = Predicate(method="equal", index=2, field="category",
+                                literals=[1])
+        splits = self._builder(filter_pred).new_vector_search_scan().scan().splits()
+
+        for split in splits:
+            self.assertEqual(
+                ["id-category-btree.index"],
+                [f.file_name for f in split.scalar_index_files])
+
     def test_read_threads_prefilter_bitmap_as_include_row_ids(self):
         """preFilter bitmap from scanner.scan(filter) must reach each split's
         VectorSearch, offset-rebased to local coords by OffsetGlobalIndexReader.
@@ -1430,6 +1457,137 @@ class HybridSearchBuilderTest(unittest.TestCase):
 
 
 class VectorSearchManySplitsTest(unittest.TestCase):
+
+    def test_fast_search_controls_unindexed_range_scan(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+        from pypaimon.manifest.schema.simple_stats import SimpleStats
+        from pypaimon.read.plan import Plan
+        from pypaimon.read.split import DataSplit
+        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_split import VectorSearchSplit
+        from pypaimon.utils.range import Range
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec-0.index",
+                       row_range_start=0, row_range_end=0)
+        raw_file = DataFileMeta(
+            file_name="data-0.orc",
+            file_size=10,
+            row_count=3,
+            min_key=GenericRow([], []),
+            max_key=GenericRow([], []),
+            key_stats=SimpleStats.empty_stats(),
+            value_stats=SimpleStats.empty_stats(),
+            min_sequence_number=0,
+            max_sequence_number=0,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=0,
+        )
+        raw_split = DataSplit(files=[raw_file], partition=None, bucket=0)
+        table = _StubTable(fields=[embedding_field], entries=[entry])
+        table.index_search_options = []
+
+        class _RawScan:
+            def plan(self_inner):
+                return Plan([raw_split])
+
+        class _RawRead:
+            def to_arrow(self_inner, splits):
+                table.raw_read_splits = splits
+                return pa.table({
+                    "embedding": [[2.0, 0.0], [4.0, 0.0]],
+                    "_ROW_ID": [1, 2],
+                })
+
+        class _RawReadBuilder:
+            def __init__(self_inner):
+                self_inner.read_type = None
+                self_inner.filter = None
+
+            def with_read_type(self_inner, read_type):
+                self_inner.read_type = read_type
+                table.raw_read_type = read_type
+                return self_inner
+
+            def with_filter(self_inner, predicate):
+                self_inner.filter = predicate
+                table.raw_filter = predicate
+                return self_inner
+
+            def with_partition_filter(self_inner, partition_filter):
+                table.raw_partition_filter = partition_filter
+                return self_inner
+
+            def new_scan(self_inner):
+                return _RawScan()
+
+            def new_read(self_inner):
+                return _RawRead()
+
+        table.new_read_builder = lambda: _RawReadBuilder()
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader:
+                def vector_metric(self_inner):
+                    table.metric_calls = getattr(table, "metric_calls", 0) + 1
+                    return "l2"
+
+                def visit_vector_search(self_inner, vs):
+                    table.index_search_options.append(dict(vs.options))
+                    return _completed_future(
+                        DictBasedScoredIndexResult({0: 0.9}))
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        splits = [
+            VectorSearchSplit(
+                row_range_start=0, row_range_end=0,
+                vector_index_files=[entry.index_file])
+        ]
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            disabled = VectorSearchReadImpl(
+                table, limit=2, vector_column=embedding_field,
+                query_vector=[4.0, 0.0], filter_=None)
+            self.assertEqual([0], sorted(disabled.read(splits).results()))
+
+            table.table_schema.options["global-index.fast-search"] = "false"
+            enabled = VectorSearchReadImpl(
+                table, limit=2, vector_column=embedding_field,
+                query_vector=[4.0, 0.0], filter_=None)
+            result = enabled.read(splits)
+
+        self.assertEqual([0, 2], sorted(result.results()))
+        self.assertEqual([Range(1, 2)],
+                         table.raw_read_splits[0].row_ranges())
+        self.assertEqual({}, table.index_search_options[-1])
+        self.assertEqual(1, table.metric_calls)
+
+        table.metric_calls = 0
+        table.index_search_options = []
+        table.raw_read_splits = []
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            repeated_read = VectorSearchReadImpl(
+                table, limit=2, vector_column=embedding_field,
+                query_vector=[4.0, 0.0], filter_=None)
+            result = repeated_read.read(splits)
+
+        self.assertEqual([0, 2], sorted(result.results()))
+        self.assertEqual(1, table.metric_calls)
 
     def test_vector_search_with_many_splits(self):
         from pypaimon.globalindex.vector_search_result import (

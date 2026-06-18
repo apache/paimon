@@ -96,7 +96,12 @@ class VectorSearchScanImpl(VectorSearchScan):
             field_id = global_index_meta.index_field_id
             if vector_column.id == field_id:
                 return True
-            return field_id in filter_field_ids
+            if field_id in filter_field_ids:
+                return True
+            for extra_field_id in global_index_meta.extra_field_ids or []:
+                if extra_field_id in filter_field_ids:
+                    return True
+            return False
 
         entries = index_file_handler.scan(snapshot, index_file_filter)
         all_index_files = [entry.index_file for entry in entries]

@@ -122,6 +122,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
             self._limit,
             self._vector_column,
             self._query_vectors,
+            partition_filter=self._partition_filter,
             filter_=self._filter,
             options=self._options,
         )

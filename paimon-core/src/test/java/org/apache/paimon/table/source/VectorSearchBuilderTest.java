@@ -30,6 +30,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -238,6 +239,108 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(result.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testVectorSearchScansUnindexedDataWhenFastSearchDisabled() throws Exception {
+        catalog.createTable(
+                identifier("slow_search_cosine_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false")
+                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                        .option("test.vector.metric", "cosine")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("slow_search_cosine_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {0.5f, 0.0f},
+            {0.99f, 0.01f}
+        };
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+
+        TestVectorGlobalIndexer.resetMetricCalls();
+        GlobalIndexResult defaultResult =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(defaultResult.results()).containsExactlyInAnyOrder(2L, 3L);
+        assertThat(TestVectorGlobalIndexer.metricCalls()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testVectorSearchFastSearchSkipsUnindexedDataByDefault() throws Exception {
+        catalog.createTable(
+                identifier("fast_search_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_search_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {1.0f, 0.0f},
+            {0.95f, 0.05f}
+        };
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).doesNotContain(2L, 3L);
+    }
+
+    @Test
+    public void testVectorSearchSlowSearchScansFilteredUnindexedData() throws Exception {
+        catalog.createTable(
+                identifier("slow_search_filtered_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("slow_search_filtered_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {1.0f, 0.0f},
+            {0.95f, 0.05f}
+        };
+        writeVectors(table, vectors);
+
+        Range indexedRange = new Range(0, 1);
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, indexedRange);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1}, indexedRange);
+
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
+        GlobalIndexResult defaultResult =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .executeLocal();
+
+        assertThat(defaultResult).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(defaultResult.results()).contains(2L, 3L);
     }
 
     @Test

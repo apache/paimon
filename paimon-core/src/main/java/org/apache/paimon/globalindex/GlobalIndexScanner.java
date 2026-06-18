@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -27,6 +28,10 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -179,8 +184,64 @@ public class GlobalIndexScanner implements Closeable {
                         indexFiles));
     }
 
+    public static List<Range> indexedRanges(FileStoreTable table, Snapshot snapshot) {
+        return table.store().newIndexFileHandler().scan(snapshot, entry -> true).stream()
+                .map(IndexManifestEntry::indexFile)
+                .map(IndexFileMeta::globalIndexMeta)
+                .filter(meta -> meta != null)
+                .map(meta -> new Range(meta.rowRangeStart(), meta.rowRangeEnd()))
+                .collect(Collectors.toList());
+    }
+
+    public static List<Range> indexedRanges(
+            FileStoreTable table,
+            PartitionPredicate partitionFilter,
+            Predicate filter,
+            Snapshot snapshot) {
+        if (filter == null) {
+            return Collections.emptyList();
+        }
+        Map<Integer, List<Range>> coverageByField = new HashMap<>();
+        for (IndexManifestEntry entry :
+                table.store()
+                        .newIndexFileHandler()
+                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter))) {
+            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
+            if (globalIndex == null) {
+                continue;
+            }
+            Range range = new Range(globalIndex.rowRangeStart(), globalIndex.rowRangeEnd());
+            coverageByField.computeIfAbsent(globalIndex.indexFieldId(), k -> new ArrayList<>())
+                    .add(range);
+            if (globalIndex.extraFieldIds() != null) {
+                for (int id : globalIndex.extraFieldIds()) {
+                    coverageByField.computeIfAbsent(id, k -> new ArrayList<>()).add(range);
+                }
+            }
+        }
+        Optional<List<Range>> coverage = indexedRanges(filter, table.rowType(), coverageByField);
+        return coverage.orElse(Collections.emptyList());
+    }
+
     public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
+        List<IndexFileMeta> indexFiles =
+                table.store()
+                        .newIndexFileHandler()
+                        .scan(
+                                tryTravelOrLatest(table),
+                                indexFileFilter(table, partitionFilter, filter))
+                        .stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+        return create(table, indexFiles);
+    }
+
+    private static Filter<IndexManifestEntry> indexFileFilter(
+            FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
+        if (filter == null) {
+            return entry -> false;
+        }
         Set<Integer> filterFieldIds =
                 collectFieldNames(filter).stream()
                         .filter(name -> table.rowType().containsField(name))
@@ -209,13 +270,61 @@ public class GlobalIndexScanner implements Closeable {
                     }
                     return false;
                 };
+        return indexFileFilter;
+    }
 
-        List<IndexFileMeta> indexFiles =
-                table.store().newIndexFileHandler().scan(tryTravelOrLatest(table), indexFileFilter)
-                        .stream()
-                        .map(IndexManifestEntry::indexFile)
+    private static Optional<List<Range>> indexedRanges(
+            Predicate predicate, RowType rowType, Map<Integer, List<Range>> coverageByField) {
+        if (predicate == null) {
+            return Optional.empty();
+        }
+        if (predicate instanceof LeafPredicate) {
+            Optional<FieldRef> fieldRef = ((LeafPredicate) predicate).fieldRefOptional();
+            if (!fieldRef.isPresent() || !rowType.containsField(fieldRef.get().name())) {
+                return Optional.empty();
+            }
+            List<Range> coverage = coverageByField.get(rowType.getField(fieldRef.get().name()).id());
+            if (coverage == null || coverage.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(Range.sortAndMergeOverlap(coverage, true));
+        }
+
+        if (!(predicate instanceof CompoundPredicate)) {
+            return Optional.empty();
+        }
+
+        CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+        List<Optional<List<Range>>> childCoverages =
+                compoundPredicate.children().stream()
+                        .map(child -> indexedRanges(child, rowType, coverageByField))
                         .collect(Collectors.toList());
-        return create(table, indexFiles);
+
+        if (compoundPredicate.function() instanceof Or) {
+            Optional<List<Range>> result = Optional.empty();
+            for (Optional<List<Range>> childCoverage : childCoverages) {
+                if (!childCoverage.isPresent()) {
+                    return Optional.empty();
+                }
+                result =
+                        result.isPresent()
+                                ? Optional.of(Range.and(result.get(), childCoverage.get()))
+                                : childCoverage;
+            }
+            return result;
+        }
+
+        Optional<List<Range>> result = Optional.empty();
+        for (Optional<List<Range>> childCoverage : childCoverages) {
+            if (!childCoverage.isPresent()) {
+                continue;
+            }
+            result =
+                    result.isPresent()
+                            ? Optional.of(Range.and(result.get(), childCoverage.get()))
+                            : childCoverage;
+        }
+        return result;
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {

@@ -38,6 +38,8 @@ class ReadBuilder:
 
         self.table: FileStoreTable = table
         self._predicate: Optional[Predicate] = None
+        self._partition_predicate: Optional[Predicate] = None
+        self._read_type: Optional[List[DataField]] = None
         # ``_projection`` stores the user-facing name list from
         # :meth:`with_projection`. When dotted names are present,
         # ``_nested_paths`` is also populated and takes precedence
@@ -48,6 +50,16 @@ class ReadBuilder:
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
+        return self
+
+    def with_partition_filter(self, predicate: Predicate) -> 'ReadBuilder':
+        self._partition_predicate = predicate
+        return self
+
+    def with_read_type(self, read_type: List[DataField]) -> 'ReadBuilder':
+        self._read_type = list(read_type)
+        self._projection = None
+        self._nested_paths = None
         return self
 
     def with_projection(self, projection: List[str]) -> 'ReadBuilder':
@@ -62,6 +74,7 @@ class ReadBuilder:
         Precedence: if a dotted name matches an actual top-level field, the
         top-level match wins and the name is not walked as a struct path.
         """
+        self._read_type = None
         self._projection = projection
         if projection and any('.' in name for name in projection):
             self._nested_paths = self._resolve_dotted_paths(projection)
@@ -77,7 +90,8 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            partition_predicate=self._partition_predicate,
         )
 
     def new_read(self) -> TableRead:
@@ -137,6 +151,9 @@ class ReadBuilder:
         )
 
     def read_type(self) -> List[DataField]:
+        if self._read_type is not None:
+            return self._read_type
+
         table_fields = self.table.fields
 
         if not self._projection and not self._nested_paths:

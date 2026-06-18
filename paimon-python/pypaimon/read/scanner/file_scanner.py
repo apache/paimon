@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -49,6 +50,8 @@ from pypaimon.read.scanner.data_evolution_split_generator import \
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
@@ -326,6 +329,14 @@ class FileScanner:
         global_index_result = self._global_index_result if self._global_index_result is not None \
             else self._eval_global_index(snapshot)
         if global_index_result is not None:
+            scan_unindexed_data = (
+                self._global_index_result is None
+                and not isinstance(global_index_result, ScoredGlobalIndexResult)
+                and not self.table.options.global_index_fast_search()
+            )
+            if scan_unindexed_data:
+                global_index_result = self._with_unindexed_rows(
+                    global_index_result, manifest_files, snapshot)
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
@@ -349,6 +360,64 @@ class FileScanner:
             row_ranges,
             score_getter
         )
+
+    def _with_unindexed_rows(self, indexed_result, manifest_files, snapshot):
+        data_ranges = []
+        entries = self.read_manifest_entries(manifest_files)
+        for entry in entries:
+            first_row_id = entry.file.first_row_id
+            if first_row_id is not None:
+                data_ranges.append(entry.file.row_id_range())
+
+        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+        from pypaimon.utils.range import Range
+
+        predicate_indexed_ranges = Range.sort_and_merge_overlap(
+            GlobalIndexScanner.predicate_indexed_ranges(
+                self.table,
+                self.partition_key_predicate,
+                self.predicate,
+                snapshot,
+            ),
+            merge=True,
+            adjacent=True,
+        )
+        unindexed_ranges = []
+        for data_range in Range.sort_and_merge_overlap(
+                data_ranges, merge=True, adjacent=True):
+            unindexed_ranges.extend(data_range.exclude(predicate_indexed_ranges))
+        unindexed_ranges = Range.sort_and_merge_overlap(
+            unindexed_ranges, merge=True, adjacent=True)
+
+        bitmap = RoaringBitmap64.or_(
+            indexed_result.results(),
+            self._matching_unindexed_rows(entries, unindexed_ranges))
+        return GlobalIndexResult.create(bitmap)
+
+    def _matching_unindexed_rows(self, entries, row_ranges):
+        rows = RoaringBitmap64()
+        if not row_ranges:
+            return rows
+
+        entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        if not entries:
+            return rows
+
+        split_generator = DataEvolutionSplitGenerator(
+            self.table,
+            self.target_split_size,
+            self.open_file_cost,
+            self._deletion_files_map(entries),
+            row_ranges,
+        )
+        splits = split_generator.create_splits(entries)
+        read_type = SpecialFields.row_type_with_row_id(self.table.fields)
+        row_id_index = len(read_type) - 1
+        reader = self.table.new_read_builder().with_read_type(read_type) \
+            .with_filter(self.predicate).new_read()
+        for row in reader.to_iterator(splits):
+            rows.add(int(row.get_field(row_id_index)))
+        return rows
 
     def plan_files(self) -> List[ManifestEntry]:
         manifest_files, snapshot = self.manifest_scanner()

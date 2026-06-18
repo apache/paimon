@@ -55,6 +55,9 @@ def _map_future(source, transform):
 class GlobalIndexReader(ABC):
     """Index reader for global index. All visit methods return Future[Optional[GlobalIndexResult]]."""
 
+    def vector_metric(self):
+        raise NotImplementedError("Vector metric not supported by this reader")
+
     def visit_vector_search(self, vector_search: 'VectorSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Vector search not supported by this reader")
 

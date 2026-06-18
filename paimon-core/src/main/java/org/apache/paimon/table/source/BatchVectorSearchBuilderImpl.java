@@ -114,6 +114,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
         for (float[] vector : vectors) {
             checkNotNull(vector, "Search vector element cannot be null");
         }
-        return new BatchVectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
+        return new BatchVectorReadImpl(
+                table, partitionFilter, filter, limit, vectorColumn, vectors, options);
     }
 }

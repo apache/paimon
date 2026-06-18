@@ -20,13 +20,16 @@ from unittest.mock import patch
 
 import pyarrow as pa
 
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
 )
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.utils.range import Range
 
 
@@ -122,3 +125,34 @@ class PlanSnapshotFetchRegressionTest(
                 "GlobalIndexScanner.create self-fetched latest snapshot, "
                 "so global index used latest while manifest used the "
                 "time-travel snapshot — silent correctness bug.")
+
+    def test_fast_search_false_filters_unindexed_rows_exactly(self):
+        table = self._create_table().copy({'global-index.fast-search': 'false'})
+        self._write_arrow(table, pa.table(
+            {'id': [0, 1, 2, 3], 'name': ['a', 'b', 'c', 'd'],
+             'age': [0, 1, 2, 3], 'city': ['x', 'x', 'y', 'y']},
+            schema=self.pa_schema))
+
+        predicate = PredicateBuilder(table.fields).is_in('id', [0, 2])
+
+        indexed = RoaringBitmap64()
+        indexed.add(0)
+
+        class FakeScanner:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            def scan(self, _predicate):
+                return GlobalIndexResult.create(indexed)
+
+        with patch.object(GlobalIndexScanner, 'create',
+                          return_value=FakeScanner()), \
+             patch.object(GlobalIndexScanner, 'predicate_indexed_ranges',
+                          return_value=[Range(0, 1)]):
+            rb = table.new_read_builder().with_filter(predicate)
+            result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+
+        self.assertEqual([0, 2], result.column('id').to_pylist())

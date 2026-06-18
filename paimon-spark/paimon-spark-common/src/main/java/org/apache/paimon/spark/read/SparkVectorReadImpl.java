@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.VectorReadImpl;
@@ -35,6 +36,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.spark.broadcast.Broadcast;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -61,11 +64,27 @@ public class SparkVectorReadImpl extends VectorReadImpl {
             DataField vectorColumn,
             float[] vector,
             Map<String, String> options) {
-        super(table, filter, limit, vectorColumn, vector, options);
+        this(table, null, filter, limit, vectorColumn, vector, options);
+    }
+
+    public SparkVectorReadImpl(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            Predicate filter,
+            int limit,
+            DataField vectorColumn,
+            float[] vector,
+            Map<String, String> options) {
+        super(table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+        // Slow search scans table data and should run in the coordinator with normal Paimon split
+        // planning; Spark distribution below is only for index-only evaluation.
+        if (slowSearchEnabled()) {
+            return super.read(splits);
+        }
         if (splits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
