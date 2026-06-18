@@ -22,8 +22,6 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -84,8 +82,9 @@ public class HybridSearchRanker {
             for (int rank = 0; rank < ranked.size(); rank++) {
                 Long rowId = ranked.get(rank);
                 float contribution = weight / (RRF_K + rank + 1.0f);
-                Float oldScore = scores.get(rowId);
-                scores.put(rowId, oldScore == null ? contribution : oldScore + contribution);
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
             }
         }
         return topK(scores, limit);
@@ -108,8 +107,9 @@ public class HybridSearchRanker {
             ScoreGetter scoreGetter = result.scoreGetter();
             for (long rowId : result.results()) {
                 float contribution = weight * scoreGetter.score(rowId);
-                Float oldScore = scores.get(rowId);
-                scores.put(rowId, oldScore == null ? contribution : oldScore + contribution);
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
             }
         }
         return topK(scores, limit);
@@ -121,14 +121,8 @@ public class HybridSearchRanker {
             rowIds.add(rowId);
         }
         final ScoreGetter scoreGetter = result.scoreGetter();
-        Collections.sort(
-                rowIds,
-                new Comparator<Long>() {
-                    @Override
-                    public int compare(Long left, Long right) {
-                        return Float.compare(scoreGetter.score(right), scoreGetter.score(left));
-                    }
-                });
+        rowIds.sort(
+                (left, right) -> Float.compare(scoreGetter.score(right), scoreGetter.score(left)));
         return rowIds;
     }
 
@@ -137,17 +131,13 @@ public class HybridSearchRanker {
             return ScoredGlobalIndexResult.createEmpty();
         }
         List<Map.Entry<Long, Float>> ranked = new ArrayList<>(scores.entrySet());
-        Collections.sort(
-                ranked,
-                new Comparator<Map.Entry<Long, Float>>() {
-                    @Override
-                    public int compare(Map.Entry<Long, Float> left, Map.Entry<Long, Float> right) {
-                        int scoreCompare = Float.compare(right.getValue(), left.getValue());
-                        if (scoreCompare != 0) {
-                            return scoreCompare;
-                        }
-                        return Long.compare(left.getKey(), right.getKey());
+        ranked.sort(
+                (left, right) -> {
+                    int scoreCompare = Float.compare(right.getValue(), left.getValue());
+                    if (scoreCompare != 0) {
+                        return scoreCompare;
                     }
+                    return Long.compare(left.getKey(), right.getKey());
                 });
 
         int size = Math.min(limit, ranked.size());
