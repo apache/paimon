@@ -772,7 +772,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -823,7 +823,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -866,7 +866,7 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-        testVectors.forEach(writer::write);
+        writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -912,7 +912,7 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-        testVectors.forEach(writer::write);
+        writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
