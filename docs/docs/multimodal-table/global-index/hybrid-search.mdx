@@ -27,9 +27,11 @@ under the License.
 
 # Hybrid Search
 
-Hybrid search queries multiple vector and full-text routes in one request and ranks the scored
-results before reading table rows. This is useful when one table stores several searchable
-representations for the same record, such as title embeddings, body embeddings, and content text.
+Hybrid search queries multiple scored routes in one request and ranks the results before reading
+table rows. A route can be a vector search route or a full-text search route, so hybrid search can
+combine multiple vector indexes, multiple full-text indexes, or a mix of vector and full-text
+indexes. This is useful when one table stores several searchable representations for the same
+record, such as title embeddings, body embeddings, and content text.
 
 Before running hybrid search, create a global index for every vector or text column used by
 the query:
