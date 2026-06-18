@@ -109,3 +109,6 @@ class FormatTable(Table):
 
     def new_vector_search_builder(self):
         raise NotImplementedError("Format table does not support vector search.")
+
+    def new_hybrid_search_builder(self):
+        raise NotImplementedError("Format table does not support hybrid search.")

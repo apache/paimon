@@ -18,22 +18,22 @@
 
 package org.apache.paimon.spark.read;
 
-import org.apache.paimon.predicate.MultiVectorSearchRoute;
+import org.apache.paimon.predicate.HybridSearchRoute;
 import org.apache.paimon.table.InnerTable;
-import org.apache.paimon.table.source.MultiVectorSearchBuilderImpl;
+import org.apache.paimon.table.source.HybridSearchBuilderImpl;
 import org.apache.paimon.table.source.VectorSearchBuilder;
 
-/** Spark-aware {@link MultiVectorSearchBuilderImpl}. */
-public class SparkMultiVectorSearchBuilderImpl extends MultiVectorSearchBuilderImpl {
+/** Spark-aware {@link HybridSearchBuilderImpl}. */
+public class SparkHybridSearchBuilderImpl extends HybridSearchBuilderImpl {
 
     private static final long serialVersionUID = 1L;
 
-    public SparkMultiVectorSearchBuilderImpl(InnerTable table) {
+    public SparkHybridSearchBuilderImpl(InnerTable table) {
         super(table);
     }
 
     @Override
-    protected VectorSearchBuilder newVectorSearchBuilder(MultiVectorSearchRoute route) {
+    protected VectorSearchBuilder newVectorSearchBuilder(HybridSearchRoute route) {
         VectorSearchBuilder vectorSearchBuilder =
                 new SparkVectorSearchBuilderImpl(table)
                         .withVector(route.vector())

@@ -112,3 +112,8 @@ class ObjectTable(Table):
         raise NotImplementedError(
             "ObjectTable is read-only and does not support vector search."
         )
+
+    def new_hybrid_search_builder(self):
+        raise NotImplementedError(
+            "ObjectTable is read-only and does not support hybrid search."
+        )

@@ -84,7 +84,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .column(vectorFieldName, new ArrayType(DataTypes.FLOAT())));
     }
 
-    protected Schema.Builder multiVectorSchemaBuilder() {
+    protected Schema.Builder hybridVectorSchemaBuilder() {
         return withVectorSchemaOptions(
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -101,12 +101,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testMultiVectorSearchBuilderExposesRouteBuilders() throws Exception {
+    public void testHybridSearchBuilderExposesRouteBuilders() throws Exception {
         catalog.createTable(
-                identifier("multi_vector_builder_table"),
-                multiVectorSchemaBuilder().build(),
+                identifier("hybrid_vector_builder_table"),
+                hybridVectorSchemaBuilder().build(),
                 false);
-        FileStoreTable table = getTable(identifier("multi_vector_builder_table"));
+        FileStoreTable table = getTable(identifier("hybrid_vector_builder_table"));
 
         float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
         float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
@@ -114,18 +114,18 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitIndex(table, "title_vec", titleVectors);
         buildAndCommitIndex(table, "body_vec", bodyVectors);
 
-        MultiVectorSearchBuilder builder =
-                table.newMultiVectorSearchBuilder()
-                        .addRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
-                        .addRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
+        HybridSearchBuilder builder =
+                table.newHybridSearchBuilder()
+                        .addVectorRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
+                        .addVectorRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
                         .withLimit(2)
                         .withWeightedScoreRanker();
-        List<MultiVectorSearchBuilder.Route> routes = builder.routeBuilders();
+        List<HybridSearchBuilder.Route> routes = builder.routeBuilders();
 
         assertThat(routes).hasSize(2);
 
-        List<MultiVectorSearchBuilder.RouteResult> routeResults = new ArrayList<>();
-        for (MultiVectorSearchBuilder.Route route : routes) {
+        List<HybridSearchBuilder.RouteResult> routeResults = new ArrayList<>();
+        for (HybridSearchBuilder.Route route : routes) {
             routeResults.add(
                     builder.toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
         }

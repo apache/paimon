@@ -33,6 +33,8 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -53,6 +55,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FullTextSearchBuilder} using test-only brute-force full-text index. */
 public class FullTextSearchBuilderTest extends TableTestBase {
@@ -110,6 +113,48 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Rows 0, 1, 3 contain "Paimon"
         assertThat(ids).containsAnyOf(0, 1, 3);
+    }
+
+    @Test
+    public void testHybridSearchBuilderWithFullTextRoute() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {
+            "Apache Paimon is a lake format",
+            "Paimon supports full-text search",
+            "Vector search is also supported"
+        };
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        ScoredGlobalIndexResult result =
+                table.newHybridSearchBuilder()
+                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                        .withLimit(3)
+                        .executeLocal();
+
+        assertThat(result.results().isEmpty()).isFalse();
+        assertThat(result.scoreGetter().score(result.results().iterator().next())).isGreaterThan(0);
+    }
+
+    @Test
+    public void testHybridSearchRejectsDataFilterWithFullTextRoute() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).equal(0, 1);
+
+        assertThatThrownBy(
+                        () ->
+                                table.newHybridSearchBuilder()
+                                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                                        .withFilter(idFilter)
+                                        .withLimit(3)
+                                        .routeBuilders())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support non-partition filters");
     }
 
     @Test

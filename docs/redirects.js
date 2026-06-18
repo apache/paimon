@@ -398,7 +398,11 @@ module.exports = [
   },
   {
     "from": "/pypaimon/global-index.html",
-    "to": "/pypaimon/global-index"
+    "to": "/multimodal-table/global-index"
+  },
+  {
+    "from": "/pypaimon/global-index",
+    "to": "/multimodal-table/global-index"
   },
   {
     "from": "/pypaimon/manage-tags.html",

@@ -22,21 +22,19 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Ranker utilities for multi-vector search results. */
-public class MultiVectorSearchRanker {
+/** Ranker utilities for hybrid search results. */
+public class HybridSearchRanker {
 
     public static final String RRF_RANKER = "rrf";
     public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
 
     private static final float RRF_K = 60.0f;
 
-    private MultiVectorSearchRanker() {}
+    private HybridSearchRanker() {}
 
     public static ScoredGlobalIndexResult rank(
             String ranker, List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
@@ -61,7 +59,7 @@ public class MultiVectorSearchRanker {
         }
         String normalized = ranker.trim().toLowerCase();
         if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
-            throw new IllegalArgumentException("Unsupported multi-vector ranker: " + ranker);
+            throw new IllegalArgumentException("Unsupported hybrid ranker: " + ranker);
         }
         return normalized;
     }
@@ -84,8 +82,9 @@ public class MultiVectorSearchRanker {
             for (int rank = 0; rank < ranked.size(); rank++) {
                 Long rowId = ranked.get(rank);
                 float contribution = weight / (RRF_K + rank + 1.0f);
-                Float oldScore = scores.get(rowId);
-                scores.put(rowId, oldScore == null ? contribution : oldScore + contribution);
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
             }
         }
         return topK(scores, limit);
@@ -108,8 +107,9 @@ public class MultiVectorSearchRanker {
             ScoreGetter scoreGetter = result.scoreGetter();
             for (long rowId : result.results()) {
                 float contribution = weight * scoreGetter.score(rowId);
-                Float oldScore = scores.get(rowId);
-                scores.put(rowId, oldScore == null ? contribution : oldScore + contribution);
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
             }
         }
         return topK(scores, limit);
@@ -121,14 +121,8 @@ public class MultiVectorSearchRanker {
             rowIds.add(rowId);
         }
         final ScoreGetter scoreGetter = result.scoreGetter();
-        Collections.sort(
-                rowIds,
-                new Comparator<Long>() {
-                    @Override
-                    public int compare(Long left, Long right) {
-                        return Float.compare(scoreGetter.score(right), scoreGetter.score(left));
-                    }
-                });
+        rowIds.sort(
+                (left, right) -> Float.compare(scoreGetter.score(right), scoreGetter.score(left)));
         return rowIds;
     }
 
@@ -137,17 +131,13 @@ public class MultiVectorSearchRanker {
             return ScoredGlobalIndexResult.createEmpty();
         }
         List<Map.Entry<Long, Float>> ranked = new ArrayList<>(scores.entrySet());
-        Collections.sort(
-                ranked,
-                new Comparator<Map.Entry<Long, Float>>() {
-                    @Override
-                    public int compare(Map.Entry<Long, Float> left, Map.Entry<Long, Float> right) {
-                        int scoreCompare = Float.compare(right.getValue(), left.getValue());
-                        if (scoreCompare != 0) {
-                            return scoreCompare;
-                        }
-                        return Long.compare(left.getKey(), right.getKey());
+        ranked.sort(
+                (left, right) -> {
+                    int scoreCompare = Float.compare(right.getValue(), left.getValue());
+                    if (scoreCompare != 0) {
+                        return scoreCompare;
                     }
+                    return Long.compare(left.getKey(), right.getKey());
                 });
 
         int size = Math.min(limit, ranked.size());
@@ -168,7 +158,7 @@ public class MultiVectorSearchRanker {
         return weights[index];
     }
 
-    /** Weighted result from one vector-search route. */
+    /** Weighted result from one search route. */
     public static class WeightedResult implements Serializable {
 
         private static final long serialVersionUID = 1L;

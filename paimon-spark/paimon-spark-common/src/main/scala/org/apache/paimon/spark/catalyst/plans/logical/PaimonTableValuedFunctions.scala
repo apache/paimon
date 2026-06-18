@@ -19,11 +19,11 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.globalindex.MultiVectorSearchRanker
-import org.apache.paimon.predicate.{FullTextSearch, MultiVectorSearch, MultiVectorSearchRoute, VectorSearch}
+import org.apache.paimon.globalindex.HybridSearchRanker
+import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, HybridSearchRoute, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
-import org.apache.paimon.table.{DataTable, FullTextSearchTable, InnerTable, MultiVectorSearchTable, VectorSearchTable}
+import org.apache.paimon.table.{DataTable, FullTextSearchTable, HybridSearchTable, InnerTable, VectorSearchTable}
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil.InconsistentTagBucketException
 
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -47,7 +47,7 @@ object PaimonTableValuedFunctions {
   val INCREMENTAL_BETWEEN_TIMESTAMP = "paimon_incremental_between_timestamp"
   val INCREMENTAL_TO_AUTO_TAG = "paimon_incremental_to_auto_tag"
   val VECTOR_SEARCH = "vector_search"
-  val MULTI_VECTOR_SEARCH = "multi_vector_search"
+  val HYBRID_SEARCH = "hybrid_search"
   val FULL_TEXT_SEARCH = "full_text_search"
 
   val supportedFnNames: Seq[String] =
@@ -56,7 +56,7 @@ object PaimonTableValuedFunctions {
       INCREMENTAL_BETWEEN_TIMESTAMP,
       INCREMENTAL_TO_AUTO_TAG,
       VECTOR_SEARCH,
-      MULTI_VECTOR_SEARCH,
+      HYBRID_SEARCH,
       FULL_TEXT_SEARCH)
 
   def parsePositiveLimit(value: Any): Int = {
@@ -88,8 +88,8 @@ object PaimonTableValuedFunctions {
         FunctionRegistryBase.build[IncrementalToAutoTag](fnName, since = None)
       case VECTOR_SEARCH =>
         FunctionRegistryBase.build[VectorSearchQuery](fnName, since = None)
-      case MULTI_VECTOR_SEARCH =>
-        FunctionRegistryBase.build[MultiVectorSearchQuery](fnName, since = None)
+      case HYBRID_SEARCH =>
+        FunctionRegistryBase.build[HybridSearchQuery](fnName, since = None)
       case FULL_TEXT_SEARCH =>
         FunctionRegistryBase.build[FullTextSearchQuery](fnName, since = None)
       case _ =>
@@ -122,12 +122,12 @@ object PaimonTableValuedFunctions {
     val ident: Identifier = Identifier.of(Array(dbName), tableName)
     val sparkTable = sparkCatalog.loadTable(ident)
 
-    // Handle vector_search and full_text_search specially
+    // Handle search table-valued functions specially.
     tvf match {
       case vsq: VectorSearchQuery =>
         resolveVectorSearchQuery(sparkTable, sparkCatalog, ident, vsq, args.tail)
-      case mvsq: MultiVectorSearchQuery =>
-        resolveMultiVectorSearchQuery(sparkTable, sparkCatalog, ident, mvsq, args.tail)
+      case hsq: HybridSearchQuery =>
+        resolveHybridSearchQuery(sparkTable, sparkCatalog, ident, hsq, args.tail)
       case ftsq: FullTextSearchQuery =>
         resolveFullTextSearchQuery(sparkTable, sparkCatalog, ident, ftsq, args.tail)
       case _ =>
@@ -167,24 +167,24 @@ object PaimonTableValuedFunctions {
     }
   }
 
-  private def resolveMultiVectorSearchQuery(
+  private def resolveHybridSearchQuery(
       sparkTable: Table,
       sparkCatalog: TableCatalog,
       ident: Identifier,
-      mvsq: MultiVectorSearchQuery,
+      hsq: HybridSearchQuery,
       argsWithoutTable: Seq[Expression]): LogicalPlan = {
     sparkTable match {
       case st @ SparkTable(innerTable: InnerTable) =>
-        val multiVectorSearch = mvsq.createMultiVectorSearch(innerTable, argsWithoutTable)
-        val multiVectorSearchTable = MultiVectorSearchTable.create(innerTable, multiVectorSearch)
+        val hybridSearch = hsq.createHybridSearch(innerTable, argsWithoutTable)
+        val hybridSearchTable = HybridSearchTable.create(innerTable, hybridSearch)
         DataSourceV2Relation.create(
-          st.copy(table = multiVectorSearchTable),
+          st.copy(table = hybridSearchTable),
           Some(sparkCatalog),
           Some(ident),
           CaseInsensitiveStringMap.empty())
       case _ =>
         throw new RuntimeException(
-          "multi_vector_search only supports Paimon SparkTable backed by InnerTable, " +
+          "hybrid_search only supports Paimon SparkTable backed by InnerTable, " +
             s"but got table implementation: ${sparkTable.getClass.getName}")
     }
   }
@@ -450,73 +450,94 @@ case class VectorSearchQuery(override val args: Seq[Expression])
 }
 
 /**
- * Plan for the [[MULTI_VECTOR_SEARCH]] table-valued function.
+ * Plan for the [[HYBRID_SEARCH]] table-valued function.
  *
- * Usage: multi_vector_search(table_name, routes, limit[, ranker])
+ * Usage: hybrid_search(table_name, vector_routes, full_text_routes, limit[, ranker])
  *   - table_name: the Paimon table to search
- *   - routes: route config array with vector_column, query_vector, limit, weight, and options
- *     fields
+ *   - vector_routes: route config array with field, query_vector, limit, weight, and options fields
+ *   - full_text_routes: route config array with field, query_text, query_operator, limit, weight,
+ *     and options fields
  *   - limit: the final number of ranked top results to return
- *   - ranker: optional ranker for combining results from multiple vector columns
+ *   - ranker: optional ranker for combining results from multiple routes
  */
-case class MultiVectorSearchQuery(override val args: Seq[Expression])
-  extends PaimonTableValueFunction(MULTI_VECTOR_SEARCH) {
+case class HybridSearchQuery(override val args: Seq[Expression])
+  extends PaimonTableValueFunction(HYBRID_SEARCH) {
 
   override def parseArgs(args: Seq[Expression]): Map[String, String] = {
     Map.empty
   }
 
-  def createMultiVectorSearch(
+  def createHybridSearch(
       innerTable: InnerTable,
-      argsWithoutTable: Seq[Expression]): MultiVectorSearch = {
-    if (argsWithoutTable.size != 2 && argsWithoutTable.size != 3) {
+      argsWithoutTable: Seq[Expression]): HybridSearch = {
+    if (argsWithoutTable.size != 3 && argsWithoutTable.size != 4) {
       throw new RuntimeException(
-        s"$MULTI_VECTOR_SEARCH needs two or three parameters after table_name: " +
-          s"routes, limit[, ranker]. " +
+        s"$HYBRID_SEARCH needs three or four parameters after table_name: " +
+          s"vector_routes, full_text_routes, limit[, ranker]. " +
           s"Got ${argsWithoutTable.size} parameters after table_name.")
     }
-    val finalLimit = parsePositiveLimit(argsWithoutTable(1).eval())
+    val finalLimit = parsePositiveLimit(argsWithoutTable(2).eval())
     val ranker =
-      if (argsWithoutTable.size == 3) {
-        VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(2))
+      if (argsWithoutTable.size == 4) {
+        VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(3))
       } else {
-        MultiVectorSearchRanker.RRF_RANKER
+        HybridSearchRanker.RRF_RANKER
       }
 
-    val routes = extractRoutes(argsWithoutTable.head, finalLimit).map {
-      route =>
-        val columnName = route.fieldName()
-        if (!innerTable.rowType().containsField(columnName)) {
-          throw new RuntimeException(
-            s"Column $columnName does not exist in table ${innerTable.name()}")
-        }
-        route
-    }.toList
+    val routes =
+      (extractVectorRoutes(argsWithoutTable.head, finalLimit) ++
+        extractFullTextRoutes(argsWithoutTable(1), finalLimit)).map {
+        route =>
+          val columnName = route.fieldName()
+          if (!innerTable.rowType().containsField(columnName)) {
+            throw new RuntimeException(
+              s"Column $columnName does not exist in table ${innerTable.name()}")
+          }
+          route
+      }.toList
 
-    new MultiVectorSearch(routes.asJava, finalLimit, ranker)
+    new HybridSearch(routes.asJava, finalLimit, ranker)
   }
 
-  private def extractRoutes(expr: Expression, defaultLimit: Int): Seq[MultiVectorSearchRoute] = {
+  private def extractVectorRoutes(expr: Expression, defaultLimit: Int): Seq[HybridSearchRoute] = {
     expr match {
       case CreateArray(elements, _) if elements != null =>
-        elements.map(extractRoute(_, defaultLimit))
+        elements.map(extractVectorRoute(_, defaultLimit))
       case _ =>
-        throw new RuntimeException(s"Cannot extract multi-vector routes from expression: $expr")
+        throw new RuntimeException(s"Cannot extract vector routes from expression: $expr")
     }
   }
 
-  private def extractRoute(expr: Expression, defaultLimit: Int): MultiVectorSearchRoute = {
+  private def extractFullTextRoutes(expr: Expression, defaultLimit: Int): Seq[HybridSearchRoute] = {
+    expr match {
+      case CreateArray(elements, _) if elements != null =>
+        elements.map(extractFullTextRoute(_, defaultLimit))
+      case _ =>
+        throw new RuntimeException(s"Cannot extract full-text routes from expression: $expr")
+    }
+  }
+
+  private def extractVectorRoute(expr: Expression, defaultLimit: Int): HybridSearchRoute = {
     expr match {
       case CreateNamedStruct(children) if children != null =>
-        extractConfiguredRoute(children, defaultLimit)
+        extractConfiguredVectorRoute(children, defaultLimit)
       case _ =>
-        throw new RuntimeException(s"Cannot extract multi-vector route from expression: $expr")
+        throw new RuntimeException(s"Cannot extract vector route from expression: $expr")
     }
   }
 
-  private def extractConfiguredRoute(
+  private def extractFullTextRoute(expr: Expression, defaultLimit: Int): HybridSearchRoute = {
+    expr match {
+      case CreateNamedStruct(children) if children != null =>
+        extractConfiguredFullTextRoute(children, defaultLimit)
+      case _ =>
+        throw new RuntimeException(s"Cannot extract full-text route from expression: $expr")
+    }
+  }
+
+  private def extractConfiguredVectorRoute(
       children: Seq[Expression],
-      defaultLimit: Int): MultiVectorSearchRoute = {
+      defaultLimit: Int): HybridSearchRoute = {
     var columnName: Option[String] = None
     var queryVector: Option[Array[Float]] = None
     var limit: Option[Int] = None
@@ -526,7 +547,7 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
     children.grouped(2).foreach {
       case Seq(keyExpr, valueExpr) =>
         VectorSearchQuery(Seq.empty).extractString(keyExpr) match {
-          case "vector_column" =>
+          case "field" | "vector_column" =>
             columnName = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
           case "query_vector" =>
             queryVector = Some(VectorSearchQuery(Seq.empty).extractQueryVector(valueExpr))
@@ -537,9 +558,8 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
           case "options" =>
             options = VectorSearchQuery(Seq.empty).extractOptions(valueExpr)
           case key =>
-            throw new IllegalArgumentException(
-              s"Unsupported multi-vector route field '$key'. " +
-                "Supported fields are vector_column, query_vector, limit, weight, and options.")
+            throw new IllegalArgumentException(s"Unsupported vector route field '$key'. " +
+              "Supported fields are field, vector_column, query_vector, limit, weight, and options.")
         }
       case other =>
         throw new RuntimeException(s"Invalid route config entries: $other")
@@ -547,12 +567,60 @@ case class MultiVectorSearchQuery(override val args: Seq[Expression])
 
     val routeColumn =
       columnName.getOrElse(
-        throw new IllegalArgumentException("Multi-vector route must define vector_column."))
-    new MultiVectorSearchRoute(
+        throw new IllegalArgumentException("Vector route must define field or vector_column."))
+    HybridSearchRoute.vector(
       routeColumn,
       queryVector.getOrElse(
         throw new IllegalArgumentException(
-          s"Multi-vector route for column $routeColumn must define query_vector.")),
+          s"Vector route for column $routeColumn must define query_vector.")),
+      limit.getOrElse(defaultLimit),
+      weight.getOrElse(1.0f),
+      options.asJava
+    )
+  }
+
+  private def extractConfiguredFullTextRoute(
+      children: Seq[Expression],
+      defaultLimit: Int): HybridSearchRoute = {
+    var columnName: Option[String] = None
+    var queryText: Option[String] = None
+    var queryOperator: Option[String] = None
+    var limit: Option[Int] = None
+    var weight: Option[Float] = None
+    var options = Map.empty[String, String]
+
+    children.grouped(2).foreach {
+      case Seq(keyExpr, valueExpr) =>
+        VectorSearchQuery(Seq.empty).extractString(keyExpr) match {
+          case "field" | "text_column" =>
+            columnName = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
+          case "query_text" =>
+            queryText = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
+          case "query_operator" =>
+            queryOperator = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
+          case "limit" =>
+            limit = Some(parsePositiveLimit(valueExpr.eval()))
+          case "weight" =>
+            weight = Some(parsePositiveFloat(valueExpr.eval(), "weight"))
+          case "options" =>
+            options = VectorSearchQuery(Seq.empty).extractOptions(valueExpr)
+          case key =>
+            throw new IllegalArgumentException(s"Unsupported full-text route field '$key'. " +
+              "Supported fields are field, text_column, query_text, query_operator, limit, weight, and options.")
+        }
+      case other =>
+        throw new RuntimeException(s"Invalid route config entries: $other")
+    }
+
+    val routeColumn =
+      columnName.getOrElse(
+        throw new IllegalArgumentException("Full-text route must define field or text_column."))
+    HybridSearchRoute.fullText(
+      routeColumn,
+      queryText.getOrElse(
+        throw new IllegalArgumentException(
+          s"Full-text route for column $routeColumn must define query_text.")),
+      queryOperator.getOrElse("or"),
       limit.getOrElse(defaultLimit),
       weight.getOrElse(1.0f),
       options.asJava

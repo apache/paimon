@@ -18,7 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.globalindex.MultiVectorSearchRanker;
+import org.apache.paimon.globalindex.HybridSearchRanker;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -26,20 +26,20 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Multi-vector search over multiple vector columns.
+ * Hybrid search over vector and full-text routes.
  *
- * <p>This is an internal pushdown representation. Use {@code Table.newMultiVectorSearchBuilder()}
- * to configure multi-vector search from Java.
+ * <p>This is an internal pushdown representation. Use {@code Table.newHybridSearchBuilder()} to
+ * configure hybrid search from Java.
  */
-public class MultiVectorSearch implements Serializable {
+public class HybridSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final List<MultiVectorSearchRoute> routes;
+    private final List<HybridSearchRoute> routes;
     private final int limit;
     private final String ranker;
 
-    public MultiVectorSearch(List<MultiVectorSearchRoute> routes, int limit, String ranker) {
+    public HybridSearch(List<HybridSearchRoute> routes, int limit, String ranker) {
         if (routes == null || routes.isEmpty()) {
             throw new IllegalArgumentException("Routes cannot be null or empty");
         }
@@ -48,10 +48,10 @@ public class MultiVectorSearch implements Serializable {
         }
         this.routes = Collections.unmodifiableList(new ArrayList<>(routes));
         this.limit = limit;
-        this.ranker = MultiVectorSearchRanker.normalizeRanker(ranker);
+        this.ranker = HybridSearchRanker.normalizeRanker(ranker);
     }
 
-    public List<MultiVectorSearchRoute> routes() {
+    public List<HybridSearchRoute> routes() {
         return routes;
     }
 

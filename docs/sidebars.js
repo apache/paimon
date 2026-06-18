@@ -177,7 +177,6 @@ const sidebars = {
       "pypaimon/daft",
       "pypaimon/pytorch",
       "pypaimon/data-evolution",
-      "pypaimon/global-index",
       "pypaimon/system-tables",
       "pypaimon/fuse-support",
       "pypaimon/pyjindosdk-support",

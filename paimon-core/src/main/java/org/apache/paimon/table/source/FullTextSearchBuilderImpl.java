@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
@@ -36,9 +37,16 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private DataField textColumn;
     private String queryText;
     private String queryOperator = "or";
+    private PartitionPredicate partitionFilter;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
+    }
+
+    @Override
+    public FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
+        this.partitionFilter = partitionFilter;
+        return this;
     }
 
     @Override
@@ -68,7 +76,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     @Override
     public FullTextScan newFullTextScan() {
         checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        return new FullTextScanImpl(table, textColumn);
+        return new FullTextScanImpl(table, partitionFilter, textColumn);
     }
 
     @Override
