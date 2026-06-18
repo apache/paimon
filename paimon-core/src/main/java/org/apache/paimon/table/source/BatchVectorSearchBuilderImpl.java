@@ -106,7 +106,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     }
 
     @Override
-    public VectorRead newVectorRead() {
+    public BatchVectorRead newBatchVectorRead() {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(vectorColumn, "Vector column must be set via withVectorColumn()");
         checkArgument(
@@ -114,6 +114,6 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
         for (float[] vector : vectors) {
             checkNotNull(vector, "Search vector element cannot be null");
         }
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
+        return new BatchVectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
     }
 }

@@ -37,28 +37,33 @@ import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 
-/** Implementation for {@link VectorRead}. */
-public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
+/** Implementation for {@link BatchVectorRead}. */
+public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVectorRead {
 
     private static final long serialVersionUID = 1L;
 
-    protected final float[] vector;
+    protected final float[][] vectors;
 
-    public VectorReadImpl(
+    public BatchVectorReadImpl(
             FileStoreTable table,
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector,
+            float[][] vectors,
             Map<String, String> options) {
         super(table, filter, limit, vectorColumn, options);
-        this.vector = vector;
+        this.vectors = vectors;
     }
 
     @Override
-    public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+    public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        int n = vectors.length;
         if (splits.isEmpty()) {
-            return GlobalIndexResult.createEmpty();
+            List<GlobalIndexResult> empty = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                empty.add(GlobalIndexResult.createEmpty());
+            }
+            return empty;
         }
 
         RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
@@ -69,30 +74,41 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
         ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
 
-        List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
+        List<CompletableFuture<List<Optional<ScoredGlobalIndexResult>>>> futures =
                 new ArrayList<>(splits.size());
         for (VectorSearchSplit split : splits) {
             futures.add(
-                    eval(
+                    evalBatch(
                             globalIndexer,
                             indexPathFactory,
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
-                            vector,
+                            vectors,
                             preFilter,
                             executor));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.createEmpty();
-        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
-            Optional<ScoredGlobalIndexResult> splitResult = future.join();
-            if (splitResult.isPresent()) {
-                merged = merged.or(splitResult.get());
+        ScoredGlobalIndexResult[] merged = new ScoredGlobalIndexResult[n];
+        for (int i = 0; i < n; i++) {
+            merged[i] = ScoredGlobalIndexResult.createEmpty();
+        }
+
+        for (CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> future : futures) {
+            List<Optional<ScoredGlobalIndexResult>> splitResults = future.join();
+            for (int i = 0; i < n; i++) {
+                if (splitResults.get(i).isPresent()) {
+                    merged[i] = merged[i].or(splitResults.get(i).get());
+                }
             }
         }
-        return merged.topK(limit);
+
+        List<GlobalIndexResult> results = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            results.add(merged[i].topK(limit));
+        }
+        return results;
     }
 }
