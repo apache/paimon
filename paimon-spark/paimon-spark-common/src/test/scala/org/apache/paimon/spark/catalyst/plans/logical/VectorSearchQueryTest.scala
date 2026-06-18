@@ -137,6 +137,38 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).weight() == 1.5f)
   }
 
+  test("create full-text search with default query operator") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(Literal("content"), Literal("paimon lake"), Literal(10)))
+
+    assert(search.fieldName() == "content")
+    assert(search.queryText() == "paimon lake")
+    assert(search.limit() == 10)
+    assert(search.queryOperator() == "or")
+  }
+
+  test("create full-text search with explicit query operator") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(Literal("content"), Literal("paimon lake"), Literal(10), Literal("and")))
+
+    assert(search.fieldName() == "content")
+    assert(search.queryText() == "paimon lake")
+    assert(search.limit() == 10)
+    assert(search.queryOperator() == "and")
+  }
+
+  test("reject invalid full-text search query operator") {
+    val exception = intercept[IllegalArgumentException] {
+      FullTextSearchQuery(Seq.empty).createFullTextSearch(
+        innerTable,
+        Seq(Literal("content"), Literal("paimon lake"), Literal(10), Literal("xor")))
+    }
+
+    assert(exception.getMessage.contains("Query operator must be 'or' or 'and'"))
+  }
+
   test("reject hybrid search query map") {
     val exception = intercept[RuntimeException] {
       HybridSearchQuery(Seq.empty).createHybridSearch(

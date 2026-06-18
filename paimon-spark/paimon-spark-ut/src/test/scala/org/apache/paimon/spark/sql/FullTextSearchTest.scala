@@ -137,7 +137,7 @@ class FullTextSearchTest extends PaimonSparkTestBase {
     }
   }
 
-  test("full-text search - multi-term query") {
+  test("full-text search - multi-term query operators") {
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, content STRING)
@@ -162,18 +162,23 @@ class FullTextSearchTest extends PaimonSparkTestBase {
           s"CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => '$indexType')")
         .collect()
 
-      // Query "Paimon search" - rows 1 and 2 match both terms
-      val result = spark
+      val defaultOrResult = spark
         .sql("""
-               |SELECT id FROM full_text_search('T', 'content', 'Paimon search', 2)
+               |SELECT id FROM full_text_search('T', 'content', 'Paimon search', 5)
                |ORDER BY id
                |""".stripMargin)
         .collect()
 
-      assert(result.length == 2)
-      val ids = result.map(_.getInt(0)).toSet
-      assert(ids.contains(1))
-      assert(ids.contains(2))
+      assert(defaultOrResult.map(_.getInt(0)).toSeq == Seq(0, 1, 2, 3))
+
+      val explicitAndResult = spark
+        .sql("""
+               |SELECT id FROM full_text_search('T', 'content', 'Paimon search', 5, 'and')
+               |ORDER BY id
+               |""".stripMargin)
+        .collect()
+
+      assert(explicitAndResult.map(_.getInt(0)).toSeq == Seq(1, 2))
     }
   }
 

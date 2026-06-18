@@ -648,13 +648,14 @@ case class HybridSearchQuery(override val args: Seq[Expression])
 /**
  * Plan for the [[FULL_TEXT_SEARCH]] table-valued function.
  *
- * Usage: full_text_search(table_name, column_name, query_text, limit)
+ * Usage: full_text_search(table_name, column_name, query_text, limit[, query_operator])
  *   - table_name: the Paimon table to search
  *   - column_name: the text column name
  *   - query_text: the query text string
  *   - limit: the number of top results to return
+ *   - query_operator: optional query operator, supported values are 'or' and 'and'
  *
- * Example: SELECT * FROM full_text_search('T', 'content', 'hello world', 10)
+ * Example: SELECT * FROM full_text_search('T', 'content', 'hello world', 10, 'and')
  */
 case class FullTextSearchQuery(override val args: Seq[Expression])
   extends PaimonTableValueFunction(FULL_TEXT_SEARCH) {
@@ -667,9 +668,10 @@ case class FullTextSearchQuery(override val args: Seq[Expression])
   def createFullTextSearch(
       innerTable: InnerTable,
       argsWithoutTable: Seq[Expression]): FullTextSearch = {
-    if (argsWithoutTable.size != 3) {
+    if (argsWithoutTable.size != 3 && argsWithoutTable.size != 4) {
       throw new RuntimeException(
-        s"$FULL_TEXT_SEARCH needs three parameters after table_name: column_name, query_text, limit. " +
+        s"$FULL_TEXT_SEARCH needs three or four parameters after table_name: " +
+          s"column_name, query_text, limit[, query_operator]. " +
           s"Got ${argsWithoutTable.size} parameters after table_name."
       )
     }
@@ -681,6 +683,12 @@ case class FullTextSearchQuery(override val args: Seq[Expression])
     }
     val queryText = argsWithoutTable(1).eval().toString
     val limit = parsePositiveLimit(argsWithoutTable(2).eval())
-    new FullTextSearch(queryText, limit, columnName)
+    val queryOperator =
+      if (argsWithoutTable.size == 4) {
+        VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(3))
+      } else {
+        "or"
+      }
+    new FullTextSearch(queryText, limit, columnName, queryOperator)
   }
 }

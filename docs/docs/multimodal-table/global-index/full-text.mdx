@@ -125,8 +125,11 @@ The query operator controls how multiple query terms are matched:
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Search for top-10 documents matching the query
+-- Search for top-10 documents matching any query term. The default query operator is 'or'.
 SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10);
+
+-- Search for top-10 documents matching all query terms.
+SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10, 'and');
 ```
 
 </TabItem>
