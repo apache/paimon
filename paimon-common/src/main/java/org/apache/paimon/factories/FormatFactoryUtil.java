@@ -19,6 +19,7 @@
 package org.apache.paimon.factories;
 
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FileFormatProvider;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -32,6 +33,9 @@ import static org.apache.paimon.factories.FactoryUtil.discoverFactories;
 public class FormatFactoryUtil {
 
     private static final Cache<ClassLoader, List<FileFormatFactory>> FACTORIES =
+            Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
+
+    private static final Cache<ClassLoader, List<FileFormatProvider>> PROVIDERS =
             Caffeine.newBuilder().softValues().maximumSize(100).executor(Runnable::run).build();
 
     /** Discovers a file format factory. */
@@ -63,5 +67,47 @@ public class FormatFactoryUtil {
     private static List<FileFormatFactory> getFactories(ClassLoader classLoader) {
         return FACTORIES.get(
                 classLoader, s -> discoverFactories(classLoader, FileFormatFactory.class));
+    }
+
+    /** Discovers file format providers. */
+    public static List<FileFormatProvider> discoverProviders(ClassLoader classLoader) {
+        return PROVIDERS.get(
+                classLoader, s -> discoverFactories(classLoader, FileFormatProvider.class));
+    }
+
+    /** Discovers a file format provider. */
+    public static FileFormatProvider discoverProvider(ClassLoader classLoader, String identifier) {
+        final List<FileFormatProvider> foundProviders = discoverProviders(classLoader);
+
+        final List<FileFormatProvider> matchingProviders =
+                foundProviders.stream()
+                        .filter(f -> f.identifier().equals(identifier))
+                        .collect(Collectors.toList());
+
+        if (matchingProviders.isEmpty()) {
+            throw new FactoryException(
+                    String.format(
+                            "Could not find any provider for identifier '%s' that implements FileFormatProvider in the classpath.\n\n"
+                                    + "Available provider identifiers are:\n\n"
+                                    + "%s",
+                            identifier,
+                            foundProviders.stream()
+                                    .map(FileFormatProvider::identifier)
+                                    .collect(Collectors.joining("\n"))));
+        }
+
+        if (matchingProviders.size() > 1) {
+            throw new FactoryException(
+                    String.format(
+                            "Multiple providers for identifier '%s' that implement FileFormatProvider found in the classpath.\n\n"
+                                    + "Ambiguous provider classes are:\n\n"
+                                    + "%s",
+                            identifier,
+                            matchingProviders.stream()
+                                    .map(p -> p.getClass().getName())
+                                    .collect(Collectors.joining("\n"))));
+        }
+
+        return matchingProviders.get(0);
     }
 }

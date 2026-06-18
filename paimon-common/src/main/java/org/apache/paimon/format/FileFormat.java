@@ -87,8 +87,21 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        return FormatFactoryUtil.discoverFactory(
-                        FileFormat.class.getClassLoader(), identifier.toLowerCase())
+        String normalizedIdentifier = identifier.toLowerCase();
+        ClassLoader classLoader = FileFormat.class.getClassLoader();
+        String providerIdentifier =
+                context.options().getString(FileFormatProvider.FORMAT_PROVIDER, null);
+        if (providerIdentifier != null && !providerIdentifier.trim().isEmpty()) {
+            Optional<FileFormat> providedFormat =
+                    FormatFactoryUtil.discoverProvider(
+                                    classLoader, providerIdentifier.trim().toLowerCase())
+                            .create(normalizedIdentifier, context);
+            if (providedFormat.isPresent()) {
+                return providedFormat.get();
+            }
+        }
+
+        return FormatFactoryUtil.discoverFactory(classLoader, normalizedIdentifier)
                 .create(context);
     }
 
