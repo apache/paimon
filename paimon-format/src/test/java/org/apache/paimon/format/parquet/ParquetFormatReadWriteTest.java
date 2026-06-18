@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
@@ -32,12 +33,16 @@ import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** A parquet {@link FormatReadWriteTest}. */
@@ -87,6 +92,44 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                     Assertions.assertThat(enabled == (filter != null)).isTrue();
                 }
             }
+        }
+    }
+
+    @Test
+    public void testColumnCompressionCodec() throws Exception {
+        Options options = new Options();
+        options.set("parquet.compression#name", "none");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(1, "name", DataTypes.STRING()));
+
+        PositionOutputStream out = fileIO.newOutputStream(file, false);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+        writer.addElement(GenericRow.of(1, BinaryString.fromString("one")));
+        writer.addElement(GenericRow.of(2, BinaryString.fromString("two")));
+        writer.addElement(GenericRow.of(3, BinaryString.fromString("three")));
+        writer.close();
+        out.close();
+
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            Map<String, CompressionCodecName> codecs = new HashMap<>();
+            for (BlockMetaData blockMetaData : reader.getFooter().getBlocks()) {
+                for (ColumnChunkMetaData columnChunkMetaData : blockMetaData.getColumns()) {
+                    codecs.put(
+                            columnChunkMetaData.getPath().toDotString(),
+                            columnChunkMetaData.getCodec());
+                }
+            }
+
+            Assertions.assertThat(codecs)
+                    .containsEntry("id", CompressionCodecName.ZSTD)
+                    .containsEntry("name", CompressionCodecName.UNCOMPRESSED);
         }
     }
 }
