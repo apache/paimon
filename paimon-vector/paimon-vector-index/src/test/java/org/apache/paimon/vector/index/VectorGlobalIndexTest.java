@@ -394,7 +394,7 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -446,7 +446,7 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -501,7 +501,7 @@ public class VectorGlobalIndexTest {
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -556,6 +556,12 @@ public class VectorGlobalIndexTest {
         options.setInteger("ivf-pq.dimension", dimension);
         options.setString("ivf-pq.metric", "l2");
         return options;
+    }
+
+    private void writeVectors(VectorGlobalIndexWriter writer, float[][] vectors) {
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
     }
 
     private GlobalIndexFileWriter createFileWriter(Path path) {
