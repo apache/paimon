@@ -187,7 +187,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         recordLevelExpire,
                         options.forceRewriteAllFiles(),
                         options.isChainTable());
-        compactManager.setPartitionBucketInfo(partition, bucket, keyReaderFactory.pathFactory());
+        compactManager.setPartitionBucketInfo(
+                partition, bucket, readerFactoryBuilder.pathFactory());
         return compactManager;
     }
 
