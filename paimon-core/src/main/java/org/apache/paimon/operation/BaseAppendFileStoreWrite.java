@@ -163,9 +163,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (blobContext != null) {
             blobContext = blobContext.withWriteType(writeType);
         }
-        int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
-        this.writeCols = writeType.getFieldNames();
+        // writeCols carries (possibly nested) dotted paths, e.g. ["f0", "nest.a"]; a plain
+        // top-level name means the whole column, a dotted path means only that sub-field is written
+        this.writeCols = writeType.leafPaths(rowType);
         // optimize writeCols to null in following cases:
         // writeType contains all columns (without _ROW_ID and _SEQUENCE_NUMBER)
         if (writeCols.equals(fullNames)) {

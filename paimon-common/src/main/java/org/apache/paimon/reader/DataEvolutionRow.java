@@ -35,12 +35,24 @@ public class DataEvolutionRow implements InternalRow {
     private final InternalRow[] rows;
     private final int[] rowOffsets;
     private final int[] fieldOffsets;
+
+    /**
+     * Optional per-top-level-field plan to assemble a nested struct whose sub-fields are spread
+     * across several source files (sub-field-level data evolution). {@code null} (or a {@code null}
+     * entry) means the field is taken whole from a single source row (the common case).
+     */
+    private NestedField[] nested;
+
     private RowKind rowKind;
 
     public DataEvolutionRow(int rowNumber, int[] rowOffsets, int[] fieldOffsets) {
         this.rows = new InternalRow[rowNumber];
         this.rowOffsets = rowOffsets;
         this.fieldOffsets = fieldOffsets;
+    }
+
+    public void setNested(NestedField[] nested) {
+        this.nested = nested;
     }
 
     public int rowNumber() {
@@ -56,6 +68,15 @@ public class DataEvolutionRow implements InternalRow {
                 this.rowKind = row.getRowKind();
             }
             rows[pos] = row;
+        }
+    }
+
+    private void setRowsAllowNull(InternalRow[] newRows) {
+        for (int i = 0; i < newRows.length; i++) {
+            this.rows[i] = newRows[i];
+            if (rowKind == null && newRows[i] != null) {
+                this.rowKind = newRows[i].getRowKind();
+            }
         }
     }
 
@@ -97,10 +118,22 @@ public class DataEvolutionRow implements InternalRow {
 
     @Override
     public boolean isNullAt(int pos) {
+        if (nested != null && nested[pos] != null) {
+            // a composed struct is null only when none of its source files provide it
+            NestedField nf = nested[pos];
+            for (int k = 0; k < nf.numPartials; k++) {
+                InternalRow src = rows[nf.partialReader[k]];
+                if (src != null && !src.isNullAt(nf.partialOffset[k])) {
+                    return false;
+                }
+            }
+            return true;
+        }
         if (rowOffsets[pos] < 0) {
             return true;
         }
-        return chooseRow(pos).isNullAt(offsetInRow(pos));
+        InternalRow row = chooseRow(pos);
+        return row == null || row.isNullAt(offsetInRow(pos));
     }
 
     @Override
@@ -185,6 +218,54 @@ public class DataEvolutionRow implements InternalRow {
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
+        if (nested != null && nested[pos] != null) {
+            NestedField nf = nested[pos];
+            InternalRow[] partials = new InternalRow[nf.numPartials];
+            for (int k = 0; k < nf.numPartials; k++) {
+                InternalRow src = rows[nf.partialReader[k]];
+                partials[k] =
+                        (src == null || src.isNullAt(nf.partialOffset[k]))
+                                ? null
+                                : src.getRow(nf.partialOffset[k], nf.partialSize[k]);
+            }
+            DataEvolutionRow composed =
+                    new DataEvolutionRow(nf.numPartials, nf.subRowOffsets, nf.subFieldOffsets);
+            composed.setRowsAllowNull(partials);
+            return composed;
+        }
         return chooseRow(pos).getRow(offsetInRow(pos), numFields);
+    }
+
+    /**
+     * Plan to assemble one nested struct from sub-fields spread across several source files. A
+     * "partial" is the projection of the struct read from a single source file; each output
+     * sub-field is sourced from one partial via {@code subRowOffsets}/{@code subFieldOffsets}.
+     */
+    public static class NestedField {
+
+        final int numPartials;
+        // per partial struct: the source reader, the struct's position in that reader's row, and
+        // the
+        // number of fields of the struct as read from that file
+        final int[] partialReader;
+        final int[] partialOffset;
+        final int[] partialSize;
+        // per output sub-field: which partial it comes from, and its offset within that partial
+        final int[] subRowOffsets;
+        final int[] subFieldOffsets;
+
+        public NestedField(
+                int[] partialReader,
+                int[] partialOffset,
+                int[] partialSize,
+                int[] subRowOffsets,
+                int[] subFieldOffsets) {
+            this.numPartials = partialReader.length;
+            this.partialReader = partialReader;
+            this.partialOffset = partialOffset;
+            this.partialSize = partialSize;
+            this.subRowOffsets = subRowOffsets;
+            this.subFieldOffsets = subFieldOffsets;
+        }
     }
 }

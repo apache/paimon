@@ -37,12 +37,12 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
+import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -63,13 +63,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
-import java.util.stream.Collectors;
 
 import static java.lang.String.format;
 import static java.util.Collections.reverseOrder;
@@ -249,86 +252,270 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         // Init all we need to create a compound reader
         List<DataField> allReadFields = readRowType.getFields();
-        RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[fieldsFiles.size()];
-        int[] readFieldIndex = allReadFields.stream().mapToInt(DataField::id).toArray();
-        // which row the read field index belongs to
-        int[] rowOffsets = new int[allReadFields.size()];
-        // which field index in the reading row
-        int[] fieldOffsets = new int[allReadFields.size()];
+        int numFields = allReadFields.size();
+        int numBunches = fieldsFiles.size();
+        RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[numBunches];
+
+        // Step 1: for each bunch (file), gather its (possibly nested) data row type and the set of
+        // leaf field ids it physically provides. writeCols may carry nested dotted paths.
+        long[] bunchSchemaId = new long[numBunches];
+        List<Set<Integer>> bunchLeaves = new ArrayList<>();
+        for (int i = 0; i < numBunches; i++) {
+            DataFileMeta firstFile = fieldsFiles.get(i).files().get(0);
+            long schemaId = firstFile.schemaId();
+            bunchSchemaId[i] = schemaId;
+            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
+            RowType avail = rowTypeWithRowTracking(dataSchema.logicalRowType());
+            Set<Integer> leaves = new HashSet<>();
+            collectLeafIds(avail.getFields(), leaves);
+            bunchLeaves.add(leaves);
+        }
+
+        // Step 2: decide, per read field, whether it is taken whole from one file or composed from
+        // several files at sub-field granularity. Files are already sorted latest-first, so the
+        // first bunch providing a leaf wins (latest-wins semantics, now at sub-field level).
+        // selection per bunch: topFieldId -> null (whole) or set of selected sub-field ids
+        List<Map<Integer, Set<Integer>>> bunchSelection = new ArrayList<>();
+        for (int i = 0; i < numBunches; i++) {
+            bunchSelection.add(new LinkedHashMap<>());
+        }
+
+        int[] rowOffsets = new int[numFields];
+        int[] fieldOffsets = new int[numFields];
         Arrays.fill(rowOffsets, -1);
         Arrays.fill(fieldOffsets, -1);
+        DataEvolutionRow.NestedField[] nested = new DataEvolutionRow.NestedField[numFields];
+        boolean[] composite = new boolean[numFields];
+        int[] wholeBunch = new int[numFields];
+        Arrays.fill(wholeBunch, -1);
 
-        for (int i = 0; i < fieldsFiles.size(); i++) {
+        for (int j = 0; j < numFields; j++) {
+            DataField rf = allReadFields.get(j);
+            List<Integer> leaves = leafIdsOf(rf);
+            Map<Integer, Integer> leafProvider = new HashMap<>();
+            Set<Integer> providers = new HashSet<>();
+            for (int leaf : leaves) {
+                int p = providerOf(leaf, bunchLeaves);
+                if (p >= 0) {
+                    leafProvider.put(leaf, p);
+                    providers.add(p);
+                }
+            }
+            if (providers.isEmpty()) {
+                // no file provides this field; it stays null (nullability checked below)
+                continue;
+            }
+            if (providers.size() == 1) {
+                int b = providers.iterator().next();
+                bunchSelection.get(b).put(rf.id(), null);
+                wholeBunch[j] = b;
+            } else {
+                checkArgument(
+                        rf.type() instanceof RowType,
+                        "Field %s is split across files but is not a struct.",
+                        rf.name());
+                composite[j] = true;
+                for (DataField sub : ((RowType) rf.type()).getFields()) {
+                    Set<Integer> subProviders = new HashSet<>();
+                    for (int leaf : leafIdsOf(sub)) {
+                        int p = leafProvider.getOrDefault(leaf, -1);
+                        if (p >= 0) {
+                            subProviders.add(p);
+                        }
+                    }
+                    if (subProviders.size() > 1) {
+                        throw new UnsupportedOperationException(
+                                "Sub-field-level data evolution does not yet support splitting a "
+                                        + "nested sub-field ("
+                                        + rf.name()
+                                        + "."
+                                        + sub.name()
+                                        + ") across multiple files.");
+                    }
+                    if (subProviders.size() == 1) {
+                        int b = subProviders.iterator().next();
+                        bunchSelection
+                                .get(b)
+                                .computeIfAbsent(rf.id(), k -> new LinkedHashSet<>())
+                                .add(sub.id());
+                    }
+                    // else: sub-field absent everywhere -> stays null
+                }
+            }
+        }
+
+        // Step 3: materialize each bunch's partial read row type and the offset maps.
+        List<List<DataField>> bunchReadFields = new ArrayList<>();
+        List<Map<Integer, Integer>> bunchTopOffset = new ArrayList<>();
+        List<Map<Integer, Map<Integer, Integer>>> bunchSubOffset = new ArrayList<>();
+        for (int i = 0; i < numBunches; i++) {
+            Map<Integer, Set<Integer>> sel = bunchSelection.get(i);
+            List<DataField> readFields = new ArrayList<>();
+            Map<Integer, Integer> topOffset = new HashMap<>();
+            Map<Integer, Map<Integer, Integer>> subOffset = new HashMap<>();
+            for (Map.Entry<Integer, Set<Integer>> e : sel.entrySet()) {
+                int topId = e.getKey();
+                Set<Integer> subs = e.getValue();
+                DataField readTop = readRowType.getField(topId);
+                if (subs == null) {
+                    readFields.add(readTop);
+                    topOffset.put(topId, readFields.size() - 1);
+                } else {
+                    RowType readStruct = (RowType) readTop.type();
+                    List<DataField> chosen = new ArrayList<>();
+                    Map<Integer, Integer> subToIdx = new HashMap<>();
+                    for (DataField s : readStruct.getFields()) {
+                        if (subs.contains(s.id())) {
+                            subToIdx.put(s.id(), chosen.size());
+                            chosen.add(s);
+                        }
+                    }
+                    RowType partial = new RowType(readStruct.isNullable(), chosen);
+                    readFields.add(readTop.newType(partial));
+                    topOffset.put(topId, readFields.size() - 1);
+                    subOffset.put(topId, subToIdx);
+                }
+            }
+            bunchReadFields.add(readFields);
+            bunchTopOffset.add(topOffset);
+            bunchSubOffset.add(subOffset);
+        }
+
+        // Step 4: wire output offsets (whole fields) and nested composition plans (split structs).
+        for (int j = 0; j < numFields; j++) {
+            DataField rf = allReadFields.get(j);
+            if (composite[j]) {
+                List<DataField> subFields = ((RowType) rf.type()).getFields();
+                int subCount = subFields.size();
+                int[] subRowOffsets = new int[subCount];
+                int[] subFieldOffsets = new int[subCount];
+                Arrays.fill(subRowOffsets, -1);
+                Arrays.fill(subFieldOffsets, -1);
+                Map<Integer, Integer> bunchToPartial = new LinkedHashMap<>();
+                List<int[]> partials = new ArrayList<>();
+                for (int s = 0; s < subCount; s++) {
+                    int subId = subFields.get(s).id();
+                    int b = findSubProvider(rf.id(), subId, bunchSubOffset);
+                    if (b < 0) {
+                        continue;
+                    }
+                    Integer pIdx = bunchToPartial.get(b);
+                    if (pIdx == null) {
+                        int topOff = bunchTopOffset.get(b).get(rf.id());
+                        int size = bunchSubOffset.get(b).get(rf.id()).size();
+                        pIdx = partials.size();
+                        bunchToPartial.put(b, pIdx);
+                        partials.add(new int[] {b, topOff, size});
+                    }
+                    subRowOffsets[s] = pIdx;
+                    subFieldOffsets[s] = bunchSubOffset.get(b).get(rf.id()).get(subId);
+                }
+                int p = partials.size();
+                int[] pr = new int[p];
+                int[] po = new int[p];
+                int[] ps = new int[p];
+                for (int k = 0; k < p; k++) {
+                    pr[k] = partials.get(k)[0];
+                    po[k] = partials.get(k)[1];
+                    ps[k] = partials.get(k)[2];
+                }
+                nested[j] =
+                        new DataEvolutionRow.NestedField(
+                                pr, po, ps, subRowOffsets, subFieldOffsets);
+            } else if (wholeBunch[j] >= 0) {
+                int b = wholeBunch[j];
+                rowOffsets[j] = b;
+                fieldOffsets[j] = bunchTopOffset.get(b).get(rf.id());
+            }
+        }
+
+        // Step 5: build the per-bunch readers from the materialized partial read row types.
+        for (int i = 0; i < numBunches; i++) {
+            List<DataField> readFields = bunchReadFields.get(i);
+            if (readFields.isEmpty()) {
+                fileRecordReaders[i] = null;
+                continue;
+            }
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
             String formatIdentifier = DataFilePathFactory.formatIdentifier(firstFile.fileName());
-            long schemaId = firstFile.schemaId();
+            long schemaId = bunchSchemaId[i];
             TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
-            int[] fieldIds =
-                    SpecialFields.rowTypeWithRowTracking(dataSchema.logicalRowType()).getFields()
-                            .stream()
-                            .mapToInt(DataField::id)
-                            .toArray();
-            List<DataField> readFields = new ArrayList<>();
-            for (int j = 0; j < readFieldIndex.length; j++) {
-                for (int fieldId : fieldIds) {
-                    // Check if the read field index matches the file field
-                    // index
-                    if (readFieldIndex[j] == fieldId) {
-                        // If the row offset is not set, set it to the current
-                        // file reader
-                        if (rowOffsets[j] == -1) {
-                            // "i" is the reader index, and "readFields.size()"
-                            // is the offset the that row
-                            rowOffsets[j] = i;
-                            fieldOffsets[j] = readFields.size();
-                            readFields.add(allReadFields.get(j));
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (readFields.isEmpty()) {
-                fileRecordReaders[i] = null;
-            } else {
-                // create new FormatReaderMapping for read partial fields
-                List<String> readFieldNames =
-                        readFields.stream().map(DataField::name).collect(Collectors.toList());
-                FormatReaderMapping formatReaderMapping =
-                        formatReaderMappings.computeIfAbsent(
-                                new FormatKey(schemaId, formatIdentifier, readFieldNames),
-                                key ->
-                                        formatBuilder.build(
-                                                formatIdentifier,
-                                                schema,
-                                                dataSchema,
-                                                readFields,
-                                                false));
-                RowType partialReadRowType = new RowType(readFields);
-                fileRecordReaders[i] =
-                        new ForceSingleBatchReader(
-                                createFieldBunchReader(
-                                        partition,
-                                        bunch,
-                                        dataFilePathFactory,
-                                        formatReaderMapping,
-                                        rowRanges,
-                                        partialReadRowType));
-            }
+            RowType partialReadRowType = new RowType(readFields);
+            // cache key must use paths relative to the full schema so that two files reading
+            // different sub-fields of the same struct (e.g. nest.a vs nest.b) do not collide
+            RowType fullRef =
+                    rowTypeWithRowTracking(schemaFetcher.apply(schemaId).logicalRowType());
+            List<String> readFieldNames = partialReadRowType.leafPaths(fullRef);
+            FormatReaderMapping formatReaderMapping =
+                    formatReaderMappings.computeIfAbsent(
+                            new FormatKey(schemaId, formatIdentifier, readFieldNames),
+                            key ->
+                                    formatBuilder.build(
+                                            formatIdentifier,
+                                            schema,
+                                            dataSchema,
+                                            readFields,
+                                            false));
+            fileRecordReaders[i] =
+                    new ForceSingleBatchReader(
+                            createFieldBunchReader(
+                                    partition,
+                                    bunch,
+                                    dataFilePathFactory,
+                                    formatReaderMapping,
+                                    rowRanges,
+                                    partialReadRowType));
         }
 
-        for (int i = 0; i < rowOffsets.length; i++) {
-            if (rowOffsets[i] == -1) {
+        for (int j = 0; j < numFields; j++) {
+            if (rowOffsets[j] == -1 && nested[j] == null) {
                 checkArgument(
-                        allReadFields.get(i).type().isNullable(),
+                        allReadFields.get(j).type().isNullable(),
                         format(
                                 "Field %s is not null but can't find any file contains it.",
-                                allReadFields.get(i)));
+                                allReadFields.get(j)));
             }
         }
 
-        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders);
+        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders, nested);
+    }
+
+    /** Collect (recursively) the leaf field ids of {@code fields}; only ROW types recurse. */
+    private static void collectLeafIds(List<DataField> fields, java.util.Collection<Integer> out) {
+        for (DataField f : fields) {
+            if (f.type() instanceof RowType) {
+                collectLeafIds(((RowType) f.type()).getFields(), out);
+            } else {
+                out.add(f.id());
+            }
+        }
+    }
+
+    private static List<Integer> leafIdsOf(DataField field) {
+        List<Integer> result = new ArrayList<>();
+        collectLeafIds(Collections.singletonList(field), result);
+        return result;
+    }
+
+    private static int providerOf(int leafId, List<Set<Integer>> bunchLeaves) {
+        for (int i = 0; i < bunchLeaves.size(); i++) {
+            if (bunchLeaves.get(i).contains(leafId)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findSubProvider(
+            int topId, int subId, List<Map<Integer, Map<Integer, Integer>>> bunchSubOffset) {
+        for (int b = 0; b < bunchSubOffset.size(); b++) {
+            Map<Integer, Integer> sm = bunchSubOffset.get(b).get(topId);
+            if (sm != null && sm.containsKey(subId)) {
+                return b;
+            }
+        }
+        return -1;
     }
 
     private RecordReader<InternalRow> createFieldBunchReader(

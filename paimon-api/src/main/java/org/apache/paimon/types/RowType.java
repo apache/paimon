@@ -312,6 +312,114 @@ public final class RowType extends DataType {
         return project(Arrays.asList(names));
     }
 
+    /**
+     * Project this row type by a list of (possibly nested) dotted paths, e.g. {@code ["f0",
+     * "nest.a"]}. A path without a dot selects the whole top-level field (same as {@link
+     * #project(List)}); a dotted path selects only the addressed sub-field of a nested {@link
+     * RowType}, preserving field ids and nullability of every level. Schema field order is
+     * preserved. This is used by data evolution to reconstruct the partial nested schema of a
+     * column-group file from its {@code writeCols}.
+     */
+    public RowType projectByPaths(List<String> paths) {
+        return projectTypeByPaths(this, paths);
+    }
+
+    private static RowType projectTypeByPaths(RowType type, List<String> paths) {
+        // group paths by their immediate child name; a child appearing without a tail (or also with
+        // a tail) is selected as a whole field
+        Map<String, List<String>> childToSubPaths = new HashMap<>();
+        Set<String> wholeChildren = new HashSet<>();
+        for (String path : paths) {
+            int dot = path.indexOf('.');
+            if (dot < 0) {
+                childToSubPaths.computeIfAbsent(path, k -> new ArrayList<>());
+                wholeChildren.add(path);
+            } else {
+                String head = path.substring(0, dot);
+                String tail = path.substring(dot + 1);
+                childToSubPaths.computeIfAbsent(head, k -> new ArrayList<>()).add(tail);
+            }
+        }
+
+        Set<String> matched = new HashSet<>();
+        List<DataField> result = new ArrayList<>();
+        for (DataField field : type.getFields()) {
+            List<String> subPaths = childToSubPaths.get(field.name());
+            if (subPaths == null) {
+                continue;
+            }
+            matched.add(field.name());
+            if (wholeChildren.contains(field.name())
+                    || subPaths.isEmpty()
+                    || !(field.type() instanceof RowType)) {
+                result.add(field);
+            } else {
+                RowType prunedChild =
+                        projectTypeByPaths((RowType) field.type(), subPaths)
+                                .copy(field.type().isNullable());
+                result.add(field.newType(prunedChild));
+            }
+        }
+        if (!matched.containsAll(childToSubPaths.keySet())) {
+            Set<String> unknown = new HashSet<>(childToSubPaths.keySet());
+            unknown.removeAll(matched);
+            throw new IllegalArgumentException(
+                    "Cannot project by paths, unknown field(s) " + unknown + " in " + type);
+        }
+        return new RowType(type.isNullable(), result);
+    }
+
+    /**
+     * Compute the dotted paths describing this (possibly partially nested) write type relative to a
+     * full row type. A top-level field, or a nested field whose structure fully covers the
+     * corresponding field in {@code fullType}, is emitted by its name; a nested field that only
+     * covers some sub-fields is expanded into dotted leaf paths. This is the inverse of {@link
+     * #projectByPaths(List)} and is used to derive {@code writeCols}.
+     */
+    public List<String> leafPaths(RowType fullType) {
+        List<String> result = new ArrayList<>();
+        collectLeafPaths(getFields(), fullType, "", result);
+        return result;
+    }
+
+    private static void collectLeafPaths(
+            List<DataField> writeFields, RowType fullType, String prefix, List<String> out) {
+        for (DataField writeField : writeFields) {
+            DataField fullField = fullType.getField(writeField.id());
+            String path = prefix.isEmpty() ? writeField.name() : prefix + "." + writeField.name();
+            if (writeField.type() instanceof RowType
+                    && fullField.type() instanceof RowType
+                    && !coversFully((RowType) writeField.type(), (RowType) fullField.type())) {
+                collectLeafPaths(
+                        ((RowType) writeField.type()).getFields(),
+                        (RowType) fullField.type(),
+                        path,
+                        out);
+            } else {
+                out.add(path);
+            }
+        }
+    }
+
+    /** Whether {@code part} contains every (recursively nested) field of {@code full}. */
+    private static boolean coversFully(RowType part, RowType full) {
+        if (part.getFieldCount() != full.getFieldCount()) {
+            return false;
+        }
+        for (DataField fullField : full.getFields()) {
+            if (!part.containsField(fullField.id())) {
+                return false;
+            }
+            DataField partField = part.getField(fullField.id());
+            if (partField.type() instanceof RowType && fullField.type() instanceof RowType) {
+                if (!coversFully((RowType) partField.type(), (RowType) fullField.type())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private Map<String, DataField> nameToField() {
         Map<String, DataField> nameToField = this.laziedNameToField;
         if (nameToField == null) {
