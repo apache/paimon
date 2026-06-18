@@ -28,15 +28,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Ranker utilities for multi-vector search results. */
-public class MultiVectorSearchRanker {
+/** Ranker utilities for hybrid search results. */
+public class HybridSearchRanker {
 
     public static final String RRF_RANKER = "rrf";
     public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
 
     private static final float RRF_K = 60.0f;
 
-    private MultiVectorSearchRanker() {}
+    private HybridSearchRanker() {}
 
     public static ScoredGlobalIndexResult rank(
             String ranker, List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
@@ -61,7 +61,7 @@ public class MultiVectorSearchRanker {
         }
         String normalized = ranker.trim().toLowerCase();
         if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
-            throw new IllegalArgumentException("Unsupported multi-vector ranker: " + ranker);
+            throw new IllegalArgumentException("Unsupported hybrid ranker: " + ranker);
         }
         return normalized;
     }
@@ -168,7 +168,7 @@ public class MultiVectorSearchRanker {
         return weights[index];
     }
 
-    /** Weighted result from one vector-search route. */
+    /** Weighted result from one search route. */
     public static class WeightedResult implements Serializable {
 
         private static final long serialVersionUID = 1L;

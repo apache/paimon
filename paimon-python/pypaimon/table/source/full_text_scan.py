@@ -46,29 +46,37 @@ class FullTextScan(ABC):
 class FullTextScanImpl(FullTextScan):
     """Implementation for FullTextScan."""
 
-    def __init__(self, table: 'FileStoreTable', text_column: 'DataField'):
+    def __init__(
+            self,
+            table: 'FileStoreTable',
+            text_column: 'DataField',
+            partition_filter=None):
         self._table = table
         self._text_column = text_column
+        self._partition_filter = partition_filter
 
     def scan(self) -> FullTextScanPlan:
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         text_column = self._text_column
-        snapshot = self._table.snapshot_manager().get_latest_snapshot()
 
         from pypaimon.snapshot.time_travel_util import TimeTravelUtil
         from pypaimon.common.options.options import Options
-        travel_snapshot = TimeTravelUtil.try_travel_to_snapshot(
+        snapshot = TimeTravelUtil.try_travel_to_snapshot(
             Options(self._table.table_schema.options),
             self._table.tag_manager(),
             self._table.snapshot_manager(),
         )
-        if travel_snapshot is not None:
-            snapshot = travel_snapshot
+        if snapshot is None:
+            snapshot = self._table.snapshot_manager().get_latest_snapshot()
 
         index_file_handler = IndexFileHandler(table=self._table)
+        partition_filter = self._partition_filter
 
         def index_file_filter(entry):
+            if partition_filter is not None:
+                if not partition_filter.test(entry.partition):
+                    return False
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
                 return False

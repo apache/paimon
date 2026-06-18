@@ -81,6 +81,18 @@ class _StubTable:
                 return _G()
         return _P()
 
+    def new_vector_search_builder(self):
+        from pypaimon.table.source.vector_search_builder import (
+            VectorSearchBuilderImpl,
+        )
+        return VectorSearchBuilderImpl(self)
+
+    def new_full_text_search_builder(self):
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+        return FullTextSearchBuilderImpl(self)
+
 
 def _field(fid, name, dtype="INT"):
     return DataField(id=fid, name=name,
@@ -1251,6 +1263,170 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
                 PredicateBuilder.and_predicates(
                     [pb.equal("pt", 1), pb.equal("id", 5)]))
         self.assertIn("non-partition", str(ctx.exception))
+
+
+class HybridSearchBuilderTest(unittest.TestCase):
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_hybrid_search_ranks_multiple_routes(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        id_field = _field(0, "id")
+        title_embedding = _field(1, "title_embedding", "FLOAT")
+        body_embedding = _field(2, "body_embedding", "FLOAT")
+        content = _field(3, "content", "STRING")
+        table = _StubTable(
+            fields=[id_field, title_embedding, body_embedding, content],
+            entries=[],
+        )
+
+        captured_builders = []
+
+        class _FakeRouteBuilder:
+            def __init__(self, result):
+                self._result = result
+                self.calls = []
+
+            def with_vector_column(self, name):
+                self.calls.append(("vector_column", name))
+                return self
+
+            def with_query_vector(self, vector):
+                self.calls.append(("query_vector", vector))
+                return self
+
+            def with_text_column(self, name):
+                self.calls.append(("text_column", name))
+                return self
+
+            def with_query_text(self, query_text):
+                self.calls.append(("query_text", query_text))
+                return self
+
+            def with_query_operator(self, query_operator):
+                self.calls.append(("query_operator", query_operator))
+                return self
+
+            def with_limit(self, limit):
+                self.calls.append(("limit", limit))
+                return self
+
+            def with_options(self, options):
+                self.calls.append(("options", options))
+                return self
+
+            def execute_local(self):
+                return self._result
+
+        vector_result = DictBasedScoredIndexResult({1: 0.9, 2: 0.8})
+        text_result = DictBasedScoredIndexResult({2: 0.7, 3: 0.6})
+
+        def new_vector_search_builder():
+            builder = _FakeRouteBuilder(vector_result)
+            captured_builders.append(builder)
+            return builder
+
+        def new_full_text_search_builder():
+            builder = _FakeRouteBuilder(text_result)
+            captured_builders.append(builder)
+            return builder
+
+        table.new_vector_search_builder = new_vector_search_builder
+        table.new_full_text_search_builder = new_full_text_search_builder
+
+        result = (
+            HybridSearchBuilderImpl(table)
+            .add_vector_route(
+                "title_embedding", [1.0, 0.0], 10, weight=1.0,
+                options={"ivf.nprobe": "32"})
+            .add_full_text_route(
+                "content", "paimon search", 10, weight=1.0,
+                query_operator="and")
+            .with_limit(2)
+            .with_rrf_ranker()
+            .execute_local()
+        )
+
+        self.assertEqual(2, result.results().cardinality())
+        self.assertIn(2, list(result.results()))
+        self.assertGreater(result.score_getter()(2), result.score_getter()(1))
+        self.assertIn(("options", {"ivf.nprobe": "32"}),
+                      captured_builders[0].calls)
+        self.assertIn(("query_operator", "and"), captured_builders[1].calls)
+
+    def test_hybrid_search_rejects_data_filter_with_full_text_route(self):
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        id_field = _field(0, "id")
+        content = _field(1, "content", "STRING")
+        table = _StubTable(fields=[id_field, content], entries=[])
+        pb = PredicateBuilder(table.fields)
+
+        builder = (
+            HybridSearchBuilderImpl(table)
+            .add_full_text_route("content", "paimon search", 10)
+            .with_filter(pb.equal("id", 1))
+            .with_limit(5)
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            builder.route_builders()
+        self.assertIn("full-text routes", str(ctx.exception))
+
+    def test_hybrid_search_partition_filter_prunes_full_text_route(self):
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        pt_field = _field(0, "pt")
+        content = _field(1, "content", "STRING")
+        partition_pt1 = GenericRow([1], [pt_field])
+        partition_pt2 = GenericRow([2], [pt_field])
+        entries = [
+            _entry(partition_pt1, field_id=1, index_type="tantivy-fulltext",
+                   file_name="ft-pt1.index", row_range_start=0,
+                   row_range_end=4),
+            _entry(partition_pt2, field_id=1, index_type="tantivy-fulltext",
+                   file_name="ft-pt2.index", row_range_start=5,
+                   row_range_end=9),
+        ]
+        table = _StubTable(
+            fields=[pt_field, content],
+            entries=entries,
+            partition_fields=[pt_field],
+        )
+        _patch_snapshot(self, entries)
+
+        pb = PredicateBuilder(table.fields)
+        route_builders = (
+            HybridSearchBuilderImpl(table)
+            .add_full_text_route("content", "paimon search", 10)
+            .with_filter(pb.equal("pt", 2))
+            .with_limit(5)
+            .route_builders()
+        )
+        splits = (
+            route_builders[0]
+            .search_builder
+            .new_full_text_scan()
+            .scan()
+            .splits()
+        )
+
+        self.assertEqual(1, len(splits))
+        self.assertEqual(
+            ["ft-pt2.index"],
+            [f.file_name for f in splits[0].full_text_index_files],
+        )
 
 
 class VectorSearchManySplitsTest(unittest.TestCase):

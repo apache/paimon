@@ -30,8 +30,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-/** Tests for {@link MultiVectorSearchRanker}. */
-public class MultiVectorSearchRankerTest {
+/** Tests for {@link HybridSearchRanker}. */
+public class HybridSearchRankerTest {
 
     @Test
     public void testRrfFavorsRowsReturnedByMultipleRoutes() {
@@ -39,8 +39,7 @@ public class MultiVectorSearchRankerTest {
         ScoredGlobalIndexResult second = result(new long[] {2, 3}, new float[] {0.7f, 0.6f});
 
         ScoredGlobalIndexResult ranked =
-                MultiVectorSearchRanker.rrf(
-                        Arrays.asList(first, second), new float[] {1.0f, 1.0f}, 2);
+                HybridSearchRanker.rrf(Arrays.asList(first, second), new float[] {1.0f, 1.0f}, 2);
 
         assertThat(ranked.results().getIntCardinality()).isEqualTo(2);
         assertThat(ranked.results()).contains(2L);
@@ -52,7 +51,7 @@ public class MultiVectorSearchRankerTest {
         ScoredGlobalIndexResult result = result(new long[] {1, 2}, new float[] {0.3f, 0.2f});
 
         ScoredGlobalIndexResult ranked =
-                MultiVectorSearchRanker.weightedScore(
+                HybridSearchRanker.weightedScore(
                         Collections.singletonList(result), new float[] {3.0f}, 1);
 
         assertThat(ranked.results().getIntCardinality()).isEqualTo(1);

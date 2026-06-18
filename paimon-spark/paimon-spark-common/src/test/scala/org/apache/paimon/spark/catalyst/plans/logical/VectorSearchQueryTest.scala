@@ -29,8 +29,8 @@ import java.lang.reflect.{InvocationHandler, Method, Proxy}
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
 
-  test("create multi vector search with route configs") {
-    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+  test("create hybrid search with vector route configs") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
       innerTable,
       Seq(
         CreateArray(
@@ -60,6 +60,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
               CreateMap(Seq(Literal("ivf.nprobe"), Literal("16")))
             ))
           )),
+        CreateArray(Seq.empty),
         Literal(3),
         Literal("weighted_score")
       )
@@ -75,8 +76,8 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
   }
 
-  test("default multi vector route limit to final limit") {
-    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+  test("default hybrid vector route limit to final limit") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
       innerTable,
       Seq(
         CreateArray(
@@ -88,6 +89,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
                 Literal("query_vector"),
                 CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
               )))),
+        CreateArray(Seq.empty),
         Literal(7)
       )
     )
@@ -99,9 +101,45 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).options().isEmpty)
   }
 
-  test("reject multi vector search query map") {
+  test("create hybrid search with full-text route configs") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(Seq.empty),
+        CreateArray(
+          Seq(
+            CreateNamedStruct(Seq(
+              Literal("field"),
+              Literal("content"),
+              Literal("query_text"),
+              Literal("paimon lake"),
+              Literal("query_operator"),
+              Literal("and"),
+              Literal("limit"),
+              Literal(20),
+              Literal("weight"),
+              Literal(1.5f),
+              Literal("options"),
+              CreateMap(Seq.empty)
+            ))
+          )),
+        Literal(5),
+        Literal("rrf")
+      )
+    )
+
+    assert(search.routes().size() == 1)
+    assert(search.routes().get(0).isFullText)
+    assert(search.routes().get(0).fieldName() == "content")
+    assert(search.routes().get(0).queryText() == "paimon lake")
+    assert(search.routes().get(0).queryOperator() == "and")
+    assert(search.routes().get(0).limit() == 20)
+    assert(search.routes().get(0).weight() == 1.5f)
+  }
+
+  test("reject hybrid search query map") {
     val exception = intercept[RuntimeException] {
-      MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      HybridSearchQuery(Seq.empty).createHybridSearch(
         innerTable,
         Seq(
           CreateMap(
@@ -110,12 +148,13 @@ class VectorSearchQueryTest extends AnyFunSuite {
               CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
               Literal("body_vec"),
               CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
+          CreateArray(Seq.empty),
           Literal(3)
         )
       )
     }
 
-    assert(exception.getMessage.contains("Cannot extract multi-vector routes"))
+    assert(exception.getMessage.contains("Cannot extract vector routes"))
   }
 
   test("create vector search with string options") {
@@ -155,8 +194,9 @@ class VectorSearchQueryTest extends AnyFunSuite {
               Array[DataType](
                 new ArrayType(DataTypes.FLOAT()),
                 new ArrayType(DataTypes.FLOAT()),
-                new ArrayType(DataTypes.FLOAT())),
-              Array[String]("v", "title_vec", "body_vec")
+                new ArrayType(DataTypes.FLOAT()),
+                DataTypes.STRING()),
+              Array[String]("v", "title_vec", "body_vec", "content")
             )
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {

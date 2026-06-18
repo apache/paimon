@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.table.source.full_text_read import FullTextRead, FullTextReadImpl
 from pypaimon.table.source.full_text_scan import FullTextScan, FullTextScanImpl
@@ -49,6 +50,11 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
+    def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
+        """Partition predicate used to prune index manifest entries."""
+        pass
+
+    @abstractmethod
     def new_full_text_scan(self) -> FullTextScan:
         """Create full-text scan to scan index files."""
         pass
@@ -72,6 +78,7 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._text_column: Optional['DataField'] = None
         self._query_text: Optional[str] = None
         self._query_operator: str = "or"
+        self._partition_filter = None
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
@@ -92,10 +99,49 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         self._query_operator = query_operator
         return self
 
+    def with_partition_filter(self, partition_filter) -> 'FullTextSearchBuilder':
+        if partition_filter is None:
+            self._partition_filter = None
+            return self
+        partition_keys = list(self._table.partition_keys or [])
+        if not partition_keys:
+            raise ValueError(
+                "with_partition_filter called on a non-partitioned table")
+        from pypaimon.read.push_down_utils import _get_all_fields
+        referenced = _get_all_fields(partition_filter)
+        extras = referenced - set(partition_keys)
+        if extras:
+            raise ValueError(
+                "Partition filter must reference only partition keys "
+                "(%s); got non-partition field(s): %s"
+                % (partition_keys, sorted(extras)))
+        rebuilt = self._rebuild_leaf_indices_by_name(
+            partition_filter,
+            {name: idx for idx, name in enumerate(partition_keys)},
+        )
+        if self._partition_filter is None:
+            self._partition_filter = rebuilt
+        else:
+            self._partition_filter = PredicateBuilder.and_predicates(
+                [self._partition_filter, rebuilt])
+        return self
+
+    @classmethod
+    def _rebuild_leaf_indices_by_name(cls, predicate, name_to_idx):
+        if predicate.method in ('and', 'or'):
+            return predicate.new_literals(
+                [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
+                 for c in (predicate.literals or [])])
+        return predicate.new_index(name_to_idx[predicate.field])
+
     def new_full_text_scan(self) -> FullTextScan:
         if self._text_column is None:
             raise ValueError("Text column must be set via with_text_column()")
-        return FullTextScanImpl(self._table, self._text_column)
+        return FullTextScanImpl(
+            self._table,
+            self._text_column,
+            partition_filter=self._partition_filter,
+        )
 
     def new_full_text_read(self) -> FullTextRead:
         if self._limit <= 0:
