@@ -45,7 +45,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Spark-aware {@link VectorReadImpl} that distributes grouped vector index evaluation across the
@@ -60,25 +59,13 @@ public class SparkVectorReadImpl extends VectorReadImpl {
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[][] vectors) {
-        super(table, filter, limit, vectorColumn, vectors);
-    }
-
-    public SparkVectorReadImpl(
-            FileStoreTable table,
-            Predicate filter,
-            int limit,
-            DataField vectorColumn,
-            float[][] vectors,
+            float[] vector,
             Map<String, String> options) {
-        super(table, filter, limit, vectorColumn, vectors, options);
+        super(table, filter, limit, vectorColumn, vector, options);
     }
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        checkState(
-                vectors.length == 1,
-                "read() is single-vector only; use readBatch() for multiple vectors");
         if (splits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
@@ -117,25 +104,25 @@ public class SparkVectorReadImpl extends VectorReadImpl {
                     ExecutorService executor =
                             GlobalIndexReadThreadPool.getExecutorService(
                                     Math.min(parallelism, group.size()));
-                    List<CompletableFuture<List<Optional<ScoredGlobalIndexResult>>>> futures =
+                    List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                             new ArrayList<>(group.size());
                     for (byte[] bytes : group) {
                         VectorSearchSplit split = deserializeSplit(bytes);
                         futures.add(
-                                evalBatch(
+                                eval(
                                         globalIndexer,
                                         indexPathFactory,
                                         split.rowRangeStart(),
                                         split.rowRangeEnd(),
                                         split.vectorIndexFiles(),
+                                        vector,
                                         includeRowIds,
                                         executor));
                     }
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                     ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-                    for (CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> f : futures) {
-                        // Spark carries a single query vector, so the batch result has one element.
-                        Optional<ScoredGlobalIndexResult> next = f.join().get(0);
+                    for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
+                        Optional<ScoredGlobalIndexResult> next = f.join();
                         if (next.isPresent()) {
                             result = result.or(next.get());
                         }

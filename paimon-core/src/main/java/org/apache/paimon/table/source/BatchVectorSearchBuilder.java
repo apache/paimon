@@ -59,11 +59,11 @@ public interface BatchVectorSearchBuilder extends Serializable {
     /** Create vector scan to scan index files. */
     VectorScan newVectorScan();
 
-    /** Create vector read to read index files. */
-    VectorRead newVectorRead();
+    /** Create batch vector read to read index files. */
+    BatchVectorRead newBatchVectorRead();
 
     /** Execute batch vector search locally; result {@code i} corresponds to {@code vectors[i]}. */
     default List<GlobalIndexResult> executeBatchLocal() {
-        return newVectorRead().readBatch(newVectorScan().scan());
+        return newBatchVectorRead().readBatch(newVectorScan().scan());
     }
 }

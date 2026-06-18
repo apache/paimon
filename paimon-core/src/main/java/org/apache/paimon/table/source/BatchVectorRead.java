@@ -22,12 +22,14 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 
 import java.util.List;
 
-/** Vector read to read index files. */
-public interface VectorRead {
+/** Batch vector read to read index files for multiple query vectors. */
+public interface BatchVectorRead {
 
-    default GlobalIndexResult read(VectorScan.Plan plan) {
-        return read(plan.splits());
+    /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
+    default List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
+        return readBatch(plan.splits());
     }
 
-    GlobalIndexResult read(List<VectorSearchSplit> splits);
+    /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
+    List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits);
 }

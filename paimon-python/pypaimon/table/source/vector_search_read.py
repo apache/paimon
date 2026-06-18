@@ -40,49 +40,28 @@ class VectorSearchRead(ABC):
         pass
 
 
-class VectorSearchReadImpl(VectorSearchRead):
-    """Implementation for VectorSearchRead."""
+class BatchVectorSearchRead(ABC):
+    """Batch vector search read to read index files."""
 
-    def __init__(self, table, limit, vector_column, query_vector, filter_=None,
-                 options=None):
+    def read_batch_plan(self, plan):
+        # type: (VectorSearchScanPlan) -> List[GlobalIndexResult]
+        return self.read_batch(plan.splits())
+
+    @abstractmethod
+    def read_batch(self, splits):
+        # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+        pass
+
+
+class AbstractVectorSearchReadImpl:
+    """Base implementation for vector search reads."""
+
+    def __init__(self, table, limit, vector_column, filter_=None, options=None):
         self._table = table
         self._limit = limit
         self._vector_column = vector_column
-        self._query_vector = query_vector
         self._filter = filter_
         self._options = dict(options or {})
-
-    def read(self, splits):
-        # type: (List[VectorSearchSplit]) -> GlobalIndexResult
-        if not splits:
-            return GlobalIndexResult.create_empty()
-
-        pre_filter = self._pre_filter(splits)
-        return self._search_one(self._query_vector, splits, pre_filter)
-
-    def _search_one(self, query_vector, splits, pre_filter):
-        # type: (list, list, Optional[RoaringBitmap64]) -> GlobalIndexResult
-        """Search one query vector across all splits and merge per-split results."""
-        futures = [
-            self._eval(
-                split.row_range_start, split.row_range_end,
-                split.vector_index_files, query_vector, pre_filter
-            )
-            for split in splits
-        ]
-
-        wait(futures)
-
-        merged_scores = {}
-        for future in futures:
-            split_result = future.result()
-            if split_result is not None:
-                score_getter = split_result.score_getter()
-                for row_id in split_result.results():
-                    if row_id not in merged_scores:
-                        merged_scores[row_id] = score_getter(row_id)
-
-        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
     def _pre_filter(self, splits):
         # type: (list) -> Optional[RoaringBitmap64]
@@ -158,12 +137,50 @@ class VectorSearchReadImpl(VectorSearchRead):
         return future
 
 
-class BatchVectorSearchReadImpl(VectorSearchReadImpl):
+class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
+    """Implementation for VectorSearchRead."""
+
+    def __init__(self, table, limit, vector_column, query_vector, filter_=None,
+                 options=None):
+        super().__init__(table, limit, vector_column,
+                         filter_=filter_, options=options)
+        self._query_vector = query_vector
+
+    def read(self, splits):
+        # type: (List[VectorSearchSplit]) -> GlobalIndexResult
+        if not splits:
+            return GlobalIndexResult.create_empty()
+
+        pre_filter = self._pre_filter(splits)
+        futures = [
+            self._eval(
+                split.row_range_start, split.row_range_end,
+                split.vector_index_files, self._query_vector, pre_filter
+            )
+            for split in splits
+        ]
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
+            if split_result is not None:
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores:
+                        merged_scores[row_id] = score_getter(row_id)
+
+        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
+
+
+class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
+                                BatchVectorSearchRead):
     """Batch vector search read; result ``i`` corresponds to query vector ``i``."""
 
     def __init__(self, table, limit, vector_column, query_vectors,
                  filter_=None, options=None):
-        super().__init__(table, limit, vector_column, None,
+        super().__init__(table, limit, vector_column,
                          filter_=filter_, options=options)
         self._query_vectors = list(query_vectors)
 
@@ -174,9 +191,32 @@ class BatchVectorSearchReadImpl(VectorSearchReadImpl):
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
         pre_filter = self._pre_filter(splits)
-        # result i corresponds to query_vectors[i], in input order.
-        return [self._search_one(vector, splits, pre_filter)
-                for vector in self._query_vectors]
+        futures_by_vector = [
+            [
+                self._eval(
+                    split.row_range_start, split.row_range_end,
+                    split.vector_index_files, vector, pre_filter
+                )
+                for split in splits
+            ]
+            for vector in self._query_vectors
+        ]
+
+        for futures in futures_by_vector:
+            wait(futures)
+
+        results = []
+        for futures in futures_by_vector:
+            merged_scores = {}
+            for future in futures:
+                split_result = future.result()
+                if split_result is not None:
+                    score_getter = split_result.score_getter()
+                    for row_id in split_result.results():
+                        if row_id not in merged_scores:
+                            merged_scores[row_id] = score_getter(row_id)
+            results.append(DictBasedScoredIndexResult(merged_scores).top_k(self._limit))
+        return results
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):

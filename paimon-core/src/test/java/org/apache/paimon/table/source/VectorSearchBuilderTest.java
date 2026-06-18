@@ -595,12 +595,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
             {0.7f, 0.7f}
         };
 
-        List<GlobalIndexResult> results =
+        BatchVectorSearchBuilder searchBuilder =
                 table.newBatchVectorSearchBuilder()
                         .withVectors(queryVectors)
                         .withLimit(2)
-                        .withVectorColumn(VECTOR_FIELD_NAME)
-                        .executeBatchLocal();
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+
+        List<GlobalIndexResult> results =
+                searchBuilder.newBatchVectorRead().readBatch(searchBuilder.newVectorScan().scan());
 
         assertThat(results).hasSize(3);
 

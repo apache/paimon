@@ -107,7 +107,6 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     @Override
     public VectorRead newVectorRead() {
         checkNotNull(vector, "vector must be set via withVector()");
-        return new VectorReadImpl(
-                table, filter, limit, vectorColumn, new float[][] {vector}, options);
+        return new VectorReadImpl(table, filter, limit, vectorColumn, vector, options);
     }
 }

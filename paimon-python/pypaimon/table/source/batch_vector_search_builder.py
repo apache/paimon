@@ -22,7 +22,10 @@ from abc import ABC, abstractmethod
 from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
-from pypaimon.table.source.vector_search_read import BatchVectorSearchReadImpl
+from pypaimon.table.source.vector_search_read import (
+    BatchVectorSearchRead,
+    BatchVectorSearchReadImpl,
+)
 
 
 class BatchVectorSearchBuilder(ABC):
@@ -80,15 +83,15 @@ class BatchVectorSearchBuilder(ABC):
 
     @abstractmethod
     def new_batch_vector_search_read(self):
-        # type: () -> BatchVectorSearchReadImpl
+        # type: () -> BatchVectorSearchRead
         """Create batch vector search read to read index files."""
         pass
 
     def execute_batch_local(self):
         # type: () -> List[GlobalIndexResult]
         """Execute batch vector search locally; result i matches query vector i."""
-        return self.new_batch_vector_search_read().read_batch(
-            self.new_vector_search_scan().scan().splits()
+        return self.new_batch_vector_search_read().read_batch_plan(
+            self.new_vector_search_scan().scan()
         )
 
 
@@ -106,7 +109,7 @@ class BatchVectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl,
         return self
 
     def new_batch_vector_search_read(self):
-        # type: () -> BatchVectorSearchReadImpl
+        # type: () -> BatchVectorSearchRead
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
         if self._vector_column is None:
