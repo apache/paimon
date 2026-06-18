@@ -117,3 +117,8 @@ class ObjectTable(Table):
         raise NotImplementedError(
             "ObjectTable is read-only and does not support hybrid search."
         )
+
+    def new_batch_vector_search_builder(self):
+        raise NotImplementedError(
+            "ObjectTable is read-only and does not support vector search."
+        )

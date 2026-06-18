@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.NativeLoader;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -49,6 +50,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -368,6 +370,172 @@ public class VectorGlobalIndexTest {
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             assertThat(result.results().contains(0L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testBatchVectorSearch() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.05f, 0.98f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        Arrays.stream(vectors).forEach(writer::write);
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (VectorGlobalIndexReader reader =
+                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+            float[][] queryVectors =
+                    new float[][] {
+                        new float[] {1.0f, 0.0f},
+                        new float[] {0.0f, 1.0f},
+                        new float[] {0.7f, 0.7f}
+                    };
+            BatchVectorSearch batchSearch = new BatchVectorSearch(queryVectors, 3, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            // result i corresponds to queryVectors[i], in input order.
+            assertThat(batchResults).hasSize(3);
+
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().contains(0L)).isTrue();
+
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().contains(4L)).isTrue();
+
+            assertThat(batchResults.get(2)).isPresent();
+            assertThat(batchResults.get(2).get().results().getLongCardinality()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testBatchVectorSearchWithFilter() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.9f, 0.2f},
+                    new float[] {-1.0f, 0.0f},
+                    new float[] {-0.95f, 0.1f},
+                    new float[] {-0.9f, 0.2f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        Arrays.stream(vectors).forEach(writer::write);
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (VectorGlobalIndexReader reader =
+                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+            float[][] queryVectors =
+                    new float[][] {new float[] {1.0f, 0.0f}, new float[] {-1.0f, 0.0f}};
+
+            // Both queries are scoped to rows {1, 4}.
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(1L);
+            filter.add(4L);
+
+            BatchVectorSearch batchSearch =
+                    new BatchVectorSearch(queryVectors, 6, fieldName).withIncludeRowIds(filter);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            assertThat(batchResults).hasSize(2);
+
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().getLongCardinality()).isEqualTo(2);
+            assertThat(batchResults.get(0).get().results().contains(1L)).isTrue();
+            assertThat(batchResults.get(0).get().results().contains(4L)).isTrue();
+
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().getLongCardinality()).isEqualTo(2);
+            assertThat(batchResults.get(1).get().results().contains(1L)).isTrue();
+            assertThat(batchResults.get(1).get().results().contains(4L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testBatchConsistentWithSingle() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        options.setInteger("ivf-pq.nlist", 2);
+        options.setInteger("ivf-pq.pq.m", 1);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.05f, 0.98f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        Arrays.stream(vectors).forEach(writer::write);
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (VectorGlobalIndexReader reader =
+                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+            float[][] queryVectors =
+                    new float[][] {
+                        new float[] {1.0f, 0.0f},
+                        new float[] {0.0f, 1.0f},
+                        new float[] {0.7f, 0.7f}
+                    };
+            int limit = 3;
+
+            // The batch path must return exactly what looping the single path returns, in order.
+            BatchVectorSearch batchSearch = new BatchVectorSearch(queryVectors, limit, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            assertThat(batchResults).hasSize(queryVectors.length);
+            for (int i = 0; i < queryVectors.length; i++) {
+                VectorSearch singleSearch = new VectorSearch(queryVectors[i], limit, fieldName);
+                Optional<ScoredGlobalIndexResult> singleResult =
+                        reader.visitVectorSearch(singleSearch).join();
+
+                assertThat(batchResults.get(i).isPresent()).isEqualTo(singleResult.isPresent());
+                if (singleResult.isPresent()) {
+                    assertThat(batchResults.get(i).get().results().getLongCardinality())
+                            .isEqualTo(singleResult.get().results().getLongCardinality());
+                    for (long rowId : singleResult.get().results()) {
+                        assertThat(batchResults.get(i).get().results().contains(rowId)).isTrue();
+                    }
+                }
+            }
         }
     }
 

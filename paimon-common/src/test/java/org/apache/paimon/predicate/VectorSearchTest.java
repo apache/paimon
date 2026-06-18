@@ -73,4 +73,21 @@ public class VectorSearchTest {
                 .containsEntry("hnsw.ef_search", "64")
                 .hasSize(2);
     }
+
+    @Test
+    public void testBatchVectorSearchOrder() {
+        float[][] vectors = new float[][] {new float[] {1.0f, 0.0f}, new float[] {0.0f, 1.0f}};
+
+        RoaringNavigableMap64 includeRowIds = new RoaringNavigableMap64();
+        includeRowIds.addRange(new Range(100L, 200L));
+
+        BatchVectorSearch batchSearch =
+                new BatchVectorSearch(vectors, 1, "test").withIncludeRowIds(includeRowIds);
+        batchSearch = batchSearch.offsetRange(60, 150);
+
+        assertThat(batchSearch.forIndex(0).vector()).isSameAs(vectors[0]);
+        assertThat(batchSearch.forIndex(1).vector()).isSameAs(vectors[1]);
+        assertThat(batchSearch.forIndex(0).includeRowIds().toRangeList())
+                .containsExactly(new Range(40L, 90L));
+    }
 }

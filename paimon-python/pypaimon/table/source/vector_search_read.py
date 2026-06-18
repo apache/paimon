@@ -58,11 +58,15 @@ class VectorSearchReadImpl(VectorSearchRead):
             return GlobalIndexResult.create_empty()
 
         pre_filter = self._pre_filter(splits)
+        return self._search_one(self._query_vector, splits, pre_filter)
 
+    def _search_one(self, query_vector, splits, pre_filter):
+        # type: (list, list, Optional[RoaringBitmap64]) -> GlobalIndexResult
+        """Search one query vector across all splits and merge per-split results."""
         futures = [
             self._eval(
                 split.row_range_start, split.row_range_end,
-                split.vector_index_files, pre_filter
+                split.vector_index_files, query_vector, pre_filter
             )
             for split in splits
         ]
@@ -112,7 +116,7 @@ class VectorSearchReadImpl(VectorSearchRead):
             scanner.close()
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
-              include_row_ids):
+              query_vector, include_row_ids):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -136,7 +140,7 @@ class VectorSearchReadImpl(VectorSearchRead):
         options = self._table.table_schema.options
 
         vector_search = VectorSearch(
-            vector=self._query_vector,
+            vector=query_vector,
             limit=self._limit,
             field_name=self._vector_column.name,
             options=self._options,
@@ -152,6 +156,27 @@ class VectorSearchReadImpl(VectorSearchRead):
         future = offset_reader.visit_vector_search(vector_search)
         future.add_done_callback(lambda _: reader.close())
         return future
+
+
+class BatchVectorSearchReadImpl(VectorSearchReadImpl):
+    """Batch vector search read; result ``i`` corresponds to query vector ``i``."""
+
+    def __init__(self, table, limit, vector_column, query_vectors,
+                 filter_=None, options=None):
+        super().__init__(table, limit, vector_column, None,
+                         filter_=filter_, options=options)
+        self._query_vectors = list(query_vectors)
+
+    def read_batch(self, splits):
+        # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+        n = len(self._query_vectors)
+        if not splits:
+            return [GlobalIndexResult.create_empty() for _ in range(n)]
+
+        pre_filter = self._pre_filter(splits)
+        # result i corresponds to query_vectors[i], in input order.
+        return [self._search_one(vector, splits, pre_filter)
+                for vector in self._query_vectors]
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):

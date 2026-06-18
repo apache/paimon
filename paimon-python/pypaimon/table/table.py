@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.table.source.batch_vector_search_builder import BatchVectorSearchBuilder
 from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilder
 from pypaimon.table.source.hybrid_search_builder import HybridSearchBuilder
 from pypaimon.table.source.vector_search_builder import VectorSearchBuilder
@@ -55,3 +56,9 @@ class Table(ABC):
     @abstractmethod
     def new_hybrid_search_builder(self) -> HybridSearchBuilder:
         """Returns a new hybrid search builder."""
+
+    def new_batch_vector_search_builder(self) -> BatchVectorSearchBuilder:
+        """Returns a new batch vector search builder."""
+        raise NotImplementedError(
+            "%s does not support batch vector search."
+            % self.__class__.__name__)

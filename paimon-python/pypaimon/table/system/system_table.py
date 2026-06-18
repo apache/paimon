@@ -105,6 +105,9 @@ class SystemTable(Table):
     def new_hybrid_search_builder(self):
         raise NotImplementedError(_READ_ONLY_MESSAGE)
 
+    def new_batch_vector_search_builder(self):
+        raise NotImplementedError(_READ_ONLY_MESSAGE)
+
 
 class SystemReadBuilder:
     """ReadBuilder-shaped facade exposing the system table's data.

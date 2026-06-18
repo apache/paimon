@@ -29,10 +29,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Implementation for {@link VectorSearchBuilder}. */
-public class VectorSearchBuilderImpl implements VectorSearchBuilder {
+/** Implementation for {@link BatchVectorSearchBuilder}. */
+public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     private static final long serialVersionUID = 1L;
 
@@ -42,21 +43,21 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected Predicate filter;
     protected int limit;
     protected DataField vectorColumn;
-    protected float[] vector;
+    protected float[][] vectors;
     protected Map<String, String> options = new HashMap<>();
 
-    public VectorSearchBuilderImpl(InnerTable table) {
+    public BatchVectorSearchBuilderImpl(InnerTable table) {
         this.table = (FileStoreTable) table;
     }
 
     @Override
-    public VectorSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
+    public BatchVectorSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
         this.partitionFilter = partitionFilter;
         return this;
     }
 
     @Override
-    public VectorSearchBuilder withFilter(Predicate predicate) {
+    public BatchVectorSearchBuilder withFilter(Predicate predicate) {
         if (this.filter == null) {
             this.filter = predicate;
         } else {
@@ -68,25 +69,25 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     @Override
-    public VectorSearchBuilder withLimit(int limit) {
+    public BatchVectorSearchBuilder withLimit(int limit) {
         this.limit = limit;
         return this;
     }
 
     @Override
-    public VectorSearchBuilder withVectorColumn(String name) {
+    public BatchVectorSearchBuilder withVectorColumn(String name) {
         this.vectorColumn = table.rowType().getField(name);
         return this;
     }
 
     @Override
-    public VectorSearchBuilder withVector(float[] vector) {
-        this.vector = vector;
+    public BatchVectorSearchBuilder withVectors(float[][] vectors) {
+        this.vectors = vectors;
         return this;
     }
 
     @Override
-    public VectorSearchBuilder withOptions(Map<String, String> options) {
+    public BatchVectorSearchBuilder withOptions(Map<String, String> options) {
         if (options != null) {
             this.options.putAll(options);
         }
@@ -94,7 +95,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     @Override
-    public VectorSearchBuilder withOption(String key, String value) {
+    public BatchVectorSearchBuilder withOption(String key, String value) {
         this.options.put(key, value);
         return this;
     }
@@ -106,8 +107,13 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
-        checkNotNull(vector, "vector must be set via withVector()");
-        return new VectorReadImpl(
-                table, filter, limit, vectorColumn, new float[][] {vector}, options);
+        checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
+        checkNotNull(vectorColumn, "Vector column must be set via withVectorColumn()");
+        checkArgument(
+                vectors != null && vectors.length > 0, "vectors must be set via withVectors()");
+        for (float[] vector : vectors) {
+            checkNotNull(vector, "Search vector element cannot be null");
+        }
+        return new VectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
     }
 }

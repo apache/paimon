@@ -31,6 +31,7 @@ import org.apache.paimon.table.format.FormatBatchWriteBuilder;
 import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.BatchVectorSearchBuilder;
 import org.apache.paimon.table.source.FullTextSearchBuilder;
 import org.apache.paimon.table.source.HybridSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -284,6 +285,11 @@ public interface FormatTable extends Table {
         @Override
         public HybridSearchBuilder newHybridSearchBuilder() {
             throw new UnsupportedOperationException("FormatTable does not support hybrid search.");
+        }
+
+        @Override
+        public BatchVectorSearchBuilder newBatchVectorSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support vector search.");
         }
 
         @Override
