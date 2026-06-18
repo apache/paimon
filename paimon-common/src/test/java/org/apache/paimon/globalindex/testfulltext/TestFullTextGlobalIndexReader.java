@@ -54,6 +54,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexIOMeta ioMeta;
 
     private String[] documents;
+    private long[] rowIds;
     private int count;
 
     public TestFullTextGlobalIndexReader(
@@ -90,10 +91,10 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 continue;
             }
             if (topK.size() < effectiveK) {
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             } else if (score > topK.peek().score) {
                 topK.poll();
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             }
         }
 
@@ -138,12 +139,14 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
 
             // Read documents
             documents = new String[count];
+            rowIds = new long[count];
             for (int i = 0; i < count; i++) {
-                byte[] lenBytes = new byte[4];
-                readFully(in, lenBytes);
-                ByteBuffer lenBuf = ByteBuffer.wrap(lenBytes);
-                lenBuf.order(ByteOrder.LITTLE_ENDIAN);
-                int textLen = lenBuf.getInt();
+                byte[] entryHeaderBytes = new byte[Long.BYTES + Integer.BYTES];
+                readFully(in, entryHeaderBytes);
+                ByteBuffer entryHeader = ByteBuffer.wrap(entryHeaderBytes);
+                entryHeader.order(ByteOrder.LITTLE_ENDIAN);
+                rowIds[i] = entryHeader.getLong();
+                int textLen = entryHeader.getInt();
 
                 byte[] textBytes = new byte[textLen];
                 readFully(in, textBytes);
@@ -170,6 +173,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         documents = null;
+        rowIds = null;
     }
 
     // =================== unsupported predicate operations =====================

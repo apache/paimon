@@ -21,7 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.vector.VectorIndexWriter;
@@ -48,13 +48,13 @@ import java.util.Map;
 /**
  * Vector global index writer using paimon-vector-index.
  *
- * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object)},
- * keeping Java heap usage constant (~8 MB buffer). During index build, vectors are read back for
- * training and batch insertion.
+ * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object,
+ * long)}, keeping Java heap usage constant (~8 MB buffer). During index build, vectors are read
+ * back for training and batch insertion.
  *
  * <p><b>Thread safety:</b> This class is <b>not</b> thread-safe.
  */
-public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
+public class VectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "vector";
 
@@ -77,7 +77,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     private long count;
     private boolean closed;
 
-    private long logicalRowId;
+    private long rowCount;
 
     public VectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
@@ -129,31 +129,31 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(Object fieldData, long relativeRowId) {
         if (fieldData == null) {
-            logicalRowId++;
+            rowCount++;
             return;
         }
 
-        float[] src = materializeAndValidate(fieldData);
+        float[] src = materializeAndValidate(fieldData, relativeRowId);
 
         if (writeBuf.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
         }
-        writeBuf.putLong(logicalRowId);
+        writeBuf.putLong(relativeRowId);
         for (int i = 0; i < dim; i++) {
             writeBuf.putFloat(src[i]);
         }
-        logicalRowId++;
+        rowCount++;
         count++;
     }
 
-    private float[] materializeAndValidate(Object fieldData) {
+    private float[] materializeAndValidate(Object fieldData, long relativeRowId) {
         if (fieldData instanceof float[]) {
             float[] vector = (float[]) fieldData;
             checkDimension(vector.length);
             for (int i = 0; i < dim; i++) {
-                checkFinite(vector[i], i);
+                checkFinite(vector[i], relativeRowId, i);
             }
             return vector;
         } else if (fieldData instanceof InternalVector) {
@@ -161,7 +161,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
             checkDimension(vector.size());
             for (int i = 0; i < dim; i++) {
                 float v = vector.getFloat(i);
-                checkFinite(v, i);
+                checkFinite(v, relativeRowId, i);
                 vectorBuf[i] = v;
             }
             return vectorBuf;
@@ -173,7 +173,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                     throw new IllegalArgumentException("Vector element at index " + i + " is null");
                 }
                 float v = array.getFloat(i);
-                checkFinite(v, i);
+                checkFinite(v, relativeRowId, i);
                 vectorBuf[i] = v;
             }
             return vectorBuf;
@@ -262,7 +262,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
                     System.currentTimeMillis() - buildStart);
 
             VectorIndexMeta meta = new VectorIndexMeta();
-            return new ResultEntry(fileName, logicalRowId, meta.serialize());
+            return new ResultEntry(fileName, rowCount, meta.serialize());
         }
     }
 
@@ -364,12 +364,12 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Clos
         }
     }
 
-    private void checkFinite(float value, int elementIndex) {
+    private void checkFinite(float value, long relativeRowId, int elementIndex) {
         if (!Float.isFinite(value)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Vector element at rowId=%d, index=%d is %s",
-                            logicalRowId, elementIndex, Float.toString(value)));
+                            relativeRowId, elementIndex, Float.toString(value)));
         }
     }
 

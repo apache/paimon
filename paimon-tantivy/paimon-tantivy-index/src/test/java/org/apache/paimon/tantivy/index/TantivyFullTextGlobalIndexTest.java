@@ -125,9 +125,9 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
 
-        writer.write(BinaryString.fromString("Apache Paimon is a streaming data lake platform"));
-        writer.write(BinaryString.fromString("Tantivy is a full-text search engine in Rust"));
-        writer.write(BinaryString.fromString("Paimon supports real-time data ingestion"));
+        writer.write(BinaryString.fromString("Apache Paimon is a streaming data lake platform"), 0);
+        writer.write(BinaryString.fromString("Tantivy is a full-text search engine in Rust"), 1);
+        writer.write(BinaryString.fromString("Paimon supports real-time data ingestion"), 2);
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -171,7 +171,7 @@ public class TantivyFullTextGlobalIndexTest {
                         new TantivyFullTextIndexOptions(
                                 TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
 
-        writer.write(BinaryString.fromString("Apache Paimon supports Chinese text"));
+        writer.write(BinaryString.fromString("Apache Paimon supports Chinese text"), 0);
         List<ResultEntry> results = writer.finish();
 
         assertThat(results).hasSize(1);
@@ -194,8 +194,8 @@ public class TantivyFullTextGlobalIndexTest {
                         new TantivyFullTextIndexOptions(
                                 TantivyFullTextGlobalIndexerFactory.removeTantivyPrefix(options)));
 
-        writer.write(BinaryString.fromString("张华在百货公司当售货员"));
-        writer.write(BinaryString.fromString("Apache Paimon supports full text search"));
+        writer.write(BinaryString.fromString("张华在百货公司当售货员"), 0);
+        writer.write(BinaryString.fromString("Apache Paimon supports full text search"), 1);
 
         List<ResultEntry> results = writer.finish();
         TantivyFullTextIndexOptions indexOptions =
@@ -222,8 +222,8 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
 
-        writer.write(BinaryString.fromString("Hello world"));
-        writer.write(BinaryString.fromString("Foo bar baz"));
+        writer.write(BinaryString.fromString("Hello world"), 0);
+        writer.write(BinaryString.fromString("Foo bar baz"), 1);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -245,9 +245,9 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
 
-        writer.write(BinaryString.fromString("Paimon data lake"));
-        writer.write(null); // row 1 is null, should be skipped
-        writer.write(BinaryString.fromString("Paimon streaming"));
+        writer.write(BinaryString.fromString("Paimon data lake"), 0);
+        writer.write(null, 1); // row 1 is null, should be skipped
+        writer.write(BinaryString.fromString("Paimon streaming"), 2);
 
         List<ResultEntry> results = writer.finish();
         assertThat(results.get(0).rowCount()).isEqualTo(3);
@@ -291,7 +291,7 @@ public class TantivyFullTextGlobalIndexTest {
             if (i % 10 == 0) {
                 text += " special_keyword";
             }
-            writer.write(BinaryString.fromString(text));
+            writer.write(BinaryString.fromString(text), i);
         }
 
         List<ResultEntry> results = writer.finish();
@@ -323,7 +323,7 @@ public class TantivyFullTextGlobalIndexTest {
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
 
         for (int i = 0; i < 20; i++) {
-            writer.write(BinaryString.fromString("paimon document " + i));
+            writer.write(BinaryString.fromString("paimon document " + i), i);
         }
 
         List<ResultEntry> results = writer.finish();
@@ -346,8 +346,8 @@ public class TantivyFullTextGlobalIndexTest {
     public void testPoolReuse() throws IOException {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
-        writer.write(BinaryString.fromString("Apache Paimon streaming lake"));
-        writer.write(BinaryString.fromString("Tantivy full-text search"));
+        writer.write(BinaryString.fromString("Apache Paimon streaming lake"), 0);
+        writer.write(BinaryString.fromString("Tantivy full-text search"), 1);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -379,7 +379,7 @@ public class TantivyFullTextGlobalIndexTest {
         TantivyFullTextGlobalIndexWriter writer =
                 (TantivyFullTextGlobalIndexWriter) indexer.createWriter(fileWriter);
 
-        writer.write(BinaryString.fromString("test via indexer factory"));
+        writer.write(BinaryString.fromString("test via indexer factory"), 0);
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
 

@@ -20,7 +20,7 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -233,7 +233,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
     private GlobalIndexIOMeta writeDataWithIndexer(
             BTreeGlobalIndexer indexer, List<Pair<Object, Long>> subData) throws IOException {
-        GlobalIndexParallelWriter indexWriter = indexer.createWriter(fileWriter);
+        GlobalIndexSingleColumnWriter indexWriter = indexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : subData) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }

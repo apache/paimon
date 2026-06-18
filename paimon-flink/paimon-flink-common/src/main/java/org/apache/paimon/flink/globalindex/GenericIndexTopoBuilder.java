@@ -30,7 +30,7 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
@@ -684,13 +684,14 @@ public class GenericIndexTopoBuilder {
                         }
                         // Only write rows within this shard's range
                         if (currentRowId >= task.shardRange.from) {
+                            long rowId = currentRowId - task.shardRange.from;
                             if (multiColumn) {
-                                long rowId = currentRowId - task.shardRange.from;
                                 ((GlobalIndexMultiColumnWriter) indexWriter)
                                         .write(rowId, writerProjection.replaceRow(row));
                             } else {
                                 Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
-                                ((GlobalIndexSingletonWriter) indexWriter).write(fieldData);
+                                ((GlobalIndexSingleColumnWriter) indexWriter)
+                                        .write(fieldData, rowId);
                             }
                             rowsSeen++;
                         }

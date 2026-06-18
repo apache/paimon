@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -353,7 +353,7 @@ public class BTreeThreadSafetyTest {
     }
 
     private GlobalIndexIOMeta writeData(List<Pair<Object, Long>> subData) throws IOException {
-        GlobalIndexParallelWriter indexWriter = globalIndexer.createWriter(fileWriter);
+        GlobalIndexSingleColumnWriter indexWriter = globalIndexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : subData) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }

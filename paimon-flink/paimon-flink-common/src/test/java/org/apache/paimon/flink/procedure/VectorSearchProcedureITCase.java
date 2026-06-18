@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
@@ -218,15 +218,15 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
