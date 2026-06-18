@@ -166,6 +166,8 @@ public class PostgresRecordParser
                     return DataTypes.TIMESTAMP(6);
                 } else if (MicroTime.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIME(6);
+                } else if (Timestamp.SCHEMA_NAME.equals(field.name())) {
+                    return DataTypes.TIMESTAMP(3);
                 }
                 return DataTypes.BIGINT();
             case "float":

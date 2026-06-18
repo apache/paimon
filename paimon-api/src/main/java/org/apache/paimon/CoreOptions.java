@@ -2554,17 +2554,19 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "Whether to enable the visibility wait callback that waits for compaction to complete "
-                                    + "after commit. This is useful for primary key tables with deletion vectors or "
-                                    + "postpone bucket mode to ensure data visibility, only used for batch mode or bounded stream.");
+                            "Whether to enable the visibility wait callback that waits for compaction or global "
+                                    + "index build to complete after commit. This is useful for primary key tables "
+                                    + "with deletion vectors or postpone bucket mode and row-tracking tables with "
+                                    + "global indexes to ensure data visibility, only used for batch mode or bounded stream.");
 
     public static final ConfigOption<Duration> VISIBILITY_CALLBACK_TIMEOUT =
             key("visibility-callback.timeout")
                     .durationType()
                     .defaultValue(Duration.ofMinutes(30))
                     .withDescription(
-                            "The maximum time to wait for compaction to complete when visibility callback is enabled. "
-                                    + "If the timeout is reached, an exception will be thrown.");
+                            "The maximum time to wait for compaction or global index build to complete when "
+                                    + "visibility callback is enabled. If the timeout is reached, an exception will "
+                                    + "be thrown.");
 
     public static final ConfigOption<Duration> VISIBILITY_CALLBACK_CHECK_INTERVAL =
             key("visibility-callback.check-interval")

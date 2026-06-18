@@ -28,7 +28,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/** VectorSearch to perform vector similarity search. * */
+/**
+ * VectorSearch to perform vector similarity search.
+ *
+ * <p>This is an internal pushdown representation. Use {@code Table.newVectorSearchBuilder()} to
+ * configure vector search from Java.
+ */
 public class VectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;

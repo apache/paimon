@@ -229,6 +229,120 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 }
 ```
 
+For Java, use `Table.newVectorSearchBuilder()` to produce a global index result, then pass
+the result to `TableScan.withGlobalIndexResult`.
+
+</TabItem>
+
+</Tabs>
+
+## Multi-Vector Search
+
+Multi-vector search queries multiple vector columns in one request and ranks the scored results
+before reading table rows. This is useful when one table stores several embeddings for the same
+record, such as title, body, image, or audio embeddings.
+
+Before running multi-vector search, create a vector global index for every vector column used by
+the query:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'title_embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+);
+
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'body_embedding',
+    index_type => 'ivf-pq',
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+);
+```
+
+For Spark SQL, use the `multi_vector_search(table_name, routes, limit[, ranker])`
+table-valued function. The third argument is the final number of ranked results to return.
+The optional fourth argument selects the ranker. Supported rankers are `rrf` and
+`weighted_score`; the default is `rrf`.
+
+The second argument is an array of route configs created by `named_struct`:
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `vector_column` | Yes | N/A | Vector column to search. |
+| `query_vector` | Yes | N/A | Query vector for this route. |
+| `limit` | No | Final limit | Top K results to retrieve from this vector column before ranking. |
+| `weight` | No | `1.0` | Weight for this route when ranking results. |
+| `options` | No | Empty map | Route-specific vector search options such as `ivf.nprobe` and `hnsw.ef_search`. |
+
+When using an array of route configs, every `named_struct` should use the same fields because
+Spark requires array elements to have the same struct type.
+
+<Tabs groupId="multi-vector-search">
+
+<TabItem value="spark-sql" label="Spark SQL">
+
+```sql
+SELECT id, __paimon_vector_search_score
+FROM multi_vector_search(
+  'my_table',
+  array(
+    named_struct(
+      'vector_column', 'title_embedding',
+      'query_vector', array(1.0f, 0.0f, 0.0f),
+      'limit', 50,
+      'weight', 2.0f,
+      'options', map('ivf.nprobe', '32')),
+    named_struct(
+      'vector_column', 'body_embedding',
+      'query_vector', array(0.0f, 1.0f, 0.0f),
+      'limit', 50,
+      'weight', 1.0f,
+      'options', map('ivf.nprobe', '16'))),
+  10,
+  'rrf');
+```
+
+Spark SQL adds `__paimon_vector_search_score` to expose the ranked score.
+
+</TabItem>
+
+<TabItem value="java-api" label="Java API">
+
+```java
+Table table = catalog.getTable(identifier);
+
+MultiVectorSearchBuilder searchBuilder =
+        table.newMultiVectorSearchBuilder()
+                .addRoute(
+                        "title_embedding",
+                        new float[] {1.0f, 0.0f, 0.0f},
+                        50,
+                        2.0f,
+                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                .addRoute(
+                        "body_embedding",
+                        new float[] {0.0f, 1.0f, 0.0f},
+                        50,
+                        1.0f,
+                        java.util.Collections.singletonMap("ivf.nprobe", "16"))
+                .withLimit(10)
+                .withRrfRanker();
+GlobalIndexResult result = searchBuilder.executeLocal();
+
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> {
+        System.out.println("id=" + row.getInt(0));
+    });
+}
+```
+
+For Java, use `Table.newMultiVectorSearchBuilder()` to configure routes, final limit, and ranker
+directly. `VectorSearch` and `MultiVectorSearch` are internal pushdown representations.
+
 </TabItem>
 
 </Tabs>

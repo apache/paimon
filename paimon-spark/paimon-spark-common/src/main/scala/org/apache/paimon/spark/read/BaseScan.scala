@@ -20,7 +20,7 @@ package org.apache.paimon.spark.read
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.{FullTextSearch, MultiVectorSearch, Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
@@ -51,6 +51,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedLimit: Option[Int] = None
   def pushedTopN: Option[TopN] = None
   def pushedVectorSearch: Option[VectorSearch] = None
+  def pushedMultiVectorSearch: Option[MultiVectorSearch] = None
   def pushedFullTextSearch: Option[FullTextSearch] = None
   def pushedVariantExtractions: Map[Seq[String], Seq[VariantExtractionInfo]] = Map.empty
 
@@ -204,6 +205,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
       pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
       pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("") +
+      pushedMultiVectorSearch.map(mvs => s", MultiVectorSearch: [$mvs]").getOrElse("") +
       pushedFullTextSearch.map(fts => s", FullTextSearch: [$fts]").getOrElse("") +
       pushedVariantsStr
   }

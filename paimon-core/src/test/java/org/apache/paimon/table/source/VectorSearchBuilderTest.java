@@ -74,15 +74,65 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     @Override
     protected Schema schemaDefault() {
-        return Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
-                .option(CoreOptions.BUCKET.key(), "-1")
+        return vectorSchemaBuilder(VECTOR_FIELD_NAME).build();
+    }
+
+    protected Schema.Builder vectorSchemaBuilder(String vectorFieldName) {
+        return withVectorSchemaOptions(
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(vectorFieldName, new ArrayType(DataTypes.FLOAT())));
+    }
+
+    protected Schema.Builder multiVectorSchemaBuilder() {
+        return withVectorSchemaOptions(
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("title_vec", new ArrayType(DataTypes.FLOAT()))
+                        .column("body_vec", new ArrayType(DataTypes.FLOAT())));
+    }
+
+    protected Schema.Builder withVectorSchemaOptions(Schema.Builder builder) {
+        return builder.option(CoreOptions.BUCKET.key(), "-1")
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                 .option("test.vector.dimension", String.valueOf(DIMENSION))
-                .option("test.vector.metric", "l2")
-                .build();
+                .option("test.vector.metric", "l2");
+    }
+
+    @Test
+    public void testMultiVectorSearchBuilderExposesRouteBuilders() throws Exception {
+        catalog.createTable(
+                identifier("multi_vector_builder_table"),
+                multiVectorSchemaBuilder().build(),
+                false);
+        FileStoreTable table = getTable(identifier("multi_vector_builder_table"));
+
+        float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
+        float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
+        writeTwoVectorColumns(table, titleVectors, bodyVectors);
+        buildAndCommitIndex(table, "title_vec", titleVectors);
+        buildAndCommitIndex(table, "body_vec", bodyVectors);
+
+        MultiVectorSearchBuilder builder =
+                table.newMultiVectorSearchBuilder()
+                        .addRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
+                        .addRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
+                        .withLimit(2)
+                        .withWeightedScoreRanker();
+        List<MultiVectorSearchBuilder.Route> routes = builder.routeBuilders();
+
+        assertThat(routes).hasSize(2);
+
+        List<MultiVectorSearchBuilder.RouteResult> routeResults = new ArrayList<>();
+        for (MultiVectorSearchBuilder.Route route : routes) {
+            routeResults.add(
+                    builder.toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
+        }
+        ScoredGlobalIndexResult ranked = builder.rank(routeResults);
+
+        assertThat(ranked.results().getIntCardinality()).isEqualTo(2);
+        assertThat(ranked.results()).contains(1L);
     }
 
     @Test
@@ -133,13 +183,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // Create a table with cosine metric
         catalog.createTable(
                 identifier("cosine_table"),
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
-                        .option(CoreOptions.BUCKET.key(), "-1")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
                         .option("test.vector.metric", "cosine")
                         .build(),
                 false);
@@ -231,14 +275,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
     public void testVectorSearchThreadsOptions() throws Exception {
         catalog.createTable(
                 identifier("options_table"),
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
-                        .option(CoreOptions.BUCKET.key(), "-1")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .option("test.vector.dimension", String.valueOf(DIMENSION))
-                        .option("test.vector.metric", "l2")
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
                         .option("test.vector.required-option.key", "ivf.nprobe")
                         .option("test.vector.required-option.value", "16")
                         .build(),
@@ -311,16 +348,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
         // Create a partitioned table
         catalog.createTable(
                 identifier("partitioned_table"),
-                Schema.newBuilder()
-                        .column("pt", DataTypes.INT())
-                        .column("id", DataTypes.INT())
-                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
-                        .partitionKeys("pt")
-                        .option(CoreOptions.BUCKET.key(), "-1")
-                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .option("test.vector.dimension", String.valueOf(DIMENSION))
-                        .option("test.vector.metric", "l2")
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("pt", DataTypes.INT())
+                                        .column("id", DataTypes.INT())
+                                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                                        .partitionKeys("pt"))
                         .build(),
                 false);
         FileStoreTable table = getTable(identifier("partitioned_table"));
@@ -553,9 +586,30 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
+    private void writeTwoVectorColumns(
+            FileStoreTable table, float[][] titleVectors, float[][] bodyVectors) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < titleVectors.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                new GenericArray(titleVectors[i]),
+                                new GenericArray(bodyVectors[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
+        buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors);
+    }
+
+    private void buildAndCommitIndex(FileStoreTable table, String fieldName, float[][] vectors)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
-        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+        DataField vectorField = table.rowType().getField(fieldName);
 
         GlobalIndexSingletonWriter writer =
                 (GlobalIndexSingletonWriter)

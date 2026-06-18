@@ -47,6 +47,17 @@ def build_index_delete_msgs(entries) -> list:
     ]
 
 
+def indexed_field_names(global_index_meta, field_by_id) -> set:
+    field_ids = [global_index_meta.index_field_id]
+    if global_index_meta.extra_field_ids:
+        field_ids.extend(global_index_meta.extra_field_ids)
+    return {
+        field_by_id[field_id]
+        for field_id in field_ids
+        if field_id in field_by_id
+    }
+
+
 def apply_global_index_update_action(
     table,
     snapshot,
@@ -60,11 +71,17 @@ def apply_global_index_update_action(
         return []
     field_by_id = {f.id: f.name for f in table.fields}
     update_set = set(updated_cols)
-    affected = [
-        e for e in entries
-        if field_by_id.get(e.index_file.global_index_meta.index_field_id) in update_set
-        and tuple(e.partition.values) in written_partitions
-    ]
+    affected = []
+    conflicted = set()
+    for e in entries:
+        if tuple(e.partition.values) not in written_partitions:
+            continue
+        matched = indexed_field_names(
+            e.index_file.global_index_meta, field_by_id
+        ).intersection(update_set)
+        if matched:
+            affected.append(e)
+            conflicted.update(matched)
     if not affected:
         return []
     action = table.options.global_index_column_update_action()
@@ -72,11 +89,8 @@ def apply_global_index_update_action(
         action = GlobalIndexColumnUpdateAction.THROW_ERROR
     if action == GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX:
         return build_index_delete_msgs(affected)
-    conflicted = sorted(
-        {field_by_id.get(e.index_file.global_index_meta.index_field_id) for e in affected}
-    )
     raise RuntimeError(
         f"Update columns contain globally indexed columns, not supported now.\n"
         f"Updated columns: {sorted(update_set)}\n"
-        f"Conflicted columns: {conflicted}"
+        f"Conflicted columns: {sorted(conflicted)}"
     )

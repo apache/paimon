@@ -23,7 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkVectorSearchBuilderImpl}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkMultiVectorSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
@@ -64,12 +64,17 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
-    if (pushedVectorSearch.isDefined && pushedFullTextSearch.isDefined) {
+    val globalSearchCount =
+      Seq(pushedVectorSearch, pushedMultiVectorSearch, pushedFullTextSearch).count(_.isDefined)
+    if (globalSearchCount > 1) {
       throw new UnsupportedOperationException(
-        "Cannot push down both vector search and full-text search simultaneously.")
+        "Cannot push down vector search, multi-vector search and full-text search simultaneously.")
     }
     if (pushedVectorSearch.isDefined) {
       return evalVectorSearch()
+    }
+    if (pushedMultiVectorSearch.isDefined) {
+      return evalMultiVectorSearch()
     }
     if (pushedFullTextSearch.isDefined) {
       return evalFullTextSearch()
@@ -97,6 +102,27 @@ abstract class PaimonBaseScan(table: InnerTable)
       vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
     vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+  }
+
+  private def evalMultiVectorSearch(): GlobalIndexResult = {
+    val multiVectorSearch = pushedMultiVectorSearch.get
+    val multiVectorSearchBuilder =
+      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
+        new SparkMultiVectorSearchBuilderImpl(table)
+      } else {
+        table.newMultiVectorSearchBuilder()
+      }
+    val builder = multiVectorSearchBuilder
+      .withLimit(multiVectorSearch.limit())
+      .withRanker(multiVectorSearch.ranker())
+    multiVectorSearch.routes().asScala.foreach(route => builder.addRoute(route))
+    if (pushedPartitionFilters.nonEmpty) {
+      builder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      builder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    builder.executeLocal()
   }
 
   private def evalFullTextSearch(): GlobalIndexResult = {

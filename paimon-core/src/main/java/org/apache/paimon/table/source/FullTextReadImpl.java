@@ -78,10 +78,22 @@ public class FullTextReadImpl implements FullTextRead {
             return GlobalIndexResult.createEmpty();
         }
 
-        String indexType = splits.get(0).fullTextIndexFiles().get(0).indexType();
-        GlobalIndexer globalIndexer =
-                GlobalIndexerFactoryUtils.load(indexType)
-                        .create(textColumn, table.coreOptions().toConfiguration());
+        IndexFileMeta firstFile = splits.get(0).fullTextIndexFiles().get(0);
+        String indexType = firstFile.indexType();
+        GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
+        GlobalIndexer globalIndexer;
+        if (firstMeta.extraFieldIds() != null) {
+            globalIndexer =
+                    GlobalIndexerFactoryUtils.load(indexType)
+                            .create(
+                                    firstMeta.getIndexField(table.rowType()),
+                                    firstMeta.getExtraFields(table.rowType()),
+                                    table.coreOptions().toConfiguration());
+        } else {
+            globalIndexer =
+                    GlobalIndexerFactoryUtils.load(indexType)
+                            .create(textColumn, table.coreOptions().toConfiguration());
+        }
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);

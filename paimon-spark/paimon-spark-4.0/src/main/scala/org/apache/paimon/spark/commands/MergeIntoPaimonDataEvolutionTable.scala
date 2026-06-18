@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.SparkTable
@@ -34,20 +35,22 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.RowType
+import org.apache.paimon.types.VectorType.isVectorStoreFile
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{BooleanType, StructType}
 
 import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
@@ -91,9 +94,8 @@ case class MergeIntoPaimonDataEvolutionTable(
       action match {
         case updateAction: UpdateAction =>
           for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              columns ++= Seq(key)
+            if (isModifiedAssignment(assignment)) {
+              columns += assignmentKeyAttribute(assignment)
             }
           }
       }
@@ -160,7 +162,12 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     val firstRowIds: immutable.IndexedSeq[Long] = tableSplits
       .flatMap(_.dataFiles().asScala)
-      .filter(file => file.firstRowId() != null && !isBlobFile(file.fileName()))
+      .filter {
+        file =>
+          file.firstRowId() != null &&
+          !isBlobFile(file.fileName()) &&
+          !isVectorStoreFile(file.fileName())
+      }
       .map(file => file.firstRowId().asInstanceOf[Long])
       .distinct
       .sorted
@@ -330,11 +337,11 @@ case class MergeIntoPaimonDataEvolutionTable(
       touchedFileTargetRelation: DataSourceV2Relation,
       firstRowIds: immutable.IndexedSeq[Long],
       persistSourceDss: Option[Dataset[Row]]): Seq[CommitMessage] = {
-    val mergeFields = extractFields(matchedCondition)
+    val conditionFields = extractFields(matchedCondition)
     val allFields = mutable.SortedSet.empty[AttributeReference](
       (o1, o2) => {
         o1.toString().compareTo(o2.toString())
-      }) ++ mergeFields
+      }) ++ conditionFields
 
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
@@ -347,8 +354,39 @@ case class MergeIntoPaimonDataEvolutionTable(
       .map { case (_, attrs) => attrs.head }
       .toSeq
 
-    val assignments = metadataColumns.map(column => Assignment(column, column))
-    val output = updateColumnsSorted ++ metadataColumns
+    // Find raw blob update columns and avoid reading them from target table
+    val blobInlineFields = table.coreOptions().blobInlineField().asScala.toSet
+    val rawBlobFieldNames = table
+      .rowType()
+      .getFields
+      .asScala
+      .filter(
+        field =>
+          field.`type`().is(BLOB) &&
+            !blobInlineFields.exists(inlineField => resolver(inlineField, field.name())))
+      .map(_.name())
+      .toSet
+
+    def isRawBlobUpdateColumn(attr: AttributeReference): Boolean = {
+      rawBlobFieldNames.exists(rawBlobFieldName => resolver(rawBlobFieldName, attr.name))
+    }
+
+    // The final output is composed by updated columns, metadata columns and blob marker columns.
+    // Marker columns are used to mark whether a blob field should be written with placeholder
+    val rawBlobUpdateColumns = updateColumnsSorted.filter(isRawBlobUpdateColumn)
+    val rawBlobMarkerNames =
+      rawBlobMarkerNamesAvoiding(
+        rawBlobUpdateColumns.size,
+        updateColumnsSorted.map(_.name) ++ sourceTable.output.map(_.name))
+    val rawBlobMarkerNamesByColumn = rawBlobUpdateColumns
+      .zip(rawBlobMarkerNames)
+      .map { case (attr, markerName) => attr.name -> markerName }
+      .toMap
+    val rawBlobMarkerAttributes = rawBlobUpdateColumns.map(
+      attr =>
+        AttributeReference(rawBlobMarkerNamesByColumn(attr.name), BooleanType, nullable = false)())
+    val mergeOutput = updateColumnsSorted ++ metadataColumns ++ rawBlobMarkerAttributes
+
     val realUpdateActions = matchedActions
       .map(s => s.asInstanceOf[UpdateAction])
       .map(
@@ -356,12 +394,88 @@ case class MergeIntoPaimonDataEvolutionTable(
           UpdateAction.apply(
             update.condition,
             update.assignments.filter(
-              a =>
-                updateColumnsSorted.contains(
-                  a.key.asInstanceOf[AttributeReference])) ++ assignments))
+              a => updateColumnsSorted.contains(assignmentKeyAttribute(a)))))
 
+    // All fields are composed by:
+    // 1. Match condition fields
+    // 2. For each update action, the condition fields and the assignment value fields
+    // 3. All updated fields exclude raw blob fields
     for (action <- realUpdateActions) {
-      allFields ++= action.references.flatMap(r => extractFields(r)).seq
+      action.condition.foreach(condition => allFields ++= extractFields(condition))
+      for (assignment <- action.assignments) {
+        if (isModifiedAssignment(assignment)) {
+          allFields ++= extractFields(assignment.value)
+        }
+      }
+    }
+    allFields ++= updateColumnsSorted.filterNot(isRawBlobUpdateColumn)
+
+    def modifiedRawBlobNames(action: UpdateAction): Set[String] = {
+      action.assignments.flatMap {
+        assignment =>
+          if (isModifiedAssignment(assignment)) {
+            val key = assignmentKeyAttribute(assignment)
+            rawBlobUpdateColumns.find(_.sameRef(key)).map(_.name)
+          } else {
+            None
+          }
+      }.toSet
+    }
+
+    def assignmentValue(action: UpdateAction, attr: AttributeReference): Expression = {
+      action.assignments
+        .find(assignment => assignmentKeyAttribute(assignment).sameRef(attr))
+        .map(_.value)
+        .getOrElse(attr)
+    }
+
+    // the output projection for update from source table
+    def updateOutput(action: UpdateAction, rawBlobModified: Set[String]): Seq[Expression] = {
+      val updatedColumns = updateColumnsSorted.map {
+        attr =>
+          if (
+            rawBlobUpdateColumns.exists(_.sameRef(attr)) && !rawBlobModified.contains(attr.name)
+          ) {
+            Literal(null, attr.dataType)
+          } else {
+            assignmentValue(action, attr)
+          }
+      }
+      val metadata = metadataColumns.map(attr => assignmentValue(action, attr))
+      val markers = rawBlobUpdateColumns.map {
+        attr =>
+          if (rawBlobModified.contains(attr.name)) {
+            FalseLiteral
+          } else {
+            TrueLiteral
+          }
+      }
+      updatedColumns ++ metadata ++ markers
+    }
+
+    // the output projection for target table copy
+    def copyOutput: Seq[Expression] = {
+      val copiedColumns = updateColumnsSorted.map {
+        attr =>
+          if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
+            Literal(null, attr.dataType)
+          } else {
+            attr
+          }
+      }
+      copiedColumns ++ metadataColumns ++ rawBlobUpdateColumns.map(_ => TrueLiteral)
+    }
+
+    def reorderPartialWriteColumns(dataset: Dataset[Row]): Dataset[Row] = {
+      if (rawBlobMarkerAttributes.isEmpty) {
+        dataset
+      } else {
+        val columns =
+          updateColumnsSorted.map(attr => quotedColumn(attr.name)) ++
+            Seq(quotedColumn(ROW_ID_NAME), quotedColumn(FIRST_ROW_ID_NAME)) ++
+            rawBlobMarkerAttributes.map(attr => quotedColumn(attr.name))
+        dataset.select(columns: _*)
+      }
     }
 
     val toWrite = if (isSelfMergeOnRowId) {
@@ -400,6 +514,8 @@ case class MergeIntoPaimonDataEvolutionTable(
         }
       }
 
+      val rawBlobModifiedByAction = realUpdateActions.map(modifiedRawBlobNames)
+
       val rewrittenUpdateActions: Seq[UpdateAction] = realUpdateActions.map {
         ua =>
           val newCond = ua.condition.map(c => rewriteSourceToTarget(c, sourceToTarget))
@@ -413,29 +529,32 @@ case class MergeIntoPaimonDataEvolutionTable(
         isSourceRowPresent = TrueLiteral,
         isTargetRowPresent = TrueLiteral,
         matchedInstructions = rewrittenUpdateActions
-          .map(
-            action => {
+          .zip(rawBlobModifiedByAction)
+          .map {
+            case (action, rawBlobModified) =>
               SparkShimLoader.shim
                 .mergeRowsKeepUpdate(
                   action.condition.getOrElse(TrueLiteral),
-                  action.assignments.map(a => a.value))
+                  updateOutput(action, rawBlobModified))
                 .asInstanceOf[MergeRows.Instruction]
-            }) ++ Seq(
+          } ++ Seq(
           SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, output)
+            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
             .asInstanceOf[MergeRows.Instruction]),
         notMatchedInstructions = Nil,
         notMatchedBySourceInstructions = Seq(
           SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, output)
+            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
             .asInstanceOf[MergeRows.Instruction]),
         checkCardinality = false,
-        output = output,
+        output = mergeOutput,
         child = readPlan
       )
 
-      val withFirstRowId = addFirstRowId(sparkSession, mergeRows, firstRowIds)
-      assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
+      val withFirstRowId = reorderPartialWriteColumns(
+        addFirstRowId(sparkSession, mergeRows, firstRowIds))
+      assert(
+        withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2 + rawBlobUpdateColumns.size)
       withFirstRowId
     } else {
       val allReadFieldsOnTarget = allFields.filter(
@@ -468,30 +587,35 @@ case class MergeIntoPaimonDataEvolutionTable(
               SparkShimLoader.shim
                 .mergeRowsKeepUpdate(
                   action.condition.getOrElse(TrueLiteral),
-                  action.assignments.map(a => a.value))
+                  updateOutput(action, modifiedRawBlobNames(action)))
                 .asInstanceOf[MergeRows.Instruction]
             }) ++ Seq(
           SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, output)
+            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
             .asInstanceOf[MergeRows.Instruction]),
         notMatchedInstructions = Nil,
         notMatchedBySourceInstructions = Seq(
           SparkShimLoader.shim
-            .mergeRowsKeepCopy(TrueLiteral, output)
+            .mergeRowsKeepCopy(TrueLiteral, copyOutput)
             .asInstanceOf[MergeRows.Instruction]).toSeq,
         checkCardinality = false,
-        output = output,
+        output = mergeOutput,
         child = joinPlan
       )
-      val withFirstRowId = addFirstRowId(sparkSession, mergeRows, firstRowIds)
-      assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
+      val withFirstRowId = reorderPartialWriteColumns(
+        addFirstRowId(sparkSession, mergeRows, firstRowIds))
+      assert(
+        withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2 + rawBlobUpdateColumns.size)
       withFirstRowId
         .repartition(col(FIRST_ROW_ID_NAME))
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
     val writer = DataEvolutionPaimonWriter(table, dataSplits)
-    writer.writePartialFields(toWrite, updateColumnsSorted.map(_.name))
+    writer.writePartialFields(
+      toWrite,
+      updateColumnsSorted.map(_.name),
+      rawBlobUpdateColumns.map(attr => attr.name -> rawBlobMarkerNamesByColumn(attr.name)).toMap)
   }
 
   private def insertActionInvoke(
@@ -592,9 +716,9 @@ case class MergeIntoPaimonDataEvolutionTable(
         if (globalIndexMeta == null) {
           false
         } else {
-          val fieldName = rowType.getField(globalIndexMeta.indexFieldId()).name()
+          val indexedNames = globalIndexMeta.getIndexedFieldNames(rowType).asScala
           affectedParts.contains(entry.partition()) && updateColumns.exists(
-            _.name.equals(fieldName))
+            col => indexedNames.contains(col.name))
         }
       }
 
@@ -611,8 +735,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         case GlobalIndexColumnUpdateAction.THROW_ERROR =>
           val updatedColNames = updateColumns.map(_.name)
           val conflicted = affectedIndexEntries
-            .map(_.indexFile().globalIndexMeta().indexFieldId())
-            .map(id => rowType.getField(id).name())
+            .flatMap(e => e.indexFile().globalIndexMeta().getIndexedFieldNames(rowType).asScala)
             .toSet
           throw new RuntimeException(
             s"""MergeInto: update columns contain globally indexed columns, not supported now.
@@ -695,6 +818,52 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_FROM_TARGET = "__row_from_target"
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
+  final private val RAW_BLOB_PLACEHOLDER_MARKER_PREFIX = "__paimon_raw_blob_placeholder_"
+
+  private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
+    !sameAttributeReference(assignment.key, assignment.value)
+  }
+
+  private[commands] def assignmentKeyAttribute(assignment: Assignment): AttributeReference = {
+    assignment.key match {
+      case key: AttributeReference => key
+      case other =>
+        throw new UnsupportedOperationException(
+          s"Unsupported update assignment key: $other. Only top-level attributes are supported.")
+    }
+  }
+
+  private[commands] def rawBlobMarkerName(index: Int): String = {
+    RAW_BLOB_PLACEHOLDER_MARKER_PREFIX + index
+  }
+
+  private[commands] def rawBlobMarkerNamesAvoiding(
+      count: Int,
+      reservedNames: Seq[String]): Seq[String] = {
+    var nextIndex = 0
+    (0 until count).map {
+      _ =>
+        var markerName = rawBlobMarkerName(nextIndex)
+        while (reservedNames.exists(reservedName => resolver(reservedName, markerName))) {
+          nextIndex += 1
+          markerName = rawBlobMarkerName(nextIndex)
+        }
+        nextIndex += 1
+        markerName
+    }
+  }
+
+  private def quotedColumn(name: String) = {
+    col("`" + name.replace("`", "``") + "`")
+  }
+
+  private def sameAttributeReference(left: Expression, right: Expression): Boolean = {
+    (left, right) match {
+      case (leftAttr: AttributeReference, rightAttr: AttributeReference) =>
+        leftAttr.sameRef(rightAttr)
+      case _ => false
+    }
+  }
 
   private def floorBinarySearch(indexed: immutable.IndexedSeq[Long], value: Long): Long = {
     if (indexed.isEmpty) {

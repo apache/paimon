@@ -21,13 +21,102 @@ package org.apache.paimon.spark.catalyst.plans.logical
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.types.{ArrayType, DataType, DataTypes, RowType}
 
-import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, CreateNamedStruct, Expression, Literal}
 import org.scalatest.funsuite.AnyFunSuite
 
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
 
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
+
+  test("create multi vector search with route configs") {
+    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("title_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("limit"),
+              Literal(20),
+              Literal("weight"),
+              Literal(2.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("32")))
+            )),
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("body_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))),
+              Literal("limit"),
+              Literal(10),
+              Literal("weight"),
+              Literal(1.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("16")))
+            ))
+          )),
+        Literal(3),
+        Literal("weighted_score")
+      )
+    )
+
+    assert(search.ranker() == "weighted_score")
+    assert(search.routes().size() == 2)
+    assert(search.routes().get(0).limit() == 20)
+    assert(search.routes().get(0).weight() == 2.0f)
+    assert(search.routes().get(0).options().get("ivf.nprobe") == "32")
+    assert(search.routes().get(1).limit() == 10)
+    assert(search.routes().get(1).weight() == 1.0f)
+    assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
+  }
+
+  test("default multi vector route limit to final limit") {
+    val search = MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(
+              Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
+              )))),
+        Literal(7)
+      )
+    )
+
+    assert(search.limit() == 7)
+    assert(search.ranker() == "rrf")
+    assert(search.routes().get(0).limit() == 7)
+    assert(search.routes().get(0).weight() == 1.0f)
+    assert(search.routes().get(0).options().isEmpty)
+  }
+
+  test("reject multi vector search query map") {
+    val exception = intercept[RuntimeException] {
+      MultiVectorSearchQuery(Seq.empty).createMultiVectorSearch(
+        innerTable,
+        Seq(
+          CreateMap(
+            Seq(
+              Literal("title_vec"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("body_vec"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
+          Literal(3)
+        )
+      )
+    }
+
+    assert(exception.getMessage.contains("Cannot extract multi-vector routes"))
+  }
 
   test("create vector search with string options") {
     val vectorSearch = createVectorSearch(
@@ -62,7 +151,13 @@ class VectorSearchQueryTest extends AnyFunSuite {
         Array(classOf[InnerTable]),
         new InvocationHandler {
           private val rowType =
-            RowType.of(Array[DataType](new ArrayType(DataTypes.FLOAT())), Array[String]("v"))
+            RowType.of(
+              Array[DataType](
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT())),
+              Array[String]("v", "title_vec", "body_vec")
+            )
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
             method.getName match {
