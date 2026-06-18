@@ -19,12 +19,14 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
@@ -741,12 +743,46 @@ public class ParquetReadWriteTest {
         assertThat(count.get()).isEqualTo(nanosValues.length);
     }
 
+    @Test
+    public void testReadWriteVector() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .fields(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .build();
+        List<InternalRow> rows =
+                Arrays.asList(
+                        GenericRow.of(1, BinaryVector.fromPrimitiveArray(new float[] {1, 2, 3})),
+                        GenericRow.of(2, BinaryVector.fromPrimitiveArray(new float[] {4, 5, 6})));
+
+        Path path = createTempParquetFileByPaimon(folder, rows, 1024, rowType);
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(new Options(), rowType, 500, FilterCompat.NOOP);
+
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+        List<InternalRow> results = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(rowType);
+        reader.forEachRemaining(row -> results.add(serializer.copy(row)));
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).getInt(0)).isEqualTo(1);
+        assertVector(results.get(0).getVector(1), new float[] {1, 2, 3});
+        assertThat(results.get(1).getInt(0)).isEqualTo(2);
+        assertVector(results.get(1).getVector(1), new float[] {4, 5, 6});
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());
         Path testPath = createTempParquetFileByPaimon(folder, rows, rowGroupSize, ROW_TYPE);
         int len = testReadingFile(subList(records, 0), testPath);
         assertThat(len).isEqualTo(records.size());
+    }
+
+    private static void assertVector(InternalVector vector, float[] expected) {
+        Assertions.assertArrayEquals(expected, vector.toFloatArray());
     }
 
     private Path createTempParquetFileByPaimon(

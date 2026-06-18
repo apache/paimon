@@ -40,6 +40,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.io.api.Binary;
@@ -138,9 +139,13 @@ public class ParquetRowDataWriter {
             GroupType groupType = type.asGroupType();
             LogicalTypeAnnotation annotation = type.getLogicalTypeAnnotation();
 
-            if (t instanceof ArrayType
+            if ((t instanceof ArrayType || t instanceof VectorType)
                     && annotation instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                return new ArrayWriter(((ArrayType) t).getElementType(), groupType);
+                DataType elementType =
+                        t instanceof ArrayType
+                                ? ((ArrayType) t).getElementType()
+                                : ((VectorType) t).getElementType();
+                return new ArrayWriter(elementType, groupType, t instanceof VectorType);
             } else if (t instanceof MapType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
@@ -511,8 +516,9 @@ public class ParquetRowDataWriter {
         private final String elementName;
         private final FieldWriter elementWriter;
         private final String repeatedGroupName;
+        private final boolean vector;
 
-        private ArrayWriter(DataType t, GroupType groupType) {
+        private ArrayWriter(DataType t, GroupType groupType, boolean vector) {
             // Get the internal array structure
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -521,16 +527,17 @@ public class ParquetRowDataWriter {
             this.elementName = elementType.getName();
 
             this.elementWriter = createWriter(t, elementType);
+            this.vector = vector;
         }
 
         @Override
         public void write(InternalRow row, int ordinal) {
-            writeArrayData(row.getArray(ordinal));
+            writeArrayData(vector ? row.getVector(ordinal) : row.getArray(ordinal));
         }
 
         @Override
         public void write(InternalArray arrayData, int ordinal) {
-            writeArrayData(arrayData.getArray(ordinal));
+            writeArrayData(vector ? arrayData.getVector(ordinal) : arrayData.getArray(ordinal));
         }
 
         private void writeArrayData(InternalArray arrayData) {
