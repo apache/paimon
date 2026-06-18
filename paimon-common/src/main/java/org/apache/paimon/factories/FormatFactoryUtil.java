@@ -25,6 +25,7 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.factories.FactoryUtil.discoverFactories;
@@ -78,10 +79,16 @@ public class FormatFactoryUtil {
     /** Discovers a file format provider. */
     public static FileFormatProvider discoverProvider(ClassLoader classLoader, String identifier) {
         final List<FileFormatProvider> foundProviders = discoverProviders(classLoader);
+        final String normalizedIdentifier = identifier.trim().toLowerCase(Locale.ROOT);
 
         final List<FileFormatProvider> matchingProviders =
                 foundProviders.stream()
-                        .filter(f -> f.identifier().equals(identifier))
+                        .filter(
+                                f ->
+                                        f.identifier()
+                                                .trim()
+                                                .toLowerCase(Locale.ROOT)
+                                                .equals(normalizedIdentifier))
                         .collect(Collectors.toList());
 
         if (matchingProviders.isEmpty()) {

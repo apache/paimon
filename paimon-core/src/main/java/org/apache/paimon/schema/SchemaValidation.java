@@ -80,7 +80,7 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
-import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.format.FileFormat.validationVectorFileFormat;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
@@ -152,7 +152,8 @@ public class SchemaValidation {
                 validationSchema.fields(), validationSchema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(
                 validationSchema.fields(), validationSchema.partitionKeys(), "partition");
-        validateOnlyContainPrimitiveType(validationSchema.fields(), options.upsertKey(), "upsert key");
+        validateOnlyContainPrimitiveType(
+                validationSchema.fields(), options.upsertKey(), "upsert key");
 
         if (!options.upsertKey().isEmpty() && !validationSchema.primaryKeys().isEmpty()) {
             throw new RuntimeException(
@@ -224,7 +225,8 @@ public class SchemaValidation {
                         + CHANGELOG_NUM_RETAINED_MAX.key());
 
         FileFormat fileFormat =
-                FileFormat.fromIdentifier(options.formatType(), Options.fromMap(validationOptions));
+                FileFormat.validationFromIdentifier(
+                        options.formatType(), Options.fromMap(validationOptions));
         RowType tableRowType = new RowType(validationSchema.fields());
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
@@ -276,7 +278,8 @@ public class SchemaValidation {
         }
 
         // Check column names in schema
-        validationSchema.fieldNames()
+        validationSchema
+                .fieldNames()
                 .forEach(
                         f -> {
                             checkState(
@@ -348,13 +351,13 @@ public class SchemaValidation {
         }
 
         if (options.snapshotSequenceOrdering()) {
-            validateSnapshotSequenceOrdering(
-                    validationSchema, options, dynamicOptionKeys);
+            validateSnapshotSequenceOrdering(validationSchema, options, dynamicOptionKeys);
         }
 
         // vector field names must point to vector type
         Set<String> fieldNamesSpecifiedAsVector = options.vectorField();
-        validationSchema.fields()
+        validationSchema
+                .fields()
                 .forEach(
                         f ->
                                 checkState(
@@ -894,7 +897,7 @@ public class SchemaValidation {
                     "The BLOB type column can not be part of partition keys.");
         }
 
-        FileFormat vectorFileFormat = vectorFileFormat(options);
+        FileFormat vectorFileFormat = validationVectorFileFormat(options);
         if (vectorFileFormat != null) {
             Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
             checkArgument(

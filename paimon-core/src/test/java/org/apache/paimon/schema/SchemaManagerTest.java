@@ -165,12 +165,7 @@ public class SchemaManagerTest {
         Map<String, String> schemaOptions = new HashMap<>();
         schemaOptions.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
         Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        schemaOptions,
-                        "");
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, schemaOptions, "");
 
         Map<String, String> dynamicOptions =
                 Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true");
@@ -190,12 +185,7 @@ public class SchemaManagerTest {
         Map<String, String> schemaOptions = new HashMap<>();
         schemaOptions.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
         Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        schemaOptions,
-                        "");
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, schemaOptions, "");
 
         Map<String, String> dynamicOptions =
                 Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true");

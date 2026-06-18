@@ -23,21 +23,42 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 
 import java.util.Optional;
 
-/** Provider for engine-specific file format implementations. */
+/**
+ * Provider for engine-specific file format implementations.
+ *
+ * <p>Engines can use this SPI to provide readers, writers, or validation logic without exposing the
+ * implementation dependencies used by Paimon's built-in file formats. For example, an engine may
+ * provide ORC or Parquet implementations backed by its own filesystem and format libraries.
+ *
+ * <p>The operation-specific options take precedence for their operation. If the operation-specific
+ * provider is not configured or returns {@link Optional#empty()}, Paimon falls back to {@link
+ * #FORMAT_PROVIDER}. If no configured provider handles the format, Paimon uses the built-in {@link
+ * FileFormatFactory} for the requested format.
+ */
 @Experimental
 public interface FileFormatProvider {
 
     /** Option key used to select a provider discovered from the classpath. */
     String FORMAT_PROVIDER = "file.format.provider";
 
-    /** Identifier used by {@link FileFormat#fromIdentifier(String, FormatContext)}. */
+    /** Option key used to select a provider for file-format readers. */
+    String READ_FORMAT_PROVIDER = "file.format.read-provider";
+
+    /** Option key used to select a provider for file-format writers. */
+    String WRITE_FORMAT_PROVIDER = "file.format.write-provider";
+
+    /** Option key used to select a provider for file-format validation. */
+    String VALIDATION_FORMAT_PROVIDER = "file.format.validation-provider";
+
+    /** Identifier used to select this provider. */
     String identifier();
 
     /**
      * Creates a file format for the identifier.
      *
-     * <p>Return {@link Optional#empty()} to let Paimon use the default service-loaded format
-     * factory.
+     * <p>The identifier is the normalized file format identifier, such as {@code parquet} or {@code
+     * orc}. Return {@link Optional#empty()} to let Paimon use the default service-loaded format
+     * factory for this format.
      */
     Optional<FileFormat> create(String identifier, FormatContext context);
 }

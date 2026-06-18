@@ -43,8 +43,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileFormatProviderTest {
 
     private static final String TEST_PROVIDER = "test-provider";
+    private static final String WRITE_ONLY_PROVIDER = "write-only-provider";
     private static final String DUPLICATE_PROVIDER = "duplicate-provider";
     private static final String PROVIDER_ONLY_FORMAT = "provider-only";
+    private static final String WRITE_ONLY_FORMAT = "write-only";
     private static final String DEFAULT_FORMAT = "default-format";
 
     @Test
@@ -58,7 +60,8 @@ public class FileFormatProviderTest {
                     fileFormatClass.getMethod("fromIdentifier", String.class, optionsClass);
 
             Object options = optionsClass.newInstance();
-            optionsClass.getMethod("set", String.class, String.class)
+            optionsClass
+                    .getMethod("set", String.class, String.class)
                     .invoke(options, FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
             Object fileFormat = fromIdentifier.invoke(null, PROVIDER_ONLY_FORMAT, options);
 
@@ -99,6 +102,102 @@ public class FileFormatProviderTest {
         FileFormat fileFormat = FileFormat.fromIdentifier(DEFAULT_FORMAT, options);
 
         assertThat(fileFormat).isInstanceOf(FactoryFileFormat.class);
+    }
+
+    @Test
+    public void testOperationSpecificProvidersDoNotAffectOtherOperations() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.WRITE_FORMAT_PROVIDER, TEST_PROVIDER);
+
+        FileFormat readerFormat = FileFormat.readerFromIdentifier(DEFAULT_FORMAT, options);
+        FileFormat writerFormat = FileFormat.writerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+
+        assertThat(readerFormat).isInstanceOf(FactoryFileFormat.class);
+        assertThat(writerFormat).isInstanceOf(ProviderFileFormat.class);
+
+        options = new Options();
+        options.setString(FileFormatProvider.READ_FORMAT_PROVIDER, TEST_PROVIDER);
+
+        readerFormat = FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+        writerFormat = FileFormat.writerFromIdentifier(DEFAULT_FORMAT, options);
+
+        assertThat(readerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(writerFormat).isInstanceOf(FactoryFileFormat.class);
+    }
+
+    @Test
+    public void testGenericProviderAppliesToOperationSpecificLookups() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
+
+        FileFormat readerFormat = FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+        FileFormat writerFormat = FileFormat.writerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+        FileFormat validationFormat =
+                FileFormat.validationFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+
+        assertThat(readerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(writerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(validationFormat).isInstanceOf(ProviderFileFormat.class);
+    }
+
+    @Test
+    public void testOperationSpecificProviderTakesPrecedenceOverGenericProvider() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
+        options.setString(FileFormatProvider.WRITE_FORMAT_PROVIDER, WRITE_ONLY_PROVIDER);
+
+        FileFormat readerFormat = FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+        FileFormat writerFormat = FileFormat.writerFromIdentifier(WRITE_ONLY_FORMAT, options);
+
+        assertThat(readerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(writerFormat).isInstanceOf(WriteOnlyProviderFileFormat.class);
+    }
+
+    @Test
+    public void testOperationSpecificProviderFallsBackToGenericProviderWhenFormatIsNotHandled() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
+        options.setString(FileFormatProvider.WRITE_FORMAT_PROVIDER, WRITE_ONLY_PROVIDER);
+
+        FileFormat writerFormat = FileFormat.writerFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+
+        assertThat(writerFormat).isInstanceOf(ProviderFileFormat.class);
+    }
+
+    @Test
+    public void testOperationSpecificProviderCanBeSelectedFromFormatContext() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.READ_FORMAT_PROVIDER, TEST_PROVIDER);
+        FormatContext context = new FormatContext(options, 1024, 1024);
+
+        FileFormat readerFormat = FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT, context);
+        FileFormat genericFormat = FileFormat.fromIdentifier(DEFAULT_FORMAT, context);
+
+        assertThat(readerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(genericFormat).isInstanceOf(FactoryFileFormat.class);
+    }
+
+    @Test
+    public void testProviderIdentifierSelectionIsCaseInsensitive() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.FORMAT_PROVIDER, "  MIXED-CASE-PROVIDER  ");
+
+        FileFormat fileFormat = FileFormat.fromIdentifier(PROVIDER_ONLY_FORMAT, options);
+
+        assertThat(fileFormat).isInstanceOf(ProviderFileFormat.class);
+    }
+
+    @Test
+    public void testValidationProviderCanBeSelectedSeparately() {
+        Options options = new Options();
+        options.setString(FileFormatProvider.VALIDATION_FORMAT_PROVIDER, TEST_PROVIDER);
+
+        FileFormat validationFormat =
+                FileFormat.validationFromIdentifier(PROVIDER_ONLY_FORMAT, options);
+        FileFormat readerFormat = FileFormat.readerFromIdentifier(DEFAULT_FORMAT, options);
+
+        assertThat(validationFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(readerFormat).isInstanceOf(FactoryFileFormat.class);
     }
 
     @Test
@@ -159,6 +258,7 @@ public class FileFormatProviderTest {
         }
     }
 
+    /** Test provider that handles only {@link #PROVIDER_ONLY_FORMAT}. */
     public static class TestFileFormatProvider implements FileFormatProvider {
 
         @Override
@@ -175,6 +275,33 @@ public class FileFormatProviderTest {
         }
     }
 
+    /** Test provider used to verify operation-specific provider precedence. */
+    public static class WriteOnlyFileFormatProvider implements FileFormatProvider {
+
+        @Override
+        public String identifier() {
+            return WRITE_ONLY_PROVIDER;
+        }
+
+        @Override
+        public Optional<FileFormat> create(String identifier, FormatContext context) {
+            if (WRITE_ONLY_FORMAT.equals(identifier)) {
+                return Optional.of(new WriteOnlyProviderFileFormat(identifier));
+            }
+            return Optional.empty();
+        }
+    }
+
+    /** Test provider with a mixed-case identifier. */
+    public static class MixedCaseFileFormatProvider extends TestFileFormatProvider {
+
+        @Override
+        public String identifier() {
+            return "Mixed-Case-Provider";
+        }
+    }
+
+    /** Test provider with a duplicate identifier. */
     public static class DuplicateFileFormatProvider implements FileFormatProvider {
 
         @Override
@@ -188,8 +315,10 @@ public class FileFormatProviderTest {
         }
     }
 
+    /** Second test provider with the same duplicate identifier. */
     public static class OtherDuplicateFileFormatProvider extends DuplicateFileFormatProvider {}
 
+    /** Test factory used when no provider handles the requested format. */
     public static class TestFileFormatFactory implements FileFormatFactory {
 
         @Override
@@ -210,6 +339,13 @@ public class FileFormatProviderTest {
         }
     }
 
+    private static class WriteOnlyProviderFileFormat extends TestFileFormat {
+
+        private WriteOnlyProviderFileFormat(String formatIdentifier) {
+            super(formatIdentifier);
+        }
+    }
+
     private static class FactoryFileFormat extends TestFileFormat {
 
         private FactoryFileFormat(String formatIdentifier) {
@@ -217,6 +353,7 @@ public class FileFormatProviderTest {
         }
     }
 
+    /** Base test file format implementation. */
     public static class TestFileFormat extends FileFormat {
 
         private TestFileFormat(String formatIdentifier) {

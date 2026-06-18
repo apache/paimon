@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests that {@link FileFormatProvider} can bypass Hadoop-backed format constructors. */
@@ -50,7 +51,7 @@ public class FormatProviderNoHadoopTest {
     private static final String TEST_PROVIDER = "format-test-provider";
 
     @Test
-    public void testProviderBypassesHadoopBackedOrcAndParquetWriters() throws Exception {
+    public void testProviderBypassesHadoopBackedOrcAndParquetFormatPaths() throws Exception {
         try (URLClassLoader classLoader = new NoHadoopClassLoader(testClasspathWithoutHadoop())) {
             Class<?> runner =
                     Class.forName(NoHadoopFormatProviderRunner.class.getName(), true, classLoader);
@@ -106,19 +107,43 @@ public class FormatProviderNoHadoopTest {
             RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "id", DataTypes.INT()));
 
             Options options = new Options();
-            options.setString(FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
+            options.setString(FileFormatProvider.WRITE_FORMAT_PROVIDER, TEST_PROVIDER);
+            options.setString(FileFormatProvider.READ_FORMAT_PROVIDER, TEST_PROVIDER);
+            options.setString(FileFormatProvider.VALIDATION_FORMAT_PROVIDER, TEST_PROVIDER);
 
-            FileFormat orc = FileFormat.fromIdentifier("orc", options);
-            FileFormat parquet = FileFormat.fromIdentifier("parquet", options);
+            FileFormat orc = FileFormat.writerFromIdentifier("orc", options);
+            FileFormat parquet = FileFormat.writerFromIdentifier("parquet", options);
+            FileFormat orcReader = FileFormat.readerFromIdentifier("orc", options);
+            FileFormat orcValidation = FileFormat.validationFromIdentifier("orc", options);
 
             assertThat(orc).isInstanceOf(TestFileFormat.class);
             assertThat(parquet).isInstanceOf(TestFileFormat.class);
-            assertThat(orc.createWriterFactory(rowType)).isInstanceOf(TestFormatWriterFactory.class);
+            assertThat(orcReader).isInstanceOf(TestFileFormat.class);
+            assertThat(orcValidation).isInstanceOf(TestFileFormat.class);
+            assertThat(orc.createWriterFactory(rowType))
+                    .isInstanceOf(TestFormatWriterFactory.class);
             assertThat(parquet.createWriterFactory(rowType))
                     .isInstanceOf(TestFormatWriterFactory.class);
+            assertThat(orcReader.createReaderFactory(rowType, rowType, null))
+                    .isInstanceOf(TestFormatReaderFactory.class);
+            assertThatCode(() -> orcValidation.validateDataFields(rowType))
+                    .doesNotThrowAnyException();
+
+            Options writerOnlyOptions = new Options();
+            writerOnlyOptions.setString(FileFormatProvider.WRITE_FORMAT_PROVIDER, TEST_PROVIDER);
+            assertThatThrownBy(() -> FileFormat.readerFromIdentifier("orc", writerOnlyOptions))
+                    .hasRootCauseInstanceOf(ClassNotFoundException.class);
+
+            Options writerAndGenericOptions = new Options();
+            writerAndGenericOptions.setString(
+                    FileFormatProvider.WRITE_FORMAT_PROVIDER, TEST_PROVIDER);
+            writerAndGenericOptions.setString(FileFormatProvider.FORMAT_PROVIDER, TEST_PROVIDER);
+            assertThat(FileFormat.readerFromIdentifier("orc", writerAndGenericOptions))
+                    .isInstanceOf(TestFileFormat.class);
         }
     }
 
+    /** Test provider used by the no-Hadoop classloader runner. */
     public static class TestFileFormatProvider implements FileFormatProvider {
 
         @Override
@@ -135,6 +160,7 @@ public class FormatProviderNoHadoopTest {
         }
     }
 
+    /** Test format implementation that avoids Hadoop-backed constructors. */
     public static class TestFileFormat extends FileFormat {
 
         private TestFileFormat(String formatIdentifier) {
@@ -164,6 +190,7 @@ public class FormatProviderNoHadoopTest {
         }
     }
 
+    /** Test reader factory returned by {@link TestFileFormat}. */
     public static class TestFormatReaderFactory implements FormatReaderFactory {
 
         @Override
@@ -172,6 +199,7 @@ public class FormatProviderNoHadoopTest {
         }
     }
 
+    /** Test writer factory returned by {@link TestFileFormat}. */
     public static class TestFormatWriterFactory implements FormatWriterFactory {
 
         @Override

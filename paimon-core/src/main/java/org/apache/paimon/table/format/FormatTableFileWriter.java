@@ -35,7 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.format.FileFormat.writerFileFormat;
 import static org.apache.paimon.utils.PartitionPathUtils.generatePartitionPathUtil;
 
 /** File writer for format table. */
@@ -52,7 +52,7 @@ public class FormatTableFileWriter {
             FileIO fileIO, RowType writeRowType, CoreOptions options, RowType partitionType) {
         this.fileIO = fileIO;
         this.writeRowType = writeRowType;
-        this.fileFormat = fileFormat(options);
+        this.fileFormat = writerFileFormat(options);
         this.writers = new HashMap<>();
         this.options = options;
         this.pathFactory =

@@ -97,9 +97,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         RUNTIME_PROVIDER_VALIDATIONS.set(0);
         Options options = new Options();
         options.set(
-                Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.FORMAT_PROVIDER,
+                Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
                 RuntimeOptionFileFormatProvider.IDENTIFIER);
-        catalog = new FileSystemCatalog(fileIO, new Path(warehouse), CatalogContext.create(options));
+        catalog =
+                new FileSystemCatalog(fileIO, new Path(warehouse), CatalogContext.create(options));
 
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "new_table");
@@ -118,28 +119,30 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(table.options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
                 .containsEntry(
-                        FileFormatProvider.FORMAT_PROVIDER,
+                        FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
                         RuntimeOptionFileFormatProvider.IDENTIFIER);
         assertThat(
-                        new SchemaManager(fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
+                        new SchemaManager(
+                                        fileIO,
+                                        new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
-                .doesNotContainKey(FileFormatProvider.FORMAT_PROVIDER);
+                .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
 
         RUNTIME_PROVIDER_VALIDATIONS.set(0);
         catalog.alterTable(
-                identifier,
-                SchemaChange.addColumn("new_value", DataTypes.STRING()),
-                false);
+                identifier, SchemaChange.addColumn("new_value", DataTypes.STRING()), false);
 
         assertThat(RUNTIME_PROVIDER_VALIDATIONS.get()).isGreaterThan(0);
         assertThat(
-                        new SchemaManager(fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
+                        new SchemaManager(
+                                        fileIO,
+                                        new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
-                .doesNotContainKey(FileFormatProvider.FORMAT_PROVIDER);
+                .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
     }
 
     @Test

@@ -14,5 +14,7 @@
 # limitations under the License.
 
 org.apache.paimon.format.FileFormatProviderTest$TestFileFormatProvider
+org.apache.paimon.format.FileFormatProviderTest$WriteOnlyFileFormatProvider
+org.apache.paimon.format.FileFormatProviderTest$MixedCaseFileFormatProvider
 org.apache.paimon.format.FileFormatProviderTest$DuplicateFileFormatProvider
 org.apache.paimon.format.FileFormatProviderTest$OtherDuplicateFileFormatProvider

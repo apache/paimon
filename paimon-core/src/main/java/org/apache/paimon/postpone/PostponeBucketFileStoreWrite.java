@@ -62,7 +62,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.format.FileFormat.writerFileFormat;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@code bucket = -2} tables. */
@@ -126,7 +126,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                                 : writeId));
         this.options = new CoreOptions(newOptions);
 
-        FileFormat fileFormat = fileFormat(this.options);
+        FileFormat fileFormat = writerFileFormat(this.options);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,

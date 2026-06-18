@@ -416,7 +416,8 @@ public class KeyValueFileWriterFactory {
 
         private FileFormat fileFormat(String format) {
             return formatFactory.computeIfAbsent(
-                    format, k -> FileFormat.fromIdentifier(format, options.toConfiguration()));
+                    format,
+                    k -> FileFormat.writerFromIdentifier(format, options.toConfiguration()));
         }
     }
 

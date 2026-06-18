@@ -62,7 +62,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.format.FileFormat.writerFileFormat;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -103,7 +103,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.rowType = rowType;
         this.writeType = rowType;
         this.writeCols = null;
-        this.fileFormat = fileFormat(options);
+        this.fileFormat = writerFileFormat(options);
         this.pathFactory = pathFactory;
         this.blobContext = BlobFileContext.create(rowType, options);
         this.fileIndexOptions = options.indexColumnsOptions();

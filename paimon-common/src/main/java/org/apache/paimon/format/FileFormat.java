@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -74,6 +75,23 @@ public abstract class FileFormat {
     }
 
     public static FileFormat fromIdentifier(String identifier, Options options) {
+        return fromIdentifier(identifier, options, FileFormatProvider.FORMAT_PROVIDER);
+    }
+
+    public static FileFormat readerFromIdentifier(String identifier, Options options) {
+        return fromIdentifier(identifier, options, FileFormatProvider.READ_FORMAT_PROVIDER);
+    }
+
+    public static FileFormat writerFromIdentifier(String identifier, Options options) {
+        return fromIdentifier(identifier, options, FileFormatProvider.WRITE_FORMAT_PROVIDER);
+    }
+
+    public static FileFormat validationFromIdentifier(String identifier, Options options) {
+        return fromIdentifier(identifier, options, FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
+    }
+
+    private static FileFormat fromIdentifier(
+            String identifier, Options options, String providerOptionKey) {
         return fromIdentifier(
                 normalizeFileFormat(identifier),
                 new FormatContext(
@@ -82,27 +100,66 @@ public abstract class FileFormat {
                         options.get(CoreOptions.WRITE_BATCH_SIZE),
                         options.get(CoreOptions.WRITE_BATCH_MEMORY),
                         options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL),
-                        options.get(CoreOptions.FILE_BLOCK_SIZE)));
+                        options.get(CoreOptions.FILE_BLOCK_SIZE)),
+                providerOptionKey);
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        String normalizedIdentifier = identifier.toLowerCase();
-        String providerIdentifier =
-                context.options().getString(FileFormatProvider.FORMAT_PROVIDER, null);
-        if (providerIdentifier != null && !providerIdentifier.trim().isEmpty()) {
-            ClassLoader classLoader = providerClassLoader();
-            Optional<FileFormat> providedFormat =
-                    FormatFactoryUtil.discoverProvider(
-                                    classLoader, providerIdentifier.trim().toLowerCase())
-                            .create(normalizedIdentifier, context);
-            if (providedFormat.isPresent()) {
-                return providedFormat.get();
+        return fromIdentifier(identifier, context, FileFormatProvider.FORMAT_PROVIDER);
+    }
+
+    public static FileFormat readerFromIdentifier(String identifier, FormatContext context) {
+        return fromIdentifier(identifier, context, FileFormatProvider.READ_FORMAT_PROVIDER);
+    }
+
+    public static FileFormat writerFromIdentifier(String identifier, FormatContext context) {
+        return fromIdentifier(identifier, context, FileFormatProvider.WRITE_FORMAT_PROVIDER);
+    }
+
+    public static FileFormat validationFromIdentifier(String identifier, FormatContext context) {
+        return fromIdentifier(identifier, context, FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
+    }
+
+    private static FileFormat fromIdentifier(
+            String identifier, FormatContext context, String providerOptionKey) {
+        String normalizedIdentifier = identifier.toLowerCase(Locale.ROOT);
+        ClassLoader classLoader = providerClassLoader();
+        Optional<FileFormat> operationFormat =
+                createFromProvider(classLoader, context, providerOptionKey, normalizedIdentifier);
+        if (operationFormat.isPresent()) {
+            return operationFormat.get();
+        }
+
+        if (!FileFormatProvider.FORMAT_PROVIDER.equals(providerOptionKey)) {
+            Optional<FileFormat> genericFormat =
+                    createFromProvider(
+                            classLoader,
+                            context,
+                            FileFormatProvider.FORMAT_PROVIDER,
+                            normalizedIdentifier);
+            if (genericFormat.isPresent()) {
+                return genericFormat.get();
             }
         }
 
-        return FormatFactoryUtil.discoverFactory(FileFormat.class.getClassLoader(), normalizedIdentifier)
+        return FormatFactoryUtil.discoverFactory(
+                        FileFormat.class.getClassLoader(), normalizedIdentifier)
                 .create(context);
+    }
+
+    private static Optional<FileFormat> createFromProvider(
+            ClassLoader classLoader,
+            FormatContext context,
+            String providerOptionKey,
+            String normalizedIdentifier) {
+        String providerIdentifier = context.options().getString(providerOptionKey, null);
+        if (providerIdentifier == null || providerIdentifier.trim().isEmpty()) {
+            return Optional.empty();
+        }
+        return FormatFactoryUtil.discoverProvider(
+                        classLoader, providerIdentifier.trim().toLowerCase(Locale.ROOT))
+                .create(normalizedIdentifier, context);
     }
 
     private static ClassLoader providerClassLoader() {
@@ -135,13 +192,37 @@ public abstract class FileFormat {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
     }
 
+    public static FileFormat readerFileFormat(CoreOptions options) {
+        return FileFormat.readerFromIdentifier(
+                options.fileFormatString(), options.toConfiguration());
+    }
+
+    public static FileFormat writerFileFormat(CoreOptions options) {
+        return FileFormat.writerFromIdentifier(
+                options.fileFormatString(), options.toConfiguration());
+    }
+
+    public static FileFormat validationFileFormat(CoreOptions options) {
+        return FileFormat.validationFromIdentifier(
+                options.fileFormatString(), options.toConfiguration());
+    }
+
     @Nullable
     public static FileFormat vectorFileFormat(CoreOptions options) {
         String vectorFileFormat = options.vectorFileFormatString();
         if (vectorFileFormat == null) {
             return null;
         }
-        return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
+        return FileFormat.writerFromIdentifier(vectorFileFormat, options.toConfiguration());
+    }
+
+    @Nullable
+    public static FileFormat validationVectorFileFormat(CoreOptions options) {
+        String vectorFileFormat = options.vectorFileFormatString();
+        if (vectorFileFormat == null) {
+            return null;
+        }
+        return FileFormat.validationFromIdentifier(vectorFileFormat, options.toConfiguration());
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {

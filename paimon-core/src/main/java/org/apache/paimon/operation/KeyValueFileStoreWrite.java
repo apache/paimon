@@ -61,7 +61,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.format.FileFormat.writerFileFormat;
 import static org.apache.paimon.utils.FileStorePathFactory.createFormatPathFactories;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
@@ -128,7 +128,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema.id(),
                         keyType,
                         valueType,
-                        fileFormat(options),
+                        writerFileFormat(options),
                         createFormatPathFactories(options, formatPathFactory),
                         options.targetFileSize(true));
         this.keyComparatorSupplier = keyComparatorSupplier;

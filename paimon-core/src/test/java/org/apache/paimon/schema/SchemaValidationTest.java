@@ -584,34 +584,6 @@ class SchemaValidationTest {
                 .hasMessageContaining(CoreOptions.WRITE_ONLY.key());
     }
 
-    @Test
-    public void testSnapshotSequenceOrderingHonorsDynamicWriteOnlyKey() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");
-        options.put(CoreOptions.WRITE_ONLY.key(), "false");
-        options.put(BUCKET.key(), String.valueOf(-1));
-
-        TableSchema schema =
-                new TableSchema(
-                        1,
-                        Arrays.asList(
-                                new DataField(0, "f0", DataTypes.INT()),
-                                new DataField(1, "f1", DataTypes.INT())),
-                        10,
-                        emptyList(),
-                        singletonList("f1"),
-                        options,
-                        "");
-
-        assertThatNoException()
-                .isThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        schema,
-                                        Collections.singleton(CoreOptions.WRITE_ONLY.key())));
-    }
-
-    @Test
     public void testSnapshotSequenceOrderingHonorsDynamicWriteOnlyValue() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");

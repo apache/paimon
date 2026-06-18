@@ -78,7 +78,7 @@ public class CompactedChangelogReadOnlyFormat extends FileFormat {
         @Override
         public FileFormat create(FormatContext formatContext) {
             return new CompactedChangelogReadOnlyFormat(
-                    getIdentifier(format), FileFormat.fromIdentifier(format, formatContext));
+                    getIdentifier(format), FileFormat.readerFromIdentifier(format, formatContext));
         }
     }
 

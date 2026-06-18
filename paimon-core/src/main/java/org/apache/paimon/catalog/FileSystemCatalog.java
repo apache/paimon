@@ -171,7 +171,8 @@ public class FileSystemCatalog extends AbstractCatalog {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         SchemaManager schemaManager = schemaManager(identifier);
         try {
-            runWithLock(identifier, () -> schemaManager.commitChanges(changes, tableRuntimeOptions));
+            runWithLock(
+                    identifier, () -> schemaManager.commitChanges(changes, tableRuntimeOptions));
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
                 | ColumnNotExistException
