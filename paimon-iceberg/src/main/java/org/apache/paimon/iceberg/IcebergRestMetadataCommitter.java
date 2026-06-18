@@ -296,7 +296,12 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                         "Partition fieldId = 0. The Iceberg REST committer will use partition evolution to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero fieldId partition field");
             }
             Schema emptySchema = new Schema();
-            return restCatalog.createTable(icebergTableIdentifier, emptySchema);
+            // Some Iceberg REST catalogs (e.g. AWS Glue) do not auto-assign a table location,
+            // so pass the location Paimon writes its metadata to explicitly.
+            return restCatalog
+                    .buildTable(icebergTableIdentifier, emptySchema)
+                    .withLocation(toRestLocation(newMetadata.location()))
+                    .create();
         } else {
             LOG.info(
                     "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
@@ -317,8 +322,34 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             }
 
             Schema dummySchema = new Schema(columns);
-            return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
+            return restCatalog
+                    .buildTable(icebergTableIdentifier, dummySchema)
+                    .withPartitionSpec(spec)
+                    .withLocation(toRestLocation(newMetadata.location()))
+                    .create();
         }
+    }
+
+    /**
+     * Normalizes a table location's scheme to {@code s3://} for the Iceberg REST catalog.
+     *
+     * <p>Paimon's warehouse runs on the {@code s3a://} (or legacy {@code s3n://}) Hadoop
+     * filesystem, but some REST catalogs (notably AWS Glue) validate the table location and only
+     * accept the {@code s3://} scheme. The schemes address the same physical object, so rewriting
+     * it is safe. Non-S3 schemes (e.g. {@code file://}, {@code hdfs://}) and {@code null} are
+     * returned unchanged.
+     */
+    static String toRestLocation(String location) {
+        if (location == null) {
+            return null;
+        }
+        if (location.startsWith("s3a://")) {
+            return "s3://" + location.substring("s3a://".length());
+        }
+        if (location.startsWith("s3n://")) {
+            return "s3://" + location.substring("s3n://".length());
+        }
+        return location;
     }
 
     private Table getTable() {

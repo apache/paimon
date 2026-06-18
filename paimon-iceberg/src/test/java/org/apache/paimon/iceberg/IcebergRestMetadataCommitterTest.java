@@ -769,6 +769,22 @@ public class IcebergRestMetadataCommitterTest {
         commit.close();
     }
 
+    @Test
+    public void testToRestLocationNormalizesScheme() {
+        // s3a:// and legacy s3n:// are rewritten to s3:// (Glue's REST endpoint only accepts
+        // s3://).
+        assertThat(IcebergRestMetadataCommitter.toRestLocation("s3a://bucket/db/t"))
+                .isEqualTo("s3://bucket/db/t");
+        assertThat(IcebergRestMetadataCommitter.toRestLocation("s3n://bucket/db/t"))
+                .isEqualTo("s3://bucket/db/t");
+        // s3:// and other schemes pass through unchanged; null is preserved.
+        assertThat(IcebergRestMetadataCommitter.toRestLocation("s3://bucket/db/t"))
+                .isEqualTo("s3://bucket/db/t");
+        assertThat(IcebergRestMetadataCommitter.toRestLocation("file:///tmp/db/t"))
+                .isEqualTo("file:///tmp/db/t");
+        assertThat(IcebergRestMetadataCommitter.toRestLocation(null)).isNull();
+    }
+
     private static class TestRecord {
         private final BinaryRow partition;
         private final GenericRow record;
