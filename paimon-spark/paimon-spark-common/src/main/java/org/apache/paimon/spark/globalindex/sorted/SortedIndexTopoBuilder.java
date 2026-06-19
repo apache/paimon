@@ -74,11 +74,6 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
     }
 
     @Override
-    public String identifier() {
-        return "btree";
-    }
-
-    @Override
     public List<CommitMessage> buildIndex(
             SparkSession spark,
             DataSourceV2Relation relation,
