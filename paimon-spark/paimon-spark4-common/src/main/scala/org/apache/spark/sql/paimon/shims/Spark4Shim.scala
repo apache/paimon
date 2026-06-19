@@ -319,6 +319,18 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+
+  // SQL UDFs (CREATE FUNCTION ... RETURN ...).
+  override def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan] =
+    org.apache.spark.sql.catalyst.parser.extensions.RewritePaimonSQLFunctionCommands(spark)
+
+  override def resolvePaimonSQLFunction(
+      funcIdent: org.apache.spark.sql.catalyst.FunctionIdentifier,
+      function: org.apache.paimon.function.Function,
+      arguments: Seq[Expression],
+      parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
+    org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
+      .toSQLFunctionExpression(funcIdent, function, arguments, parser)
 }
 
 object Spark4Shim {
