@@ -770,7 +770,7 @@ public class IcebergRestMetadataCommitterTest {
     }
 
     @Test
-    public void testToRestLocationNormalizesScheme() {
+    public void testToRestLocationNormalisesScheme() {
         // s3a:// and legacy s3n:// are rewritten to s3:// (Glue's REST endpoint only accepts
         // s3://).
         assertThat(IcebergRestMetadataCommitter.toRestLocation("s3a://bucket/db/t"))
