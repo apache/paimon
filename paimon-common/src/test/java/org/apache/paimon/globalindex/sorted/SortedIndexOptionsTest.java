@@ -40,7 +40,6 @@ class SortedIndexOptionsTest {
         options.setString("btree-index.build.max-parallelism", "8");
 
         assertThat(options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE)).isEqualTo(100L);
-        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM))
-                .isEqualTo(8);
+        assertThat(options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM)).isEqualTo(8);
     }
 }

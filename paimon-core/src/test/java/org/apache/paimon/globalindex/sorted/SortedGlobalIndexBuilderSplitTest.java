@@ -58,7 +58,8 @@ public class SortedGlobalIndexBuilderSplitTest {
                         .build();
 
         List<DataSplit> rebuilt =
-                SortedGlobalIndexBuilder.splitByContiguousRowRange(Collections.singletonList(split));
+                SortedGlobalIndexBuilder.splitByContiguousRowRange(
+                        Collections.singletonList(split));
 
         assertThat(rebuilt).hasSize(2);
         assertThat(rebuilt.get(0).dataFiles()).containsExactly(file1, file3);
