@@ -80,13 +80,14 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         }
 
         String[] queryTerms = queryText.toLowerCase(Locale.ROOT).split("\\s+");
+        boolean requireAllTerms = "and".equals(fullTextSearch.queryOperator());
 
         // Min-heap: smallest score at head, so we evict the weakest candidate.
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
 
         for (int i = 0; i < count; i++) {
-            float score = computeScore(documents[i], queryTerms);
+            float score = computeScore(documents[i], queryTerms, requireAllTerms);
             if (score <= 0) {
                 continue;
             }
@@ -113,12 +114,15 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 Optional.of(ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get)));
     }
 
-    private static float computeScore(String document, String[] queryTerms) {
+    private static float computeScore(
+            String document, String[] queryTerms, boolean requireAllTerms) {
         String lowerDoc = document.toLowerCase(Locale.ROOT);
         float score = 0;
         for (String term : queryTerms) {
             if (lowerDoc.contains(term)) {
                 score += 1.0f / queryTerms.length;
+            } else if (requireAllTerms) {
+                return 0;
             }
         }
         return score;
