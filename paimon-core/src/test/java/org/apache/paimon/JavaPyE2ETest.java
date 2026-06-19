@@ -34,7 +34,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
@@ -572,7 +572,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(
@@ -648,7 +649,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(
@@ -726,7 +728,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.IndexedSplit;
@@ -38,8 +38,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for split regrouping in {@link BTreeGlobalIndexBuilder}. */
-public class BTreeGlobalIndexBuilderSplitTest {
+/** Tests for split regrouping in {@link SortedGlobalIndexBuilder}. */
+public class SortedGlobalIndexBuilderSplitTest {
 
     @Test
     public void testSplitByContiguousRowRangeFromDataFiles() {
@@ -58,14 +58,15 @@ public class BTreeGlobalIndexBuilderSplitTest {
                         .build();
 
         List<DataSplit> rebuilt =
-                BTreeGlobalIndexBuilder.splitByContiguousRowRange(Collections.singletonList(split));
+                SortedGlobalIndexBuilder.splitByContiguousRowRange(
+                        Collections.singletonList(split));
 
         assertThat(rebuilt).hasSize(2);
         assertThat(rebuilt.get(0).dataFiles()).containsExactly(file1, file3);
         assertThat(rebuilt.get(1).dataFiles()).containsExactly(file2);
-        assertThat(BTreeGlobalIndexBuilder.calcRowRange(rebuilt.get(0)))
+        assertThat(SortedGlobalIndexBuilder.calcRowRange(rebuilt.get(0)))
                 .isEqualTo(new Range(0, 199));
-        assertThat(BTreeGlobalIndexBuilder.calcRowRange(rebuilt.get(1)))
+        assertThat(SortedGlobalIndexBuilder.calcRowRange(rebuilt.get(1)))
                 .isEqualTo(new Range(300, 399));
     }
 
@@ -86,7 +87,7 @@ public class BTreeGlobalIndexBuilderSplitTest {
                         .build();
 
         Map<BinaryRow, Map<Range, List<Split>>> result =
-                BTreeGlobalIndexBuilder.groupSplitsByRange(
+                SortedGlobalIndexBuilder.groupSplitsByRange(
                         RowRangeIndex.create(
                                 Arrays.asList(new Range(4750, 4900), new Range(5938, 7599))),
                         Collections.singletonList(split));

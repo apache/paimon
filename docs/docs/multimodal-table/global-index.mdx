@@ -148,9 +148,11 @@ These table options affect global index build and read behavior:
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
-| `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-BTree global index builds. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
-| `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building global indexes. |
+| `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
 | `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
 | `visibility-callback.enabled` | `false` | Whether batch or bounded-stream commits wait until existing global indexes cover newly added files. |
 | `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |

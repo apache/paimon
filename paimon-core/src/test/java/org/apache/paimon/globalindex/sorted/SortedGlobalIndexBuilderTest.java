@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -57,8 +58,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/** Test class for {@link BTreeGlobalIndexBuilder}. */
-public class BTreeGlobalIndexBuilderTest extends TableTestBase {
+/** Test class for {@link SortedGlobalIndexBuilder}. */
+public class SortedGlobalIndexBuilderTest extends TableTestBase {
 
     private static final long PART_ROW_NUM = 1000L;
     private static final KeySerializer KEY_SERIALIZER = KeySerializer.create(DataTypes.INT());
@@ -109,7 +110,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
     private void createIndex(PartitionPredicate partitionPredicate) throws Exception {
         FileStoreTable table = getTableDefault();
 
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        SortedGlobalIndexBuilder builder = new SortedGlobalIndexBuilder(table, "btree");
         builder.withIndexField("f0");
         builder.withPartitionPredicate(partitionPredicate);
         List<DataSplit> dataSplits =
@@ -168,7 +169,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         createTableDefault();
 
         FileStoreTable table = getTableDefault();
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        SortedGlobalIndexBuilder builder = new SortedGlobalIndexBuilder(table, "btree");
         builder.withIndexField("f0");
 
         Assertions.assertFalse(
@@ -182,7 +183,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         createIndex(null);
 
         FileStoreTable table = getTableDefault();
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        SortedGlobalIndexBuilder builder = new SortedGlobalIndexBuilder(table, "btree");
         builder.withIndexField("f0");
 
         Assertions.assertFalse(
@@ -212,7 +213,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         }
 
         table = getTableDefault();
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        SortedGlobalIndexBuilder builder = new SortedGlobalIndexBuilder(table, "btree");
         builder.withIndexField("f0");
 
         Optional<Pair<org.apache.paimon.utils.RowRangeIndex, List<DataSplit>>> incrementalScan =
@@ -270,7 +271,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         predicate =
                 PartitionPredicate.createPartitionPredicate(
                         partType, Collections.singletonMap("dt", BinaryString.fromString("p0")));
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        SortedGlobalIndexBuilder builder = new SortedGlobalIndexBuilder(table, "btree");
         builder.withIndexField("f0");
         builder.withPartitionPredicate(PartitionPredicate.fromPredicate(partType, predicate));
 
@@ -330,7 +331,8 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
                 containsBlobFile(table.store().newScan().plan().files()),
                 "Test table should contain blob manifest entries.");
 
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("f0");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("f0");
         assertNoBlobFiles(
                 builder.scan()
                         .map(Pair::getRight)
@@ -385,7 +387,7 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
                 Assertions.assertNotEquals(
                         "blob",
                         file.fileFormat(),
-                        "BTree global index scan should not include blob files.");
+                        "Sorted global index scan should not include blob files.");
             }
         }
     }
