@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.btree;
+package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
@@ -38,8 +38,8 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
-import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -69,26 +69,34 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
+import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.splitByContiguousRowRange;
 
-/** The {@link BTreeIndexTopoBuilder} for BTree index in Flink. */
-public class BTreeIndexTopoBuilder {
+/** The topology builder for sorted indexes in Flink. */
+public class SortedIndexTopoBuilder {
 
-    private static final String BUILD_TASK_ID_FIELD = "_BTREE_BUILD_TASK_ID";
+    private static final String BUILD_TASK_ID_FIELD = "_SORTED_INDEX_BUILD_TASK_ID";
     private static final int BUILD_TASK_ID_FIELD_ID = -1;
+    private static final HashSet<String> SUPPORTED_INDEX_TYPES =
+            new HashSet<>(Arrays.asList("btree", "bitmap"));
+
+    public static boolean supports(String indexType) {
+        return SUPPORTED_INDEX_TYPES.contains(indexType);
+    }
 
     public static boolean buildIndex(
             StreamExecutionEnvironment env,
-            Supplier<BTreeGlobalIndexBuilder> indexBuilderSupplier,
+            Supplier<SortedGlobalIndexBuilder> indexBuilderSupplier,
             FileStoreTable table,
             List<String> indexColumns,
             PartitionPredicate partitionPredicate,
@@ -96,7 +104,7 @@ public class BTreeIndexTopoBuilder {
             throws Exception {
         List<DataStream<Committable>> allStreams = new ArrayList<>();
         for (String indexColumn : indexColumns) {
-            BTreeGlobalIndexBuilder indexBuilder =
+            SortedGlobalIndexBuilder indexBuilder =
                     indexBuilderSupplier.get().withIndexField(indexColumn);
             if (partitionPredicate != null) {
                 indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
@@ -133,9 +141,10 @@ public class BTreeIndexTopoBuilder {
             DataType indexFieldType = sortReadType.getTypeAt(indexFieldPos);
 
             // 3. Calculate maximum parallelism bound
-            long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
+            long recordsPerRange =
+                    userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
             int maxParallelism =
-                    userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
+                    userOptions.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
@@ -145,8 +154,8 @@ public class BTreeIndexTopoBuilder {
             sortColumns.add(indexColumn);
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
-            List<BTreeBuildTask> buildTasks = new ArrayList<>();
-            List<BTreeSplitTask> splitTasks = new ArrayList<>();
+            List<SortedBuildTask> buildTasks = new ArrayList<>();
+            List<SortedSplitTask> splitTasks = new ArrayList<>();
             for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                     partitionRangeSplits.entrySet()) {
                 BinaryRow partition = partitionEntry.getKey();
@@ -159,9 +168,9 @@ public class BTreeIndexTopoBuilder {
                     }
 
                     int taskId = buildTasks.size();
-                    buildTasks.add(new BTreeBuildTask(taskId, range, partitionBytes));
+                    buildTasks.add(new SortedBuildTask(taskId, range, partitionBytes));
                     for (Split split : rangeSplits) {
-                        splitTasks.add(new BTreeSplitTask(taskId, split));
+                        splitTasks.add(new SortedSplitTask(taskId, split));
                     }
                 }
             }
@@ -205,26 +214,27 @@ public class BTreeIndexTopoBuilder {
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
+            String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
         if (buildIndex(
                 env,
-                () -> new BTreeGlobalIndexBuilder(table),
+                () -> new SortedGlobalIndexBuilder(table, indexType, userOptions),
                 table,
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
                 userOptions)) {
-            env.execute("Create btree global index for table: " + table.name());
+            env.execute("Create " + indexType + " global index for table: " + table.name());
         }
     }
 
     protected static DataStream<Committable> executeForBuildTasks(
             StreamExecutionEnvironment env,
-            List<BTreeBuildTask> buildTasks,
-            List<BTreeSplitTask> splitTasks,
+            List<SortedBuildTask> buildTasks,
+            List<SortedSplitTask> splitTasks,
             ReadBuilder readBuilder,
-            BTreeGlobalIndexBuilder indexBuilder,
+            SortedGlobalIndexBuilder indexBuilder,
             int partitionFieldSize,
             int taskIdPos,
             int indexFieldPos,
@@ -237,9 +247,9 @@ public class BTreeIndexTopoBuilder {
             int maxParallelism) {
         int parallelism = calculateParallelism(buildTasks, recordsPerRange, maxParallelism);
 
-        DataStream<BTreeSplitTask> sourceStream =
+        DataStream<SortedSplitTask> sourceStream =
                 StreamExecutionEnvironmentUtils.fromData(
-                                env, splitTasks, new JavaTypeInfo<>(BTreeSplitTask.class))
+                                env, splitTasks, new JavaTypeInfo<>(SortedSplitTask.class))
                         .name("Global Index Source")
                         .setParallelism(1);
 
@@ -267,7 +277,7 @@ public class BTreeIndexTopoBuilder {
 
         return sortedStream
                 .transform(
-                        "write-btree-index",
+                        "write-sorted-index",
                         new CommittableTypeInfo(),
                         new WriteIndexOperator(
                                 buildTasks,
@@ -281,9 +291,9 @@ public class BTreeIndexTopoBuilder {
     }
 
     static int calculateParallelism(
-            List<BTreeBuildTask> buildTasks, long recordsPerRange, int maxParallelism) {
+            List<SortedBuildTask> buildTasks, long recordsPerRange, int maxParallelism) {
         long totalRecords = 0;
-        for (BTreeBuildTask task : buildTasks) {
+        for (SortedBuildTask task : buildTasks) {
             long count = task.rowRange.count();
             if (Long.MAX_VALUE - totalRecords < count) {
                 totalRecords = Long.MAX_VALUE;
@@ -317,7 +327,7 @@ public class BTreeIndexTopoBuilder {
                 new CommitterOperatorFactory<>(
                         false,
                         true,
-                        "BTreeIndexCommitter-" + UUID.randomUUID(),
+                        "SortedIndexCommitter-" + UUID.randomUUID(),
                         context ->
                                 new StoreCommitter(
                                         table, table.newCommit(context.commitUser()), context),
@@ -332,7 +342,7 @@ public class BTreeIndexTopoBuilder {
     private static class ReadDataOperator
             extends org.apache.flink.table.runtime.operators.TableStreamOperator<RowData>
             implements org.apache.flink.streaming.api.operators.OneInputStreamOperator<
-                    BTreeSplitTask, RowData> {
+                    SortedSplitTask, RowData> {
 
         private static final long serialVersionUID = 1L;
 
@@ -351,8 +361,8 @@ public class BTreeIndexTopoBuilder {
         }
 
         @Override
-        public void processElement(StreamRecord<BTreeSplitTask> element) throws Exception {
-            BTreeSplitTask buildTask = element.getValue();
+        public void processElement(StreamRecord<SortedSplitTask> element) throws Exception {
+            SortedSplitTask buildTask = element.getValue();
             GenericRow taskId = GenericRow.of(buildTask.taskId);
             try (RecordReader<InternalRow> reader = tableRead.createReader(buildTask.split)) {
                 reader.forEachRemaining(
@@ -366,27 +376,27 @@ public class BTreeIndexTopoBuilder {
 
     private static class WriteIndexOperator extends BoundedOneInputOperator<RowData, Committable> {
 
-        private final List<BTreeBuildTask> buildTasks;
+        private final List<SortedBuildTask> buildTasks;
         private final int partitionFieldSize;
-        private final BTreeGlobalIndexBuilder builder;
+        private final SortedGlobalIndexBuilder builder;
         private final int taskIdPos;
         private final int indexFieldPos;
         private final int rowIdPos;
         private final DataType indexFieldType;
 
         private transient long counter;
-        private transient BTreeBuildTask currentTask;
+        private transient SortedBuildTask currentTask;
         private transient BinaryRow currentPartition;
         private transient GlobalIndexSingleColumnWriter currentWriter;
         private transient List<CommitMessage> commitMessages;
-        private transient Map<Integer, BTreeBuildTask> buildTasksById;
+        private transient Map<Integer, SortedBuildTask> buildTasksById;
         private transient InternalRow.FieldGetter indexFieldGetter;
         private transient BinaryRowSerializer binaryRowSerializer;
 
         public WriteIndexOperator(
-                List<BTreeBuildTask> buildTasks,
+                List<SortedBuildTask> buildTasks,
                 int partitionFieldSize,
-                BTreeGlobalIndexBuilder builder,
+                SortedGlobalIndexBuilder builder,
                 int taskIdPos,
                 int indexFieldPos,
                 int rowIdPos,
@@ -405,7 +415,7 @@ public class BTreeIndexTopoBuilder {
             super.open();
             commitMessages = new ArrayList<>();
             buildTasksById = new HashMap<>();
-            for (BTreeBuildTask task : buildTasks) {
+            for (SortedBuildTask task : buildTasks) {
                 buildTasksById.put(task.taskId, task);
             }
             indexFieldGetter = InternalRow.createFieldGetter(indexFieldType, indexFieldPos);
@@ -416,9 +426,9 @@ public class BTreeIndexTopoBuilder {
         public void processElement(StreamRecord<RowData> element) throws IOException {
             InternalRow row = new FlinkRowWrapper(element.getValue());
             int taskId = row.getInt(taskIdPos);
-            BTreeBuildTask task = buildTasksById.get(taskId);
+            SortedBuildTask task = buildTasksById.get(taskId);
             if (task == null) {
-                throw new IllegalArgumentException("Unknown BTree build task id: " + taskId);
+                throw new IllegalArgumentException("Unknown sorted index build task id: " + taskId);
             }
 
             if (currentTask == null || currentTask.taskId != taskId) {
@@ -463,8 +473,8 @@ public class BTreeIndexTopoBuilder {
         }
     }
 
-    /** Metadata for one BTree index build range. */
-    public static class BTreeBuildTask implements Serializable {
+    /** Metadata for one sorted index build range. */
+    public static class SortedBuildTask implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
@@ -472,26 +482,26 @@ public class BTreeIndexTopoBuilder {
         private Range rowRange;
         private byte[] partition;
 
-        public BTreeBuildTask() {}
+        public SortedBuildTask() {}
 
-        BTreeBuildTask(int taskId, Range rowRange, byte[] partition) {
+        public SortedBuildTask(int taskId, Range rowRange, byte[] partition) {
             this.taskId = taskId;
             this.rowRange = rowRange;
             this.partition = partition;
         }
     }
 
-    /** Split assigned to one BTree index build task. */
-    public static class BTreeSplitTask implements Serializable {
+    /** Split assigned to one sorted index build task. */
+    public static class SortedSplitTask implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
         private int taskId;
         private Split split;
 
-        public BTreeSplitTask() {}
+        public SortedSplitTask() {}
 
-        BTreeSplitTask(int taskId, Split split) {
+        public SortedSplitTask(int taskId, Split split) {
             this.taskId = taskId;
             this.split = split;
         }

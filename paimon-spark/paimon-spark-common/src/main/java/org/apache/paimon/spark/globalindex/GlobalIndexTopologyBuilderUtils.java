@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.globalindex;
 
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +56,9 @@ public class GlobalIndexTopologyBuilderUtils {
     }
 
     public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
+        if (SortedIndexTopoBuilder.supports(indexType)) {
+            return new SortedIndexTopoBuilder();
+        }
         GlobalIndexTopologyBuilder builder = FACTORIES.get(indexType);
         return builder == null ? new DefaultGlobalIndexTopoBuilder() : builder;
     }

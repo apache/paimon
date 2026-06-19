@@ -13,4 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.spark.globalindex.btree.BTreeIndexTopoBuilder
+org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder

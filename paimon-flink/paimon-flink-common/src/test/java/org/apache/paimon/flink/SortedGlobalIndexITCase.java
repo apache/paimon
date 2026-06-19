@@ -36,8 +36,8 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test case for btree global index. */
-public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
+/** Test case for sorted global indexes. */
+public class SortedGlobalIndexITCase extends CatalogITCaseBase {
 
     @Test
     public void testBTreeIndex() throws Catalog.TableNotExistException {
@@ -69,6 +69,39 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
 
         // assert select with filter
         assertThat(sql("SELECT * FROM T WHERE id = 100")).containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testBitmapIndex() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_BITMAP (id INT, name STRING) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        String values =
+                IntStream.range(0, 1_000)
+                        .mapToObj(i -> String.format("(%s, %s)", i, "'name_" + i + "'"))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_BITMAP VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_BITMAP', "
+                        + "index_column => 'id', index_type => 'bitmap', "
+                        + "options => 'sorted-index.records-per-range=200')");
+
+        FileStoreTable table = paimonTable("T_BITMAP");
+        List<IndexFileMeta> bitmapEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> "bitmap".equals(f.indexType()))
+                        .collect(Collectors.toList());
+
+        long totalRowCount = bitmapEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(bitmapEntries).hasSizeGreaterThan(1);
+        assertThat(totalRowCount).isEqualTo(1000L);
+
+        assertThat(sql("SELECT * FROM T_BITMAP WHERE id = 100"))
+                .containsOnly(Row.of(100, "name_100"));
     }
 
     @Test

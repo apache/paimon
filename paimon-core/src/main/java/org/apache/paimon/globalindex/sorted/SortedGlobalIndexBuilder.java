@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
@@ -80,13 +80,12 @@ import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileM
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builder to build btree global index. */
-public class BTreeGlobalIndexBuilder implements Serializable {
+/** Builder to build sorted global index. */
+public class SortedGlobalIndexBuilder implements Serializable {
 
     private static final long serialVersionUID = 1L;
     private static final double FLOATING = 1.2;
-    private static final String INDEX_TYPE = "btree";
-
+    private final String indexType;
     private final FileStoreTable table;
     private final RowType rowType;
     private final Options options;
@@ -100,15 +99,22 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     @Nullable private PartitionPredicate partitionPredicate;
 
-    public BTreeGlobalIndexBuilder(Table table) {
-        this.table = (FileStoreTable) table;
-        this.rowType = this.table.rowType();
-        this.options = this.table.coreOptions().toConfiguration();
-        this.recordsPerRange =
-                (long) (options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE) * FLOATING);
+    public SortedGlobalIndexBuilder(Table table, String indexType) {
+        this(table, indexType, ((FileStoreTable) table).coreOptions().toConfiguration());
     }
 
-    public BTreeGlobalIndexBuilder withIndexField(String indexField) {
+    public SortedGlobalIndexBuilder(Table table, String indexType, Options options) {
+        this.indexType = indexType;
+        this.table = (FileStoreTable) table;
+        this.rowType = this.table.rowType();
+        this.options = options;
+        this.recordsPerRange =
+                (long)
+                        (options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE)
+                                * FLOATING);
+    }
+
+    public SortedGlobalIndexBuilder withIndexField(String indexField) {
         checkArgument(
                 rowType.containsField(indexField),
                 "Column '%s' does not exist in table '%s'.",
@@ -123,12 +129,12 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return this;
     }
 
-    public BTreeGlobalIndexBuilder withPartitionPredicate(PartitionPredicate partitionPredicate) {
+    public SortedGlobalIndexBuilder withPartitionPredicate(PartitionPredicate partitionPredicate) {
         this.partitionPredicate = partitionPredicate;
         return this;
     }
 
-    public BTreeGlobalIndexBuilder withSnapshot(Snapshot snapshot) {
+    public SortedGlobalIndexBuilder withSnapshot(Snapshot snapshot) {
         this.snapshot = snapshot;
         return this;
     }
@@ -192,7 +198,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     private List<Range> indexedRowRanges(Snapshot snapshot) {
         List<Range> ranges = new ArrayList<>();
         for (IndexManifestEntry entry :
-                table.store().newIndexFileHandler().scan(snapshot, "btree")) {
+                table.store().newIndexFileHandler().scan(snapshot, indexType)) {
             if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
                 continue;
             }
@@ -286,10 +292,12 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {
         GlobalIndexSingleColumnWriter currentWriter;
-        GlobalIndexWriter indexWriter = createIndexWriter(table, INDEX_TYPE, indexField, options);
+        GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
         if (!(indexWriter instanceof GlobalIndexSingleColumnWriter)) {
             throw new RuntimeException(
-                    "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexSingleColumnWriter, but found: "
+                    "Unexpected implementation, the index writer of "
+                            + indexType
+                            + " should be an instance of GlobalIndexSingleColumnWriter, but found: "
                             + indexWriter.getClass().getName());
         }
         currentWriter = (GlobalIndexSingleColumnWriter) indexWriter;
@@ -306,7 +314,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                         table.coreOptions(),
                         rowRange,
                         indexField.id(),
-                        INDEX_TYPE,
+                        indexType,
                         resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(

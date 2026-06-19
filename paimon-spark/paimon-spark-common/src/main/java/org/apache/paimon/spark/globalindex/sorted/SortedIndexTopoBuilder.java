@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex.btree;
+package org.apache.paimon.spark.globalindex.sorted;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
-import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.SparkRow;
@@ -52,17 +52,26 @@ import org.apache.spark.sql.functions;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
+import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.groupSplitsByRange;
+import static org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder.splitByContiguousRowRange;
 
-/** The {@link GlobalIndexTopologyBuilder} for BTree index. */
-public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
+/** The {@link GlobalIndexTopologyBuilder} for sorted indexes. */
+public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
+
+    private static final HashSet<String> SUPPORTED_INDEX_TYPES =
+            new HashSet<>(Arrays.asList("btree", "bitmap"));
+
+    public static boolean supports(String indexType) {
+        return SUPPORTED_INDEX_TYPES.contains(indexType);
+    }
 
     @Override
     public String identifier() {
@@ -80,9 +89,9 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException {
-        // 1. read the whole dataset of target partitions
-        BTreeGlobalIndexBuilder indexBuilder =
-                new BTreeGlobalIndexBuilder(table).withIndexField(indexField.name());
+        SortedGlobalIndexBuilder indexBuilder =
+                new SortedGlobalIndexBuilder(table, indexType, options)
+                        .withIndexField(indexField.name());
         if (partitionPredicate != null) {
             indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
@@ -107,8 +116,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         List<String> selectedColumns = new ArrayList<>(readType.getFieldNames());
 
         // Calculate maximum parallelism bound
-        long recordsPerRange = options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
-        int maxParallelism = options.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
+        long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
+        int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
         List<String> sortColumns = new ArrayList<>();
@@ -155,7 +164,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)
                                                 iter ->
-                                                        buildBTreeIndex(
+                                                        buildSortedIndex(
                                                                 iter,
                                                                 serializedBuilder,
                                                                 range,
@@ -168,7 +177,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         return allMessages;
     }
 
-    private static Iterator<byte[]> buildBTreeIndex(
+    private static Iterator<byte[]> buildSortedIndex(
             Iterator<InternalRow> input,
             byte[] serializedBuilder,
             Range range,
@@ -177,9 +186,9 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             throws IOException, ClassNotFoundException {
         final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         BinaryRow partition = binaryRowSerializer.deserializeFromBytes(partitionBytes);
-        BTreeGlobalIndexBuilder builder =
+        SortedGlobalIndexBuilder builder =
                 InstantiationUtil.deserializeObject(
-                        serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
+                        serializedBuilder, SortedGlobalIndexBuilder.class.getClassLoader());
         return CommitMessageSerializer.serializeAll(
                         builder.buildForSinglePartition(range, partition, input))
                 .iterator();
