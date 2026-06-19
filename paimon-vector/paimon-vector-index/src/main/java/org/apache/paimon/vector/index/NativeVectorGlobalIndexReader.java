@@ -60,7 +60,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <p>Each shard has exactly one vector index file. The reader lazily opens the index and performs
  * vector similarity search.
  */
-public class VectorGlobalIndexReader implements GlobalIndexReader {
+public class NativeVectorGlobalIndexReader implements GlobalIndexReader {
 
     private static final String NPROBE_PARAMETER = "ivf.nprobe";
     private static final String EF_SEARCH_PARAMETER = "hnsw.ef_search";
@@ -78,7 +78,7 @@ public class VectorGlobalIndexReader implements GlobalIndexReader {
     private volatile VectorIndexReader vectorReader;
     private SeekableInputStream openStream;
 
-    public VectorGlobalIndexReader(
+    public NativeVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,

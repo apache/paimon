@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for vector global indexer factory SPI registration. */
-public class VectorGlobalIndexerFactoryTest {
+public class NativeVectorGlobalIndexerFactoryTest {
 
     @Test
     public void testIdentifier() {
@@ -67,7 +67,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("ivf-pq.nlist", "256");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -90,7 +90,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("ivf-flat.dimension", "32");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new VectorType(8, new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -106,7 +106,7 @@ public class VectorGlobalIndexerFactoryTest {
 
         assertThatThrownBy(
                         () ->
-                                VectorGlobalIndexerFactory.nativeOptions(
+                                NativeVectorGlobalIndexerFactory.nativeOptions(
                                         new ArrayType(new FloatType()),
                                         options,
                                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -124,7 +124,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec.nlist", "256");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -143,7 +143,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec.dimension", "64");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -159,7 +159,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec.nlist", "256");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -175,7 +175,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec_extra.nlist", "512");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -190,7 +190,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec.distance.metric", "cosine");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
@@ -207,7 +207,7 @@ public class VectorGlobalIndexerFactoryTest {
         options.setString("fields.vec.aggregate-function", "sum");
 
         Map<String, String> nativeOptions =
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         new ArrayType(new FloatType()),
                         options,
                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,

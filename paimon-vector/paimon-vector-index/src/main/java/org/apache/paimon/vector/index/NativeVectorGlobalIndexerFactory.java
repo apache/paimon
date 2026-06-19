@@ -29,7 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Factory for creating vector indexes backed by paimon-vector-index. */
-public abstract class VectorGlobalIndexerFactory implements GlobalIndexerFactory {
+public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     private static final int DEFAULT_DIMENSION = 128;
 

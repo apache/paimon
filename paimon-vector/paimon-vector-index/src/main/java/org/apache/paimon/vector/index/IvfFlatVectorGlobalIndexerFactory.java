@@ -19,7 +19,7 @@
 package org.apache.paimon.vector.index;
 
 /** Factory for the {@code ivf-flat} vector index identifier. */
-public class IvfFlatVectorGlobalIndexerFactory extends VectorGlobalIndexerFactory {
+public class IvfFlatVectorGlobalIndexerFactory extends NativeVectorGlobalIndexerFactory {
 
     public static final String IDENTIFIER = "ivf-flat";
 

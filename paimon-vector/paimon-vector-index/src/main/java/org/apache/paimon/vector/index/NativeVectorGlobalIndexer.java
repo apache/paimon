@@ -46,7 +46,7 @@ public class NativeVectorGlobalIndexer implements org.apache.paimon.globalindex.
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new VectorGlobalIndexWriter(fileWriter, fieldType, options, identifier);
+        return new NativeVectorGlobalIndexWriter(fileWriter, fieldType, options, identifier);
     }
 
     @Override
@@ -54,7 +54,7 @@ public class NativeVectorGlobalIndexer implements org.apache.paimon.globalindex.
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
-        return new VectorGlobalIndexReader(fileReader, files, fieldType, executor);
+        return new NativeVectorGlobalIndexReader(fileReader, files, fieldType, executor);
     }
 
     @Override

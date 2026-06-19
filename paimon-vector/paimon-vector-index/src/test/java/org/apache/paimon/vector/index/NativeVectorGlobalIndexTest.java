@@ -58,8 +58,8 @@ import java.util.concurrent.Executors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link VectorGlobalIndexWriter} and {@link VectorGlobalIndexReader}. */
-public class VectorGlobalIndexTest {
+/** Tests for {@link NativeVectorGlobalIndexWriter} and {@link NativeVectorGlobalIndexReader}. */
+public class NativeVectorGlobalIndexTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -104,7 +104,7 @@ public class VectorGlobalIndexTest {
     public void testDimensionMismatch() {
         Options options = createDefaultOptions(64);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         float[] wrongDimVector = new float[32];
         assertThatThrownBy(() -> writer.write(wrongDimVector, 0))
@@ -129,7 +129,7 @@ public class VectorGlobalIndexTest {
         Options options = createDefaultOptions(2);
         options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}, 0))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -143,7 +143,7 @@ public class VectorGlobalIndexTest {
         Options options = createDefaultOptions(2);
         options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         writer.write(null, 0); // row 0 - null
         assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}, 1))
@@ -158,7 +158,7 @@ public class VectorGlobalIndexTest {
         Options options = createDefaultOptions(2);
         options.setInteger("ivf-pq.pq.m", 1);
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         writer.write(null, 0);
         writer.write(null, 1);
@@ -185,18 +185,18 @@ public class VectorGlobalIndexTest {
         parameters.put("hnsw.ef_search", "80");
         parameters.put("ignored", "bad");
 
-        assertThat(VectorGlobalIndexReader.nprobe(parameters)).isEqualTo(24);
-        assertThat(VectorGlobalIndexReader.efSearch(parameters)).isEqualTo(80);
-        assertThat(VectorGlobalIndexReader.nprobe(Collections.emptyMap())).isEqualTo(16);
-        assertThat(VectorGlobalIndexReader.efSearch(Collections.emptyMap())).isEqualTo(0);
+        assertThat(NativeVectorGlobalIndexReader.nprobe(parameters)).isEqualTo(24);
+        assertThat(NativeVectorGlobalIndexReader.efSearch(parameters)).isEqualTo(80);
+        assertThat(NativeVectorGlobalIndexReader.nprobe(Collections.emptyMap())).isEqualTo(16);
+        assertThat(NativeVectorGlobalIndexReader.efSearch(Collections.emptyMap())).isEqualTo(0);
     }
 
     @Test
     public void testVectorSearchParameterRangeValidationDelegatedToNative() {
-        assertThat(VectorGlobalIndexReader.nprobe(Collections.singletonMap("ivf.nprobe", "0")))
+        assertThat(NativeVectorGlobalIndexReader.nprobe(Collections.singletonMap("ivf.nprobe", "0")))
                 .isEqualTo(0);
         assertThat(
-                        VectorGlobalIndexReader.efSearch(
+                        NativeVectorGlobalIndexReader.efSearch(
                                 Collections.singletonMap("hnsw.ef_search", "-1")))
                 .isEqualTo(-1);
     }
@@ -223,7 +223,7 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
         }
@@ -231,8 +231,8 @@ public class VectorGlobalIndexTest {
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(3);
@@ -262,7 +262,7 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
         }
@@ -270,8 +270,8 @@ public class VectorGlobalIndexTest {
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
 
             // Filter to rows {1, 4} only
             RoaringNavigableMap64 filter = new RoaringNavigableMap64();
@@ -303,7 +303,7 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
 
         writer.write(vectors[0], 0); // row 0
         writer.write(null, 1); // row 1 - null
@@ -318,8 +318,8 @@ public class VectorGlobalIndexTest {
 
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 3, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(3);
@@ -351,12 +351,12 @@ public class VectorGlobalIndexTest {
         NativeVectorGlobalIndexer indexer =
                 new NativeVectorGlobalIndexer(
                         vectorType,
-                        VectorGlobalIndexerFactory.nativeOptions(
+                        NativeVectorGlobalIndexerFactory.nativeOptions(
                                 vectorType, options, IVF_PQ_IDENTIFIER, fieldName),
                         IVF_PQ_IDENTIFIER);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = (VectorGlobalIndexWriter) indexer.createWriter(fileWriter);
+        NativeVectorGlobalIndexWriter writer = (NativeVectorGlobalIndexWriter) indexer.createWriter(fileWriter);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
         }
@@ -364,8 +364,8 @@ public class VectorGlobalIndexTest {
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                (VectorGlobalIndexReader) indexer.createReader(fileReader, metas, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                (NativeVectorGlobalIndexReader) indexer.createReader(fileReader, metas, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 2, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
@@ -393,14 +393,14 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
                     new float[][] {
                         new float[] {1.0f, 0.0f},
@@ -445,14 +445,14 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
                     new float[][] {new float[] {1.0f, 0.0f}, new float[] {-1.0f, 0.0f}};
 
@@ -500,14 +500,14 @@ public class VectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        VectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
+        NativeVectorGlobalIndexWriter writer = createIvfPqWriter(fileWriter, vectorType, options);
         writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
-        try (VectorGlobalIndexReader reader =
-                new VectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
+        try (NativeVectorGlobalIndexReader reader =
+                new NativeVectorGlobalIndexReader(fileReader, metas, vectorType, executor)) {
             float[][] queryVectors =
                     new float[][] {
                         new float[] {1.0f, 0.0f},
@@ -541,12 +541,12 @@ public class VectorGlobalIndexTest {
 
     // =================== Helpers =====================
 
-    private VectorGlobalIndexWriter createIvfPqWriter(
+    private NativeVectorGlobalIndexWriter createIvfPqWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
-        return new VectorGlobalIndexWriter(
+        return new NativeVectorGlobalIndexWriter(
                 fileWriter,
                 fieldType,
-                VectorGlobalIndexerFactory.nativeOptions(
+                NativeVectorGlobalIndexerFactory.nativeOptions(
                         fieldType, options, IVF_PQ_IDENTIFIER, fieldName),
                 IVF_PQ_IDENTIFIER);
     }
@@ -558,7 +558,7 @@ public class VectorGlobalIndexTest {
         return options;
     }
 
-    private void writeVectors(VectorGlobalIndexWriter writer, float[][] vectors) {
+    private void writeVectors(NativeVectorGlobalIndexWriter writer, float[][] vectors) {
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
         }

@@ -54,11 +54,11 @@ import java.util.Map;
  *
  * <p><b>Thread safety:</b> This class is <b>not</b> thread-safe.
  */
-public class VectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
+public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "vector";
 
-    private static final Logger LOG = LoggerFactory.getLogger(VectorGlobalIndexWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(NativeVectorGlobalIndexWriter.class);
 
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
     private static final int ADD_BATCH_SIZE = 10000;
@@ -79,7 +79,7 @@ public class VectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter, C
 
     private long rowCount;
 
-    public VectorGlobalIndexWriter(
+    public NativeVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
             DataType fieldType,
             Map<String, String> options,

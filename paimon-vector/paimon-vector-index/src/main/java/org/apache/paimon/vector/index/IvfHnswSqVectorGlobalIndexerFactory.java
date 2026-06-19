@@ -19,7 +19,7 @@
 package org.apache.paimon.vector.index;
 
 /** Factory for the {@code ivf-hnsw-sq} vector index identifier. */
-public class IvfHnswSqVectorGlobalIndexerFactory extends VectorGlobalIndexerFactory {
+public class IvfHnswSqVectorGlobalIndexerFactory extends NativeVectorGlobalIndexerFactory {
 
     public static final String IDENTIFIER = "ivf-hnsw-sq";
 

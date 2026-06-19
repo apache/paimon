@@ -30,15 +30,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link VectorGlobalIndexReader.SeekableStreamVectorIndexInput}. */
+/** Tests for {@link NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput}. */
 public class SeekableStreamVectorIndexInputTest {
 
     @Test
     public void testVectoredReadableInputUsesParallelPositionReads() throws Exception {
         byte[] data = data(128 * 1024);
         TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 2);
-        VectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
-                new VectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
+        NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
+                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
 
         byte[][] buffers = new byte[][] {new byte[64], new byte[64]};
         indexInput.pread(new long[] {0, 32 * 1024}, buffers);
@@ -54,8 +54,8 @@ public class SeekableStreamVectorIndexInputTest {
     public void testFallbackToSequentialReadWhenRangesOverlap() {
         byte[] data = data(1024);
         TestVectoredSeekableInputStream input = new TestVectoredSeekableInputStream(data, 0);
-        VectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
-                new VectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
+        NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput indexInput =
+                new NativeVectorGlobalIndexReader.SeekableStreamVectorIndexInput(input);
 
         byte[][] buffers = new byte[][] {new byte[64], new byte[64]};
         indexInput.pread(new long[] {0, 32}, buffers);
