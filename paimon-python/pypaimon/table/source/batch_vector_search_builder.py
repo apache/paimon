@@ -23,7 +23,6 @@ from pypaimon.table.source.vector_search_builder import (
     AbstractVectorSearchBuilderImpl,
 )
 from pypaimon.table.source.vector_search_read import (
-    BatchVectorSearchRead,
     BatchVectorSearchReadImpl,
 )
 

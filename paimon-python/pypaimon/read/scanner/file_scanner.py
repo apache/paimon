@@ -56,7 +56,6 @@ from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
-from pypaimon.utils.range import Range
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
@@ -366,15 +365,15 @@ class FileScanner:
 
     def _with_unindexed_rows(self, indexed_result, manifest_files, snapshot):
         return GlobalIndexUnindexedRowsScanner(
-                self.table,
-                snapshot,
-                manifest_files,
-                self.partition_key_predicate,
-                self.predicate,
-                self.target_split_size,
-                self.open_file_cost,
-                self.read_manifest_entries,
-                self._deletion_files_map,
+            self.table,
+            snapshot,
+            manifest_files,
+            self.partition_key_predicate,
+            self.predicate,
+            self.target_split_size,
+            self.open_file_cost,
+            self.read_manifest_entries,
+            self._deletion_files_map,
         ).with_unindexed_rows(indexed_result)
 
     def plan_files(self) -> List[ManifestEntry]:
