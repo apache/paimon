@@ -97,5 +97,10 @@ class OffsetGlobalIndexReader(GlobalIndexReader):
     def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> 'Future[Optional[GlobalIndexResult]]':
         return self._apply_offset_future(self._wrapped.visit_between(field_ref, min_v, max_v))
 
+    def visit_not_between(
+        self, field_ref: FieldRef, min_v: object, max_v: object
+    ) -> 'Future[Optional[GlobalIndexResult]]':
+        return self._apply_offset_future(self._wrapped.visit_not_between(field_ref, min_v, max_v))
+
     def close(self) -> None:
         self._wrapped.close()

@@ -42,10 +42,10 @@ def _int_meta(first: int, last: int) -> bytes:
             struct.pack('<B', has_nulls))
 
 
-def _io_meta(file_name: str, first: int, last: int) -> GlobalIndexIOMeta:
+def _io_meta(file_name: str, first: int, last: int, file_size: int = 1024) -> GlobalIndexIOMeta:
     return GlobalIndexIOMeta(
         file_name=file_name,
-        file_size=1024,
+        file_size=file_size,
         metadata=_int_meta(first, last),
     )
 
@@ -64,6 +64,12 @@ class _SlowBTreeReader:
         return GlobalIndexResult.create(bm)
 
     def visit_is_not_null(self):
+        time.sleep(0.01)
+        bm = RoaringBitmap64()
+        bm.add_range(0, 10)
+        return GlobalIndexResult.create(bm)
+
+    def visit_starts_with(self, literal):
         time.sleep(0.01)
         bm = RoaringBitmap64()
         bm.add_range(0, 10)
@@ -96,6 +102,7 @@ class LazyFilteredBTreeReaderThreadTest(unittest.TestCase):
             index_path="/unused",
             io_metas=io_metas,
             executor=executor,
+            fallback_scan_max_size=256 * 1024 * 1024,
         )
         # Keep the patch active — reader_cls stays in module
         return reader, executor, (mod, original)
@@ -105,6 +112,71 @@ class LazyFilteredBTreeReaderThreadTest(unittest.TestCase):
         executor.shutdown(wait=False)
         mod, original = patch_info
         mod.BTreeIndexReader = original
+
+    def test_fallback_scan_budget_disables_range_scan(self):
+        """Range scans need fallback budget; point lookups remain direct."""
+        reader, executor, patch = self._create_reader(num_files=2, pool_size=2)
+        reader._fallback_scan_max_size = 0
+        field_ref = FieldRef(0, "id", "INT")
+        try:
+            self.assertIsNone(
+                reader.visit_less_than(field_ref, 15).result(timeout=5.0))
+            direct_result = reader.visit_equal(field_ref, 5).result(timeout=5.0)
+            self.assertIsNotNone(direct_result)
+            self.assertIn(5, list(direct_result.results()))
+        finally:
+            self._cleanup(reader, executor, patch)
+
+    def test_fallback_scan_budget_rejects_oversized_candidates(self):
+        reader, executor, patch = self._create_reader(num_files=2, pool_size=2)
+        reader._fallback_scan_max_size = 1024
+        field_ref = FieldRef(0, "id", "INT")
+        try:
+            self.assertIsNone(
+                reader.visit_less_than(field_ref, 15).result(timeout=5.0))
+        finally:
+            self._cleanup(reader, executor, patch)
+
+    def test_fallback_scan_budget_rejects_java_long_overflow(self):
+        reader, executor, patch = self._create_reader(num_files=2, pool_size=2)
+        reader._fallback_scan_max_size = (1 << 63) - 1
+        reader._selector._files = [
+            (_io_meta("large-0.index", 0, 9, (1 << 63) - 1),
+             BTreeIndexMeta.deserialize(_int_meta(0, 9))),
+            (_io_meta("large-1.index", 10, 19, 1),
+             BTreeIndexMeta.deserialize(_int_meta(10, 19))),
+        ]
+        field_ref = FieldRef(0, "id", "INT")
+        try:
+            self.assertIsNone(
+                reader.visit_less_than(field_ref, 15).result(timeout=5.0))
+        finally:
+            self._cleanup(reader, executor, patch)
+
+    def test_string_predicates_require_character_string_type(self):
+        reader, executor, patch = self._create_reader(num_files=1, pool_size=1)
+        try:
+            self.assertIsNone(
+                reader.visit_starts_with(FieldRef(0, "id", "BINARY"), b"a")
+                .result(timeout=5.0))
+            self.assertIsNone(
+                reader.visit_like(FieldRef(0, "id", "MAP<STRING, INT>"), "a%")
+                .result(timeout=5.0))
+            self.assertIsNotNone(
+                reader.visit_starts_with(FieldRef(0, "id", "VARCHAR(10) NOT NULL"), "1")
+                .result(timeout=5.0))
+        finally:
+            self._cleanup(reader, executor, patch)
+
+    def test_like_fallback_rejects_non_positive_budget_before_selection(self):
+        reader, executor, patch = self._create_reader(num_files=1, pool_size=1)
+        reader._fallback_scan_max_size = 0
+        try:
+            self.assertIsNone(
+                reader.visit_like(FieldRef(0, "id", "VARCHAR(10)"), "%1")
+                .result(timeout=5.0))
+        finally:
+            self._cleanup(reader, executor, patch)
 
     def test_no_deadlock_more_files_than_threads(self):
         """With 8 files and only 2 threads, callback-based chaining must not deadlock."""
