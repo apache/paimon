@@ -219,6 +219,53 @@ run_btree_index_test() {
     fi
 }
 
+run_bitmap_index_test() {
+    echo -e "${YELLOW}=== Step 6b: Running Bitmap Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testBitmapIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testBitmapIndexWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    # Run the specific Python test method
+    echo "Running Python test for JavaPyReadWriteTest.test_read_bitmap_index_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_bitmap_index_table -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
+run_compressed_global_index_test() {
+    echo -e "${YELLOW}=== Step 6c: Running Compressed Global Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testCompressedGlobalIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testCompressedGlobalIndexWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_compressed_global_index_fallback_scan..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_compressed_global_index_fallback_scan -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 run_compressed_text_test() {
     echo -e "${YELLOW}=== Step 7: Running Compressed Text Test (Java Write, Python Read) ===${NC}"
 
@@ -691,6 +738,8 @@ main() {
     local java_read_result=0
     local pk_dv_result=0
     local btree_index_result=0
+    local bitmap_index_result=0
+    local compressed_global_index_result=0
     local compressed_text_result=0
     local vector_append_table_result=0
     local tantivy_fulltext_result=0
@@ -761,6 +810,19 @@ main() {
     # Run BTree index test (Java write, Python read)
     if ! run_btree_index_test; then
         btree_index_result=1
+    fi
+
+    echo ""
+
+    # Run Bitmap index test (Java write, Python read)
+    if ! run_bitmap_index_test; then
+        bitmap_index_result=1
+    fi
+
+    echo ""
+
+    if ! run_compressed_global_index_test; then
+        compressed_global_index_result=1
     fi
 
     echo ""
@@ -940,6 +1002,18 @@ main() {
         echo -e "${RED}✗ BTree Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $bitmap_index_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Bitmap Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Bitmap Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $compressed_global_index_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Compressed Global Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Compressed Global Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     if [[ $compressed_text_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Compressed Text Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -1047,7 +1121,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

@@ -28,13 +28,13 @@ from typing import List, Optional
 
 from pypaimon.common.file_io import FileIO, supports_pread, pread
 from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
-from pypaimon.globalindex.btree.key_serializer import KeySerializer
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.key_serializer import KeySerializer
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
-from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
+from pypaimon.globalindex.memory_slice_input import MemorySliceInput
 
 
 def _deserialize_row_ids(data: bytes) -> List[int]:
@@ -200,8 +200,7 @@ class BTreeIndexReader:
         return GlobalIndexResult.create(self._read_null_bitmap())
 
     def visit_less_than(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(
-            self._range_query(self.min_key, literal, True, False))
+        return GlobalIndexResult.create(self.less_than(literal))
 
     def visit_greater_or_equal(self, literal: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(
@@ -222,8 +221,7 @@ class BTreeIndexReader:
             self._range_query(literal, literal, True, True))
 
     def visit_greater_than(self, literal: object) -> Optional[GlobalIndexResult]:
-        return GlobalIndexResult.create(
-            self._range_query(literal, self.max_key, False, True))
+        return GlobalIndexResult.create(self.greater_than(literal))
 
     def visit_in(self, literals: List[object]) -> Optional[GlobalIndexResult]:
         result = RoaringBitmap64()
@@ -254,6 +252,12 @@ class BTreeIndexReader:
     def visit_between(self, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
         return GlobalIndexResult.create(
             self._range_query(min_v, max_v, True, True))
+
+    def less_than(self, literal: object) -> RoaringBitmap64:
+        return self._range_query(self.min_key, literal, True, False)
+
+    def greater_than(self, literal: object) -> RoaringBitmap64:
+        return self._range_query(literal, self.max_key, False, True)
 
     def close(self) -> None:
         if self.input_stream is not None:

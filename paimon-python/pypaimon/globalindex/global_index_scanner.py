@@ -24,6 +24,8 @@ from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.schema.data_types import DataField
@@ -40,7 +42,9 @@ class GlobalIndexScanner:
         index_path: str,
         index_files: Collection['IndexFileMeta'],
         thread_num: Optional[int] = None,
+        options: Optional[CoreOptions] = None,
     ):
+        self._options = options or CoreOptions(Options.from_none())
         self._executor = ThreadPoolExecutor(
             max_workers=thread_num or 32
         )
@@ -76,9 +80,11 @@ class GlobalIndexScanner:
             index_metas[field_id][index_type][range_key].append(io_meta)
 
         executor = self._executor
+        options = self._options
 
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(file_io, index_path, index_metas.get(field.id), field, executor)
+            return _create_readers(
+                file_io, index_path, index_metas.get(field.id), field, executor, options)
 
         return GlobalIndexEvaluator(fields, readers_function)
 
@@ -105,6 +111,7 @@ class GlobalIndexScanner:
                 index_path=table.path_factory().global_index_path_factory().index_path(),
                 index_files=index_files,
                 thread_num=table.options.global_index_thread_num(),
+                options=table.options,
             )
 
         # Scan index files from snapshot using partition_filter and predicate
@@ -138,6 +145,7 @@ class GlobalIndexScanner:
             index_path=table.path_factory().global_index_path_factory().index_path(),
             index_files=scanned_index_files,
             thread_num=table.options.global_index_thread_num(),
+            options=table.options,
         )
 
     def scan(self, predicate: Optional[Predicate]) -> Optional[GlobalIndexResult]:
@@ -156,7 +164,7 @@ class GlobalIndexScanner:
         self.close()
 
 
-def _create_readers(file_io, index_path, index_type_metas, field, executor=None):
+def _create_readers(file_io, index_path, index_type_metas, field, executor=None, options=None):
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
@@ -178,7 +186,7 @@ def _create_readers(file_io, index_path, index_type_metas, field, executor=None)
         offset_readers = []
         for range_key, io_metas in range_metas.items():
             inner_readers = _create_inner_readers(
-                index_type, file_io, index_path, field, io_metas, executor)
+                index_type, file_io, index_path, field, io_metas, executor, options)
             for inner in inner_readers:
                 offset_readers.append(
                     OffsetGlobalIndexReader(
@@ -188,11 +196,13 @@ def _create_readers(file_io, index_path, index_type_metas, field, executor=None)
     return readers
 
 
-def _create_inner_readers(index_type, file_io, index_path, field, io_metas, executor=None):
+def _create_inner_readers(
+        index_type, file_io, index_path, field, io_metas, executor=None, options=None):
     """Build per-file (or per-shard) readers for a single indexType/range."""
+    core_options = options or CoreOptions(Options.from_none())
     if index_type == 'btree':
         from pypaimon.globalindex.btree.lazy_filtered_btree_reader import LazyFilteredBTreeReader
-        from pypaimon.globalindex.btree.key_serializer import create_serializer
+        from pypaimon.globalindex.key_serializer import create_serializer
         key_serializer = create_serializer(field.type)
         return [LazyFilteredBTreeReader(
             key_serializer=key_serializer,
@@ -200,6 +210,20 @@ def _create_inner_readers(index_type, file_io, index_path, field, io_metas, exec
             index_path=index_path,
             io_metas=io_metas,
             executor=executor,
+            fallback_scan_max_size=core_options.btree_index_fallback_scan_max_size(),
+        )]
+
+    if index_type == 'bitmap':
+        from pypaimon.globalindex.bitmap.lazy_filtered_bitmap_reader import LazyFilteredBitmapReader
+        from pypaimon.globalindex.key_serializer import create_serializer
+        key_serializer = create_serializer(field.type)
+        return [LazyFilteredBitmapReader(
+            key_serializer=key_serializer,
+            file_io=file_io,
+            index_path=index_path,
+            io_metas=io_metas,
+            executor=executor,
+            fallback_scan_max_size=core_options.bitmap_index_fallback_scan_max_size(),
         )]
 
     from pypaimon.globalindex.tantivy import (

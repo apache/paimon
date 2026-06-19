@@ -981,7 +981,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 
         class _FakeLazyReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_metas, executor=None):
+                         io_metas, executor=None, fallback_scan_max_size=None):
                 captured_io_metas.append(list(io_metas))
 
             def close(self_inner):
@@ -1061,7 +1061,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
                 _StubBTreeReader):
             with mock.patch(
-                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=wide_meta):
                 scanner = GlobalIndexScanner(
                     fields=table.fields,
@@ -1183,8 +1183,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
                 _StubBTreeReader):
             with mock.patch(
-                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
-                    return_value=BTreeIndexMeta(first_key=None, last_key=None, has_nulls=False)):
+                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
+                    return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
                 scanner = GlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
@@ -1194,11 +1194,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 try:
                     result = scanner.scan(
                         Predicate(method="like", index=0, field="name",
-                                  literals=["abc%"]))
+                                  literals=["a_c%"]))
                 finally:
                     scanner.close()
 
-        self.assertEqual([("like", "abc%")], observed_calls)
+        self.assertEqual([("like", "a_c%")], observed_calls)
         self.assertIsNotNone(result)
         self.assertEqual([3], sorted(list(result.results())))
 

@@ -15,18 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""BTree global index reader for sorted index files."""
+"""Bitmap global index reader for sorted index files."""
 
-from pypaimon.globalindex.btree.btree_index_reader import BTreeIndexReader
+from pypaimon.globalindex.bitmap.bitmap_index_reader import BitmapIndexReader
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.sorted_file_global_index_reader import SortedFileGlobalIndexReader
 
 
-class LazyFilteredBTreeReader(SortedFileGlobalIndexReader):
-    """Manages multiple BTree index files for one row-id range."""
+class LazyFilteredBitmapReader(SortedFileGlobalIndexReader):
+    """Manages multiple bitmap index files for one row-id range."""
 
-    def open_reader(self, meta: GlobalIndexIOMeta) -> BTreeIndexReader:
-        return BTreeIndexReader(
+    def open_reader(self, meta: GlobalIndexIOMeta) -> BitmapIndexReader:
+        return BitmapIndexReader(
             key_serializer=self._key_serializer,
             file_io=self._file_io,
             index_path=self._index_path,
