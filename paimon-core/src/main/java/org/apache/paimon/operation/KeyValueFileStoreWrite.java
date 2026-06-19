@@ -202,7 +202,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Creating merge tree writer for partition {} bucket {} from restored files {}",
@@ -211,12 +212,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     restoreFiles);
         }
 
+        boolean lookupEnabled = !ignorePreviousFiles && options.needLookup();
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         CompactManager compactManager =
                 compactManagerFactory.create(
-                        partition, bucket, compactExecutor, restoreFiles, dvMaintainer);
+                        partition,
+                        bucket,
+                        compactExecutor,
+                        restoreFiles,
+                        dvMaintainer,
+                        lookupEnabled);
 
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),
