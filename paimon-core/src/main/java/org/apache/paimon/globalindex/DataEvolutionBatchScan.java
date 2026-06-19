@@ -23,7 +23,6 @@ import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
@@ -38,11 +37,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableBatchScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -63,7 +58,6 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
-import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
 import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
@@ -251,7 +245,16 @@ public class DataEvolutionBatchScan implements DataTableScan {
         ScoreGetter scoreGetter = null;
 
         if (rowRangeIndex == null) {
-            Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
+            Snapshot snapshot = null;
+            Optional<GlobalIndexResult> indexResult;
+            if (globalIndexResult != null) {
+                indexResult = Optional.of(globalIndexResult);
+            } else if (filter == null || !table.coreOptions().globalIndexEnabled()) {
+                indexResult = Optional.empty();
+            } else {
+                snapshot = tryTravelOrLatest(table);
+                indexResult = evalGlobalIndex(snapshot);
+            }
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 RoaringNavigableMap64 rowIds = result.results();
@@ -262,7 +265,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
                                 && table.coreOptions().globalIndexSearchMode()
                                         != GlobalIndexSearchMode.FAST;
                 if (scanUnindexedRanges) {
-                    rowIds = withUnindexedRows(rowIds);
+                    rowIds = unindexedRowsScanner(snapshot).withUnindexedRows(rowIds);
                     rowRanges = rowIds.toRangeList();
                 }
                 rowRangeIndex = RowRangeIndex.create(rowRanges);
@@ -280,108 +283,15 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
-    private RoaringNavigableMap64 withUnindexedRows(RoaringNavigableMap64 indexedResultRows) {
-        TableScan.Plan allDataPlan = null;
-        Snapshot snapshot;
-        if (table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.DETAIL) {
-            allDataPlan = allDataPlan();
-            snapshot =
-                    batchScan.snapshotReader().snapshotManager().snapshot(snapshotId(allDataPlan));
-        } else {
-            snapshot = tryTravelOrLatest(table);
-        }
-
-        List<Range> unindexedRanges = unindexedRanges(allDataPlan, snapshot);
-
-        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        rows.or(indexedResultRows);
-        rows.or(matchingRows(unindexedRanges));
-        return rows;
+    private GlobalIndexUnindexedRowsScanner unindexedRowsScanner(Snapshot snapshot) {
+        return new GlobalIndexUnindexedRowsScanner(
+                table,
+                snapshot,
+                batchScan.snapshotReader().manifestsReader().partitionFilter(),
+                filter);
     }
 
-    private List<Range> unindexedRanges(@Nullable TableScan.Plan allDataPlan, Snapshot snapshot) {
-        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
-            return Collections.emptyList();
-        }
-
-        List<Range> dataRanges = new ArrayList<>();
-        if (table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.DETAIL) {
-            if (allDataPlan == null) {
-                return Collections.emptyList();
-            }
-            for (Split split : allDataPlan.splits()) {
-                if (!(split instanceof DataSplit)) {
-                    continue;
-                }
-                for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
-                    if (file.firstRowId() != null) {
-                        dataRanges.add(file.nonNullRowIdRange());
-                    }
-                }
-            }
-        } else {
-            dataRanges.add(new Range(0, snapshot.nextRowId() - 1));
-        }
-
-        List<Range> predicateIndexedRanges =
-                GlobalIndexScanner.indexedRanges(
-                        table,
-                        batchScan.snapshotReader().manifestsReader().partitionFilter(),
-                        filter,
-                        snapshot);
-        predicateIndexedRanges = Range.sortAndMergeOverlap(predicateIndexedRanges, true);
-
-        List<Range> unindexedRanges = new ArrayList<>();
-        for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
-            unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));
-        }
-        return Range.sortAndMergeOverlap(unindexedRanges, true);
-    }
-
-    private RoaringNavigableMap64 matchingRows(List<Range> ranges) {
-        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        if (ranges.isEmpty()) {
-            return rows;
-        }
-
-        RowType readType = rowTypeWithRowId(table.rowType());
-        RowRangeIndex rowRangeIndex = RowRangeIndex.create(ranges);
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType).withFilter(filter);
-        readBuilder.withPartitionFilter(
-                batchScan.snapshotReader().manifestsReader().partitionFilter());
-        List<Split> splits = readBuilder.withRowRangeIndex(rowRangeIndex).newScan().plan().splits();
-        int rowIdIndex = readType.getFieldIndex(ROW_ID.name());
-        try {
-            TableRead read = readBuilder.newRead();
-            try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
-                    read.executeFilter().createReader(splits)) {
-                reader.forEachRemaining(row -> rows.add(row.getLong(rowIdIndex)));
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to scan unindexed data for global index raw search.", e);
-        }
-        return rows;
-    }
-
-    private long snapshotId(TableScan.Plan plan) {
-        if (plan instanceof SnapshotReader.Plan) {
-            Long snapshotId = ((SnapshotReader.Plan) plan).snapshotId();
-            if (snapshotId != null) {
-                return snapshotId;
-            }
-        }
-        throw new IllegalStateException("Cannot read global index coverage without a snapshot.");
-    }
-
-    private TableScan.Plan allDataPlan() {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        readBuilder.withPartitionFilter(
-                batchScan.snapshotReader().manifestsReader().partitionFilter());
-        return readBuilder.newScan().plan();
-    }
-
-    private Optional<GlobalIndexResult> evalGlobalIndex() {
+    private Optional<GlobalIndexResult> evalGlobalIndex(Snapshot snapshot) {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
@@ -395,7 +305,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         PartitionPredicate partitionFilter =
                 batchScan.snapshotReader().manifestsReader().partitionFilter();
         Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, partitionFilter, filter);
+                GlobalIndexScanner.create(table, partitionFilter, filter, snapshot);
         if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }

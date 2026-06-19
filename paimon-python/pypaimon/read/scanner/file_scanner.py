@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
-from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.global_index_unindexed_rows_scanner import (
+    GlobalIndexUnindexedRowsScanner,
+)
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -51,12 +53,10 @@ from pypaimon.read.scanner.data_evolution_split_generator import \
 from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
-from pypaimon.table.special_fields import SpecialFields
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.utils.range import Range
-from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
@@ -365,73 +365,17 @@ class FileScanner:
         )
 
     def _with_unindexed_rows(self, indexed_result, manifest_files, snapshot):
-        mode = self.table.options.global_index_search_mode()
-        entries = None
-        if mode == GlobalIndexSearchMode.DETAIL:
-            entries = self.read_manifest_entries(manifest_files)
-            data_ranges = []
-            for entry in entries:
-                first_row_id = entry.file.first_row_id
-                if first_row_id is not None:
-                    data_ranges.append(entry.file.row_id_range())
-        elif snapshot is not None and snapshot.next_row_id is not None and snapshot.next_row_id > 0:
-            data_ranges = [Range(0, int(snapshot.next_row_id) - 1)]
-        else:
-            data_ranges = []
-
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-
-        predicate_indexed_ranges = Range.sort_and_merge_overlap(
-            GlobalIndexScanner.predicate_indexed_ranges(
+        return GlobalIndexUnindexedRowsScanner(
                 self.table,
+                snapshot,
+                manifest_files,
                 self.partition_key_predicate,
                 self.predicate,
-                snapshot,
-            ),
-            merge=True,
-            adjacent=True,
-        )
-        unindexed_ranges = []
-        for data_range in Range.sort_and_merge_overlap(
-                data_ranges, merge=True, adjacent=True):
-            unindexed_ranges.extend(data_range.exclude(predicate_indexed_ranges))
-        unindexed_ranges = Range.sort_and_merge_overlap(
-            unindexed_ranges, merge=True, adjacent=True)
-
-        if entries is None and unindexed_ranges:
-            entries = self.read_manifest_entries(manifest_files)
-        if entries is None:
-            entries = []
-
-        bitmap = RoaringBitmap64.or_(
-            indexed_result.results(),
-            self._matching_unindexed_rows(entries, unindexed_ranges))
-        return GlobalIndexResult.create(bitmap)
-
-    def _matching_unindexed_rows(self, entries, row_ranges):
-        rows = RoaringBitmap64()
-        if not row_ranges:
-            return rows
-
-        entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
-        if not entries:
-            return rows
-
-        split_generator = DataEvolutionSplitGenerator(
-            self.table,
-            self.target_split_size,
-            self.open_file_cost,
-            self._deletion_files_map(entries),
-            row_ranges,
-        )
-        splits = split_generator.create_splits(entries)
-        read_type = SpecialFields.row_type_with_row_id(self.table.fields)
-        row_id_index = len(read_type) - 1
-        reader = self.table.new_read_builder().with_read_type(read_type) \
-            .with_filter(self.predicate).new_read()
-        for row in reader.to_iterator(splits):
-            rows.add(int(row.get_field(row_id_index)))
-        return rows
+                self.target_split_size,
+                self.open_file_cost,
+                self.read_manifest_entries,
+                self._deletion_files_map,
+        ).with_unindexed_rows(indexed_result)
 
     def plan_files(self) -> List[ManifestEntry]:
         manifest_files, snapshot = self.manifest_scanner()

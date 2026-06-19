@@ -226,12 +226,17 @@ public class GlobalIndexScanner implements Closeable {
 
     public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
+        return create(table, partitionFilter, filter, tryTravelOrLatest(table));
+    }
+
+    public static Optional<GlobalIndexScanner> create(
+            FileStoreTable table,
+            PartitionPredicate partitionFilter,
+            Predicate filter,
+            Snapshot snapshot) {
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
-                        .scan(
-                                tryTravelOrLatest(table),
-                                indexFileFilter(table, partitionFilter, filter))
-                        .stream()
+                        .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         return create(table, indexFiles);
