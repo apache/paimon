@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex;
 
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
@@ -24,11 +24,8 @@ import org.apache.paimon.memory.MemorySliceOutput;
 
 import javax.annotation.Nullable;
 
-/**
- * Index Meta of each BTree index file. The first key and last key of this meta could be null if the
- * entire btree index file only contains nulls.
- */
-public class BTreeIndexMeta {
+/** Manifest-level min/max metadata for one global index file. */
+public class SortedIndexFileMeta {
 
     private static final byte FORMAT_VERSION_WITH_NULL_FLAGS = 1;
     private static final byte FIRST_KEY_IS_NULL = 1;
@@ -38,15 +35,26 @@ public class BTreeIndexMeta {
     @Nullable private final byte[] lastKey;
     private final boolean hasNulls;
 
-    public BTreeIndexMeta(@Nullable byte[] firstKey, @Nullable byte[] lastKey, boolean hasNulls) {
+    public SortedIndexFileMeta(
+            @Nullable byte[] firstKey, @Nullable byte[] lastKey, boolean hasNulls) {
         this.firstKey = firstKey;
         this.lastKey = lastKey;
         this.hasNulls = hasNulls;
     }
 
     @Nullable
+    public byte[] firstKey() {
+        return firstKey;
+    }
+
+    @Nullable
     public byte[] getFirstKey() {
         return firstKey;
+    }
+
+    @Nullable
+    public byte[] lastKey() {
+        return lastKey;
     }
 
     @Nullable
@@ -59,7 +67,7 @@ public class BTreeIndexMeta {
     }
 
     public boolean onlyNulls() {
-        return firstKey == null && lastKey == null;
+        return firstKey() == null && lastKey() == null;
     }
 
     private int memorySize() {
@@ -91,7 +99,7 @@ public class BTreeIndexMeta {
         return sliceOutput.toSlice().getHeapMemory();
     }
 
-    public static BTreeIndexMeta deserialize(byte[] data) {
+    public static SortedIndexFileMeta deserialize(byte[] data) {
         MemorySliceInput sliceInput = MemorySlice.wrap(data).toInput();
         int firstKeyLength = sliceInput.readInt();
         byte[] firstKey = readKey(sliceInput, firstKeyLength);
@@ -114,7 +122,7 @@ public class BTreeIndexMeta {
             firstKey = null;
             lastKey = null;
         }
-        return new BTreeIndexMeta(firstKey, lastKey, hasNulls);
+        return new SortedIndexFileMeta(firstKey, lastKey, hasNulls);
     }
 
     private static byte[] readKey(MemorySliceInput sliceInput, int keyLength) {

@@ -16,147 +16,137 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex.bitmap;
 
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileGlobalIndexReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
 
-/**
- * An Index Reader for BTree which dynamically filters file list by input predicate, then visits
- * each selected file in parallel via an executor. Each index file is synchronized independently to
- * allow maximum concurrency.
- */
-public class LazyFilteredBTreeReader extends SortedFileGlobalIndexReader<BTreeIndexReader> {
+/** Reader for bitmap global index files. */
+public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<BitmapIndexReader> {
 
-    private final KeySerializer keySerializer;
-    private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
+    private final KeySerializer keySerializer;
 
-    public LazyFilteredBTreeReader(
+    LazyFilteredBitmapReader(
+            GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             KeySerializer keySerializer,
-            GlobalIndexFileReader fileReader,
-            CacheManager cacheManager,
             long fallbackScanMaxSize,
             ExecutorService executor) {
         super(files, keySerializer, fallbackScanMaxSize, executor);
-        this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitIsNotNull(BTreeIndexReader reader) {
+    protected Optional<GlobalIndexResult> visitIsNotNull(BitmapIndexReader reader) {
         return reader.visitIsNotNull();
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitIsNull(BTreeIndexReader reader) {
+    protected Optional<GlobalIndexResult> visitIsNull(BitmapIndexReader reader) {
         return reader.visitIsNull();
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitStartsWith(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitStartsWith(
+            BitmapIndexReader reader, Object literal) {
         return reader.visitStartsWith(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitEndsWith(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitEndsWith(BitmapIndexReader reader, Object literal) {
         return reader.visitEndsWith(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitContains(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitContains(BitmapIndexReader reader, Object literal) {
         return reader.visitContains(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitLike(
-            BTreeIndexReader reader, FieldRef fieldRef, Object literal) {
-        return reader.visitLike(literal);
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitLessThan(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitLessThan(BitmapIndexReader reader, Object literal) {
         return reader.visitLessThan(literal);
     }
 
     @Override
     protected Optional<GlobalIndexResult> visitGreaterOrEqual(
-            BTreeIndexReader reader, Object literal) {
+            BitmapIndexReader reader, Object literal) {
         return reader.visitGreaterOrEqual(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitNotEqual(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitNotEqual(BitmapIndexReader reader, Object literal) {
         return reader.visitNotEqual(literal);
     }
 
     @Override
     protected Optional<GlobalIndexResult> visitLessOrEqual(
-            BTreeIndexReader reader, Object literal) {
+            BitmapIndexReader reader, Object literal) {
         return reader.visitLessOrEqual(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitEqual(BTreeIndexReader reader, Object literal) {
+    protected Optional<GlobalIndexResult> visitEqual(BitmapIndexReader reader, Object literal) {
         return reader.visitEqual(literal);
     }
 
     @Override
     protected Optional<GlobalIndexResult> visitGreaterThan(
-            BTreeIndexReader reader, Object literal) {
+            BitmapIndexReader reader, Object literal) {
         return reader.visitGreaterThan(literal);
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitIn(BTreeIndexReader reader, List<Object> literals) {
+    protected Optional<GlobalIndexResult> visitIn(BitmapIndexReader reader, List<Object> literals) {
         return reader.visitIn(literals);
     }
 
     @Override
     protected Optional<GlobalIndexResult> visitNotIn(
-            BTreeIndexReader reader, List<Object> literals) {
+            BitmapIndexReader reader, List<Object> literals) {
         return reader.visitNotIn(literals);
     }
 
     @Override
     protected Optional<GlobalIndexResult> visitBetween(
-            BTreeIndexReader reader, Object from, Object to) {
+            BitmapIndexReader reader, Object from, Object to) {
         return reader.visitBetween(from, to);
     }
 
     @Override
-    protected RoaringNavigableMap64 lessThan(BTreeIndexReader reader, Object literal) {
-        return bitmap(reader.visitLessThan(literal));
+    protected RoaringNavigableMap64 like(
+            BitmapIndexReader reader, Function<Object, Boolean> keyPredicate) {
+        return reader.like(keyPredicate::apply);
     }
 
     @Override
-    protected RoaringNavigableMap64 greaterThan(BTreeIndexReader reader, Object literal) {
-        return bitmap(reader.visitGreaterThan(literal));
+    protected RoaringNavigableMap64 lessThan(BitmapIndexReader reader, Object literal) {
+        return reader.lessThan(literal);
     }
 
     @Override
-    protected BTreeIndexReader openReader(GlobalIndexIOMeta meta) {
+    protected RoaringNavigableMap64 greaterThan(BitmapIndexReader reader, Object literal) {
+        return reader.greaterThan(literal);
+    }
+
+    @Override
+    protected BitmapIndexReader openReader(GlobalIndexIOMeta meta) {
         try {
-            return new BTreeIndexReader(keySerializer, fileReader, meta, cacheManager);
+            return new BitmapIndexReader(keySerializer, fileReader, meta);
         } catch (IOException e) {
-            throw new RuntimeException("Can't create BTree index reader for " + meta.filePath(), e);
+            throw new RuntimeException(
+                    "Can't create bitmap index reader for " + meta.filePath(), e);
         }
-    }
-
-    private RoaringNavigableMap64 bitmap(Optional<GlobalIndexResult> result) {
-        return result.get().results();
     }
 }

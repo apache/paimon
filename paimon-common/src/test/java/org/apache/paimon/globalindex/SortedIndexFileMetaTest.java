@@ -16,15 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex.btree;
+package org.apache.paimon.globalindex;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
-import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.options.Options;
@@ -39,8 +38,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link BTreeIndexMeta}. */
-class BTreeIndexMetaTest {
+/** Test for {@link SortedIndexFileMeta}. */
+class SortedIndexFileMetaTest {
 
     @TempDir private java.nio.file.Path tempPath;
 
@@ -48,7 +47,7 @@ class BTreeIndexMetaTest {
     void testEmptyFirstKey() {
         byte[] lastKey = new byte[] {1, 2, 3};
 
-        BTreeIndexMeta meta = roundTrip(new BTreeIndexMeta(new byte[0], lastKey, false));
+        SortedIndexFileMeta meta = roundTrip(new SortedIndexFileMeta(new byte[0], lastKey, false));
 
         assertThat(meta.getFirstKey()).isEmpty();
         assertThat(meta.getLastKey()).containsExactly(lastKey);
@@ -58,7 +57,8 @@ class BTreeIndexMetaTest {
 
     @Test
     void testEmptyFirstAndLastKeyWithNulls() {
-        BTreeIndexMeta meta = roundTrip(new BTreeIndexMeta(new byte[0], new byte[0], true));
+        SortedIndexFileMeta meta =
+                roundTrip(new SortedIndexFileMeta(new byte[0], new byte[0], true));
 
         assertThat(meta.getFirstKey()).isEmpty();
         assertThat(meta.getLastKey()).isEmpty();
@@ -68,7 +68,7 @@ class BTreeIndexMetaTest {
 
     @Test
     void testOnlyNulls() {
-        BTreeIndexMeta meta = roundTrip(new BTreeIndexMeta(null, null, true));
+        SortedIndexFileMeta meta = roundTrip(new SortedIndexFileMeta(null, null, true));
 
         assertThat(meta.getFirstKey()).isNull();
         assertThat(meta.getLastKey()).isNull();
@@ -82,7 +82,7 @@ class BTreeIndexMetaTest {
                 writeVarCharIndex(
                         null, BinaryString.fromString(""), BinaryString.fromString("abc"));
 
-        BTreeIndexMeta meta = BTreeIndexMeta.deserialize(results.get(0).meta());
+        SortedIndexFileMeta meta = SortedIndexFileMeta.deserialize(results.get(0).meta());
 
         assertThat(meta.getFirstKey()).isEmpty();
         assertThat(meta.getLastKey()).containsExactly(BinaryString.fromString("abc").toBytes());
@@ -92,8 +92,8 @@ class BTreeIndexMetaTest {
 
     @Test
     void testLegacyOnlyNulls() {
-        BTreeIndexMeta meta =
-                BTreeIndexMeta.deserialize(legacyMetaBytes(new byte[0], new byte[0], true));
+        SortedIndexFileMeta meta =
+                SortedIndexFileMeta.deserialize(legacyMetaBytes(new byte[0], new byte[0], true));
 
         assertThat(meta.getFirstKey()).isNull();
         assertThat(meta.getLastKey()).isNull();
@@ -105,8 +105,8 @@ class BTreeIndexMetaTest {
     void testLegacyEmptyFirstKey() {
         byte[] lastKey = new byte[] {1, 2, 3};
 
-        BTreeIndexMeta meta =
-                BTreeIndexMeta.deserialize(legacyMetaBytes(new byte[0], lastKey, false));
+        SortedIndexFileMeta meta =
+                SortedIndexFileMeta.deserialize(legacyMetaBytes(new byte[0], lastKey, false));
 
         assertThat(meta.getFirstKey()).isEmpty();
         assertThat(meta.getLastKey()).containsExactly(lastKey);
@@ -116,8 +116,8 @@ class BTreeIndexMetaTest {
 
     @Test
     void testLegacyEmptyFirstAndLastKeyWithoutNulls() {
-        BTreeIndexMeta meta =
-                BTreeIndexMeta.deserialize(legacyMetaBytes(new byte[0], new byte[0], false));
+        SortedIndexFileMeta meta =
+                SortedIndexFileMeta.deserialize(legacyMetaBytes(new byte[0], new byte[0], false));
 
         assertThat(meta.getFirstKey()).isEmpty();
         assertThat(meta.getLastKey()).isEmpty();
@@ -125,8 +125,8 @@ class BTreeIndexMetaTest {
         assertThat(meta.onlyNulls()).isFalse();
     }
 
-    private BTreeIndexMeta roundTrip(BTreeIndexMeta meta) {
-        return BTreeIndexMeta.deserialize(meta.serialize());
+    private SortedIndexFileMeta roundTrip(SortedIndexFileMeta meta) {
+        return SortedIndexFileMeta.deserialize(meta.serialize());
     }
 
     private byte[] legacyMetaBytes(byte[] firstKey, byte[] lastKey, boolean hasNulls) {
