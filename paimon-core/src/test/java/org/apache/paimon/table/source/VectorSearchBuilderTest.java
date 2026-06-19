@@ -60,6 +60,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -520,6 +521,30 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchRequiresVectorColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                new Range(0, 1),
+                Arrays.asList(table.rowType().getField("id"), table.rowType().getField("vec")));
+
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+
+        VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
+    }
+
+    @Test
     public void testVectorSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -957,6 +982,16 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitVectorIndex(FileStoreTable table, float[][] vectors, Range rowRange)
             throws Exception {
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                rowRange,
+                Collections.singletonList(table.rowType().getField(VECTOR_FIELD_NAME)));
+    }
+
+    private void buildAndCommitVectorIndexWithFields(
+            FileStoreTable table, float[][] vectors, Range rowRange, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
@@ -978,7 +1013,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        vectorField.id(),
+                        indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
