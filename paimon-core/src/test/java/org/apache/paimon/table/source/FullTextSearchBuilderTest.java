@@ -51,6 +51,7 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -344,6 +345,30 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).contains(0, 1, 2);
     }
 
+    @Test
+    public void testFullTextSearchRequiresTextColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Arrays.asList(
+                        table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)));
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQueryText("Paimon")
+                        .withLimit(2)
+                        .withTextColumn(TEXT_FIELD_NAME);
+
+        FullTextScan.Plan plan = searchBuilder.newFullTextScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
+    }
+
     // ====================== Helper methods ======================
 
     private void writeDocuments(FileStoreTable table, String[] documents) throws Exception {
@@ -358,6 +383,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     private void buildAndCommitIndex(FileStoreTable table, String[] documents) throws Exception {
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)));
+    }
+
+    private void buildAndCommitIndexWithFields(
+            FileStoreTable table, String[] documents, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
@@ -380,7 +414,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        textField.id(),
+                        indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
