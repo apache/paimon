@@ -530,6 +530,7 @@ class TableRead:
                 read_type=self.read_type,
                 predicate=self.predicate,
                 limit=self.limit,
+                nested_name_paths=self.nested_name_paths,
             )
         )
         ds = ray.data.read_datasource(
