@@ -22,7 +22,9 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -108,6 +110,29 @@ public class CoreOptionsTest {
         } finally {
             Locale.setDefault(originalLocale);
         }
+    }
+
+    @Test
+    public void testFileFormatProviderOptionsAreRegistered() {
+        assertThat(org.apache.paimon.format.FileFormatProvider.FORMAT_PROVIDER)
+                .isEqualTo(CoreOptions.FILE_FORMAT_PROVIDER.key());
+        assertThat(org.apache.paimon.format.FileFormatProvider.READ_FORMAT_PROVIDER)
+                .isEqualTo(CoreOptions.FILE_FORMAT_READ_PROVIDER.key());
+        assertThat(org.apache.paimon.format.FileFormatProvider.WRITE_FORMAT_PROVIDER)
+                .isEqualTo(CoreOptions.FILE_FORMAT_WRITE_PROVIDER.key());
+        assertThat(org.apache.paimon.format.FileFormatProvider.VALIDATION_FORMAT_PROVIDER)
+                .isEqualTo(CoreOptions.FILE_FORMAT_VALIDATION_PROVIDER.key());
+
+        assertThat(
+                        CoreOptions.getOptions().stream()
+                                .map(option -> option.key())
+                                .collect(Collectors.toSet()))
+                .containsAll(
+                        Arrays.asList(
+                                CoreOptions.FILE_FORMAT_PROVIDER.key(),
+                                CoreOptions.FILE_FORMAT_READ_PROVIDER.key(),
+                                CoreOptions.FILE_FORMAT_WRITE_PROVIDER.key(),
+                                CoreOptions.FILE_FORMAT_VALIDATION_PROVIDER.key()));
     }
 
     @Test

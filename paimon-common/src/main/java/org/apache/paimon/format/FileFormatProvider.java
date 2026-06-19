@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 
@@ -39,16 +40,16 @@ import java.util.Optional;
 public interface FileFormatProvider {
 
     /** Option key used to select a provider discovered from the classpath. */
-    String FORMAT_PROVIDER = "file.format.provider";
+    String FORMAT_PROVIDER = CoreOptions.FILE_FORMAT_PROVIDER.key();
 
     /** Option key used to select a provider for file-format readers. */
-    String READ_FORMAT_PROVIDER = "file.format.read-provider";
+    String READ_FORMAT_PROVIDER = CoreOptions.FILE_FORMAT_READ_PROVIDER.key();
 
     /** Option key used to select a provider for file-format writers. */
-    String WRITE_FORMAT_PROVIDER = "file.format.write-provider";
+    String WRITE_FORMAT_PROVIDER = CoreOptions.FILE_FORMAT_WRITE_PROVIDER.key();
 
     /** Option key used to select a provider for file-format validation. */
-    String VALIDATION_FORMAT_PROVIDER = "file.format.validation-provider";
+    String VALIDATION_FORMAT_PROVIDER = CoreOptions.FILE_FORMAT_VALIDATION_PROVIDER.key();
 
     /** Identifier used to select this provider. */
     String identifier();

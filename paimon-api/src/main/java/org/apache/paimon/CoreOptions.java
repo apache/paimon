@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fs.Path;
@@ -298,6 +299,40 @@ public class CoreOptions implements Serializable {
                     .defaultValue(FILE_FORMAT_PARQUET)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
+
+    @Experimental
+    @ExcludeFromDocumentation("Experimental format-provider SPI")
+    public static final ConfigOption<String> FILE_FORMAT_PROVIDER =
+            key("file.format.provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Selects an experimental file format provider discovered from the classpath.");
+
+    @Experimental
+    @ExcludeFromDocumentation("Experimental format-provider SPI")
+    public static final ConfigOption<String> FILE_FORMAT_READ_PROVIDER =
+            key("file.format.read-provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Selects an experimental file format provider for readers.");
+
+    @Experimental
+    @ExcludeFromDocumentation("Experimental format-provider SPI")
+    public static final ConfigOption<String> FILE_FORMAT_WRITE_PROVIDER =
+            key("file.format.write-provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Selects an experimental file format provider for writers.");
+
+    @Experimental
+    @ExcludeFromDocumentation("Experimental format-provider SPI")
+    public static final ConfigOption<String> FILE_FORMAT_VALIDATION_PROVIDER =
+            key("file.format.validation-provider")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Selects an experimental file format provider for schema validation.");
 
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
