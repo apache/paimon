@@ -29,6 +29,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.VectorReadImpl;
+import org.apache.paimon.table.source.VectorScan;
 import org.apache.paimon.table.source.VectorSearchSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -79,10 +80,20 @@ public class SparkVectorReadImpl extends VectorReadImpl {
     }
 
     @Override
-    public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        // Slow search scans table data and should run in the coordinator with normal Paimon split
+    public GlobalIndexResult read(VectorScan.Plan plan, @Nullable Long nextRowId) {
+        // Raw search scans table data and should run in the coordinator with normal Paimon split
         // planning; Spark distribution below is only for index-only evaluation.
-        if (slowSearchEnabled()) {
+        if (rawSearchEnabled()) {
+            return super.read(plan, nextRowId);
+        }
+        return read(plan.splits());
+    }
+
+    @Override
+    public GlobalIndexResult read(List<VectorSearchSplit> splits) {
+        // Raw search scans table data and should run in the coordinator with normal Paimon split
+        // planning; Spark distribution below is only for index-only evaluation.
+        if (rawSearchEnabled()) {
             return super.read(splits);
         }
         if (splits.isEmpty()) {
