@@ -134,7 +134,8 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(table.location().toString()).isEqualTo(schemaPath);
         assertThat(
                         new SchemaManager(
-                                        fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
+                                        fileIO,
+                                        new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
@@ -149,7 +150,8 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(RUNTIME_PROVIDER_CONTEXT_PATHS).doesNotContain(runtimePath);
         assertThat(
                         new SchemaManager(
-                                        fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
+                                        fileIO,
+                                        new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
