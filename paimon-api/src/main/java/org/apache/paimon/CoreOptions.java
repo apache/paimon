@@ -2756,7 +2756,7 @@ public class CoreOptions implements Serializable {
     }
 
     public static String normalizeFileFormat(String fileFormat) {
-        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase();
+        return StringUtils.isEmpty(fileFormat) ? fileFormat : fileFormat.toLowerCase(Locale.ROOT);
     }
 
     public String dataFilePrefix() {

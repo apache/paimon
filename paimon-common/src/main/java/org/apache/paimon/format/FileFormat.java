@@ -123,7 +123,7 @@ public abstract class FileFormat {
 
     private static FileFormat fromIdentifier(
             String identifier, FormatContext context, String providerOptionKey) {
-        String normalizedIdentifier = identifier.toLowerCase(Locale.ROOT);
+        String normalizedIdentifier = normalizeFileFormat(identifier);
         ClassLoader classLoader = providerClassLoader();
         Optional<FileFormat> operationFormat =
                 createFromProvider(classLoader, context, providerOptionKey, normalizedIdentifier);
@@ -179,9 +179,9 @@ public abstract class FileFormat {
 
     protected Options getIdentifierPrefixOptions(Options options) {
         Map<String, String> result = new HashMap<>();
-        String prefix = formatIdentifier.toLowerCase() + ".";
+        String prefix = formatIdentifier.toLowerCase(Locale.ROOT) + ".";
         for (String key : options.keySet()) {
-            if (key.toLowerCase().startsWith(prefix)) {
+            if (key.toLowerCase(Locale.ROOT).startsWith(prefix)) {
                 result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }

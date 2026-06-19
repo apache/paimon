@@ -22,6 +22,8 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Locale;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link org.apache.paimon.CoreOptions}. */
@@ -94,6 +96,18 @@ public class CoreOptionsTest {
 
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.sequenceField()).containsExactly("f1", "f2", "f3");
+    }
+
+    @Test
+    public void testNormalizeFileFormatUsesRootLocale() {
+        Locale originalLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr"));
+            assertThat(CoreOptions.normalizeFileFormat("MOSAIC"))
+                    .isEqualTo(CoreOptions.FILE_FORMAT_MOSAIC);
+        } finally {
+            Locale.setDefault(originalLocale);
+        }
     }
 
     @Test

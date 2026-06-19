@@ -42,6 +42,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -105,7 +106,7 @@ public class FileFormatTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, identifier);
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
-        tableOptions.setString(identifier.toLowerCase() + ".hello", "world");
+        tableOptions.setString(identifier.toLowerCase(Locale.ROOT) + ".hello", "world");
         FileFormat fileFormat = FileFormat.fromIdentifier(identifier, tableOptions);
         assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 

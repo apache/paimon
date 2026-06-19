@@ -170,10 +170,12 @@ public class FileFormatProviderTest {
         options.setString(FileFormatProvider.READ_FORMAT_PROVIDER, TEST_PROVIDER);
         FormatContext context = new FormatContext(options, 1024, 1024);
 
-        FileFormat readerFormat = FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT, context);
+        FileFormat readerFormat =
+                FileFormat.readerFromIdentifier(PROVIDER_ONLY_FORMAT.toUpperCase(), context);
         FileFormat genericFormat = FileFormat.fromIdentifier(DEFAULT_FORMAT, context);
 
         assertThat(readerFormat).isInstanceOf(ProviderFileFormat.class);
+        assertThat(readerFormat.getFormatIdentifier()).isEqualTo(PROVIDER_ONLY_FORMAT);
         assertThat(genericFormat).isInstanceOf(FactoryFileFormat.class);
     }
 
