@@ -193,7 +193,9 @@ public class NativeVectorGlobalIndexTest {
 
     @Test
     public void testVectorSearchParameterRangeValidationDelegatedToNative() {
-        assertThat(NativeVectorGlobalIndexReader.nprobe(Collections.singletonMap("ivf.nprobe", "0")))
+        assertThat(
+                        NativeVectorGlobalIndexReader.nprobe(
+                                Collections.singletonMap("ivf.nprobe", "0")))
                 .isEqualTo(0);
         assertThat(
                         NativeVectorGlobalIndexReader.efSearch(
@@ -356,7 +358,8 @@ public class NativeVectorGlobalIndexTest {
                         IVF_PQ_IDENTIFIER);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
-        NativeVectorGlobalIndexWriter writer = (NativeVectorGlobalIndexWriter) indexer.createWriter(fileWriter);
+        NativeVectorGlobalIndexWriter writer =
+                (NativeVectorGlobalIndexWriter) indexer.createWriter(fileWriter);
         for (int i = 0; i < vectors.length; i++) {
             writer.write(vectors[i], i);
         }

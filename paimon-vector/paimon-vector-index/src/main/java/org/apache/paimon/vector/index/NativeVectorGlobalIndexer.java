@@ -31,7 +31,8 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** Native vector global indexer backed by paimon-vector-index. */
-public class NativeVectorGlobalIndexer implements org.apache.paimon.globalindex.VectorGlobalIndexer {
+public class NativeVectorGlobalIndexer
+        implements org.apache.paimon.globalindex.VectorGlobalIndexer {
 
     private final DataType fieldType;
     private final Map<String, String> options;
