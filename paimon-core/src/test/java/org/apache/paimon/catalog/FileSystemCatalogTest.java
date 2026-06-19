@@ -99,11 +99,14 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         options.set(
                 Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
                 RuntimeOptionFileFormatProvider.IDENTIFIER);
+        String runtimePath = new Path(new Path(warehouse), "runtime-path-ignored").toString();
+        options.set(Catalog.TABLE_RUNTIME_OPTION_PREFIX + CoreOptions.PATH.key(), runtimePath);
         catalog =
                 new FileSystemCatalog(fileIO, new Path(warehouse), CatalogContext.create(options));
 
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "new_table");
+        String schemaPath = new Path(new Path(warehouse), "test_db.db/new_table").toString();
         Schema schema =
                 Schema.newBuilder()
                         .column("pk", DataTypes.INT())
@@ -118,16 +121,18 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         assertThat(table.options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
+                .containsEntry(CoreOptions.PATH.key(), schemaPath)
                 .containsEntry(
                         FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
                         RuntimeOptionFileFormatProvider.IDENTIFIER);
+        assertThat(table.location().toString()).isEqualTo(schemaPath);
         assertThat(
                         new SchemaManager(
-                                        fileIO,
-                                        new Path(new Path(warehouse), "test_db.db/new_table"))
+                                        fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
+                .doesNotContainKey(CoreOptions.PATH.key())
                 .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
 
         RUNTIME_PROVIDER_VALIDATIONS.set(0);
@@ -137,11 +142,11 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         assertThat(RUNTIME_PROVIDER_VALIDATIONS.get()).isGreaterThan(0);
         assertThat(
                         new SchemaManager(
-                                        fileIO,
-                                        new Path(new Path(warehouse), "test_db.db/new_table"))
+                                        fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
+                .doesNotContainKey(CoreOptions.PATH.key())
                 .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
     }
 
