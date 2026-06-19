@@ -49,6 +49,8 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,6 +61,8 @@ import static org.mockito.Mockito.when;
 public class FileSystemCatalogTest extends CatalogTestBase {
 
     private static final AtomicInteger RUNTIME_PROVIDER_VALIDATIONS = new AtomicInteger();
+    private static final Queue<String> RUNTIME_PROVIDER_CONTEXT_PATHS =
+            new ConcurrentLinkedQueue<>();
 
     @BeforeEach
     public void setUp() throws Exception {
@@ -95,6 +99,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     @Test
     public void testCreateTableWithRuntimeCatalogOptions() throws Exception {
         RUNTIME_PROVIDER_VALIDATIONS.set(0);
+        RUNTIME_PROVIDER_CONTEXT_PATHS.clear();
         Options options = new Options();
         options.set(
                 Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
@@ -118,6 +123,7 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.createTable(identifier, schema, false);
 
         assertThat(RUNTIME_PROVIDER_VALIDATIONS.get()).isGreaterThan(0);
+        assertThat(RUNTIME_PROVIDER_CONTEXT_PATHS).contains(schemaPath).doesNotContain(runtimePath);
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         assertThat(table.options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
@@ -140,12 +146,32 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                 identifier, SchemaChange.addColumn("new_value", DataTypes.STRING()), false);
 
         assertThat(RUNTIME_PROVIDER_VALIDATIONS.get()).isGreaterThan(0);
+        assertThat(RUNTIME_PROVIDER_CONTEXT_PATHS).doesNotContain(runtimePath);
         assertThat(
                         new SchemaManager(
                                         fileIO, new Path(new Path(warehouse), "test_db.db/new_table"))
                                 .latestOrThrow("Table schema should exist")
                                 .options())
                 .containsEntry(CoreOptions.FILE_FORMAT.key(), CoreOptions.FILE_FORMAT_AVRO)
+                .doesNotContainKey(CoreOptions.PATH.key())
+                .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
+
+        table.createBranch("audit");
+        FileStoreTable branchTable =
+                (FileStoreTable) catalog.getTable(new Identifier("test_db", "new_table", "audit"));
+        assertThat(branchTable.options())
+                .containsEntry(
+                        FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
+                        RuntimeOptionFileFormatProvider.IDENTIFIER);
+        assertThat(branchTable.location().toString()).isEqualTo(schemaPath);
+        assertThat(RUNTIME_PROVIDER_CONTEXT_PATHS).doesNotContain(runtimePath);
+        assertThat(
+                        new SchemaManager(
+                                        fileIO,
+                                        new Path(new Path(warehouse), "test_db.db/new_table"),
+                                        "audit")
+                                .latestOrThrow("Branch schema should exist")
+                                .options())
                 .doesNotContainKey(CoreOptions.PATH.key())
                 .doesNotContainKey(FileFormatProvider.VALIDATION_FORMAT_PROVIDER);
     }
@@ -229,6 +255,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         @Override
         public Optional<FileFormat> create(String identifier, FormatContext context) {
             if (CoreOptions.FILE_FORMAT_AVRO.equals(identifier)) {
+                String contextPath = context.options().get(CoreOptions.PATH.key());
+                if (contextPath != null) {
+                    RUNTIME_PROVIDER_CONTEXT_PATHS.add(contextPath);
+                }
                 return Optional.of(new RuntimeOptionFileFormat(identifier));
             }
             return Optional.empty();

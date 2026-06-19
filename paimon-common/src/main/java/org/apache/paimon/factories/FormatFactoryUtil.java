@@ -112,6 +112,7 @@ public class FormatFactoryUtil {
                             identifier,
                             matchingProviders.stream()
                                     .map(p -> p.getClass().getName())
+                                    .sorted()
                                     .collect(Collectors.joining("\n"))));
         }
 

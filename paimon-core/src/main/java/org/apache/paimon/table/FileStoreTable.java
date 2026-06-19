@@ -132,7 +132,7 @@ public interface FileStoreTable extends DataTable {
 
     /**
      * Get {@link DataTable} with branch identified by {@code branchName}. Note that this method
-     * does not keep dynamic options in current table.
+     * does not keep dynamic options in current table, except catalog runtime options.
      */
     @Override
     FileStoreTable switchToBranch(String branchName);

@@ -210,7 +210,20 @@ public class FileFormatProviderTest {
         assertThatThrownBy(() -> FileFormat.fromIdentifier(PROVIDER_ONLY_FORMAT, options))
                 .hasMessageContaining("Multiple providers for identifier")
                 .hasMessageContaining(DuplicateFileFormatProvider.class.getName())
-                .hasMessageContaining(OtherDuplicateFileFormatProvider.class.getName());
+                .hasMessageContaining(OtherDuplicateFileFormatProvider.class.getName())
+                .satisfies(
+                        e ->
+                                assertThat(
+                                                e.getMessage()
+                                                        .indexOf(
+                                                                DuplicateFileFormatProvider.class
+                                                                        .getName()))
+                                        .isLessThan(
+                                                e.getMessage()
+                                                        .indexOf(
+                                                                OtherDuplicateFileFormatProvider
+                                                                        .class
+                                                                        .getName())));
     }
 
     private static URL[] classpathUrls() throws Exception {

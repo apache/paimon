@@ -19,9 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -407,8 +410,23 @@ public class FallbackReadFileStoreTableTest {
         String branchName = "bc";
 
         Identifier mainId = Identifier.create("mydb", "mytable");
+        Options catalogOptions = new Options();
+        catalogOptions.set(
+                Catalog.TABLE_RUNTIME_OPTION_PREFIX + FileFormatProvider.VALIDATION_FORMAT_PROVIDER,
+                "catalog-runtime-provider");
+        catalogOptions.set(
+                Catalog.TABLE_RUNTIME_OPTION_PREFIX + CoreOptions.PATH.key(),
+                new Path(tablePath, "ignored-runtime-path").toString());
         CatalogEnvironment env =
-                new CatalogEnvironment(mainId, "uuid-1", null, null, null, null, false, false);
+                new CatalogEnvironment(
+                        mainId,
+                        "uuid-1",
+                        null,
+                        null,
+                        null,
+                        CatalogContext.create(catalogOptions),
+                        false,
+                        false);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
@@ -431,13 +449,23 @@ public class FallbackReadFileStoreTableTest {
         FallbackReadFileStoreTable fallbackTable =
                 new FallbackReadFileStoreTable(mainTable, branchTable, true);
 
-        FileStoreTable switched = fallbackTable.switchToBranch(branchName);
+        Options dynamicOptions = new Options();
+        dynamicOptions.set(CoreOptions.SCAN_SNAPSHOT_ID, 1L);
+
+        FileStoreTable switched =
+                fallbackTable.copy(dynamicOptions.toMap()).switchToBranch(branchName);
         Identifier switchedId = switched.catalogEnvironment().identifier();
 
         assertThat(switchedId).isNotNull();
         assertThat(switchedId.getDatabaseName()).isEqualTo("mydb");
         assertThat(switchedId.getBranchName()).isEqualTo(branchName);
         assertThat(switchedId.getObjectName()).isEqualTo("mytable$branch_bc");
+        assertThat(switched.options())
+                .containsEntry(CoreOptions.PATH.key(), tablePath.toString())
+                .containsEntry(
+                        FileFormatProvider.VALIDATION_FORMAT_PROVIDER, "catalog-runtime-provider")
+                .doesNotContainKey(CoreOptions.SCAN_SNAPSHOT_ID.key());
+        assertThat(switched.location()).isEqualTo(tablePath);
     }
 
     private void writeDataIntoTable(

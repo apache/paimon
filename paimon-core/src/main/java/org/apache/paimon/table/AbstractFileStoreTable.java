@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
@@ -785,8 +786,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO(),
                 location(),
                 branchSchema,
-                new Options(),
+                catalogRuntimeOptions(catalogEnvironment),
                 newCatalogEnvironment(targetBranch));
+    }
+
+    static Options catalogRuntimeOptions(CatalogEnvironment catalogEnvironment) {
+        if (catalogEnvironment.catalogContext() == null) {
+            return new Options();
+        }
+        return Options.fromMap(
+                CatalogUtils.tableRuntimeOptions(
+                        catalogEnvironment.catalogContext().options().toMap()));
     }
 
     private RollbackHelper rollbackHelper() {

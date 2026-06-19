@@ -584,6 +584,7 @@ class SchemaValidationTest {
                 .hasMessageContaining(CoreOptions.WRITE_ONLY.key());
     }
 
+    @Test
     public void testSnapshotSequenceOrderingHonorsDynamicWriteOnlyValue() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING.key(), "true");

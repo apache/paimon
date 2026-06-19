@@ -69,6 +69,7 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
@@ -139,6 +140,9 @@ public class SchemaValidation {
         Map<String, String> validationOptions = new HashMap<>(schema.options());
         dynamicOptions.forEach(
                 (key, value) -> {
+                    if (PATH.key().equals(key)) {
+                        return;
+                    }
                     if (value == null) {
                         validationOptions.remove(key);
                     } else {
