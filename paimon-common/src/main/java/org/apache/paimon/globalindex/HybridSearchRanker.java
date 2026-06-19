@@ -105,8 +105,25 @@ public class HybridSearchRanker {
             ScoredGlobalIndexResult result = weightedResult.result();
             float weight = weightedResult.weight();
             ScoreGetter scoreGetter = result.scoreGetter();
+
+            // Route score scales are heterogeneous (e.g. bounded vector similarity vs unbounded
+            // BM25), so raw scores are not comparable across routes. Min-max normalize each route
+            // into [0, 1] before weighting, so that weights -- not a route's numeric magnitude --
+            // decide its influence on the fused score.
+            float min = Float.POSITIVE_INFINITY;
+            float max = Float.NEGATIVE_INFINITY;
             for (long rowId : result.results()) {
-                float contribution = weight * scoreGetter.score(rowId);
+                float score = scoreGetter.score(rowId);
+                min = Math.min(min, score);
+                max = Math.max(max, score);
+            }
+            float range = max - min;
+
+            for (long rowId : result.results()) {
+                // No spread within the route (single hit or all ties) carries no relative signal,
+                // so every hit maps to 1.0 rather than being zeroed out.
+                float normalized = range > 0.0f ? (scoreGetter.score(rowId) - min) / range : 1.0f;
+                float contribution = weight * normalized;
                 scores.compute(
                         rowId,
                         (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);

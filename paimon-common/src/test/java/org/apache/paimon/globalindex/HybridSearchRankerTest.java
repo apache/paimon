@@ -71,7 +71,59 @@ public class HybridSearchRankerTest {
 
         assertThat(ranked.results().getIntCardinality()).isEqualTo(1);
         assertThat(ranked.results()).contains(1L);
-        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(0.9f, within(0.000001f));
+        // Within the route {0.3, 0.2} min-max maps 0.3 -> 1.0, so score = weight (3.0) * 1.0.
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(3.0f, within(0.000001f));
+    }
+
+    @Test
+    public void testWeightedScoreNormalizesHeterogeneousRouteScales() {
+        // Vector-like route: rowId 1 strongly matches, rowId 2 barely matches (bounded ~[0, 1]).
+        ScoredGlobalIndexResult vectorRoute = result(new long[] {1, 2}, new float[] {0.95f, 0.10f});
+        // BM25-like route: rowId 2 strongly matches, rowId 1 weakly (unbounded, larger magnitude).
+        ScoredGlobalIndexResult textRoute = result(new long[] {1, 2}, new float[] {2.0f, 25.0f});
+
+        // Vector route weighted 5x. Without normalization the BM25 magnitude would dominate; with
+        // normalization each route maps its best hit to 1.0 and worst to 0.0, so weights decide.
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.weightedScore(
+                        Arrays.asList(vectorRoute, textRoute), new float[] {5.0f, 1.0f}, 2);
+
+        // rowId 1: 5 * 1.0 (vector best) + 1 * 0.0 (text worst) = 5.0
+        // rowId 2: 5 * 0.0 (vector worst) + 1 * 1.0 (text best) = 1.0
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(5.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(2L)).isCloseTo(1.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(1L)).isGreaterThan(ranked.scoreGetter().score(2L));
+    }
+
+    @Test
+    public void testWeightedScoreSingleHitRouteMapsToFullWeight() {
+        // A route with a single hit has no spread (min == max); it must not produce NaN/Infinity
+        // and must keep contributing rather than being zeroed out.
+        ScoredGlobalIndexResult singleHit = result(new long[] {7}, new float[] {42.0f});
+
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.weightedScore(
+                        Collections.singletonList(
+                                new HybridSearchRanker.WeightedResult(singleHit, 2.0f)),
+                        1);
+
+        assertThat(ranked.scoreGetter().score(7L)).isCloseTo(2.0f, within(0.000001f));
+    }
+
+    @Test
+    public void testWeightedScoreAllTiedRouteMapsEachHitToFullWeight() {
+        // All hits share the same score (no relative signal); each maps to 1.0 -> weight.
+        ScoredGlobalIndexResult tied = result(new long[] {1, 2, 3}, new float[] {5.0f, 5.0f, 5.0f});
+
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.weightedScore(
+                        Collections.singletonList(
+                                new HybridSearchRanker.WeightedResult(tied, 2.0f)),
+                        3);
+
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(2.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(2L)).isCloseTo(2.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(3L)).isCloseTo(2.0f, within(0.000001f));
     }
 
     private ScoredGlobalIndexResult result(long[] rowIds, float[] scores) {
