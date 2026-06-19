@@ -63,6 +63,7 @@ public interface VectorSearchBuilder extends Serializable {
 
     /** Execute vector index search in local. */
     default GlobalIndexResult executeLocal() {
-        return newVectorRead().read(newVectorScan().scan());
+        VectorScan.Plan plan = newVectorScan().scan();
+        return newVectorRead().read(plan);
     }
 }

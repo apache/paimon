@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
@@ -198,25 +199,26 @@ public abstract class AbstractVectorRead implements Serializable {
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
-    protected boolean slowSearchEnabled() {
-        return !fastSearch();
+    protected boolean rawSearchEnabled() {
+        return searchMode() != GlobalIndexSearchMode.FAST;
     }
 
-    protected boolean fastSearch() {
-        return table.coreOptions().globalIndexFastSearch();
+    protected GlobalIndexSearchMode searchMode() {
+        return table.coreOptions().globalIndexSearchMode();
     }
 
-    protected ScoredGlobalIndexResult withSlowSearch(
+    protected ScoredGlobalIndexResult withRawSearch(
             ScoredGlobalIndexResult result,
             List<VectorSearchSplit> splits,
             @Nullable GlobalIndexer globalIndexer,
+            @Nullable Long nextRowId,
             float[] queryVector) {
-        if (!slowSearchEnabled()) {
+        if (!rawSearchEnabled()) {
             return result.topK(limit);
         }
 
         ScoredGlobalIndexResult rawResult =
-                readSlowSearch(splits, slowSearchMetric(globalIndexer), queryVector);
+                readRawSearch(splits, rawSearchMetric(globalIndexer), nextRowId, queryVector);
         return result.or(rawResult).topK(limit);
     }
 
@@ -242,12 +244,13 @@ public abstract class AbstractVectorRead implements Serializable {
         return indexIOMetaList;
     }
 
-    private ScoredGlobalIndexResult readSlowSearch(
-            List<VectorSearchSplit> splits, String metric, float[] queryVector) {
+    private ScoredGlobalIndexResult readRawSearch(
+            List<VectorSearchSplit> splits,
+            String metric,
+            @Nullable Long nextRowId,
+            float[] queryVector) {
         RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
-        ReadBuilder rangeDiscoveryBuilder = newRawReadBuilder(readType, false);
-        TableScan.Plan allDataPlan = rangeDiscoveryBuilder.newScan().plan();
-        List<Range> nonIndexedRanges = nonIndexedRanges(allDataPlan, splits);
+        List<Range> nonIndexedRanges = nonIndexedRanges(readType, splits, nextRowId);
         if (nonIndexedRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
@@ -279,7 +282,7 @@ public abstract class AbstractVectorRead implements Serializable {
                         scoreMap.put(rowId, computeScore(queryVector, stored, metric));
                     });
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read raw vectors for vector slow search.", e);
+            throw new RuntimeException("Failed to read raw vectors for vector raw search.", e);
         }
 
         return ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get).topK(limit);
@@ -297,6 +300,26 @@ public abstract class AbstractVectorRead implements Serializable {
     }
 
     private List<Range> nonIndexedRanges(
+            RowType readType, List<VectorSearchSplit> splits, @Nullable Long nextRowId) {
+        if (searchMode() == GlobalIndexSearchMode.DETAIL) {
+            ReadBuilder rangeDiscoveryBuilder = newRawReadBuilder(readType, false);
+            TableScan.Plan allDataPlan = rangeDiscoveryBuilder.newScan().plan();
+            return nonIndexedRangesByDataFiles(allDataPlan, splits);
+        }
+        return nonIndexedRangesByNextRowId(splits, nextRowId);
+    }
+
+    private List<Range> nonIndexedRangesByNextRowId(
+            List<VectorSearchSplit> splits, @Nullable Long nextRowId) {
+        if (nextRowId == null || nextRowId <= 0) {
+            return Collections.emptyList();
+        }
+
+        List<Range> indexedRanges = indexedRanges(splits);
+        return Range.sortAndMergeOverlap(new Range(0, nextRowId - 1).exclude(indexedRanges), true);
+    }
+
+    private List<Range> nonIndexedRangesByDataFiles(
             TableScan.Plan allDataPlan, List<VectorSearchSplit> splits) {
         List<Range> dataRanges = new ArrayList<>();
         for (Split split : allDataPlan.splits()) {
@@ -314,17 +337,21 @@ public abstract class AbstractVectorRead implements Serializable {
             }
         }
 
-        List<Range> indexedRanges = new ArrayList<>();
-        for (VectorSearchSplit split : splits) {
-            indexedRanges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
-        }
-        indexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
+        List<Range> indexedRanges = indexedRanges(splits);
 
         List<Range> ranges = new ArrayList<>();
         for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
             ranges.addAll(dataRange.exclude(indexedRanges));
         }
         return Range.sortAndMergeOverlap(ranges, true);
+    }
+
+    private static List<Range> indexedRanges(List<VectorSearchSplit> splits) {
+        List<Range> indexedRanges = new ArrayList<>();
+        for (VectorSearchSplit split : splits) {
+            indexedRanges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+        }
+        return Range.sortAndMergeOverlap(indexedRanges, true);
     }
 
     private float[] getVector(InternalRow row, int vectorIndex) {
@@ -339,14 +366,14 @@ public abstract class AbstractVectorRead implements Serializable {
                 "Unsupported vector column type: " + vectorColumn.type());
     }
 
-    private String slowSearchMetric(@Nullable GlobalIndexer globalIndexer) {
+    private String rawSearchMetric(@Nullable GlobalIndexer globalIndexer) {
         String metric = null;
         if (globalIndexer != null) {
             if (!(globalIndexer instanceof VectorGlobalIndexer)) {
                 throw new IllegalArgumentException(
                         "Index type '"
                                 + globalIndexer.getClass().getName()
-                                + "' does not provide vector metric for slow search.");
+                                + "' does not provide vector metric for raw search.");
             }
             metric = ((VectorGlobalIndexer) globalIndexer).metric();
         }

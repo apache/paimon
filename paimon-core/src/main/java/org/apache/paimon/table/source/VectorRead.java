@@ -20,12 +20,18 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Vector read to read index files. */
 public interface VectorRead {
 
     default GlobalIndexResult read(VectorScan.Plan plan) {
+        return read(plan, plan.nextRowId());
+    }
+
+    default GlobalIndexResult read(VectorScan.Plan plan, @Nullable Long nextRowId) {
         return read(plan.splits());
     }
 

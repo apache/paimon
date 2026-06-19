@@ -735,16 +735,16 @@ under the License.
             <td>Whether to enable global index for scan.</td>
         </tr>
         <tr>
-            <td><h5>global-index.fast-search</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether global index queries only search indexed files. Set to false to also scan files not covered by global indexes when supported.</td>
-        </tr>
-        <tr>
             <td><h5>global-index.external-path</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for global index queries. Supported values are 'fast', 'full', and 'detail'.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
         </tr>
         <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>

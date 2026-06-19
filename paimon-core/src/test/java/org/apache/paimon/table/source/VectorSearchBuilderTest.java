@@ -242,21 +242,21 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testVectorSearchScansUnindexedDataWhenFastSearchDisabled() throws Exception {
+    public void testVectorSearchFullModeScansUnindexedData() throws Exception {
         catalog.createTable(
-                identifier("slow_search_cosine_table"),
+                identifier("full_search_cosine_table"),
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
                         .option(CoreOptions.BUCKET.key(), "-1")
                         .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                         .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                        .option(CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false")
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
                         .option("test.vector.dimension", String.valueOf(DIMENSION))
                         .option("test.vector.metric", "cosine")
                         .build(),
                 false);
-        FileStoreTable table = getTable(identifier("slow_search_cosine_table"));
+        FileStoreTable table = getTable(identifier("full_search_cosine_table"));
 
         float[][] vectors = {
             {0.0f, 1.0f},
@@ -281,7 +281,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testVectorSearchFastSearchSkipsUnindexedDataByDefault() throws Exception {
+    public void testVectorSearchFastModeSkipsUnindexedDataByDefault() throws Exception {
         catalog.createTable(
                 identifier("fast_search_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
@@ -309,14 +309,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testVectorSearchSlowSearchScansFilteredUnindexedData() throws Exception {
+    public void testVectorSearchFullModeScansFilteredUnindexedData() throws Exception {
         catalog.createTable(
-                identifier("slow_search_filtered_table"),
+                identifier("full_search_filtered_table"),
                 vectorSchemaBuilder(VECTOR_FIELD_NAME)
-                        .option(CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false")
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
                         .build(),
                 false);
-        FileStoreTable table = getTable(identifier("slow_search_filtered_table"));
+        FileStoreTable table = getTable(identifier("full_search_filtered_table"));
 
         float[][] vectors = {
             {0.0f, 1.0f},

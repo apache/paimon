@@ -126,8 +126,8 @@ class PlanSnapshotFetchRegressionTest(
                 "so global index used latest while manifest used the "
                 "time-travel snapshot — silent correctness bug.")
 
-    def test_fast_search_false_filters_unindexed_rows_exactly(self):
-        table = self._create_table().copy({'global-index.fast-search': 'false'})
+    def test_search_mode_detail_filters_unindexed_rows_exactly(self):
+        table = self._create_table().copy({'global-index.search-mode': 'detail'})
         self._write_arrow(table, pa.table(
             {'id': [0, 1, 2, 3], 'name': ['a', 'b', 'c', 'd'],
              'age': [0, 1, 2, 3], 'city': ['x', 'x', 'y', 'y']},

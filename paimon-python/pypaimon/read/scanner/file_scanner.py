@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -51,10 +52,11 @@ from pypaimon.read.scanner.primary_key_table_split_generator import \
     PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
@@ -332,7 +334,8 @@ class FileScanner:
             scan_unindexed_data = (
                 self._global_index_result is None
                 and not isinstance(global_index_result, ScoredGlobalIndexResult)
-                and not self.table.options.global_index_fast_search()
+                and self.table.options.global_index_search_mode()
+                != GlobalIndexSearchMode.FAST
             )
             if scan_unindexed_data:
                 global_index_result = self._with_unindexed_rows(
@@ -362,15 +365,21 @@ class FileScanner:
         )
 
     def _with_unindexed_rows(self, indexed_result, manifest_files, snapshot):
-        data_ranges = []
-        entries = self.read_manifest_entries(manifest_files)
-        for entry in entries:
-            first_row_id = entry.file.first_row_id
-            if first_row_id is not None:
-                data_ranges.append(entry.file.row_id_range())
+        mode = self.table.options.global_index_search_mode()
+        entries = None
+        if mode == GlobalIndexSearchMode.DETAIL:
+            entries = self.read_manifest_entries(manifest_files)
+            data_ranges = []
+            for entry in entries:
+                first_row_id = entry.file.first_row_id
+                if first_row_id is not None:
+                    data_ranges.append(entry.file.row_id_range())
+        elif snapshot is not None and snapshot.next_row_id is not None and snapshot.next_row_id > 0:
+            data_ranges = [Range(0, int(snapshot.next_row_id) - 1)]
+        else:
+            data_ranges = []
 
         from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-        from pypaimon.utils.range import Range
 
         predicate_indexed_ranges = Range.sort_and_merge_overlap(
             GlobalIndexScanner.predicate_indexed_ranges(
@@ -388,6 +397,11 @@ class FileScanner:
             unindexed_ranges.extend(data_range.exclude(predicate_indexed_ranges))
         unindexed_ranges = Range.sort_and_merge_overlap(
             unindexed_ranges, merge=True, adjacent=True)
+
+        if entries is None and unindexed_ranges:
+            entries = self.read_manifest_entries(manifest_files)
+        if entries is None:
+            entries = []
 
         bitmap = RoaringBitmap64.or_(
             indexed_result.results(),

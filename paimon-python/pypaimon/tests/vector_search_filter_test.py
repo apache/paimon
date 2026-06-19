@@ -1458,7 +1458,7 @@ class HybridSearchBuilderTest(unittest.TestCase):
 
 class VectorSearchManySplitsTest(unittest.TestCase):
 
-    def test_fast_search_controls_unindexed_range_scan(self):
+    def test_search_mode_controls_unindexed_range_scan(self):
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
@@ -1563,11 +1563,11 @@ class VectorSearchManySplitsTest(unittest.TestCase):
                 query_vector=[4.0, 0.0], filter_=None)
             self.assertEqual([0], sorted(disabled.read(splits).results()))
 
-            table.table_schema.options["global-index.fast-search"] = "false"
+            table.table_schema.options["global-index.search-mode"] = "full"
             enabled = VectorSearchReadImpl(
                 table, limit=2, vector_column=embedding_field,
                 query_vector=[4.0, 0.0], filter_=None)
-            result = enabled.read(splits)
+            result = enabled.read(splits, next_row_id=3)
 
         self.assertEqual([0, 2], sorted(result.results()))
         self.assertEqual([Range(1, 2)],
@@ -1584,7 +1584,7 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             repeated_read = VectorSearchReadImpl(
                 table, limit=2, vector_column=embedding_field,
                 query_vector=[4.0, 0.0], filter_=None)
-            result = repeated_read.read(splits)
+            result = repeated_read.read(splits, next_row_id=3)
 
         self.assertEqual([0, 2], sorted(result.results()))
         self.assertEqual(1, table.metric_calls)

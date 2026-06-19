@@ -20,6 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Batch vector read to read index files for multiple query vectors. */
@@ -27,6 +29,11 @@ public interface BatchVectorRead {
 
     /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
     default List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
+        return readBatch(plan, plan.nextRowId());
+    }
+
+    /** Read batch results; result {@code i} corresponds to input vector {@code i}. */
+    default List<GlobalIndexResult> readBatch(VectorScan.Plan plan, @Nullable Long nextRowId) {
         return readBatch(plan.splits());
     }
 

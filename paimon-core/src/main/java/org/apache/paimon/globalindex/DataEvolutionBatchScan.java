@@ -19,6 +19,8 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -62,6 +64,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowId;
+import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 
 /** Scan for data evolution table. */
@@ -256,7 +259,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
                 boolean scanUnindexedRanges =
                         globalIndexResult == null
                                 && !(result instanceof ScoredGlobalIndexResult)
-                                && !table.coreOptions().globalIndexFastSearch();
+                                && table.coreOptions().globalIndexSearchMode()
+                                        != GlobalIndexSearchMode.FAST;
                 if (scanUnindexedRanges) {
                     rowIds = withUnindexedRows(rowIds);
                     rowRanges = rowIds.toRangeList();
@@ -277,17 +281,46 @@ public class DataEvolutionBatchScan implements DataTableScan {
     }
 
     private RoaringNavigableMap64 withUnindexedRows(RoaringNavigableMap64 indexedResultRows) {
-        TableScan.Plan allDataPlan = allDataPlan();
+        TableScan.Plan allDataPlan = null;
+        Snapshot snapshot;
+        if (table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.DETAIL) {
+            allDataPlan = allDataPlan();
+            snapshot =
+                    batchScan.snapshotReader().snapshotManager().snapshot(snapshotId(allDataPlan));
+        } else {
+            snapshot = tryTravelOrLatest(table);
+        }
+
+        List<Range> unindexedRanges = unindexedRanges(allDataPlan, snapshot);
+
+        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+        rows.or(indexedResultRows);
+        rows.or(matchingRows(unindexedRanges));
+        return rows;
+    }
+
+    private List<Range> unindexedRanges(@Nullable TableScan.Plan allDataPlan, Snapshot snapshot) {
+        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
+            return Collections.emptyList();
+        }
+
         List<Range> dataRanges = new ArrayList<>();
-        for (Split split : allDataPlan.splits()) {
-            if (!(split instanceof DataSplit)) {
-                continue;
+        if (table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.DETAIL) {
+            if (allDataPlan == null) {
+                return Collections.emptyList();
             }
-            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
-                if (file.firstRowId() != null) {
-                    dataRanges.add(file.nonNullRowIdRange());
+            for (Split split : allDataPlan.splits()) {
+                if (!(split instanceof DataSplit)) {
+                    continue;
+                }
+                for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                    if (file.firstRowId() != null) {
+                        dataRanges.add(file.nonNullRowIdRange());
+                    }
                 }
             }
+        } else {
+            dataRanges.add(new Range(0, snapshot.nextRowId() - 1));
         }
 
         List<Range> predicateIndexedRanges =
@@ -295,22 +328,14 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table,
                         batchScan.snapshotReader().manifestsReader().partitionFilter(),
                         filter,
-                        batchScan
-                                .snapshotReader()
-                                .snapshotManager()
-                                .snapshot(snapshotId(allDataPlan)));
+                        snapshot);
         predicateIndexedRanges = Range.sortAndMergeOverlap(predicateIndexedRanges, true);
 
         List<Range> unindexedRanges = new ArrayList<>();
         for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
             unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));
         }
-        unindexedRanges = Range.sortAndMergeOverlap(unindexedRanges, true);
-
-        RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        rows.or(indexedResultRows);
-        rows.or(matchingRows(unindexedRanges));
-        return rows;
+        return Range.sortAndMergeOverlap(unindexedRanges, true);
     }
 
     private RoaringNavigableMap64 matchingRows(List<Range> ranges) {
@@ -334,7 +359,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         } catch (IOException e) {
             throw new RuntimeException(
-                    "Failed to scan unindexed data for global index slow search.", e);
+                    "Failed to scan unindexed data for global index raw search.", e);
         }
         return rows;
     }

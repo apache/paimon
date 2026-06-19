@@ -127,7 +127,18 @@ public class VectorScanImpl implements VectorScan {
             splits.add(new VectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
         }
 
-        return () -> splits;
+        Long nextRowId = snapshot == null ? null : snapshot.nextRowId();
+        return new Plan() {
+            @Override
+            public List<VectorSearchSplit> splits() {
+                return splits;
+            }
+
+            @Override
+            public Long nextRowId() {
+                return nextRowId;
+            }
+        };
     }
 
     private static boolean isPrimaryColumn(GlobalIndexMeta meta, int fieldId) {

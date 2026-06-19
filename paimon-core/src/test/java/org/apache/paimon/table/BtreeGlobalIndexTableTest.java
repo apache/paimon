@@ -134,7 +134,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
-    public void testBTreeGlobalIndexFastSearchControlsUnindexedData() throws Exception {
+    public void testBTreeGlobalIndexSearchModeControlsUnindexedData() throws Exception {
         write(500L);
         createIndex("f1");
 
@@ -162,16 +162,16 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                                         BinaryString.fromString("a700")));
 
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-        List<String> fastSearchResult = readF1(readBuilder, readBuilder.newScan().plan());
-        assertThat(fastSearchResult).containsExactly("a100");
+        List<String> fastModeResult = readF1(readBuilder, readBuilder.newScan().plan());
+        assertThat(fastModeResult).containsExactly("a100");
 
         table =
                 table.copy(
                         Collections.singletonMap(
-                                CoreOptions.GLOBAL_INDEX_FAST_SEARCH.key(), "false"));
+                                CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
         readBuilder = table.newReadBuilder().withFilter(predicate);
-        List<String> slowSearchResult = readF1(readBuilder, readBuilder.newScan().plan());
-        assertThat(slowSearchResult).containsExactly("a100", "a700");
+        List<String> fullSearchResult = readF1(readBuilder, readBuilder.newScan().plan());
+        assertThat(fullSearchResult).containsExactly("a100", "a700");
     }
 
     @Test

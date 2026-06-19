@@ -27,9 +27,10 @@ from pypaimon.utils.range import Range
 class VectorSearchScanPlan:
     """Plan of vector search scan."""
 
-    def __init__(self, splits):
-        # type: (List[VectorSearchSplit]) -> None
+    def __init__(self, splits, next_row_id=None):
+        # type: (List[VectorSearchSplit], Optional[int]) -> None
         self._splits = splits
+        self.next_row_id = next_row_id
 
     def splits(self):
         # type: () -> List[VectorSearchSplit]
@@ -138,4 +139,5 @@ class VectorSearchScanImpl(VectorSearchScan):
                 )
             )
 
-        return VectorSearchScanPlan(splits)
+        next_row_id = None if snapshot is None else snapshot.next_row_id
+        return VectorSearchScanPlan(splits, next_row_id=next_row_id)

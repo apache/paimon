@@ -29,6 +29,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -69,7 +71,16 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
 
     @Override
     public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        if (splits.isEmpty() && fastSearch()) {
+        return read(splits, null);
+    }
+
+    @Override
+    public GlobalIndexResult read(VectorScan.Plan plan, @Nullable Long nextRowId) {
+        return read(plan.splits(), nextRowId);
+    }
+
+    private GlobalIndexResult read(List<VectorSearchSplit> splits, @Nullable Long nextRowId) {
+        if (splits.isEmpty() && !rawSearchEnabled()) {
             return GlobalIndexResult.createEmpty();
         }
 
@@ -78,7 +89,7 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                 splits.isEmpty()
                         ? ScoredGlobalIndexResult.createEmpty()
                         : readIndexed(splits, globalIndexer);
-        return withSlowSearch(result, splits, globalIndexer, vector);
+        return withRawSearch(result, splits, globalIndexer, nextRowId, vector);
     }
 
     protected ScoredGlobalIndexResult readIndexed(

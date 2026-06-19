@@ -29,6 +29,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -69,8 +71,18 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
 
     @Override
     public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+        return readBatch(splits, null);
+    }
+
+    @Override
+    public List<GlobalIndexResult> readBatch(VectorScan.Plan plan, @Nullable Long nextRowId) {
+        return readBatch(plan.splits(), nextRowId);
+    }
+
+    private List<GlobalIndexResult> readBatch(
+            List<VectorSearchSplit> splits, @Nullable Long nextRowId) {
         int n = vectors.length;
-        if (splits.isEmpty() && fastSearch()) {
+        if (splits.isEmpty() && !rawSearchEnabled()) {
             List<GlobalIndexResult> empty = new ArrayList<>(n);
             for (int i = 0; i < n; i++) {
                 empty.add(GlobalIndexResult.createEmpty());
@@ -84,7 +96,8 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
 
         List<GlobalIndexResult> results = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            results.add(withSlowSearch(indexedResults[i], splits, globalIndexer, vectors[i]));
+            results.add(
+                    withRawSearch(indexedResults[i], splits, globalIndexer, nextRowId, vectors[i]));
         }
         return results;
     }

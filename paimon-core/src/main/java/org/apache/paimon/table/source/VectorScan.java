@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Vector scan to pre-filter and scan index files. */
@@ -28,5 +30,10 @@ public interface VectorScan {
     /** Plan of vector scan. */
     interface Plan {
         List<VectorSearchSplit> splits();
+
+        @Nullable
+        default Long nextRowId() {
+            return null;
+        }
     }
 }

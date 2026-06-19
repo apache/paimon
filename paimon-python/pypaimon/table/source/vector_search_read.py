@@ -21,6 +21,7 @@ import math
 from abc import ABC, abstractmethod
 from concurrent.futures import wait
 
+from pypaimon.common.options.core_options import GlobalIndexSearchMode
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
@@ -29,19 +30,16 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.utils.range import Range
 
 
-GLOBAL_INDEX_FAST_SEARCH = "global-index.fast-search"
-
-
 class VectorSearchRead(ABC):
     """Vector search read to read index files."""
 
     def read_plan(self, plan):
         # type: (VectorSearchScanPlan) -> GlobalIndexResult
-        return self.read(plan.splits())
+        return self.read(plan.splits(), next_row_id=getattr(plan, "next_row_id", None))
 
     @abstractmethod
-    def read(self, splits):
-        # type: (List[VectorSearchSplit]) -> GlobalIndexResult
+    def read(self, splits, next_row_id=None):
+        # type: (List[VectorSearchSplit], Optional[int]) -> GlobalIndexResult
         pass
 
 
@@ -50,18 +48,17 @@ class BatchVectorSearchRead(ABC):
 
     def read_batch_plan(self, plan):
         # type: (VectorSearchScanPlan) -> List[GlobalIndexResult]
-        return self.read_batch(plan.splits())
+        return self.read_batch(
+            plan.splits(), next_row_id=getattr(plan, "next_row_id", None))
 
     @abstractmethod
-    def read_batch(self, splits):
-        # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+    def read_batch(self, splits, next_row_id=None):
+        # type: (List[VectorSearchSplit], Optional[int]) -> List[GlobalIndexResult]
         pass
 
 
 class AbstractVectorSearchReadImpl:
     """Base implementation for vector search reads."""
-
-    GLOBAL_INDEX_FAST_SEARCH = GLOBAL_INDEX_FAST_SEARCH
 
     def __init__(self, table, limit, vector_column, filter_=None,
                  options=None, partition_filter=None):
@@ -165,39 +162,45 @@ class AbstractVectorSearchReadImpl:
             index_type, file_io, index_path,
             index_io_meta_list, options
         )
-        if self._slow_search_enabled() and self._vector_metric is None:
+        if self._raw_search_enabled() and self._vector_metric is None:
             self._vector_metric = reader.vector_metric()
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
         future = offset_reader.visit_vector_search(vector_search)
         future.add_done_callback(lambda _: reader.close())
         return future
 
-    def _slow_search_enabled(self):
-        return not self._fast_search()
+    def _raw_search_enabled(self):
+        return self._search_mode() != GlobalIndexSearchMode.FAST
 
-    def _fast_search(self):
-        return str(
-            self._table_option(GLOBAL_INDEX_FAST_SEARCH, "true")
-        ).lower() == "true"
+    def _search_mode(self):
+        options = getattr(self._table, "options", None)
+        if options is not None and hasattr(options, "global_index_search_mode"):
+            return options.global_index_search_mode()
+        raw = self._table_option(
+            "global-index.search-mode", GlobalIndexSearchMode.FAST.value)
+        if isinstance(raw, GlobalIndexSearchMode):
+            return raw
+        return GlobalIndexSearchMode(str(raw).strip().lower())
 
-    def _with_slow_search(self, result, splits, query_vector):
-        if not self._slow_search_enabled():
+    def _with_raw_search(self, result, splits, query_vector, next_row_id):
+        if not self._raw_search_enabled():
             return result.top_k(self._limit)
 
-        raw_result = self._read_slow_search(splits, query_vector)
+        raw_result = self._read_raw_search(splits, query_vector, next_row_id)
         return result.or_(raw_result).top_k(self._limit)
 
-    def _read_slow_search(self, splits, query_vector):
+    def _read_raw_search(self, splits, query_vector, next_row_id):
         from pypaimon.table.special_fields import SpecialFields
 
         read_type = self._read_type_with_row_id()
-        range_discovery_builder = self._new_raw_read_builder(
-            read_type, include_filter=False)
-        all_data_plan = range_discovery_builder.new_scan().plan()
-        non_indexed_ranges = self._non_indexed_ranges(all_data_plan, splits)
+        non_indexed_ranges = self._non_indexed_ranges(
+            read_type, splits, next_row_id)
         if not non_indexed_ranges:
             return DictBasedScoredIndexResult({})
 
+        range_discovery_builder = self._new_raw_read_builder(
+            read_type, include_filter=False)
+        all_data_plan = range_discovery_builder.new_scan().plan()
         raw_splits = self._wrap_splits_with_row_ranges(
             all_data_plan.splits(), non_indexed_ranges)
         if not raw_splits:
@@ -212,14 +215,14 @@ class AbstractVectorSearchReadImpl:
         vector_name = self._vector_column.name
         if row_id_name not in arrow_table.column_names:
             raise ValueError(
-                "Vector slow search requires row tracking column %s."
+                "Vector raw search requires row tracking column %s."
                 % row_id_name)
         if vector_name not in arrow_table.column_names:
             raise ValueError(
-                "Vector slow search read type does not contain vector column %s."
+                "Vector raw search read type does not contain vector column %s."
                 % vector_name)
 
-        metric = self._slow_search_metric()
+        metric = self._raw_search_metric()
         query = self._normalize_vector(query_vector)
         scores = {}
         row_ids = arrow_table.column(row_id_name).to_pylist()
@@ -255,21 +258,40 @@ class AbstractVectorSearchReadImpl:
             read_builder = read_builder.with_filter(self._filter)
         return read_builder
 
-    def _non_indexed_ranges(self, all_data_plan, splits):
+    def _non_indexed_ranges(self, read_type, splits, next_row_id):
+        if self._search_mode() == GlobalIndexSearchMode.DETAIL:
+            range_discovery_builder = self._new_raw_read_builder(
+                read_type, include_filter=False)
+            all_data_plan = range_discovery_builder.new_scan().plan()
+            return self._non_indexed_ranges_by_data_files(all_data_plan, splits)
+        return self._non_indexed_ranges_by_next_row_id(splits, next_row_id)
+
+    def _non_indexed_ranges_by_next_row_id(self, splits, next_row_id):
+        if next_row_id is None or int(next_row_id) <= 0:
+            return []
+
+        data_range = Range(0, int(next_row_id) - 1)
+        return Range.sort_and_merge_overlap(
+            data_range.exclude(self._indexed_ranges(splits)), True)
+
+    def _non_indexed_ranges_by_data_files(self, all_data_plan, splits):
         data_ranges = []
         for split in all_data_plan.splits():
             data_ranges.extend(self._split_row_ranges(split))
 
-        indexed_ranges = [
-            Range(split.row_range_start, split.row_range_end)
-            for split in splits
-        ]
-        indexed_ranges = Range.sort_and_merge_overlap(indexed_ranges, True)
+        indexed_ranges = self._indexed_ranges(splits)
 
         ranges = []
         for data_range in Range.sort_and_merge_overlap(data_ranges, True):
             ranges.extend(data_range.exclude(indexed_ranges))
         return Range.sort_and_merge_overlap(ranges, True)
+
+    def _indexed_ranges(self, splits):
+        indexed_ranges = [
+            Range(split.row_range_start, split.row_range_end)
+            for split in splits
+        ]
+        return Range.sort_and_merge_overlap(indexed_ranges, True)
 
     def _split_row_ranges(self, split):
         from pypaimon.globalindex.indexed_split import IndexedSplit
@@ -324,7 +346,7 @@ class AbstractVectorSearchReadImpl:
     def _index_options(self):
         return dict(self._options)
 
-    def _slow_search_metric(self):
+    def _raw_search_metric(self):
         metric = self._vector_metric
         if metric is None:
             return "l2"
@@ -390,9 +412,9 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
                          partition_filter=partition_filter)
         self._query_vector = query_vector
 
-    def read(self, splits):
-        # type: (List[VectorSearchSplit]) -> GlobalIndexResult
-        if not splits and self._fast_search():
+    def read(self, splits, next_row_id=None):
+        # type: (List[VectorSearchSplit], Optional[int]) -> GlobalIndexResult
+        if not splits and not self._raw_search_enabled():
             return GlobalIndexResult.create_empty()
 
         result = (
@@ -400,7 +422,8 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
             if not splits
             else self._search_one(self._query_vector, splits, self._pre_filter(splits))
         )
-        return self._with_slow_search(result, splits, self._query_vector)
+        return self._with_raw_search(
+            result, splits, self._query_vector, next_row_id)
 
 
 class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
@@ -414,10 +437,10 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                          partition_filter=partition_filter)
         self._query_vectors = list(query_vectors)
 
-    def read_batch(self, splits):
-        # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+    def read_batch(self, splits, next_row_id=None):
+        # type: (List[VectorSearchSplit], Optional[int]) -> List[GlobalIndexResult]
         n = len(self._query_vectors)
-        if not splits and self._fast_search():
+        if not splits and not self._raw_search_enabled():
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
         results = []
@@ -428,7 +451,8 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                 if not splits
                 else self._search_one(vector, splits, pre_filter)
             )
-            results.append(self._with_slow_search(result, splits, vector))
+            results.append(
+                self._with_raw_search(result, splits, vector, next_row_id))
         return results
 
 
