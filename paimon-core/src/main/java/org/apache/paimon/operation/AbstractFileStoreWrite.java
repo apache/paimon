@@ -58,6 +58,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
@@ -96,9 +97,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private boolean ignorePreviousFiles = false;
     private boolean ignoreNumBucketCheck = false;
 
+    protected final SnapshotManager snapshotManager;
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
     private final boolean legacyPartitionName;
+    private final CoreOptions options;
 
     protected AbstractFileStoreWrite(
             SnapshotManager snapshotManager,
@@ -114,6 +117,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         } else if (dvMaintainerFactory != null) {
             indexFileHandler = dvMaintainerFactory.indexFileHandler();
         }
+        this.snapshotManager = snapshotManager;
         this.restore = new FileSystemWriteRestore(options, snapshotManager, scan, indexFileHandler);
         this.dbMaintainerFactory = dbMaintainerFactory;
         this.dvMaintainerFactory = dvMaintainerFactory;
@@ -123,6 +127,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.tableName = tableName;
         this.writerNumberMax = options.writeMaxWritersToSpill();
         this.legacyPartitionName = options.legacyPartitionName();
+        this.options = options;
         this.partitionTimestampValidator =
                 PartitionTimestampValidator.create(options, partitionType);
     }
@@ -445,8 +450,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        boolean actualIgnorePreviousFiles =
+                ignorePreviousFilesForWriter(
+                        partition, bucket, latestSnapshot, ignorePreviousFiles);
         RestoreFiles restored = RestoreFiles.empty();
-        if (!ignorePreviousFiles) {
+        if (!actualIgnorePreviousFiles) {
             restored = scanExistingFileMetas(partition, bucket);
         }
 
@@ -470,7 +479,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         partition.copy(),
                         bucket,
                         restoreFiles,
-                        getMaxSequenceNumber(restoreFiles),
+                        startingMaxSequenceNumber(
+                                getMaxSequenceNumber(restoreFiles), latestSnapshot),
                         null,
                         compactExecutor(),
                         dvMaintainer);
@@ -487,6 +497,36 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private long writerNumber() {
         return writers.values().stream().mapToLong(Map::size).sum();
+    }
+
+    protected boolean ignorePreviousFilesForWriter(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Snapshot latestSnapshot,
+            boolean ignorePreviousFiles) {
+        return ignorePreviousFiles;
+    }
+
+    @VisibleForTesting
+    long startingMaxSequenceNumber(long restoredMaxSeqNumber, @Nullable Snapshot latestSnapshot) {
+        if (options.writeSequenceNumberInitMode() != CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
+            return restoredMaxSeqNumber;
+        }
+
+        OptionalLong snapshotMaxSeqNumber =
+                SequenceSnapshotProperties.maxSequenceNumber(latestSnapshot);
+        long startingMaxSeqNumber =
+                Math.max(restoredMaxSeqNumber, snapshotMaxSeqNumber.orElse(-1L));
+        LOG.info(
+                "Start writer sequence number for table {} from restored max sequence number {}, "
+                        + "snapshot max sequence number {}, selected max sequence number {}, "
+                        + "snapshot id {}.",
+                tableName,
+                restoredMaxSeqNumber,
+                snapshotMaxSeqNumber.isPresent() ? snapshotMaxSeqNumber.getAsLong() : null,
+                startingMaxSeqNumber,
+                latestSnapshot == null ? null : latestSnapshot.id());
+        return startingMaxSeqNumber;
     }
 
     @Override

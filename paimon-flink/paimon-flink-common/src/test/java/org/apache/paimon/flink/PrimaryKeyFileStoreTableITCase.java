@@ -173,6 +173,36 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
+    public void testWriteOnlySnapshotSequenceNumberInitOverwritePreviousValue() throws Exception {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
+        bEnv.executeSql(createCatalogSql("testCatalog", path));
+        bEnv.executeSql("USE CATALOG testCatalog");
+        bEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "  k INT,"
+                        + "  v STRING,"
+                        + "  PRIMARY KEY (k) NOT ENFORCED"
+                        + ") WITH ("
+                        + "  'bucket' = '1',"
+                        + "  'write-only' = 'true',"
+                        + "  'write.sequence-number-init-mode' = 'snapshot'"
+                        + ")");
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 'old'), (2, 'keep')").await();
+        bEnv.executeSql("INSERT INTO T VALUES (1, 'new')").await();
+
+        List<Row> actual = new ArrayList<>();
+        try (CloseableIterator<Row> it = bEnv.executeSql("SELECT * FROM T ORDER BY k").collect()) {
+            while (it.hasNext()) {
+                actual.add(it.next());
+            }
+        }
+
+        assertThat(actual).containsExactly(Row.of(1, "new"), Row.of(2, "keep"));
+    }
+
+    @Test
+    @Timeout(TIMEOUT)
     public void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(
