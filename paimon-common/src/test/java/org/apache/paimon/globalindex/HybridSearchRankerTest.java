@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +48,20 @@ public class HybridSearchRankerTest {
     }
 
     @Test
+    public void testRrfBreaksRouteScoreTiesByRowId() {
+        ScoredGlobalIndexResult result =
+                result(new long[] {3, 1, 2}, new float[] {1.0f, 1.0f, 1.0f}, new long[] {3, 1, 2});
+
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.rrf(Collections.singletonList(result), new float[] {1.0f}, 2);
+
+        assertThat(ranked.results()).contains(1L, 2L);
+        assertThat(ranked.results()).doesNotContain(3L);
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(1.0f / 61.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(2L)).isCloseTo(1.0f / 62.0f, within(0.000001f));
+    }
+
+    @Test
     public void testWeightedScoreUsesAlignedWeightsAfterEmptyRouteIsSkipped() {
         ScoredGlobalIndexResult result = result(new long[] {1, 2}, new float[] {0.3f, 0.2f});
 
@@ -61,6 +76,22 @@ public class HybridSearchRankerTest {
 
     private ScoredGlobalIndexResult result(long[] rowIds, float[] scores) {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        return result(rowIds, scores, bitmap);
+    }
+
+    private ScoredGlobalIndexResult result(long[] rowIds, float[] scores, long[] iterationOrder) {
+        RoaringNavigableMap64 bitmap =
+                new RoaringNavigableMap64() {
+                    @Override
+                    public Iterator<Long> iterator() {
+                        return Arrays.stream(iterationOrder).boxed().iterator();
+                    }
+                };
+        return result(rowIds, scores, bitmap);
+    }
+
+    private ScoredGlobalIndexResult result(
+            long[] rowIds, float[] scores, RoaringNavigableMap64 bitmap) {
         Map<Long, Float> scoreMap = new HashMap<>();
         for (int i = 0; i < rowIds.length; i++) {
             bitmap.add(rowIds[i]);

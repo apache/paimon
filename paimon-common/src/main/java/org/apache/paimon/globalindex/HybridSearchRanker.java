@@ -122,7 +122,14 @@ public class HybridSearchRanker {
         }
         final ScoreGetter scoreGetter = result.scoreGetter();
         rowIds.sort(
-                (left, right) -> Float.compare(scoreGetter.score(right), scoreGetter.score(left)));
+                (left, right) -> {
+                    int scoreCompare =
+                            Float.compare(scoreGetter.score(right), scoreGetter.score(left));
+                    if (scoreCompare != 0) {
+                        return scoreCompare;
+                    }
+                    return Long.compare(left, right);
+                });
         return rowIds;
     }
 
