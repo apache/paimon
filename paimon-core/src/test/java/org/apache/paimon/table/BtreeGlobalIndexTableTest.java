@@ -281,8 +281,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .collect(Collectors.toList());
     }
 
-    private List<String> readF1(ReadBuilder readBuilder, TableScan.Plan plan)
-            throws Exception {
+    private List<String> readF1(ReadBuilder readBuilder, TableScan.Plan plan) throws Exception {
         List<String> readF1 = new ArrayList<>();
         readBuilder
                 .newRead()

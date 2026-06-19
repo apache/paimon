@@ -211,7 +211,8 @@ public class GlobalIndexScanner implements Closeable {
                 continue;
             }
             Range range = new Range(globalIndex.rowRangeStart(), globalIndex.rowRangeEnd());
-            coverageByField.computeIfAbsent(globalIndex.indexFieldId(), k -> new ArrayList<>())
+            coverageByField
+                    .computeIfAbsent(globalIndex.indexFieldId(), k -> new ArrayList<>())
                     .add(range);
             if (globalIndex.extraFieldIds() != null) {
                 for (int id : globalIndex.extraFieldIds()) {
@@ -226,8 +227,7 @@ public class GlobalIndexScanner implements Closeable {
     public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
         List<IndexFileMeta> indexFiles =
-                table.store()
-                        .newIndexFileHandler()
+                table.store().newIndexFileHandler()
                         .scan(
                                 tryTravelOrLatest(table),
                                 indexFileFilter(table, partitionFilter, filter))
@@ -283,7 +283,8 @@ public class GlobalIndexScanner implements Closeable {
             if (!fieldRef.isPresent() || !rowType.containsField(fieldRef.get().name())) {
                 return Optional.empty();
             }
-            List<Range> coverage = coverageByField.get(rowType.getField(fieldRef.get().name()).id());
+            List<Range> coverage =
+                    coverageByField.get(rowType.getField(fieldRef.get().name()).id());
             if (coverage == null || coverage.isEmpty()) {
                 return Optional.empty();
             }

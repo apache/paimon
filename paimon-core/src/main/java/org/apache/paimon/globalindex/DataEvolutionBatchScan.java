@@ -295,7 +295,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         table,
                         batchScan.snapshotReader().manifestsReader().partitionFilter(),
                         filter,
-                        batchScan.snapshotReader().snapshotManager().snapshot(snapshotId(allDataPlan)));
+                        batchScan
+                                .snapshotReader()
+                                .snapshotManager()
+                                .snapshot(snapshotId(allDataPlan)));
         predicateIndexedRanges = Range.sortAndMergeOverlap(predicateIndexedRanges, true);
 
         List<Range> unindexedRanges = new ArrayList<>();
@@ -319,7 +322,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
         RowType readType = rowTypeWithRowId(table.rowType());
         RowRangeIndex rowRangeIndex = RowRangeIndex.create(ranges);
         ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType).withFilter(filter);
-        readBuilder.withPartitionFilter(batchScan.snapshotReader().manifestsReader().partitionFilter());
+        readBuilder.withPartitionFilter(
+                batchScan.snapshotReader().manifestsReader().partitionFilter());
         List<Split> splits = readBuilder.withRowRangeIndex(rowRangeIndex).newScan().plan().splits();
         int rowIdIndex = readType.getFieldIndex(ROW_ID.name());
         try {
@@ -347,7 +351,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private TableScan.Plan allDataPlan() {
         ReadBuilder readBuilder = table.newReadBuilder();
-        readBuilder.withPartitionFilter(batchScan.snapshotReader().manifestsReader().partitionFilter());
+        readBuilder.withPartitionFilter(
+                batchScan.snapshotReader().manifestsReader().partitionFilter());
         return readBuilder.newScan().plan();
     }
 
