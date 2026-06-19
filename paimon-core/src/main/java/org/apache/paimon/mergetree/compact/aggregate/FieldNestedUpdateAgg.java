@@ -116,14 +116,18 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     @Override
     public Object agg(Object accumulator, Object inputField) {
-        if (accumulator == null || inputField == null) {
-            return accumulator == null ? inputField : accumulator;
+        if (inputField == null) {
+            return accumulator;
         }
 
-        InternalArray acc = (InternalArray) accumulator;
         InternalArray input = (InternalArray) inputField;
 
         if (keyProjection == null) {
+            if (accumulator == null) {
+                return inputField;
+            }
+
+            InternalArray acc = (InternalArray) accumulator;
             if (acc.size() >= countLimit) {
                 return accumulator;
             }
@@ -137,7 +141,9 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         }
 
         Map<BinaryRow, InternalRow> map = new HashMap<>();
-        addNestedRows(acc, map, false);
+        if (accumulator != null) {
+            addNestedRows((InternalArray) accumulator, map, false);
+        }
         addNestedRows(input, map, true);
         return new GenericArray(new ArrayList<>(map.values()).toArray());
     }
