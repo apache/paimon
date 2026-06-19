@@ -91,6 +91,7 @@ One row per persisted snapshot.
 | `changelog_record_count`  | BIGINT          |                                |
 | `watermark`               | BIGINT          |                                |
 | `next_row_id`             | BIGINT          |                                |
+| `operation`               | STRING          | `WRITE`, `DELETE`, `MERGE`, ...|
 
 ### `$schemas`
 

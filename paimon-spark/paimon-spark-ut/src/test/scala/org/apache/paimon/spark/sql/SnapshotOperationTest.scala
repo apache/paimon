@@ -76,6 +76,10 @@ class SnapshotOperationTest extends PaimonSparkTestBase {
           // rtas twice
           sql("CREATE OR REPLACE TABLE rtas AS SELECT * FROM src")
           assert(latestOperation("rtas") == Snapshot.Operation.CREATE_OR_REPLACE_TABLE_AS_SELECT)
+
+          // pure REPLACE TABLE (no CREATE)
+          sql("REPLACE TABLE rtas AS SELECT * FROM src")
+          assert(latestOperation("rtas") == Snapshot.Operation.REPLACE_TABLE_AS_SELECT)
         }
       }
     }
