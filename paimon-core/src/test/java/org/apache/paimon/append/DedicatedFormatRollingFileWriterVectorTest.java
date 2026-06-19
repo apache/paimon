@@ -195,6 +195,52 @@ public class DedicatedFormatRollingFileWriterVectorTest {
     }
 
     @Test
+    public void testBundleWritingRespectsVectorTargetFileSize() throws Exception {
+        long vectorTargetFileSize = 16 * 1024L;
+        writer =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        FileFormat.fromIdentifier("json", new Options()),
+                        128 * 1024 * 1024,
+                        128 * 1024 * 1024,
+                        vectorTargetFileSize,
+                        SCHEMA,
+                        new DataFilePathFactory(
+                                new Path(tempDir + "/bundle-vector-size-test"),
+                                "parquet",
+                                "data-",
+                                "changelog",
+                                false,
+                                null,
+                                null),
+                        () -> new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+
+        List<InternalRow> rows = makeRows(2000, 1);
+        writer.writeBundle(new SingleUseBundleRecords(rows));
+        writer.close();
+
+        List<DataFileMeta> vectorStoreFiles =
+                writer.result().stream()
+                        .filter(file -> isVectorStoreFile(file.fileName()))
+                        .collect(java.util.stream.Collectors.toList());
+        assertThat(vectorStoreFiles)
+                .as("Bundle writes should still roll vector files inside the bundle.")
+                .hasSizeGreaterThan(1);
+        for (DataFileMeta file : vectorStoreFiles.subList(0, vectorStoreFiles.size() - 1)) {
+            assertThat(file.fileSize()).isGreaterThanOrEqualTo(vectorTargetFileSize);
+        }
+        assertThat(writer.recordCount()).isEqualTo(rows.size());
+    }
+
+    @Test
     public void testBundleWritingPreservesMainFileIndexSideEffects() throws Exception {
         Options options = new Options();
         options.set("file-index.bitmap.columns", "f0");

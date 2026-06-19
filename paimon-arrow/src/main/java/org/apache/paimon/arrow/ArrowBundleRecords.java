@@ -20,20 +20,15 @@ package org.apache.paimon.arrow;
 
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.io.ProjectableBundleRecords;
-import org.apache.paimon.io.ReplayableBundleRecords;
+import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.types.RowType;
 
-import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.types.pojo.Field;
 
-import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
 
 /** Batch records for vector schema root. */
-public class ArrowBundleRecords implements ProjectableBundleRecords {
+public class ArrowBundleRecords implements BundleRecords {
 
     private final VectorSchemaRoot vectorSchemaRoot;
     private final RowType rowType;
@@ -59,42 +54,5 @@ public class ArrowBundleRecords implements ProjectableBundleRecords {
     public Iterator<InternalRow> iterator() {
         ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, caseSensitive);
         return arrowBatchReader.readBatch(vectorSchemaRoot).iterator();
-    }
-
-    @Override
-    public ReplayableBundleRecords project(int[] projection) {
-        if (isIdentityProjection(projection)) {
-            return this;
-        }
-
-        return new ArrowBundleRecords(
-                projectVectorSchemaRoot(vectorSchemaRoot, projection),
-                rowType.project(projection),
-                caseSensitive);
-    }
-
-    private boolean isIdentityProjection(int[] projection) {
-        if (projection.length != rowType.getFieldCount()) {
-            return false;
-        }
-
-        for (int i = 0; i < projection.length; i++) {
-            if (projection[i] != i) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static VectorSchemaRoot projectVectorSchemaRoot(
-            VectorSchemaRoot vectorSchemaRoot, int[] projection) {
-        List<Field> fields = new ArrayList<>(projection.length);
-        List<FieldVector> vectors = new ArrayList<>(projection.length);
-        for (int index : projection) {
-            FieldVector vector = vectorSchemaRoot.getVector(index);
-            fields.add(vector.getField());
-            vectors.add(vector);
-        }
-        return new VectorSchemaRoot(fields, vectors, vectorSchemaRoot.getRowCount());
     }
 }

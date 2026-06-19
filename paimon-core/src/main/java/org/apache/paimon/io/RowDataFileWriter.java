@@ -81,10 +81,6 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     @Override
     public void write(InternalRow row) throws IOException {
         super.write(row);
-        recordRowWrite(row);
-    }
-
-    protected final void recordRowWrite(InternalRow row) throws IOException {
         // add row to index if needed
         if (dataFileIndexWriter != null) {
             dataFileIndexWriter.write(row);

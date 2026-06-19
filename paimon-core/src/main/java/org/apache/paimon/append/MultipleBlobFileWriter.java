@@ -25,8 +25,10 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.ReplayableBundleRecords;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
+import org.apache.paimon.io.RowDataFileWriter;
+import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
@@ -67,21 +69,20 @@ public class MultipleBlobFileWriter implements Closeable {
         for (String blobFieldName : blobRowType.getFieldNames()) {
             BlobFileFormat blobFileFormat = new BlobFileFormat();
             blobFileFormat.setWriteConsumer(blobConsumer);
-            RowType projectedType = writeSchema.project(blobFieldName);
-            SimpleColStatsCollector.Factory[] statsCollectors =
-                    new SimpleColStatsCollector.Factory[] {NoneSimpleColStatsCollector::new};
             blobWriters.add(
                     new BlobProjectedFileWriter(
                             () ->
-                                    new BundleAwareRowDataFileWriter(
+                                    new RowDataFileWriter(
                                             fileIO,
                                             RollingFileWriter.createFileWriterContext(
                                                     blobFileFormat,
-                                                    projectedType,
-                                                    statsCollectors,
+                                                    writeSchema.project(blobFieldName),
+                                                    new SimpleColStatsCollector.Factory[] {
+                                                        NoneSimpleColStatsCollector::new
+                                                    },
                                                     "none"),
                                             pathFactory.newBlobPath(),
-                                            projectedType,
+                                            writeSchema.project(blobFieldName),
                                             schemaId,
                                             seqNumCounterSupplier,
                                             new FileIndexOptions(),
@@ -90,8 +91,6 @@ public class MultipleBlobFileWriter implements Closeable {
                                             statsDenseStore,
                                             pathFactory.isExternalPath(),
                                             singletonList(blobFieldName)),
-                            BundleAwareRowDataRollingFileWriter.supportsBundlePassThrough(
-                                    blobFileFormat, projectedType, statsCollectors),
                             targetFileSize,
                             writeSchema.projectIndexes(singletonList(blobFieldName))));
         }
@@ -100,12 +99,6 @@ public class MultipleBlobFileWriter implements Closeable {
     public void write(InternalRow row) throws IOException {
         for (BlobProjectedFileWriter blobWriter : blobWriters) {
             blobWriter.write(row);
-        }
-    }
-
-    public void writeBundle(ReplayableBundleRecords bundle) throws IOException {
-        for (BlobProjectedFileWriter blobWriter : blobWriters) {
-            blobWriter.writeBundle(bundle);
         }
     }
 
@@ -131,16 +124,13 @@ public class MultipleBlobFileWriter implements Closeable {
     }
 
     private static class BlobProjectedFileWriter
-            extends ProjectedFileWriter<BundleAwareRowDataRollingFileWriter, List<DataFileMeta>> {
+            extends ProjectedFileWriter<
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>> {
         public BlobProjectedFileWriter(
-                Supplier<? extends BundleAwareRowDataFileWriter> writerFactory,
-                boolean supportsBundlePassThrough,
+                Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> writerFactory,
                 long targetFileSize,
                 int[] projection) {
-            super(
-                    new BundleAwareRowDataRollingFileWriter(
-                            writerFactory, supportsBundlePassThrough, targetFileSize),
-                    projection);
+            super(new RollingFileWriterImpl<>(writerFactory, targetFileSize), projection);
         }
     }
 }

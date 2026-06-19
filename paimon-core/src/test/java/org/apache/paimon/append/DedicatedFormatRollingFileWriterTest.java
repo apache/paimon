@@ -335,6 +335,64 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testBundleWritingRespectsBlobTargetFileSize() throws IOException {
+        long blobTargetFileSize = 2 * 1024 * 1024L;
+        DedicatedFormatRollingFileWriter bundleWriter =
+                new DedicatedFormatRollingFileWriter(
+                        LocalFileIO.create(),
+                        SCHEMA_ID,
+                        FileFormat.fromIdentifier("parquet", new Options()),
+                        null,
+                        128 * 1024 * 1024,
+                        blobTargetFileSize,
+                        128 * 1024 * 1024,
+                        SCHEMA,
+                        new DataFilePathFactory(
+                                new Path(tempDir + "/bundle-blob-size-test"),
+                                "parquet",
+                                "data-",
+                                "changelog",
+                                false,
+                                null,
+                                null),
+                        () -> new LongCounter(),
+                        COMPRESSION,
+                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new FileIndexOptions(),
+                        FileSource.APPEND,
+                        false,
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
+
+        byte[] blobData = new byte[1024 * 1024];
+        new Random(321).nextBytes(blobData);
+        List<InternalRow> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            rows.add(
+                    GenericRow.of(
+                            i,
+                            BinaryString.fromString("bundle-blob-test-" + i),
+                            new BlobData(blobData)));
+        }
+
+        bundleWriter.writeBundle(new SingleUseBundleRecords(rows));
+        bundleWriter.close();
+
+        List<DataFileMeta> blobFiles =
+                bundleWriter.result().stream()
+                        .filter(file -> "blob".equals(file.fileFormat()))
+                        .collect(java.util.stream.Collectors.toList());
+        assertThat(blobFiles)
+                .as("Bundle writes should still roll blob files inside the bundle.")
+                .hasSizeGreaterThan(1);
+        for (DataFileMeta blobFile : blobFiles.subList(0, blobFiles.size() - 1)) {
+            assertThat(blobFile.fileSize())
+                    .isGreaterThanOrEqualTo(blobTargetFileSize)
+                    .isLessThanOrEqualTo(blobTargetFileSize + blobData.length);
+        }
+        assertThat(bundleWriter.recordCount()).isEqualTo(rows.size());
+    }
+
+    @Test
     public void testSchemaValidation() throws IOException {
         // Test that the writer correctly handles the schema with blob field
         InternalRow row =
