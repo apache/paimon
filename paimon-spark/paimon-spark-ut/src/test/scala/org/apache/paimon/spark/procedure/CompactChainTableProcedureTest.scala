@@ -102,6 +102,7 @@ class CompactChainTableProcedureTest extends PaimonSparkTestBase {
                   |    `t3` STRING COMMENT 't3'
                   |  ) PARTITIONED BY (`date` STRING COMMENT 'date')
                   |TBLPROPERTIES (
+                  |     'dynamic-partition-overwrite' = 'false',
                   |     'chain-table.enabled' = 'true',
                   |     'primary-key' = 'date,t1',
                   |     'sequence.field' = 't2',
@@ -149,6 +150,10 @@ class CompactChainTableProcedureTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT * FROM `chain_compact_t2$branch_snapshot` where date = '20260225'"),
         Seq(Row(3, 1, "3", "20260225"), Row(4, 2, "4", "20260225"))
+      )
+      checkAnswer(
+        sql("SELECT * FROM `chain_compact_t2$branch_snapshot` where date != '20260225'"),
+        Seq(Row(2, 1, "2", "20260223"), Row(3, 1, "3", "20260224"))
       )
 
       // Check snapshots commit_kind

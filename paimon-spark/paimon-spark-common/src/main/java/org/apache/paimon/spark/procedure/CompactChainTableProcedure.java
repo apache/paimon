@@ -96,6 +96,10 @@ public class CompactChainTableProcedure extends BaseProcedure {
         String partitionStr = args.getString(1);
         boolean overwrite = !args.isNullAt(2) && args.getBoolean(2);
         checkArgument(StringUtils.isNotEmpty(partitionStr), "Partition string cannot be empty");
+        checkArgument(
+                partitionStr.split(";").length == 1,
+                "compact_chain_table only supports a single partition, but multiple partitions were provided: %s",
+                partitionStr);
 
         return modifyPaimonTable(
                 tableIdent,
@@ -167,13 +171,16 @@ public class CompactChainTableProcedure extends BaseProcedure {
                                 splits.toArray(new Split[0]), relation));
 
         PaimonSparkWriter writer = PaimonSparkWriter.apply(snapshotTable);
-        if (partitionExists) {
-            writer.writeBuilder().withOverwrite();
-        }
-        Map<String, String> targetPartition = ParameterUtils.getPartitions(partitionStr).get(0);
+        Map<String, String> targetPartition =
+                ParameterUtils.parseCommaSeparatedKeyValues(partitionStr);
         for (Map.Entry<String, String> entry : targetPartition.entrySet()) {
             datasetForWrite =
                     datasetForWrite.withColumn(entry.getKey(), functions.expr(entry.getValue()));
+        }
+        if (partitionExists) {
+            Map<String, String> staticPartition =
+                    SparkProcedureUtils.parseStaticPartition(spark(), targetPartition);
+            writer.writeBuilder().withOverwrite(staticPartition);
         }
         writer.commit(writer.write(datasetForWrite));
         LOG.info("Successfully compacted partition {} to snapshot branch.", partitionStr);

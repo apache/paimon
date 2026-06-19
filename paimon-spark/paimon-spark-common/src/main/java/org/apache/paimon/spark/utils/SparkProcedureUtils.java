@@ -27,6 +27,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.expressions.Expression;
+import org.apache.spark.sql.catalyst.expressions.Literal;
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 import org.slf4j.Logger;
@@ -34,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -106,5 +108,34 @@ public class SparkProcedureUtils {
                 .map(a -> "(" + a + ")")
                 .reduce((a, b) -> a + " OR " + b)
                 .orElse(null);
+    }
+
+    /**
+     * Parse partition spec values by evaluating them as Spark SQL literal expressions. This strips
+     * quotes from string literals and validates that values are non-null literals.
+     *
+     * @param spark the Spark session
+     * @param partitionSpec the partition spec with raw values (e.g., {"date": "\"20260225\""})
+     * @return the static partition map with unquoted literal values (e.g., {"date": "20260225"})
+     */
+    public static Map<String, String> parseStaticPartition(
+            SparkSession spark, Map<String, String> partitionSpec) {
+        Map<String, String> staticPartition = new HashMap<>();
+        for (Map.Entry<String, String> entry : partitionSpec.entrySet()) {
+            Expression expr;
+            try {
+                expr = spark.sessionState().sqlParser().parseExpression(entry.getValue());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            checkArgument(
+                    expr instanceof Literal,
+                    "Partition value must be a literal expression, but got: %s",
+                    entry.getValue());
+            Object value = ((Literal) expr).value();
+            checkArgument(value != null, "Partition value cannot be null");
+            staticPartition.put(entry.getKey(), value.toString());
+        }
+        return staticPartition;
     }
 }
