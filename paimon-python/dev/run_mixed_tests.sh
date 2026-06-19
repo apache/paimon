@@ -483,6 +483,64 @@ run_lumina_vector_btree_test() {
     fi
 }
 
+ensure_paimon_vindex() {
+    if python -c "import paimon_vindex" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "Installing Python paimon-vindex dependency..."
+    if python -m pip install 'paimon-vindex==0.1.0'; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
+    local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
+    rm -rf "$target_dir"
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.1.0'; then
+        export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
+        return 0
+    fi
+
+    if python -c "import numpy" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
+        rm -rf "$target_dir"
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.1.0'; then
+            export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
+            return 0
+        fi
+    fi
+
+    echo -e "${RED}✗ Failed to install paimon-vindex${NC}"
+    return 1
+}
+
+# Function to run paimon-vindex vector index test (Java write index, Python read and search)
+run_vindex_vector_test() {
+    echo -e "${YELLOW}=== Running paimon-vindex Vector Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testVindexVectorIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testVindexVectorIndexWrite -pl paimon-vector -am -q -DfailIfNoTests=false -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    if ! ensure_paimon_vindex; then
+        return 1
+    fi
+    echo "Running Python test for JavaPyReadWriteTest.test_read_vindex_vector_index..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_vindex_vector_index -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 run_compact_conflict_test() {
     echo -e "${YELLOW}=== Running Compact Conflict Test (Java Write Base, Python Shard Update + Java Compact) ===${NC}"
 
@@ -745,6 +803,7 @@ main() {
     local tantivy_fulltext_result=0
     local lumina_vector_result=0
     local lumina_vector_btree_result=0
+    local vindex_vector_result=0
     local compact_conflict_result=0
     local blob_compact_conflict_result=0
     local blob_alter_compact_result=0
@@ -899,6 +958,18 @@ main() {
     # Run Lumina vector + BTree pre-filter test (Java write, Python read)
     if ! run_lumina_vector_btree_test; then
         lumina_vector_btree_result=1
+    fi
+
+    echo ""
+
+    # Run paimon-vindex vector index test (requires Python >= 3.9)
+    if [[ "$PYTHON_MINOR" -ge 9 ]]; then
+        if ! run_vindex_vector_test; then
+            vindex_vector_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping paimon-vindex Vector Index Test (requires Python >= 3.9, current: $PYTHON_VERSION)${NC}"
+        vindex_vector_result=0
     fi
 
     echo ""
@@ -1068,6 +1139,12 @@ main() {
         echo -e "${RED}✗ Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $vindex_vector_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ paimon-vindex Vector Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ paimon-vindex Vector Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     if [[ $compact_conflict_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Compact Conflict Test (Java Write+Compact, Python Read): PASSED${NC}"
     else
@@ -1121,7 +1198,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
