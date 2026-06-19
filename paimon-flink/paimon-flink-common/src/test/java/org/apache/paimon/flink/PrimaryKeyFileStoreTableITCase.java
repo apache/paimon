@@ -203,6 +203,46 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(TIMEOUT)
+    public void testSnapshotSequenceInsertIntoCheckSameBucketAndInsertOverwriteRescale()
+            throws Exception {
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
+        bEnv.executeSql(createCatalogSql("testCatalog", path));
+        bEnv.executeSql("USE CATALOG testCatalog");
+        bEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "  k INT,"
+                        + "  v STRING,"
+                        + "  PRIMARY KEY (k) NOT ENFORCED"
+                        + ") WITH ("
+                        + "  'bucket' = '1',"
+                        + "  'write-only' = 'true',"
+                        + "  'write.sequence-number-init-mode' = 'snapshot'"
+                        + ")");
+
+        bEnv.executeSql("INSERT INTO T VALUES (1, 'AAA'), (2, 'BBB')").await();
+        bEnv.executeSql("ALTER TABLE T SET ('bucket' = '2')");
+
+        assertThatCode(() -> bEnv.executeSql("INSERT INTO T VALUES (3, 'CCC')").await())
+                .rootCause()
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "Try to write table with a new bucket num 2, but the previous bucket num is 1. "
+                                + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
+
+        bEnv.executeSql("INSERT OVERWRITE T VALUES (3, 'CCC'), (4, 'DDD')").await();
+
+        List<Row> actual = new ArrayList<>();
+        try (CloseableIterator<Row> it = bEnv.executeSql("SELECT * FROM T ORDER BY k").collect()) {
+            while (it.hasNext()) {
+                actual.add(it.next());
+            }
+        }
+
+        assertThat(actual).containsExactly(Row.of(3, "CCC"), Row.of(4, "DDD"));
+    }
+
+    @Test
+    @Timeout(TIMEOUT)
     public void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(

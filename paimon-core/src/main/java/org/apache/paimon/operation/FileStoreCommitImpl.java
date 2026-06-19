@@ -782,8 +782,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean shouldCheckSameBucket(CommitKind commitKind) {
         return commitKind == CommitKind.APPEND
                 && bucketMode == BucketMode.HASH_FIXED
-                && options.writeOnly()
-                && !options.bucketAppendOrdered();
+                && (isUnorderedWriteOnlyAppend() || isWriteOnlySnapshotSequenceAppend());
+    }
+
+    private boolean isUnorderedWriteOnlyAppend() {
+        return options.writeOnly() && !options.bucketAppendOrdered();
+    }
+
+    private boolean isWriteOnlySnapshotSequenceAppend() {
+        return options.writeOnly()
+                && options.writeSequenceNumberInitMode()
+                        == CoreOptions.SequenceNumberInitMode.SNAPSHOT;
     }
 
     private OptionalLong maxSequenceNumber(List<ManifestFileMeta> manifests) {
