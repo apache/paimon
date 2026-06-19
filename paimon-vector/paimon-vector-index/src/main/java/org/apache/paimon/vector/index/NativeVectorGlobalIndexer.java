@@ -30,14 +30,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
-/** Vector global indexer backed by paimon-vector-index. */
-public class VectorGlobalIndexer implements org.apache.paimon.globalindex.VectorGlobalIndexer {
+/** Native vector global indexer backed by paimon-vector-index. */
+public class NativeVectorGlobalIndexer implements org.apache.paimon.globalindex.VectorGlobalIndexer {
 
     private final DataType fieldType;
     private final Map<String, String> options;
     private final String identifier;
 
-    public VectorGlobalIndexer(DataType fieldType, Map<String, String> options, String identifier) {
+    public NativeVectorGlobalIndexer(
+            DataType fieldType, Map<String, String> options, String identifier) {
         this.fieldType = fieldType;
         this.options = Objects.requireNonNull(options, "options must not be null");
         this.identifier = Objects.requireNonNull(identifier, "identifier must not be null");

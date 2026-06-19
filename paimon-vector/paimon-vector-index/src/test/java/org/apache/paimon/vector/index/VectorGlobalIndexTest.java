@@ -348,8 +348,8 @@ public class VectorGlobalIndexTest {
                     new float[] {0.7f, 0.7f}
                 };
 
-        VectorGlobalIndexer indexer =
-                new VectorGlobalIndexer(
+        NativeVectorGlobalIndexer indexer =
+                new NativeVectorGlobalIndexer(
                         vectorType,
                         VectorGlobalIndexerFactory.nativeOptions(
                                 vectorType, options, IVF_PQ_IDENTIFIER, fieldName),
