@@ -282,8 +282,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (result.isPresent()) {
                 LOG.info("Scan table '{}' with global index.", table.name());
+                return result;
             }
-            return result;
+            return Optional.empty();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -296,7 +297,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
         Function<Split, List<IndexedSplit>> process =
                 split ->
                         Collections.singletonList(
-                                wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+                                split instanceof IndexedSplit
+                                        ? (IndexedSplit) split
+                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
         randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
         return () -> indexedSplits;
     }

@@ -747,6 +747,12 @@ under the License.
             <td>Row count per shard for global index.</td>
         </tr>
         <tr>
+            <td><h5>global-index.search-mode</h5></td>
+            <td style="word-wrap: break-word;">fast</td>
+            <td><p>Enum</p></td>
+            <td>Search mode for global index queries. Supported values are 'fast', 'full', and 'detail'.<br /><br />Possible values:<ul><li>"fast": Only search indexed data.</li><li>"full": Use snapshot next row id and global index coverage to detect missing row ids, and scan raw data only when a gap exists.</li><li>"detail": Scan data files to find exact unindexed rows. This can handle index invalidation caused by updates or rewrites.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>global-index.thread-num</h5></td>
             <td style="word-wrap: break-word;">32</td>
             <td>Integer</td>
