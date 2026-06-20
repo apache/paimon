@@ -19,7 +19,9 @@
 -r requirements.txt
 
 # Test dependencies for pypaimon are as follows
-duckdb==1.3.2
+# duckdb 1.3.2 has no cp38 wheel; Python 3.8 caps at the 1.2.x series.
+duckdb<1.3; python_version < "3.9"
+duckdb==1.3.2; python_version >= "3.9"
 flake8==4.0.1
 parameterized==0.9.0
 py4j==0.10.9.9
