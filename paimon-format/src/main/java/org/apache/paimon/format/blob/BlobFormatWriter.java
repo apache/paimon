@@ -22,7 +22,6 @@ import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobPlaceholder;
-import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
@@ -32,9 +31,6 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -48,8 +44,6 @@ import static org.apache.paimon.utils.StreamUtils.longToLittleEndian;
 /** {@link FormatWriter} for blob file. */
 public class BlobFormatWriter implements FileAwareFormatWriter {
 
-    private static final Logger LOG = LoggerFactory.getLogger(BlobFormatWriter.class);
-
     public static final byte VERSION = 1;
     public static final int MAGIC_NUMBER = 1481511375;
     public static final byte[] MAGIC_NUMBER_BYTES = intToLittleEndian(MAGIC_NUMBER);
@@ -59,7 +53,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
     private final String blobFieldName;
-    private final boolean writeNullOnMissingFile;
     private final CRC32 crc32;
     private final byte[] tmpBuffer;
     private final LongArrayList lengths;
@@ -68,17 +61,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     public BlobFormatWriter(
             PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
-        this(out, writeConsumer, type, false);
-    }
-
-    public BlobFormatWriter(
-            PositionOutputStream out,
-            @Nullable BlobConsumer writeConsumer,
-            RowType type,
-            boolean writeNullOnMissingFile) {
         this.out = out;
         this.writeConsumer = writeConsumer;
-        this.writeNullOnMissingFile = writeNullOnMissingFile;
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         this.blobFieldName = type.getFieldNames().get(0);
         this.crc32 = new CRC32();
@@ -112,36 +96,22 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             return;
         }
 
-        SeekableInputStream in;
-        try {
-            in = blob.newInputStream();
-        } catch (IOException | RuntimeException e) {
-            if (writeNullOnMissingFile && isNotFoundError(e)) {
-                LOG.warn(
-                        "Failed to open blob from {}, writing NULL for BLOB field {}.",
-                        blobUri(blob),
-                        blobFieldName,
-                        e);
-                writeNullElement();
-                return;
-            }
-            throw e;
-        }
-
+        long previousPos = out.getPos();
         crc32.reset();
+
         write(MAGIC_NUMBER_BYTES);
+
         long blobPos = out.getPos();
-        long blobLength = 0;
-        try (SeekableInputStream stream = in) {
-            int bytesRead = stream.read(tmpBuffer);
+        try (SeekableInputStream in = blob.newInputStream()) {
+            int bytesRead = in.read(tmpBuffer);
             while (bytesRead >= 0) {
                 write(tmpBuffer, bytesRead);
-                blobLength += bytesRead;
-                bytesRead = stream.read(tmpBuffer);
+                bytesRead = in.read(tmpBuffer);
             }
         }
 
-        long binLength = blobLength + MAGIC_NUMBER_BYTES.length + 12;
+        long blobLength = out.getPos() - blobPos;
+        long binLength = out.getPos() - previousPos + 12;
         lengths.add(binLength);
         byte[] lenBytes = longToLittleEndian(binLength);
         write(lenBytes);
@@ -155,33 +125,6 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                 out.flush();
             }
         }
-    }
-
-    private void writeNullElement() throws IOException {
-        lengths.add(NULL_LENGTH);
-        if (writeConsumer != null) {
-            writeConsumer.accept(blobFieldName, null);
-        }
-    }
-
-    private static String blobUri(Blob blob) {
-        if (blob instanceof BlobRef) {
-            return ((BlobRef) blob).toDescriptor().uri();
-        }
-        return "unknown";
-    }
-
-    private static boolean isNotFoundError(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (current instanceof RuntimeException
-                    && current.getMessage() != null
-                    && current.getMessage().startsWith("HTTP error code: 404")) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 
     private void write(byte[] bytes) throws IOException {

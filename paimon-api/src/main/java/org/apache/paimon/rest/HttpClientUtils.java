@@ -88,13 +88,8 @@ public class HttpClientUtils {
     public static InputStream getAsInputStream(String uri) throws IOException {
         HttpGet httpGet = new HttpGet(uri);
         CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet);
-        int statusCode = response.getCode();
-        if (statusCode != HttpStatus.SC_OK) {
-            try {
-                throw httpError(statusCode);
-            } finally {
-                response.close();
-            }
+        if (response.getCode() != 200) {
+            throw new RuntimeException("HTTP error code: " + response.getCode());
         }
         return response.getEntity().getContent();
     }
@@ -103,7 +98,7 @@ public class HttpClientUtils {
      * Checks whether an HTTP resource exists. HEAD is attempted first; when HEAD does not return
      * 200, a lightweight GET with {@code Range: bytes=0-0} is used to verify readability. This
      * avoids treating signed or GET-only URLs as missing when HEAD is rejected or returns a
-     * different status than GET.
+     * different status than GET. HTTP 416 from the range probe indicates a zero-length resource.
      */
     public static boolean exists(String uri) throws IOException {
         int headStatusCode = headStatusCode(uri);
@@ -123,19 +118,6 @@ public class HttpClientUtils {
                 "Unexpected HTTP status code: " + rangeStatusCode + " for uri: " + uri);
     }
 
-    public static boolean isNotFoundError(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (current instanceof RuntimeException
-                    && current.getMessage() != null
-                    && current.getMessage().startsWith("HTTP error code: 404")) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
     private static int headStatusCode(String uri) throws IOException {
         HttpHead httpHead = new HttpHead(uri);
         try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpHead)) {
@@ -149,9 +131,5 @@ public class HttpClientUtils {
         try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet)) {
             return response.getCode();
         }
-    }
-
-    private static RuntimeException httpError(int statusCode) {
-        return new RuntimeException("HTTP error code: " + statusCode);
     }
 }

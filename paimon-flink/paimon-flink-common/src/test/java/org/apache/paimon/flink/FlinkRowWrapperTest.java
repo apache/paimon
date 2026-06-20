@@ -35,6 +35,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
+import java.util.Collections;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -81,6 +83,26 @@ public class FlinkRowWrapperTest {
 
         assertThat(wrapper.isNullAt(0)).isFalse();
         assertThat(wrapper.getBlob(0).toData()).isEqualTo(bytes);
+    }
+
+    @Test
+    public void testMissingHttpBlobDescriptorWithNonBlobColumnBefore() throws Exception {
+        httpServer.createContext(
+                "/missing.jpg",
+                exchange -> {
+                    sendResponse(exchange, 404, new byte[0]);
+                });
+        GenericRowData row =
+                GenericRowData.of(
+                        1,
+                        new BlobDescriptor("http://127.0.0.1:" + httpPort + "/missing.jpg", 0, 1)
+                                .serialize());
+
+        FlinkRowWrapper wrapper = wrapper(row, true, Collections.singleton(1));
+
+        assertThat(wrapper.isNullAt(0)).isFalse();
+        assertThat(wrapper.getInt(0)).isEqualTo(1);
+        assertThat(wrapper.isNullAt(1)).isTrue();
     }
 
     @Test
@@ -148,7 +170,12 @@ public class FlinkRowWrapperTest {
     }
 
     private FlinkRowWrapper wrapper(GenericRowData row, boolean checkBlobDescriptorExists) {
+        return wrapper(row, checkBlobDescriptorExists, Collections.singleton(0));
+    }
+
+    private FlinkRowWrapper wrapper(
+            GenericRowData row, boolean checkBlobDescriptorExists, Set<Integer> blobFields) {
         return new FlinkRowWrapper(
-                row, CatalogContext.create(new Options()), checkBlobDescriptorExists);
+                row, CatalogContext.create(new Options()), checkBlobDescriptorExists, blobFields);
     }
 }

@@ -30,6 +30,7 @@ import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.UriReaderFactory;
 
@@ -41,6 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -53,6 +57,7 @@ public class FlinkRowWrapper implements InternalRow {
     private final org.apache.flink.table.data.RowData row;
     private final UriReaderFactory uriReaderFactory;
     private final boolean checkBlobDescriptorExists;
+    private final Set<Integer> blobFields;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
         this(row, null);
@@ -66,9 +71,28 @@ public class FlinkRowWrapper implements InternalRow {
             org.apache.flink.table.data.RowData row,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
+        this(row, catalogContext, checkBlobDescriptorExists, Collections.emptySet());
+    }
+
+    public FlinkRowWrapper(
+            org.apache.flink.table.data.RowData row,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            Set<Integer> blobFields) {
         this.row = row;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
         this.checkBlobDescriptorExists = checkBlobDescriptorExists;
+        this.blobFields = blobFields;
+    }
+
+    public static Set<Integer> blobFieldIndexes(org.apache.paimon.types.RowType rowType) {
+        Set<Integer> result = new HashSet<>();
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
+                result.add(i);
+            }
+        }
+        return result;
     }
 
     @Override
@@ -91,7 +115,10 @@ public class FlinkRowWrapper implements InternalRow {
         if (row.isNullAt(pos)) {
             return true;
         }
-        return checkBlobDescriptorExists && isMissingBlobDescriptor(pos, row.getBinary(pos));
+        if (!checkBlobDescriptorExists || !blobFields.contains(pos)) {
+            return false;
+        }
+        return isMissingBlobDescriptor(pos, row.getBinary(pos));
     }
 
     @Override

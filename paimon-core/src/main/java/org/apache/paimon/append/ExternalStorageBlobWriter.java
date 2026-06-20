@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.casting.FallbackMappingRow;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobDescriptor;
@@ -49,9 +50,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -69,9 +70,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class ExternalStorageBlobWriter implements Closeable {
 
-    private final RowType writeSchema;
     private final List<ExternalStorageBlobFieldWriter> fieldWriters;
     private final UriReader uriReader;
+    private final GenericRow overrideRow;
+    private final FallbackMappingRow resultRow;
 
     public ExternalStorageBlobWriter(
             FileIO fileIO,
@@ -84,15 +86,13 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnMissingFile) {
+            long targetFileSize) {
         checkNotNull(
                 externalStoragePath,
                 "'%s' must be set when '%s' is configured.",
                 CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
                 CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
 
-        this.writeSchema = writeSchema;
         this.fieldWriters =
                 createFieldWriters(
                         fileIO,
@@ -105,9 +105,13 @@ public class ExternalStorageBlobWriter implements Closeable {
                         fileSource,
                         asyncFileWrite,
                         statsDenseStore,
-                        targetFileSize,
-                        writeNullOnMissingFile);
+                        targetFileSize);
         this.uriReader = UriReader.fromFile(fileIO);
+
+        int fieldCount = writeSchema.getFieldCount();
+        this.overrideRow = new GenericRow(fieldCount);
+        // identity mappings: position i maps to position i
+        this.resultRow = new FallbackMappingRow(IntStream.range(0, fieldCount).toArray());
     }
 
     /**
@@ -121,19 +125,20 @@ public class ExternalStorageBlobWriter implements Closeable {
             return row;
         }
 
-        GenericRow result = (GenericRow) copyInternalRow(row, writeSchema);
+        // clear all override positions so non-overridden fields fall back to delegate
+        for (ExternalStorageBlobFieldWriter fw : fieldWriters) {
+            overrideRow.setField(fw.fieldIndex(), null);
+        }
 
         for (ExternalStorageBlobFieldWriter fw : fieldWriters) {
-            FieldWriteResult writeResult = fw.writeAndReplace(row);
-            if (writeResult.isExplicitNull()) {
-                result.setField(fw.fieldIndex(), null);
-            } else if (writeResult.descriptor() != null) {
-                result.setField(
-                        fw.fieldIndex(), Blob.fromDescriptor(uriReader, writeResult.descriptor()));
+            BlobDescriptor descriptor = fw.writeAndReplace(row);
+            if (descriptor != null) {
+                overrideRow.setField(fw.fieldIndex(), Blob.fromDescriptor(uriReader, descriptor));
             }
         }
 
-        return result;
+        // override row as main (non-null wins), original row as fallback
+        return resultRow.replace(overrideRow, row);
     }
 
     @Override
@@ -162,8 +167,7 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnMissingFile) {
+            long targetFileSize) {
         List<ExternalStorageBlobFieldWriter> writers = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
             if (field.type().getTypeRoot() == DataTypeRoot.BLOB
@@ -180,8 +184,7 @@ public class ExternalStorageBlobWriter implements Closeable {
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                targetFileSize,
-                                writeNullOnMissingFile));
+                                targetFileSize));
             }
         }
         return writers;
@@ -198,14 +201,12 @@ public class ExternalStorageBlobWriter implements Closeable {
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            long targetFileSize,
-            boolean writeNullOnMissingFile) {
+            long targetFileSize) {
         int fieldIndex = writeSchema.getFieldIndex(fieldName);
         ExternalStorageBlobFieldWriter fieldWriter = new ExternalStorageBlobFieldWriter(fieldIndex);
 
         BlobFileFormat blobFileFormat = new BlobFileFormat();
         blobFileFormat.setWriteConsumer(fieldWriter);
-        blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
 
         RowType projectedType = writeSchema.project(fieldName);
         fieldWriter.setWriter(
@@ -267,37 +268,6 @@ public class ExternalStorageBlobWriter implements Closeable {
 
     // ------------------------------ Inner class ------------------------------
 
-    private static final class FieldWriteResult {
-        private final boolean explicitNull;
-        @Nullable private final BlobDescriptor descriptor;
-
-        private FieldWriteResult(boolean explicitNull, @Nullable BlobDescriptor descriptor) {
-            this.explicitNull = explicitNull;
-            this.descriptor = descriptor;
-        }
-
-        static FieldWriteResult explicitNull() {
-            return new FieldWriteResult(true, null);
-        }
-
-        static FieldWriteResult withDescriptor(BlobDescriptor descriptor) {
-            return new FieldWriteResult(false, descriptor);
-        }
-
-        static FieldWriteResult unchanged() {
-            return new FieldWriteResult(false, null);
-        }
-
-        boolean isExplicitNull() {
-            return explicitNull;
-        }
-
-        @Nullable
-        BlobDescriptor descriptor() {
-            return descriptor;
-        }
-    }
-
     /**
      * Writes one descriptor BLOB field backed by external storage using {@link ProjectedFileWriter}
      * with rolling support. Implements {@link BlobConsumer} to directly capture the {@link
@@ -313,9 +283,6 @@ public class ExternalStorageBlobWriter implements Closeable {
 
         /** The descriptor captured from the last {@link #accept} call. */
         @Nullable private BlobDescriptor lastDescriptor;
-
-        /** Whether the last write explicitly produced NULL (including missing-file fallback). */
-        private boolean explicitNullOverride;
 
         ExternalStorageBlobFieldWriter(int fieldIndex) {
             this.fieldIndex = fieldIndex;
@@ -336,26 +303,18 @@ public class ExternalStorageBlobWriter implements Closeable {
         @Override
         public boolean accept(String blobFieldName, BlobDescriptor blobDescriptor) {
             this.lastDescriptor = blobDescriptor;
-            this.explicitNullOverride = blobDescriptor == null;
             return true;
         }
 
         /**
          * Write the BLOB value from {@code src} to the external storage path.
          *
-         * @return the write outcome for the field
+         * @return the {@link BlobDescriptor} for the written data, or null if the field is null
          */
-        FieldWriteResult writeAndReplace(InternalRow src) throws IOException {
-            lastDescriptor = null;
-            explicitNullOverride = false;
+        @Nullable
+        BlobDescriptor writeAndReplace(InternalRow src) throws IOException {
             writer.write(src);
-            if (explicitNullOverride) {
-                return FieldWriteResult.explicitNull();
-            }
-            if (lastDescriptor != null) {
-                return FieldWriteResult.withDescriptor(lastDescriptor);
-            }
-            return FieldWriteResult.unchanged();
+            return lastDescriptor;
         }
 
         @Override

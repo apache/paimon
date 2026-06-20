@@ -61,8 +61,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -72,8 +70,6 @@ import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -448,37 +444,6 @@ public class BlobTableTest extends TableTestBase {
                                                         new BlobData(randomBytes())))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob-descriptor-field");
-    }
-
-    @Test
-    public void testExternalStorageMissingHttpBlobWritesNull() throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
-        int port = server.getAddress().getPort();
-        server.createContext(
-                "/missing",
-                exchange -> {
-                    respondHttp(exchange, 404, new byte[0]);
-                });
-        server.start();
-        try {
-            createExternalStorageTableWithNullOnMissing();
-            String missingUrl = "http://127.0.0.1:" + port + "/missing";
-            Blob blobRef =
-                    Blob.fromDescriptor(
-                            UriReader.fromHttp(), new BlobDescriptor(missingUrl, 0, -1));
-
-            writeDataDefault(
-                    Collections.singletonList(
-                            GenericRow.of(1, BinaryString.fromString("missing-http"), blobRef)));
-
-            readDefault(
-                    row -> {
-                        assertThat(row.getString(1).toString()).isEqualTo("missing-http");
-                        assertThat(row.isNullAt(2)).isTrue();
-                    });
-        } finally {
-            server.stop(0);
-        }
     }
 
     @Test
@@ -1824,14 +1789,6 @@ public class BlobTableTest extends TableTestBase {
     }
 
     private void createExternalStorageTable() throws Exception {
-        createExternalStorageTable(false);
-    }
-
-    private void createExternalStorageTableWithNullOnMissing() throws Exception {
-        createExternalStorageTable(true);
-    }
-
-    private void createExternalStorageTable(boolean writeNullOnMissingFile) throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
@@ -1845,24 +1802,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(
                 CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
                 tempPath.resolve("external-storage-blob-path").toString());
-        if (writeNullOnMissingFile) {
-            schemaBuilder.option(CoreOptions.BLOB_WRITE_NULL_ON_MISSING_FILE.key(), "true");
-        }
         catalog.createTable(identifier(), schemaBuilder.build(), true);
-    }
-
-    private static void respondHttp(HttpExchange exchange, int statusCode, byte[] body)
-            throws IOException {
-        boolean headRequest = "HEAD".equals(exchange.getRequestMethod());
-        long responseLength = headRequest ? -1 : body.length;
-        exchange.sendResponseHeaders(statusCode, responseLength);
-        if (!headRequest && body.length > 0) {
-            try (OutputStream outputStream = exchange.getResponseBody()) {
-                outputStream.write(body);
-            }
-        } else {
-            exchange.close();
-        }
     }
 
     private void writeRows(Table table, Iterable<InternalRow> rows) throws Exception {

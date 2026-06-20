@@ -477,6 +477,18 @@ under the License.
             <td>Whether enable data evolution for row tracking table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.merge-into.file-pruning</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.merge-into.source-persist</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to persist source when process merge into action on data evolution table.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.row-sidecar.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -493,18 +505,6 @@ under the License.
             <td style="word-wrap: break-word;">0.05</td>
             <td>Double</td>
             <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.merge-into.file-pruning</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>If true, enables the file-level pruning step for MergeInto partial column update on data-evolution tables. Set this to false when most files in the target partition are expected to be updated, so that the overhead of collecting touched file IDs outweighs the benefit of pruning untouched files.</td>
-        </tr>
-        <tr>
-            <td><h5>data-evolution.merge-into.source-persist</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>

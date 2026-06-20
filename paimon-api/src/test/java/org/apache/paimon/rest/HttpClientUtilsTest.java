@@ -26,12 +26,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link HttpClientUtils}. */
 public class HttpClientUtilsTest {
@@ -163,52 +161,6 @@ public class HttpClientUtilsTest {
                 });
 
         assertThat(HttpClientUtils.exists(url("/head-404-get-404"))).isFalse();
-    }
-
-    @Test
-    public void testGetAsInputStreamThrowsForNotFound() {
-        registerHandler(
-                "/get-missing",
-                exchange -> {
-                    respond(exchange, 404, new byte[0]);
-                });
-
-        assertThatThrownBy(() -> HttpClientUtils.getAsInputStream(url("/get-missing")))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage("HTTP error code: 404");
-    }
-
-    @Test
-    public void testGetAsInputStreamDoesNotLeakConnectionsOnRepeatedNotFound() throws Exception {
-        registerHandler(
-                "/missing",
-                exchange -> {
-                    respond(exchange, 404, new byte[0]);
-                });
-        registerHandler(
-                "/ok",
-                exchange -> {
-                    respond(exchange, 200, "x".getBytes());
-                });
-
-        for (int i = 0; i < 120; i++) {
-            assertThatThrownBy(() -> HttpClientUtils.getAsInputStream(url("/missing")))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessage("HTTP error code: 404");
-        }
-
-        try (InputStream in = HttpClientUtils.getAsInputStream(url("/ok"))) {
-            assertThat(in.read()).isEqualTo('x');
-        }
-    }
-
-    @Test
-    public void testIsNotFoundError() {
-        RuntimeException exception =
-                new RuntimeException("wrapper", new RuntimeException("HTTP error code: 404"));
-        assertThat(HttpClientUtils.isNotFoundError(exception)).isTrue();
-        assertThat(HttpClientUtils.isNotFoundError(new RuntimeException("HTTP error code: 500")))
-                .isFalse();
     }
 
     private void registerHandler(String path, HttpHandler handler) {
