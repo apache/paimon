@@ -947,6 +947,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
                 CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
         tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        // Prevent partition expiration from running during the compact commit.
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "999 d");
 
         FileStoreTable table =
                 prepareTable(
@@ -1012,6 +1014,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
         tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
         // COMPACTION_SKIP_EXPIRED_PARTITIONS is not set, default is false
+        // Prevent partition expiration from running during the compact commit.
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "999 d");
 
         FileStoreTable table =
                 prepareTable(
