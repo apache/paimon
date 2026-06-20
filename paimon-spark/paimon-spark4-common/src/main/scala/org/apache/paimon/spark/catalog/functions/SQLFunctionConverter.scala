@@ -28,26 +28,25 @@ import org.apache.spark.sql.catalyst.analysis.SQLFunctionExpression
 import org.apache.spark.sql.catalyst.catalog.{SQLFunction, UserDefinedFunction}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.types.{DataType => SparkDataType, StructType}
+import org.apache.spark.sql.types.{DataType => SparkDataType, StructField, StructType}
 
 import java.util.{Collections, HashMap => JHashMap, List => JList}
 
+import scala.collection.JavaConverters._
+
 /**
- * Converts between Spark's [[SQLFunction]] (`CREATE FUNCTION ... RETURN ...`) and a Paimon
- * [[PaimonFunction]] with a [[FunctionDefinition.SQLFunctionDefinition]] body. Scalar only; the raw
- * `inputParamText` / `returnTypeText` are stored in options and re-parsed on read so `DEFAULT` etc.
- * round-trip faithfully.
+ * Converts between Spark SQLFunction and Paimon Function with a SQLFunctionDefinition body.
  */
 object SQLFunctionConverter {
 
-  // Stored in options() so the Spark SQLFunction can be rebuilt faithfully.
+  // Spark-specific metadata stored in Paimon Function.options().
   private val IS_QUERY = "spark.sql-function.is-query"
   private val INPUT_PARAM = "spark.sql-function.input-param"
   private val RETURN_TYPE = "spark.sql-function.return-type"
   private val DETERMINISTIC = "spark.sql-function.deterministic"
   private val CONTAINS_SQL = "spark.sql-function.contains-sql"
 
-  /** Build a Paimon function from a parsed `CREATE FUNCTION ... RETURN ...` statement. */
+  /** Build a Paimon function from a parsed CREATE FUNCTION ... RETURN statement. */
   def toPaimonFunction(
       funcIdent: FunctionIdentifier,
       inputParamText: Option[String],
@@ -63,7 +62,7 @@ object SQLFunctionConverter {
       s"SQL function $funcIdent must declare an explicit RETURNS type.")
     val identifier = FunctionIdentifierConverter.toPaimonIdentifier(funcIdent)
 
-    // Parse to validate (e.g. DEFAULT / NOT NULL) and to populate typed params for interop.
+    // Typed params for cross-engine interop and DESCRIBE.
     val inputParams: JList[DataField] = inputParamText.filter(_.trim.nonEmpty) match {
       case Some(text) =>
         SparkTypeUtils
@@ -71,7 +70,7 @@ object SQLFunctionConverter {
           .getFields
       case None => Collections.emptyList[DataField]()
     }
-    val returnSparkType = scalarReturnType(funcIdent, returnTypeText, parser)
+    val returnSparkType = parseScalarReturnType(funcIdent, returnTypeText, parser)
     val returnParams: JList[DataField] =
       Collections.singletonList(
         new DataField(0, "result", SparkTypeUtils.toPaimonType(returnSparkType)))
@@ -81,11 +80,8 @@ object SQLFunctionConverter {
     val body = exprText
       .orElse(queryText)
       .getOrElse(throw new IllegalArgumentException(s"SQL function $funcIdent has an empty body."))
-    val definitions =
-      Collections.singletonMap[String, FunctionDefinition](
-        FUNCTION_DEFINITION_NAME,
-        FunctionDefinition.sql(body))
 
+    // Spark-specific options for lossless round-trip.
     val options = new JHashMap[String, String]()
     options.put(IS_QUERY, isQuery.toString)
     options.put(INPUT_PARAM, inputParamText.getOrElse(""))
@@ -98,29 +94,20 @@ object SQLFunctionConverter {
       inputParams,
       returnParams,
       isDeterministic.getOrElse(true),
-      definitions,
+      Collections.singletonMap(FUNCTION_DEFINITION_NAME, FunctionDefinition.sql(body)),
       comment.orNull,
       options)
   }
 
-  /** Rebuild a Spark [[SQLFunction]] from a Paimon-stored SQL function. */
-  def toSQLFunction(
+  /** Resolve a Paimon-stored SQL function into a Spark SQLFunctionExpression. */
+  def toSQLFunctionExpression(
       funcIdent: FunctionIdentifier,
       function: PaimonFunction,
-      parser: ParserInterface): SQLFunction = {
+      arguments: Seq[Expression],
+      parser: ParserInterface): Expression = {
     val options = function.options()
 
-    val inputParam: Option[StructType] =
-      Option(options.get(INPUT_PARAM))
-        .filter(_.trim.nonEmpty)
-        .map(UserDefinedFunction.parseRoutineParam(_, parser))
-
-    val returnTypeText = options.get(RETURN_TYPE)
-    require(
-      returnTypeText != null && returnTypeText.trim.nonEmpty,
-      s"SQL function $funcIdent is missing its return type.")
-    val returnType: SparkDataType = scalarReturnType(funcIdent, returnTypeText, parser)
-
+    // Body.
     val body = function.definition(FUNCTION_DEFINITION_NAME) match {
       case sql: FunctionDefinition.SQLFunctionDefinition => sql.definition()
       case other =>
@@ -128,11 +115,48 @@ object SQLFunctionConverter {
           s"Function $funcIdent is not a SQL function, found definition: $other")
     }
 
-    val isQuery = java.lang.Boolean.parseBoolean(options.getOrDefault(IS_QUERY, "false"))
-    val deterministic = Option(options.get(DETERMINISTIC)).map(_.toBoolean)
-    val containsSQL = Option(options.get(CONTAINS_SQL)).map(_.toBoolean)
+    // Input params: options text first, fallback to Paimon inputParams (loses DEFAULT).
+    val inputParam: Option[StructType] =
+      Option(options.get(INPUT_PARAM))
+        .filter(_.trim.nonEmpty)
+        .map(UserDefinedFunction.parseRoutineParam(_, parser))
+        .orElse {
+          val ip = function.inputParams()
+          if (ip.isPresent && !ip.get().isEmpty) {
+            val fields =
+              ip.get().asScala.map(f =>
+                StructField(f.name(), SparkTypeUtils.fromPaimonType(f.`type`())))
+            Some(StructType(fields.toArray))
+          } else None
+        }
 
-    SQLFunction(
+    // Return type: options text first, fallback to Paimon returnParams.
+    val returnType: SparkDataType =
+      Option(options.get(RETURN_TYPE))
+        .filter(_.trim.nonEmpty)
+        .map(parseScalarReturnType(funcIdent, _, parser))
+        .getOrElse {
+          val rp = function.returnParams()
+          require(
+            rp.isPresent && !rp.get().isEmpty,
+            s"SQL function $funcIdent has no return type in options or returnParams.")
+          SparkTypeUtils.fromPaimonType(rp.get().get(0).`type`())
+        }
+
+    // Is query: options flag first, fallback to parser.parseExpression.
+    val isQuery = Option(options.get(IS_QUERY))
+      .map(java.lang.Boolean.parseBoolean)
+      .getOrElse {
+        try { parser.parseExpression(body); false }
+        catch { case _: Exception => true }
+      }
+
+    // Deterministic: options flag first, fallback to function.isDeterministic().
+    val deterministic = Option(options.get(DETERMINISTIC))
+      .map(_.toBoolean)
+      .orElse(Some(function.isDeterministic))
+
+    val sqlFunction = SQLFunction(
       name = funcIdent,
       inputParam = inputParam,
       returnType = Left(returnType),
@@ -140,22 +164,11 @@ object SQLFunctionConverter {
       queryText = if (isQuery) Some(body) else None,
       comment = Option(function.comment()),
       deterministic = deterministic,
-      containsSQL = containsSQL,
+      containsSQL = Option(options.get(CONTAINS_SQL)).map(_.toBoolean),
       isTableFunc = false,
       properties = Map.empty
     )
-  }
 
-  /**
-   * Resolve a Paimon-stored SQL function reference into a Spark [[SQLFunctionExpression]]. Spark's
-   * own `ResolveSQLFunctions` analyzer rule then inlines the function body.
-   */
-  def toSQLFunctionExpression(
-      funcIdent: FunctionIdentifier,
-      function: PaimonFunction,
-      arguments: Seq[Expression],
-      parser: ParserInterface): Expression = {
-    val sqlFunction = toSQLFunction(funcIdent, function, parser)
     SQLFunctionExpression(
       sqlFunction.name.unquotedString,
       sqlFunction,
@@ -163,15 +176,14 @@ object SQLFunctionConverter {
       Some(sqlFunction.getScalarFuncReturnType))
   }
 
-  private def scalarReturnType(
+  private def parseScalarReturnType(
       funcIdent: FunctionIdentifier,
       returnTypeText: String,
-      parser: ParserInterface): SparkDataType = {
+      parser: ParserInterface): SparkDataType =
     SQLFunction.parseReturnTypeText(returnTypeText, isTableFunc = false, parser) match {
       case Some(Left(dataType)) => dataType
       case _ =>
         throw new UnsupportedOperationException(
           s"Unsupported return type '$returnTypeText' for scalar SQL function $funcIdent.")
     }
-  }
 }
