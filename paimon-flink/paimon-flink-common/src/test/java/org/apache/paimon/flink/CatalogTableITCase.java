@@ -192,8 +192,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> result = sql("SELECT * FROM sys.catalog_options");
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("catalog-options-table.enabled", "true"),
-                        Row.of("warehouse", path));
+                        Row.of("catalog-options-table.enabled", "true"), Row.of("warehouse", path));
     }
 
     @Test
