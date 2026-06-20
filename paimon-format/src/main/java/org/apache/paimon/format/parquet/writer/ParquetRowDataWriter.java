@@ -145,7 +145,9 @@ public class ParquetRowDataWriter {
                         t instanceof ArrayType
                                 ? ((ArrayType) t).getElementType()
                                 : ((VectorType) t).getElementType();
-                return new ArrayWriter(elementType, groupType, t instanceof VectorType);
+                Integer expectedVectorLength =
+                        t instanceof VectorType ? ((VectorType) t).getLength() : null;
+                return new ArrayWriter(elementType, groupType, expectedVectorLength);
             } else if (t instanceof MapType
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
@@ -516,9 +518,10 @@ public class ParquetRowDataWriter {
         private final String elementName;
         private final FieldWriter elementWriter;
         private final String repeatedGroupName;
-        private final boolean vector;
+        @Nullable private final Integer expectedVectorLength;
 
-        private ArrayWriter(DataType t, GroupType groupType, boolean vector) {
+        private ArrayWriter(
+                DataType t, GroupType groupType, @Nullable Integer expectedVectorLength) {
             // Get the internal array structure
             GroupType repeatedType = groupType.getType(0).asGroupType();
             this.repeatedGroupName = repeatedType.getName();
@@ -527,22 +530,34 @@ public class ParquetRowDataWriter {
             this.elementName = elementType.getName();
 
             this.elementWriter = createWriter(t, elementType);
-            this.vector = vector;
+            this.expectedVectorLength = expectedVectorLength;
         }
 
         @Override
         public void write(InternalRow row, int ordinal) {
-            writeArrayData(vector ? row.getVector(ordinal) : row.getArray(ordinal));
+            writeArrayData(
+                    expectedVectorLength != null ? row.getVector(ordinal) : row.getArray(ordinal));
         }
 
         @Override
         public void write(InternalArray arrayData, int ordinal) {
-            writeArrayData(vector ? arrayData.getVector(ordinal) : arrayData.getArray(ordinal));
+            writeArrayData(
+                    expectedVectorLength != null
+                            ? arrayData.getVector(ordinal)
+                            : arrayData.getArray(ordinal));
         }
 
         private void writeArrayData(InternalArray arrayData) {
             recordConsumer.startGroup();
             int listLength = arrayData.size();
+
+            if (expectedVectorLength != null && listLength != expectedVectorLength) {
+                throw new IllegalArgumentException(
+                        "Vector length mismatch: expected "
+                                + expectedVectorLength
+                                + " but got "
+                                + listLength);
+            }
 
             if (listLength > 0) {
                 recordConsumer.startField(repeatedGroupName, 0);

@@ -44,6 +44,10 @@ public class CastedVectorColumnVector implements VecColumnVector {
     public InternalVector getVector(int i) {
         long offset = heapArrayVector.offsets[i];
         long length = heapArrayVector.lengths[i];
+        if (length != vectorSize) {
+            throw new IllegalArgumentException(
+                    "Vector length mismatch: expected " + vectorSize + " but got " + length);
+        }
         return ColumnarVec.DEFAULT_FACTORY.create(children[0], (int) offset, (int) length);
     }
 

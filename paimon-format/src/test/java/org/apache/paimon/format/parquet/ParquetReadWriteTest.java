@@ -773,6 +773,22 @@ public class ParquetReadWriteTest {
         assertVector(results.get(1).getVector(1), new float[] {4, 5, 6});
     }
 
+    @Test
+    public void testWriteVectorLengthMismatch() {
+        RowType rowType =
+                RowType.builder()
+                        .fields(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .build();
+        List<InternalRow> rows =
+                Collections.singletonList(
+                        GenericRow.of(
+                                1, BinaryVector.fromPrimitiveArray(new float[] {1, 2, 3, 4})));
+
+        assertThatThrownBy(() -> createTempParquetFileByPaimon(folder, rows, 1024, rowType))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Vector length mismatch: expected 3 but got 4");
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());
