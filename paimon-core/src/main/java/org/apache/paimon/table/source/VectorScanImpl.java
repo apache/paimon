@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -31,7 +32,10 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,38 +43,40 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldIds;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorScan}. */
 public class VectorScanImpl implements VectorScan {
 
     private final FileStoreTable table;
-    private final PartitionPredicate partitionFilter;
-    private final Predicate filter;
+    @Nullable private final PartitionPredicate partitionFilter;
+    @Nullable private final Predicate filter;
     private final DataField vectorColumn;
+    private final Map<String, String> options;
 
     public VectorScanImpl(
             FileStoreTable table,
-            PartitionPredicate partitionFilter,
-            Predicate filter,
-            DataField vectorColumn) {
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
+            DataField vectorColumn,
+            @Nullable Map<String, String> options) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.filter = filter;
         this.vectorColumn = vectorColumn;
+        this.options =
+                options == null
+                        ? Collections.emptyMap()
+                        : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
     @Override
     public Plan scan() {
         Objects.requireNonNull(vectorColumn, "Vector column must be set");
 
-        Set<Integer> filterFieldIds =
-                collectFieldNames(filter).stream()
-                        .filter(name -> table.rowType().containsField(name))
-                        .map(name -> table.rowType().getField(name).id())
-                        .collect(Collectors.toSet());
-        Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        Set<Integer> filterFieldIds = collectFieldIds(table.rowType(), filter);
+        @Nullable Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
@@ -96,14 +102,20 @@ public class VectorScanImpl implements VectorScan {
                 indexFileHandler.scan(snapshot, indexFileFilter).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
+        String vectorIndexType = vectorIndexType(allIndexFiles);
+        if (vectorIndexType == null) {
+            vectorIndexType = configuredVectorIndexType();
+        }
 
         // Group vector index files by (rowRangeStart, rowRangeEnd)
         Map<Range, List<IndexFileMeta>> vectorByRange = new HashMap<>();
+        List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             if (isPrimaryColumn(meta, vectorColumn.id())) {
                 Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
                 vectorByRange.computeIfAbsent(range, k -> new ArrayList<>()).add(indexFile);
+                vectorIndexFiles.add(indexFile);
             }
         }
 
@@ -124,14 +136,127 @@ public class VectorScanImpl implements VectorScan {
                                         return range.hasIntersection(globalIndex.rowRange());
                                     })
                             .collect(Collectors.toList());
-            splits.add(new VectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
+            splits.add(new IndexVectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
         }
 
-        return () -> splits;
+        List<Range> rawRowRanges =
+                new GlobalIndexCoverage(table, snapshot, partitionFilter, vectorIndexFiles)
+                        .unindexedRanges(vectorColumn.id());
+        if (filter != null) {
+            rawRowRanges =
+                    Range.sortAndMergeOverlap(
+                            addAll(
+                                    rawRowRanges,
+                                    new GlobalIndexCoverage(
+                                                    table,
+                                                    snapshot,
+                                                    partitionFilter,
+                                                    scalarIndexFiles(allIndexFiles))
+                                            .unindexedRanges(table.rowType(), filter)),
+                            true);
+        }
+        if (!rawRowRanges.isEmpty()) {
+            splits.add(
+                    new RawVectorSearchSplit(
+                            rawRowRanges,
+                            scalarIndexFiles(allIndexFiles, rawRowRanges),
+                            vectorIndexType));
+        }
+
+        return new Plan() {
+            @Override
+            public List<VectorSearchSplit> splits() {
+                return splits;
+            }
+        };
     }
 
     private static boolean isPrimaryColumn(GlobalIndexMeta meta, int fieldId) {
         return meta.indexFieldId() == fieldId;
+    }
+
+    private List<IndexFileMeta> scalarIndexFiles(List<IndexFileMeta> allIndexFiles) {
+        return allIndexFiles.stream()
+                .filter(
+                        f -> {
+                            GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
+                            return !isPrimaryColumn(globalIndex, vectorColumn.id());
+                        })
+                .collect(Collectors.toList());
+    }
+
+    private List<IndexFileMeta> scalarIndexFiles(
+            List<IndexFileMeta> allIndexFiles, List<Range> rowRanges) {
+        return allIndexFiles.stream()
+                .filter(
+                        f -> {
+                            GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
+                            if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
+                                return false;
+                            }
+                            return hasIntersection(rowRanges, globalIndex.rowRange());
+                        })
+                .collect(Collectors.toList());
+    }
+
+    private static boolean hasIntersection(List<Range> ranges, Range range) {
+        for (Range r : ranges) {
+            if (r.hasIntersection(range)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<Range> addAll(List<Range> left, List<Range> right) {
+        List<Range> result = new ArrayList<>(left.size() + right.size());
+        result.addAll(left);
+        result.addAll(right);
+        return result;
+    }
+
+    @Nullable
+    private String vectorIndexType(List<IndexFileMeta> indexFiles) {
+        String indexType = null;
+        for (IndexFileMeta indexFile : indexFiles) {
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            if (!isPrimaryColumn(meta, vectorColumn.id())) {
+                continue;
+            }
+            if (indexType == null) {
+                indexType = indexFile.indexType();
+            } else if (!indexType.equals(indexFile.indexType())) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Vector column '%s' has multiple index types: %s and %s.",
+                                vectorColumn.name(), indexType, indexFile.indexType()));
+            }
+        }
+        return indexType;
+    }
+
+    @Nullable
+    private String configuredVectorIndexType() {
+        String indexType = option("index_type");
+        if (indexType == null) {
+            indexType = option("index-type");
+        }
+        if (indexType == null) {
+            indexType = option("vector.index-type");
+        }
+        if (indexType == null) {
+            indexType = option("fields." + vectorColumn.name() + ".index-type");
+        }
+        return indexType;
+    }
+
+    @Nullable
+    private String option(String key) {
+        String value = options.get(key);
+        if (value == null) {
+            value = table.options().get(key);
+        }
+        return value == null ? null : value.toLowerCase().trim();
     }
 
     private static boolean containsField(GlobalIndexMeta meta, int fieldId) {

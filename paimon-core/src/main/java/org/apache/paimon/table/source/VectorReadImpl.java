@@ -23,10 +23,13 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,24 +49,42 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
 
     public VectorReadImpl(
             FileStoreTable table,
-            Predicate filter,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
             int limit,
             DataField vectorColumn,
             float[] vector,
-            Map<String, String> options) {
-        super(table, filter, limit, vectorColumn, options);
+            @Nullable Map<String, String> options) {
+        super(table, partitionFilter, filter, limit, vectorColumn, options);
         this.vector = vector;
     }
 
     @Override
-    public GlobalIndexResult read(List<VectorSearchSplit> splits) {
-        if (splits.isEmpty()) {
+    public GlobalIndexResult read(VectorScan.Plan plan) {
+        return readSplits(plan.splits());
+    }
+
+    protected GlobalIndexResult readSplits(List<? extends VectorSearchSplit> splits) {
+        List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
+        List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
+        splitSearchSplits(splits, indexSplits, rawSplits);
+        if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             return GlobalIndexResult.createEmpty();
         }
 
-        RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
+        GlobalIndexer globalIndexer =
+                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
+        ScoredGlobalIndexResult result =
+                indexSplits.isEmpty()
+                        ? ScoredGlobalIndexResult.createEmpty()
+                        : readIndexed(indexSplits, globalIndexer);
+        return withRawSearch(result, rawSplits, globalIndexer, rawPreFilter(rawSplits), vector);
+    }
 
-        GlobalIndexer globalIndexer = createGlobalIndexer(splits);
+    protected ScoredGlobalIndexResult readIndexed(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+        List<RoaringNavigableMap64> preFilters = preFilters(splits);
+
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
@@ -71,7 +92,8 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
 
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                 new ArrayList<>(splits.size());
-        for (VectorSearchSplit split : splits) {
+        for (int i = 0; i < splits.size(); i++) {
+            IndexVectorSearchSplit split = splits.get(i);
             futures.add(
                     eval(
                             globalIndexer,
@@ -80,7 +102,7 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vector,
-                            preFilter,
+                            preFilters.isEmpty() ? null : preFilters.get(i),
                             executor));
         }
 
@@ -93,6 +115,6 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                 merged = merged.or(splitResult.get());
             }
         }
-        return merged.topK(limit);
+        return merged;
     }
 }

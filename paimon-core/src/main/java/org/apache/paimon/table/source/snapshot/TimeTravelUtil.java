@@ -65,6 +65,7 @@ public class TimeTravelUtil {
         SCAN_TIMESTAMP_MILLIS.key()
     };
 
+    @Nullable
     public static Snapshot tryTravelOrLatest(FileStoreTable table) {
         return tryTravelToSnapshot(table).orElseGet(() -> table.latestSnapshot().orElse(null));
     }
