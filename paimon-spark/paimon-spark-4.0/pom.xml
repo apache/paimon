@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : 4.0 : 2.13</name>
 
     <properties>
-        <spark.version>4.0.2</spark.version>
+        <spark.version>4.0.3</spark.version>
         <!-- Spark 4.x uses SLF4J 2.x (`org.slf4j.spi.LoggingEventBuilder` is 2.x-only). Override
              the Paimon parent pom's default `slf4j.version=1.7.32` so the classpath is uniformly
              2.x; otherwise `log4j-slf4j2-impl` + `slf4j-api:1.7.32` mix produces
@@ -64,7 +64,7 @@ under the License.
           `SqlApiConf` added abstract `manageParserCaches()`, which Spark 4.0's concrete
           anonymous subclasses (e.g. `WithTestConf$$anon$4`) don't implement. Mixing those
           jars produces `AbstractMethodError` at parser configuration time. Pin
-          `spark-sql-api` to `${spark.version}` (4.0.2) so the test classpath is uniformly 4.0.
+          `spark-sql-api` to `${spark.version}` (4.0.3) so the test classpath is uniformly 4.0.
         -->
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -86,7 +86,7 @@ under the License.
             <version>${spark.version}</version>
             <exclusions>
                 <!--
-                  Spark 4.0.2 ships a tiny `spark-connect-shims` jar containing a stub
+                  Spark 4.0.3 ships a tiny `spark-connect-shims` jar containing a stub
                   `org.apache.spark.SparkConf` with only `getAll()` and a no-arg constructor
                   (no `set` etc.). scalac resolves that stub in preference to spark-core's
                   real `SparkConf` and fails compile with `value set is not a member of

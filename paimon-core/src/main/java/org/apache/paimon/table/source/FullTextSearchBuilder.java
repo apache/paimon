@@ -19,11 +19,18 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.partition.PartitionPredicate;
 
 import java.io.Serializable;
 
 /** Builder to build full-text search. */
 public interface FullTextSearchBuilder extends Serializable {
+
+    /** Push partition filters. */
+    default FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionPredicate) {
+        throw new UnsupportedOperationException(
+                "This full-text search builder does not support partition filters.");
+    }
 
     /** The top k results to return. */
     FullTextSearchBuilder withLimit(int limit);

@@ -18,43 +18,15 @@
 
 package org.apache.paimon.spark.globalindex;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.paimon.spark.globalindex.sorted.SortedIndexTopoBuilder;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.ServiceLoader;
-
-/**
- * Utility class for loading {@link GlobalIndexTopologyBuilder} implementations via Java's {@link
- * ServiceLoader} mechanism.
- *
- * <p>Factories are loaded once during class initialization and cached for subsequent lookups.
- */
+/** Utility class for creating {@link GlobalIndexTopologyBuilder} implementations. */
 public class GlobalIndexTopologyBuilderUtils {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(GlobalIndexTopologyBuilderUtils.class);
-
-    private static final Map<String, GlobalIndexTopologyBuilder> FACTORIES = new HashMap<>();
-
-    static {
-        ServiceLoader<GlobalIndexTopologyBuilder> serviceLoader =
-                ServiceLoader.load(GlobalIndexTopologyBuilder.class);
-
-        for (GlobalIndexTopologyBuilder builder : serviceLoader) {
-            String identifier = builder.identifier();
-            if (FACTORIES.put(identifier, builder) != null) {
-                LOG.warn(
-                        "Found multiple GlobalIndexBuilderFactory implementations for type '{}'. "
-                                + "Using the last one loaded.",
-                        identifier);
-            }
-        }
-    }
-
     public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
-        GlobalIndexTopologyBuilder builder = FACTORIES.get(indexType);
-        return builder == null ? new DefaultGlobalIndexTopoBuilder() : builder;
+        if (SortedIndexTopoBuilder.supports(indexType)) {
+            return new SortedIndexTopoBuilder();
+        }
+        return new DefaultGlobalIndexTopoBuilder();
     }
 }

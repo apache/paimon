@@ -632,6 +632,28 @@ class CoreOptions:
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
         .default_value(GlobalIndexColumnUpdateAction.THROW_ERROR)
+        .with_description(
+            "Defines the action to take when an update modifies columns that "
+            "are covered by a global index."
+        )
+    )
+
+    BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("btree-index.fallback-scan-max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "The maximum total BTree global index file size to allow fallback index scans."
+        )
+    )
+
+    BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("bitmap-index.fallback-scan-max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "The maximum total bitmap global index file size to allow fallback dictionary scans."
+        )
     )
 
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
@@ -1089,6 +1111,16 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def btree_index_fallback_scan_max_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
+        ).get_bytes()
+
+    def bitmap_index_fallback_scan_max_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE
+        ).get_bytes()
 
     def local_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)

@@ -633,26 +633,23 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
-        Set<FileRowIdKey> existingIndex = new HashSet<>();
-        for (SimpleFileEntry base : baseEntries) {
-            if (base.firstRowId() != null) {
-                existingIndex.add(
-                        new FileRowIdKey(
-                                base.partition(),
-                                base.bucket(),
-                                base.firstRowId(),
-                                base.rowCount()));
-            }
-        }
+        List<Range> existingRanges =
+                baseEntries.stream()
+                        .filter(
+                                base ->
+                                        base.firstRowId() != null
+                                                && !dedicatedStorageFile(base.fileName()))
+                        .map(SimpleFileEntry::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        RowRangeIndex existingIndex = RowRangeIndex.create(existingRanges, false);
 
         for (SimpleFileEntry entry : filesToCheck) {
-            FileRowIdKey key =
-                    new FileRowIdKey(
-                            entry.partition(),
-                            entry.bucket(),
-                            entry.firstRowId(),
-                            entry.rowCount());
-            if (!existingIndex.contains(key)) {
+            Range rowRange = entry.nonNullRowIdRange();
+            boolean exists =
+                    dedicatedStorageFile(entry.fileName())
+                            ? existingIndex.contains(rowRange)
+                            : existingIndex.containsExactly(rowRange);
+            if (!exists) {
                 return Optional.of(
                         new RuntimeException(
                                 String.format(
@@ -668,40 +665,6 @@ public class ConflictDetection {
             }
         }
         return Optional.empty();
-    }
-
-    private static class FileRowIdKey {
-        private final BinaryRow partition;
-        private final int bucket;
-        private final long firstRowId;
-        private final long rowCount;
-
-        FileRowIdKey(BinaryRow partition, int bucket, long firstRowId, long rowCount) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.firstRowId = firstRowId;
-            this.rowCount = rowCount;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            FileRowIdKey that = (FileRowIdKey) o;
-            return bucket == that.bucket
-                    && firstRowId == that.firstRowId
-                    && rowCount == that.rowCount
-                    && Objects.equals(partition, that.partition);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(partition, bucket, firstRowId, rowCount);
-        }
     }
 
     private static boolean dedicatedStorageFile(String fileName) {

@@ -22,10 +22,28 @@ import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
+import java.util.List;
+
 /** File index factory to construct {@link FileIndexer}. */
 public interface GlobalIndexerFactory {
 
     String identifier();
 
-    GlobalIndexer create(DataField dataField, Options options);
+    GlobalIndexer create(DataField indexField, Options options);
+
+    /**
+     * Creates an indexer over a primary column plus optional extra columns. {@code indexField} is
+     * the primary column; {@code extraFields} holds the remaining columns and is empty for a
+     * single-column index.
+     */
+    default GlobalIndexer create(
+            DataField indexField, List<DataField> extraFields, Options options) {
+        if (extraFields != null && !extraFields.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Index type '%s' does not support multi-column index, got extra columns: %s",
+                            identifier(), extraFields));
+        }
+        return create(indexField, options);
+    }
 }

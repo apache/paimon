@@ -56,7 +56,7 @@ object PaimonMetadataColumn {
   val BUCKET_COLUMN = "__paimon_bucket"
   val ROW_ID_COLUMN: String = SpecialFields.ROW_ID.name()
   val SEQUENCE_NUMBER_COLUMN: String = SpecialFields.SEQUENCE_NUMBER.name()
-  val VECTOR_SEARCH_SCORE_COLUMN: String = "__paimon_vector_search_score"
+  val SEARCH_SCORE_COLUMN: String = "__paimon_search_score"
 
   val PATH_AND_INDEX_META_COLUMNS: Seq[String] = Seq(FILE_PATH_COLUMN, ROW_INDEX_COLUMN)
   val PARTITION_AND_BUCKET_META_COLUMNS: Seq[String] = Seq(PARTITION_COLUMN, BUCKET_COLUMN)
@@ -69,7 +69,7 @@ object PaimonMetadataColumn {
     BUCKET_COLUMN,
     ROW_ID_COLUMN,
     SEQUENCE_NUMBER_COLUMN,
-    VECTOR_SEARCH_SCORE_COLUMN
+    SEARCH_SCORE_COLUMN
   )
 
   val ROW_INDEX: PaimonMetadataColumn =
@@ -89,8 +89,8 @@ object PaimonMetadataColumn {
       SEQUENCE_NUMBER_COLUMN,
       LongType,
       preserveOnUpdate = false)
-  val VECTOR_SEARCH_SCORE: PaimonMetadataColumn =
-    PaimonMetadataColumn(Integer.MAX_VALUE - 106, VECTOR_SEARCH_SCORE_COLUMN, FloatType)
+  val SEARCH_SCORE: PaimonMetadataColumn =
+    PaimonMetadataColumn(Integer.MAX_VALUE - 106, SEARCH_SCORE_COLUMN, FloatType)
 
   def dvMetaCols: Seq[PaimonMetadataColumn] = Seq(FILE_PATH, ROW_INDEX)
 
@@ -102,7 +102,7 @@ object PaimonMetadataColumn {
       case BUCKET_COLUMN => BUCKET
       case ROW_ID_COLUMN => ROW_ID
       case SEQUENCE_NUMBER_COLUMN => SEQUENCE_NUMBER
-      case VECTOR_SEARCH_SCORE_COLUMN => VECTOR_SEARCH_SCORE
+      case SEARCH_SCORE_COLUMN => SEARCH_SCORE
       case _ =>
         throw new IllegalArgumentException(s"$metadataColumn metadata column is not supported.")
     }

@@ -1678,13 +1678,13 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>visibility-callback.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to enable the visibility wait callback that waits for compaction to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode to ensure data visibility, only used for batch mode or bounded stream.</td>
+            <td>Whether to enable the visibility wait callback that waits for compaction or global index build to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode and row-tracking tables with global indexes to ensure data visibility, only used for batch mode or bounded stream.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.timeout</h5></td>
             <td style="word-wrap: break-word;">30 min</td>
             <td>Duration</td>
-            <td>The maximum time to wait for compaction to complete when visibility callback is enabled. If the timeout is reached, an exception will be thrown.</td>
+            <td>The maximum time to wait for compaction or global index build to complete when visibility callback is enabled. If the timeout is reached, an exception will be thrown.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>
@@ -1721,6 +1721,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>write.sequence-number-init-mode</h5></td>
+            <td style="word-wrap: break-word;">scan</td>
+            <td><p>Enum</p></td>
+            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write.batch-memory</h5></td>

@@ -30,6 +30,7 @@ import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 
 import java.util.Collections
 
@@ -43,23 +44,42 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
   override val table: FileStoreTable =
     paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
 
-  def writePartialFields(data: DataFrame, columnNames: Seq[String]): Seq[CommitMessage] = {
+  def writePartialFields(
+      data: DataFrame,
+      columnNames: Seq[String],
+      rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
-    assert(data.columns.length == columnNames.size + 2)
+    assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
     val writeType = table.rowType().project(columnNames.asJava)
 
     val options = new CoreOptions(table.schema().options())
-    val updatableBlobFields = options.updatableBlobFields()
-    val hasRawDataBlob = writeType.getFields.asScala.exists(
-      f => f.`type`().is(BLOB) && !updatableBlobFields.contains(f.name()))
-    if (hasRawDataBlob) {
-      throw new UnsupportedOperationException(
-        "DataEvolution does not support writing partial columns with raw-data BLOB type. " +
-          "Only descriptor-based BLOB columns (configured via '" +
-          CoreOptions.BLOB_DESCRIPTOR_FIELD.key() + "' or '" +
-          CoreOptions.BLOB_VIEW_FIELD.key() + "' or '" +
-          CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key() + "') can be updated.")
+    val blobInlineFields = options.blobInlineField().asScala.toSeq
+    // Maps from blob field index to corresponding marker column index
+    val rawBlobPlaceholderMarkerIndexes = writeType.getFields.asScala.flatMap {
+      field =>
+        if (
+          field.`type`().is(BLOB) &&
+          !blobInlineFields.exists(inlineField => resolver(inlineField, field.name()))
+        ) {
+          val markerColumn = rawBlobPlaceholderMarkerColumns.getOrElse(
+            field.name(),
+            throw new UnsupportedOperationException(
+              "DataEvolution raw-data BLOB partial writes require an internal placeholder marker " +
+                s"for column ${field.name()}.")
+          )
+          Some(writeType.getFieldIndex(field.name()) -> data.schema.fieldIndex(markerColumn))
+        } else {
+          None
+        }
+    }.toMap
+    val unusedMarkerColumns =
+      rawBlobPlaceholderMarkerColumns.keySet -- rawBlobPlaceholderMarkerIndexes.keys.map(
+        index => writeType.getFields.get(index).name())
+    if (unusedMarkerColumns.nonEmpty) {
+      throw new IllegalArgumentException(
+        "Raw BLOB placeholder markers do not match partial write columns: " +
+          unusedMarkerColumns.toSeq.sorted.mkString(", "))
     }
 
     val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
@@ -91,7 +111,8 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
               writeBuilder,
               writeType,
               firstRowIdToPartitionMapBroadcast.value,
-              catalogContextForBlobDescriptor)
+              catalogContextForBlobDescriptor,
+              rawBlobPlaceholderMarkerIndexes)
             try {
               iter.foreach(row => write.write(row))
               Iterator.apply(write.commit)

@@ -21,13 +21,173 @@ package org.apache.paimon.spark.catalyst.plans.logical
 import org.apache.paimon.table.InnerTable
 import org.apache.paimon.types.{ArrayType, DataType, DataTypes, RowType}
 
-import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{CreateArray, CreateMap, CreateNamedStruct, Expression, Literal}
 import org.scalatest.funsuite.AnyFunSuite
 
 import java.lang.reflect.{InvocationHandler, Method, Proxy}
 
 /** Tests for [[VectorSearchQuery]]. */
 class VectorSearchQueryTest extends AnyFunSuite {
+
+  test("create hybrid search with vector route configs") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("title_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("limit"),
+              Literal(20),
+              Literal("weight"),
+              Literal(2.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("32")))
+            )),
+            CreateNamedStruct(Seq(
+              Literal("vector_column"),
+              Literal("body_vec"),
+              Literal("query_vector"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))),
+              Literal("limit"),
+              Literal(10),
+              Literal("weight"),
+              Literal(1.0f),
+              Literal("options"),
+              CreateMap(Seq(Literal("ivf.nprobe"), Literal("16")))
+            ))
+          )),
+        CreateArray(Seq.empty),
+        Literal(3),
+        Literal("weighted_score")
+      )
+    )
+
+    assert(search.ranker() == "weighted_score")
+    assert(search.routes().size() == 2)
+    assert(search.routes().get(0).limit() == 20)
+    assert(search.routes().get(0).weight() == 2.0f)
+    assert(search.routes().get(0).options().get("ivf.nprobe") == "32")
+    assert(search.routes().get(1).limit() == 10)
+    assert(search.routes().get(1).weight() == 1.0f)
+    assert(search.routes().get(1).options().get("ivf.nprobe") == "16")
+  }
+
+  test("default hybrid vector route limit to final limit") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(
+              Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
+              )))),
+        CreateArray(Seq.empty),
+        Literal(7)
+      )
+    )
+
+    assert(search.limit() == 7)
+    assert(search.ranker() == "rrf")
+    assert(search.routes().get(0).limit() == 7)
+    assert(search.routes().get(0).weight() == 1.0f)
+    assert(search.routes().get(0).options().isEmpty)
+  }
+
+  test("create hybrid search with full-text route configs") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(Seq.empty),
+        CreateArray(
+          Seq(
+            CreateNamedStruct(Seq(
+              Literal("field"),
+              Literal("content"),
+              Literal("query_text"),
+              Literal("paimon lake"),
+              Literal("query_operator"),
+              Literal("and"),
+              Literal("limit"),
+              Literal(20),
+              Literal("weight"),
+              Literal(1.5f),
+              Literal("options"),
+              CreateMap(Seq.empty)
+            ))
+          )),
+        Literal(5),
+        Literal("rrf")
+      )
+    )
+
+    assert(search.routes().size() == 1)
+    assert(search.routes().get(0).isFullText)
+    assert(search.routes().get(0).fieldName() == "content")
+    assert(search.routes().get(0).queryText() == "paimon lake")
+    assert(search.routes().get(0).queryOperator() == "and")
+    assert(search.routes().get(0).limit() == 20)
+    assert(search.routes().get(0).weight() == 1.5f)
+  }
+
+  test("create full-text search with default query operator") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(Literal("content"), Literal("paimon lake"), Literal(10)))
+
+    assert(search.fieldName() == "content")
+    assert(search.queryText() == "paimon lake")
+    assert(search.limit() == 10)
+    assert(search.queryOperator() == "or")
+  }
+
+  test("create full-text search with explicit query operator") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(Literal("content"), Literal("paimon lake"), Literal(10), Literal("and")))
+
+    assert(search.fieldName() == "content")
+    assert(search.queryText() == "paimon lake")
+    assert(search.limit() == 10)
+    assert(search.queryOperator() == "and")
+  }
+
+  test("reject invalid full-text search query operator") {
+    val exception = intercept[IllegalArgumentException] {
+      FullTextSearchQuery(Seq.empty).createFullTextSearch(
+        innerTable,
+        Seq(Literal("content"), Literal("paimon lake"), Literal(10), Literal("xor")))
+    }
+
+    assert(exception.getMessage.contains("Query operator must be 'or' or 'and'"))
+  }
+
+  test("reject hybrid search query map") {
+    val exception = intercept[RuntimeException] {
+      HybridSearchQuery(Seq.empty).createHybridSearch(
+        innerTable,
+        Seq(
+          CreateMap(
+            Seq(
+              Literal("title_vec"),
+              CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+              Literal("body_vec"),
+              CreateArray(Seq(Literal(0.0f), Literal(1.0f))))),
+          CreateArray(Seq.empty),
+          Literal(3)
+        )
+      )
+    }
+
+    assert(exception.getMessage.contains("Cannot extract vector routes"))
+  }
 
   test("create vector search with string options") {
     val vectorSearch = createVectorSearch(
@@ -62,7 +222,14 @@ class VectorSearchQueryTest extends AnyFunSuite {
         Array(classOf[InnerTable]),
         new InvocationHandler {
           private val rowType =
-            RowType.of(Array[DataType](new ArrayType(DataTypes.FLOAT())), Array[String]("v"))
+            RowType.of(
+              Array[DataType](
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT()),
+                new ArrayType(DataTypes.FLOAT()),
+                DataTypes.STRING()),
+              Array[String]("v", "title_vec", "body_vec", "content")
+            )
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
             method.getName match {

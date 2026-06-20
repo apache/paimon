@@ -434,15 +434,24 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
         }
 
-        if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
-            if (table.bucketMode() == BucketMode.POSTPONE_MODE
-                    || options.deletionVectorsEnabled()) {
-                callbacks.add(new VisibilityWaitCallback(table));
-            }
+        if (options.visibilityCallbackEnabled() && shouldWaitForVisibility(table)) {
+            callbacks.add(new VisibilityWaitCallback(table));
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
+    }
+
+    private boolean shouldWaitForVisibility(FileStoreTable table) {
+        if (options.rowTrackingEnabled()) {
+            return true;
+        }
+
+        if (schema.primaryKeys().isEmpty()) {
+            return false;
+        }
+
+        return table.bucketMode() == BucketMode.POSTPONE_MODE || options.deletionVectorsEnabled();
     }
 
     @Override

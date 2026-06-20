@@ -23,6 +23,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
@@ -42,10 +43,17 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class FullTextScanImpl implements FullTextScan {
 
     private final FileStoreTable table;
+    private final PartitionPredicate partitionFilter;
     private final DataField textColumn;
 
     public FullTextScanImpl(FileStoreTable table, DataField textColumn) {
+        this(table, null, textColumn);
+    }
+
+    public FullTextScanImpl(
+            FileStoreTable table, PartitionPredicate partitionFilter, DataField textColumn) {
         this.table = table;
+        this.partitionFilter = partitionFilter;
         this.textColumn = textColumn;
     }
 
@@ -57,6 +65,9 @@ public class FullTextScanImpl implements FullTextScan {
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         Filter<IndexManifestEntry> indexFileFilter =
                 entry -> {
+                    if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
+                        return false;
+                    }
                     GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
                     if (globalIndex == null) {
                         return false;

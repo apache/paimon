@@ -21,7 +21,7 @@ package org.apache.paimon.lumina.index;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.ArrayType;
@@ -50,16 +50,17 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Vector global index writer using Lumina. Builds a single index file per shard.
  *
- * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object)},
- * keeping Java heap usage constant (~8 MB buffer) regardless of dataset size. During index build,
- * the Lumina builder streams vectors from the temp file via the {@link LuminaDataset} callback API.
+ * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object,
+ * long)}, keeping Java heap usage constant (~8 MB buffer) regardless of dataset size. During index
+ * build, the Lumina builder streams vectors from the temp file via the {@link LuminaDataset}
+ * callback API.
  *
  * <p><b>Thread safety:</b> This class is <b>not</b> thread-safe. The underlying {@code
  * LuminaBuilder} must be used from a single thread or the caller must provide external
  * synchronization. The internal Lumina executor thread pool size is controlled globally by the
  * {@code LUMINA_EXECUTOR_THREAD_COUNT} environment variable and cannot be configured per-instance.
  */
-public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
+public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "lumina";
 
@@ -92,7 +93,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private long count;
     private boolean closed;
 
-    private long logicalRowId;
+    private long rowCount;
 
     public LuminaVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
@@ -154,23 +155,23 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(Object fieldData, long relativeRowId) {
         if (fieldData == null) {
-            logicalRowId++;
+            rowCount++;
             return;
         }
 
         // Validation must complete before any buffer/state mutation below
-        float[] src = materializeAndValidate(fieldData);
+        float[] src = materializeAndValidate(fieldData, relativeRowId);
 
         if (writeBuf.remaining() < recordSizeInBytes) {
             flushWriteBuffer();
         }
-        writeBuf.putLong(logicalRowId);
+        writeBuf.putLong(relativeRowId);
         for (int i = 0; i < dim; i++) {
             writeBuf.putFloat(src[i]);
         }
-        logicalRowId++;
+        rowCount++;
         count++;
     }
 
@@ -179,12 +180,12 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
      * input directly (zero-copy). For InternalVector/InternalArray, reads into the reusable
      * vectorBuf field.
      */
-    private float[] materializeAndValidate(Object fieldData) {
+    private float[] materializeAndValidate(Object fieldData, long relativeRowId) {
         if (fieldData instanceof float[]) {
             float[] vector = (float[]) fieldData;
             checkDimension(vector.length);
             for (int i = 0; i < dim; i++) {
-                checkFinite(vector[i], i);
+                checkFinite(vector[i], relativeRowId, i);
             }
             return vector;
         } else if (fieldData instanceof InternalVector) {
@@ -192,7 +193,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             checkDimension(vector.size());
             for (int i = 0; i < dim; i++) {
                 float v = vector.getFloat(i);
-                checkFinite(v, i);
+                checkFinite(v, relativeRowId, i);
                 vectorBuf[i] = v;
             }
             return vectorBuf;
@@ -204,7 +205,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                     throw new IllegalArgumentException("Vector element at index " + i + " is null");
                 }
                 float v = array.getFloat(i);
-                checkFinite(v, i);
+                checkFinite(v, relativeRowId, i);
                 vectorBuf[i] = v;
             }
             return vectorBuf;
@@ -301,7 +302,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
             LuminaIndexMeta meta = new LuminaIndexMeta(luminaOptions);
             // rowCount = logical rows including nulls (not just indexed vectors)
-            return new ResultEntry(fileName, logicalRowId, meta.serialize());
+            return new ResultEntry(fileName, rowCount, meta.serialize());
         }
     }
 
@@ -365,12 +366,12 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
     }
 
-    private void checkFinite(float value, int elementIndex) {
+    private void checkFinite(float value, long relativeRowId, int elementIndex) {
         if (!Float.isFinite(value)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Vector element at rowId=%d, index=%d is %s",
-                            logicalRowId, elementIndex, Float.toString(value)));
+                            relativeRowId, elementIndex, Float.toString(value)));
         }
     }
 

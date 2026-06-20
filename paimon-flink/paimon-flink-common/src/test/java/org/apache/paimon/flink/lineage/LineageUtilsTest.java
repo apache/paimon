@@ -104,13 +104,24 @@ class LineageUtilsTest {
     }
 
     @Test
-    void testGetNamespace() throws Exception {
+    void testGetNamespaceWithWarehouse() throws Exception {
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("warehouse", "s3://my-bucket/warehouse");
+        FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
+
+        String namespace =
+                LineageUtils.getNamespace(table, table.catalogEnvironment().catalogContext());
+
+        assertThat(namespace).isEqualTo("s3://my-bucket/warehouse");
+    }
+
+    @Test
+    void testGetNamespaceFallsBackToPath() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        String namespace = LineageUtils.getNamespace(table);
+        String namespace = LineageUtils.getNamespace(table, null);
 
-        assertThat(namespace).startsWith("paimon://");
         assertThat(namespace).contains(tablePath.toString());
     }
 
@@ -127,7 +138,7 @@ class LineageUtilsTest {
 
         LineageDataset dataset = vertex.datasets().get(0);
         assertThat(dataset.name()).isEqualTo("paimon.db.src");
-        assertThat(dataset.namespace()).startsWith("paimon://");
+        assertThat(dataset.namespace()).contains(tablePath.toString());
     }
 
     @Test
@@ -197,7 +208,7 @@ class LineageUtilsTest {
 
         LineageDataset dataset = vertex.datasets().get(0);
         assertThat(dataset.name()).isEqualTo("paimon.db.sink");
-        assertThat(dataset.namespace()).startsWith("paimon://");
+        assertThat(dataset.namespace()).contains(tablePath.toString());
     }
 
     @Test

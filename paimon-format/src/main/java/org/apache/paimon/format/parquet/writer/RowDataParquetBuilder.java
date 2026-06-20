@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.parquet.ColumnConfigParser;
 import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.options.Options;
@@ -60,8 +61,7 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
         ParquetRowDataBuilder builder =
                 new ParquetRowDataBuilder(out, rowType, shreddingSchemas)
                         .withConf(conf)
-                        .withCompressionCodec(
-                                CompressionCodecName.fromConf(getCompression(compression)))
+                        .withCompressionCodec(getCompressionCodec(getCompression(compression)))
                         .withRowGroupSize(
                                 conf.getLong(
                                         ParquetOutputFormat.BLOCK_SIZE,
@@ -115,6 +115,10 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                         ParquetProperties.DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH));
         new ColumnConfigParser()
                 .withColumnConfig(
+                        ParquetOutputFormat.COMPRESSION,
+                        key -> getCompressionCodec(conf.get(key)),
+                        builder::withCompressionCodec)
+                .withColumnConfig(
                         ParquetOutputFormat.ENABLE_DICTIONARY,
                         key -> conf.getBoolean(key, false),
                         builder::withDictionaryEncoding)
@@ -136,5 +140,12 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     public String getCompression(String compression) {
         return conf.get("parquet.compression", compression);
+    }
+
+    private CompressionCodecName getCompressionCodec(String compression) {
+        if (HadoopCompressionType.NONE.value().equalsIgnoreCase(compression)) {
+            return CompressionCodecName.UNCOMPRESSED;
+        }
+        return CompressionCodecName.fromConf(compression);
     }
 }

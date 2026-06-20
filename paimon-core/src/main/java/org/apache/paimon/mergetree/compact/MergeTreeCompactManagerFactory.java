@@ -147,12 +147,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             int bucket,
             ExecutorService compactExecutor,
             List<DataFileMeta> restoreFiles,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean lookupEnabled) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         }
 
-        CompactStrategy compactStrategy = createCompactStrategy(options, restoreFiles);
+        CompactStrategy compactStrategy =
+                createCompactStrategy(options, restoreFiles, lookupEnabled);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
@@ -163,7 +165,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         keyComparator,
                         userDefinedSeqComparator,
                         levels,
-                        dvMaintainer);
+                        dvMaintainer,
+                        lookupEnabled);
         CompactionMetrics.Reporter metricsReporter =
                 compactionMetrics == null
                         ? null
@@ -181,18 +184,18 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 rewriter,
                 metricsReporter,
                 dvMaintainer,
-                options.prepareCommitWaitCompaction(),
-                options.needLookup(),
+                lookupEnabled && options.prepareCommitWaitCompaction(),
+                lookupEnabled,
                 recordLevelExpire,
                 options.forceRewriteAllFiles(),
                 options.isChainTable());
     }
 
     private CompactStrategy createCompactStrategy(
-            CoreOptions options, List<DataFileMeta> restoreFiles) {
+            CoreOptions options, List<DataFileMeta> restoreFiles, boolean lookupEnabled) {
         Long initialLastFullCompaction =
                 estimateLastFullCompactionTime(restoreFiles, options.numLevels());
-        if (options.needLookup()) {
+        if (lookupEnabled) {
             Integer compactMaxInterval = null;
             switch (options.lookupCompact()) {
                 case GENTLE:
@@ -247,7 +250,8 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean lookupEnabled) {
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
         KeyValueFileReaderFactory keyReaderFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);
@@ -273,7 +277,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                     mfFactory,
                     mergeSorter,
                     logDedupEqualSupplier.get());
-        } else if (lookupStrategy.needLookup) {
+        } else if (lookupEnabled && lookupStrategy.needLookup) {
             PersistProcessor.Factory<?> processorFactory;
             LookupMergeTreeCompactRewriter.MergeFunctionWrapperFactory<?> wrapperFactory;
             FileReaderFactory<KeyValue> lookupReaderFactory = readerFactory;

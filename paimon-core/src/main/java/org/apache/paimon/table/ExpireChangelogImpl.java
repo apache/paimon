@@ -191,7 +191,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 continue;
             }
 
-            changelogDeletion.cleanUnusedDataFiles(changelog, skipper);
+            changelogDeletion.cleanDeletedDataFiles(changelog, skipper);
             changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
             changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
         }
@@ -262,7 +262,7 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 continue;
             }
 
-            changelogDeletion.cleanUnusedDataFiles(changelog, skipper);
+            changelogDeletion.cleanDeletedDataFiles(changelog, skipper);
             changelogDeletion.cleanUnusedManifests(changelog, manifestSkippSet);
             changelogManager.fileIO().deleteQuietly(changelogManager.longLivedChangelogPath(id));
         }

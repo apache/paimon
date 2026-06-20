@@ -91,14 +91,13 @@ class VectorSearchBuilder(ABC):
         )
 
 
-class VectorSearchBuilderImpl(VectorSearchBuilder):
-    """Implementation for VectorSearchBuilder."""
+class AbstractVectorSearchBuilderImpl:
+    """Shared state and filter/partition handling for the vector search builders."""
 
     def __init__(self, table):
         self._table = table
         self._limit = 0
         self._vector_column = None
-        self._query_vector = None
         self._filter = None
         self._partition_filter = None
         self._options = {}
@@ -114,11 +113,6 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
         if name not in field_dict:
             raise ValueError("Vector column '%s' not found in table schema" % name)
         self._vector_column = field_dict[name]
-        return self
-
-    def with_query_vector(self, vector):
-        # type: (list) -> VectorSearchBuilder
-        self._query_vector = vector
         return self
 
     def with_option(self, key, value):
@@ -223,6 +217,19 @@ class VectorSearchBuilderImpl(VectorSearchBuilder):
             filter_=self._filter,
             partition_filter=self._partition_filter,
         )
+
+
+class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuilder):
+    """Implementation for VectorSearchBuilder."""
+
+    def __init__(self, table):
+        super().__init__(table)
+        self._query_vector = None
+
+    def with_query_vector(self, vector):
+        # type: (list) -> VectorSearchBuilder
+        self._query_vector = vector
+        return self
 
     def new_vector_search_read(self):
         # type: () -> VectorSearchRead
