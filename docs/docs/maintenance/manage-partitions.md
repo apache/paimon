@@ -49,6 +49,11 @@ __Note:__ After the partition expires, it is logically deleted and the latest sn
 files in the file system are not immediately physically deleted, it depends on when the corresponding snapshot expires.
 See [Expire Snapshots](./manage-snapshots#expire-snapshots).
 
+Also, even after the data files are physically deleted by snapshot expiration, the empty partition directories are
+**not** removed by default. To clean up empty directories, set
+`'snapshot.clean-empty-directories' = 'true'` on the table. Please note that on object stores (e.g. OSS, S3)
+this may cause performance issues, which is why the option defaults to `false`.
+
 :::
 
 An example for single partition field:
