@@ -295,8 +295,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 LOG.info(
                         "Partition fieldId = 0. The Iceberg REST committer will use partition evolution to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero fieldId partition field");
             }
-            Schema emptySchema = new Schema();
-            return restCatalog.createTable(icebergTableIdentifier, emptySchema);
+            return createTable(new Schema(), null, newMetadata);
         } else {
             LOG.info(
                     "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
@@ -316,9 +315,48 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 columns[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
             }
 
-            Schema dummySchema = new Schema(columns);
-            return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
+            return createTable(new Schema(columns), spec, newMetadata);
         }
+    }
+
+    private Table createTable(
+            Schema schema, @Nullable PartitionSpec spec, TableMetadata newMetadata) {
+        try {
+            // Path-based catalogs (e.g. Hadoop) derive and assign the table location themselves
+            // and reject a custom one, so first try letting the catalog assign it.
+            return newTableBuilder(schema, spec).create();
+        } catch (RuntimeException e) {
+            // Some Iceberg REST catalogs (notably AWS Glue) do not auto-assign a table location
+            // and reject creation without one. Retry with the location Paimon writes its metadata
+            // to, normalised to the s3:// scheme such catalogs require.
+            try {
+                return newTableBuilder(schema, spec)
+                        .withLocation(toRestLocation(newMetadata.location()))
+                        .create();
+            } catch (RuntimeException retryError) {
+                e.addSuppressed(retryError);
+                throw e;
+            }
+        }
+    }
+
+    private Catalog.TableBuilder newTableBuilder(Schema schema, @Nullable PartitionSpec spec) {
+        Catalog.TableBuilder builder = restCatalog.buildTable(icebergTableIdentifier, schema);
+        return spec == null ? builder : builder.withPartitionSpec(spec);
+    }
+
+    /** Normalises a table location's URI scheme for the Iceberg REST catalog. */
+    static String toRestLocation(String location) {
+        if (location == null) {
+            return null;
+        }
+        if (location.startsWith("s3a://")) {
+            return "s3://" + location.substring("s3a://".length());
+        }
+        if (location.startsWith("s3n://")) {
+            return "s3://" + location.substring("s3n://".length());
+        }
+        return location;
     }
 
     private Table getTable() {

@@ -119,6 +119,31 @@ class RayIntegrationTest(unittest.TestCase):
         self.assertEqual(set(df.columns), {'id', 'name'})
         self.assertEqual(len(df), 2)
 
+    def test_read_paimon_with_nested_projection(self):
+        """read_paimon() respects a nested-leaf projection.
+
+        Regression for the worker-side TableRead being rebuilt without
+        nested_name_paths: a projection like ['payload.a'] used to read every
+        nested leaf as NULL because the worker treated the flattened leaf name
+        as a missing top-level column.
+        """
+        from pypaimon.ray import read_paimon
+
+        inner = pa.struct([('a', pa.int64()), ('b', pa.string())])
+        pa_schema = pa.schema([('id', pa.int32()), ('payload', inner)])
+        identifier = self._create_and_populate_table(
+            'test_read_nested_proj', pa_schema,
+            {'id': [1, 2],
+             'payload': [{'a': 10, 'b': 'x'}, {'a': 20, 'b': 'y'}]},
+        )
+
+        ds = read_paimon(identifier, self.catalog_options,
+                         projection=['id', 'payload.a'])
+        rows = {r['id']: r for r in ds.take_all()}
+        self.assertEqual(set(rows.keys()), {1, 2})
+        self.assertEqual(rows[1]['payload_a'], 10)
+        self.assertEqual(rows[2]['payload_a'], 20)
+
     def test_read_paimon_with_filter(self):
         """read_paimon() pushes down a predicate filter."""
         from pypaimon.ray import read_paimon

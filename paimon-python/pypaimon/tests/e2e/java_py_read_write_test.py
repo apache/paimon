@@ -25,6 +25,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
 from pypaimon.read.read_builder import ReadBuilder
@@ -633,6 +634,148 @@ class JavaPyReadWriteTest(unittest.TestCase):
             "partial append should not drop index manifest"
         )
 
+    def test_read_bitmap_index_table(self):
+        table = self.catalog.get_table('default.test_bitmap_index_string')
+
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.equal('k', 'k2'),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_null('k'),
+            [4],
+            {'k': [None], 'v': ['v_null']},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_in('k', ['k1', 'k3']),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.not_equal('k', 'k2'),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_not_in('k', ['k1', 'k3']),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.between('k', 'k1', 'k2'),
+            [0, 1, 2],
+            {'k': ['k1', 'k2', 'k2'], 'v': ['v1', 'v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.not_between('k', 'k2', 'k2'),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.startswith('k', 'k'),
+            [0, 1, 2, 3],
+            {'k': ['k1', 'k2', 'k2', 'k3'], 'v': ['v1', 'v2', 'v2b', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.endswith('k', '2'),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.contains('k', '3'),
+            [3],
+            {'k': ['k3'], 'v': ['v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.like('k', 'k_'),
+            [0, 1, 2, 3],
+            {'k': ['k1', 'k2', 'k2', 'k3'], 'v': ['v1', 'v2', 'v2b', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.equal('k', None),
+            [],
+            {'k': [], 'v': []},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_not_in('k', ['k1', None]),
+            [],
+            {'k': [], 'v': []},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+
+    def _assert_bitmap_index_read(self, table, predicate_factory, expected_row_ids,
+                                  expected_data, schema=None):
+        read_builder = table.new_read_builder()
+        predicate = predicate_factory(read_builder.new_predicate_builder())
+
+        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        self.assertIsNotNone(scanner)
+        with scanner:
+            result = scanner.scan(predicate)
+        self.assertIsNotNone(result)
+        self.assertEqual(expected_row_ids, sorted(list(result.results())))
+
+        scan = read_builder.new_scan().with_global_index_result(result)
+        actual = table_sort_by(read_builder.new_read().to_arrow(scan.plan().splits()), 'v')
+        expected = pa.Table.from_pydict(expected_data, schema=schema)
+        expected = table_sort_by(expected, 'v')
+        self.assertEqual(expected, actual)
+
+    def test_read_compressed_global_index_fallback_scan(self):
+        for compression in ('lz4', 'lzo'):
+            self._assert_compressed_global_index_fallback_scan(
+                'test_btree_index_%s_fallback' % compression,
+                'btree-index.fallback-scan-max-size')
+            self._assert_compressed_global_index_fallback_scan(
+                'test_bitmap_index_%s_fallback' % compression,
+                'bitmap-index.fallback-scan-max-size')
+
+    def _assert_compressed_global_index_fallback_scan(self, table_name, budget_key):
+        table = self.catalog.get_table('default.' + table_name)
+        predicate = (table.new_read_builder()
+                     .new_predicate_builder()
+                     .greater_or_equal('k', 'key-295'))
+
+        scanner = GlobalIndexScanner.create(table, predicate=predicate)
+        self.assertIsNotNone(scanner)
+        with scanner:
+            result = scanner.scan(predicate)
+        self.assertIsNotNone(result)
+        self.assertEqual([295, 296, 297, 298, 299],
+                         sorted(list(result.results())))
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        actual = table_sort_by(read_builder.new_read().to_arrow(scan.plan().splits()), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ['key-295', 'key-296', 'key-297', 'key-298', 'key-299'],
+            'v': ['value-295', 'value-296', 'value-297', 'value-298', 'value-299'],
+        })
+        self.assertEqual(expected, actual)
+
+        disabled_table = table.copy({budget_key: '0 b'})
+        disabled_scanner = GlobalIndexScanner.create(disabled_table, predicate=predicate)
+        self.assertIsNotNone(disabled_scanner)
+        with disabled_scanner:
+            disabled_result = disabled_scanner.scan(predicate)
+        self.assertIsNone(disabled_result)
+
     @parameterized.expand([('json',), ('csv',)])
     def test_read_compressed_text_append_table(self, file_format):
         table = self.catalog.get_table(
@@ -1076,6 +1219,39 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ids = pa_table.column('id').to_pylist()
                 print(f"Lumina vector search ({label}) matched rows: ids={ids}")
                 self.assertIn(0, ids)
+
+    def test_read_vindex_vector_index(self):
+        """Test reading a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table('default.test_vindex_vector')
+
+        builder = table.new_vector_search_builder()
+        builder.with_vector_column('embedding')
+        builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+        builder.with_limit(3)
+
+        result = builder.execute_local()
+        row_ids = sorted(list(result.results()))
+        print(f"paimon-vindex vector search for [1,0,0,0]: row_ids={row_ids}")
+        self.assertIn(0, row_ids)
+        self.assertEqual(len(row_ids), 3)
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        print(f"paimon-vindex vector search matched rows: ids={ids}")
+        self.assertIn(0, ids)
 
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java

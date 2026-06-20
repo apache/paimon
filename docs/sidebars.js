@@ -114,7 +114,22 @@ const sidebars = {
       "multimodal-table/data-evolution",
       "multimodal-table/blob",
       "multimodal-table/vector",
-      "multimodal-table/global-index"
+      {
+        type: "category",
+        "label": "Global Index",
+        "collapsed": true,
+        "link": {
+          type: "doc",
+          "id": "multimodal-table/global-index"
+        },
+        "items": [
+          "multimodal-table/global-index/btree",
+          "multimodal-table/global-index/bitmap",
+          "multimodal-table/global-index/vector",
+          "multimodal-table/global-index/full-text",
+          "multimodal-table/global-index/hybrid-search"
+        ]
+      }
     ]
   },
   {
@@ -177,7 +192,6 @@ const sidebars = {
       "pypaimon/daft",
       "pypaimon/pytorch",
       "pypaimon/data-evolution",
-      "pypaimon/global-index",
       "pypaimon/system-tables",
       "pypaimon/fuse-support",
       "pypaimon/pyjindosdk-support",

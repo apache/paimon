@@ -388,7 +388,7 @@ public class LuminaVectorBenchmark {
                     for (int d = 0; d < dimension; d++) {
                         vec[d] = (float) insertRandom.nextDouble() * 2 - 1;
                     }
-                    writer.write(vec);
+                    writer.write(vec, i);
                 }
                 long writeEnd = System.currentTimeMillis();
                 System.out.printf(

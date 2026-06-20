@@ -18,66 +18,31 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
-import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
-import org.apache.paimon.globalindex.OffsetGlobalIndexReader;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
-import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
-import org.apache.paimon.index.GlobalIndexMeta;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import javax.annotation.Nullable;
-
-import java.io.IOException;
-import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorRead}. */
-public class VectorReadImpl implements VectorRead, Serializable {
+public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
 
     private static final long serialVersionUID = 1L;
 
-    protected final FileStoreTable table;
-    private final Predicate filter;
-    protected final int limit;
-    protected final DataField vectorColumn;
     protected final float[] vector;
-    protected final Map<String, String> options;
-
-    public VectorReadImpl(
-            FileStoreTable table,
-            Predicate filter,
-            int limit,
-            DataField vectorColumn,
-            float[] vector) {
-        this(table, filter, limit, vectorColumn, vector, Collections.emptyMap());
-    }
 
     public VectorReadImpl(
             FileStoreTable table,
@@ -86,15 +51,8 @@ public class VectorReadImpl implements VectorRead, Serializable {
             DataField vectorColumn,
             float[] vector,
             Map<String, String> options) {
-        this.table = table;
-        this.filter = filter;
-        this.limit = limit;
-        this.vectorColumn = vectorColumn;
+        super(table, filter, limit, vectorColumn, options);
         this.vector = vector;
-        this.options =
-                options == null
-                        ? Collections.emptyMap()
-                        : Collections.unmodifiableMap(new HashMap<>(options));
     }
 
     @Override
@@ -105,22 +63,7 @@ public class VectorReadImpl implements VectorRead, Serializable {
 
         RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
 
-        IndexFileMeta firstFile = splits.get(0).vectorIndexFiles().get(0);
-        String indexType = firstFile.indexType();
-        GlobalIndexMeta firstMeta = checkNotNull(firstFile.globalIndexMeta());
-        GlobalIndexer globalIndexer;
-        if (firstMeta.extraFieldIds() != null) {
-            globalIndexer =
-                    GlobalIndexerFactoryUtils.load(indexType)
-                            .create(
-                                    firstMeta.getIndexField(table.rowType()),
-                                    firstMeta.getExtraFields(table.rowType()),
-                                    table.coreOptions().toConfiguration());
-        } else {
-            globalIndexer =
-                    GlobalIndexerFactoryUtils.load(indexType)
-                            .create(vectorColumn, table.coreOptions().toConfiguration());
-        }
+        GlobalIndexer globalIndexer = createGlobalIndexer(splits);
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
@@ -136,69 +79,20 @@ public class VectorReadImpl implements VectorRead, Serializable {
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
+                            vector,
                             preFilter,
                             executor));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
-        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> f : futures) {
-            Optional<ScoredGlobalIndexResult> next = f.join();
-            if (next.isPresent()) {
-                result = result.or(next.get());
+        ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.createEmpty();
+        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
+            Optional<ScoredGlobalIndexResult> splitResult = future.join();
+            if (splitResult.isPresent()) {
+                merged = merged.or(splitResult.get());
             }
         }
-
-        return result.topK(limit);
-    }
-
-    protected Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
-        Set<IndexFileMeta> scalarIndexFiles =
-                new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
-        for (VectorSearchSplit split : splits) {
-            scalarIndexFiles.addAll(split.scalarIndexFiles());
-        }
-
-        Optional<GlobalIndexScanner> optionalScanner =
-                GlobalIndexScanner.create(table, scalarIndexFiles);
-        if (!optionalScanner.isPresent()) {
-            return Optional.empty();
-        }
-        try (GlobalIndexScanner scanner = optionalScanner.get()) {
-            return scanner.scan(filter).map(GlobalIndexResult::results);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
-            GlobalIndexer globalIndexer,
-            IndexPathFactory indexPathFactory,
-            long rowRangeStart,
-            long rowRangeEnd,
-            List<IndexFileMeta> vectorIndexFiles,
-            @Nullable RoaringNavigableMap64 includeRowIds,
-            ExecutorService executor) {
-        List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
-        for (IndexFileMeta indexFile : vectorIndexFiles) {
-            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            indexIOMetaList.add(
-                    new GlobalIndexIOMeta(
-                            indexPathFactory.toPath(indexFile),
-                            indexFile.fileSize(),
-                            meta.indexMeta()));
-        }
-        @SuppressWarnings("resource")
-        FileIO fileIO = table.fileIO();
-        GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
-        GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
-        VectorSearch vectorSearch =
-                new VectorSearch(vector, limit, vectorColumn.name(), options)
-                        .withIncludeRowIds(includeRowIds);
-        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                .visitVectorSearch(vectorSearch)
-                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
+        return merged.topK(limit);
     }
 }

@@ -81,16 +81,12 @@ public class VectorScanImpl implements VectorScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    int fieldId = globalIndex.indexFieldId();
-                    if (vectorColumn.id() == fieldId || filterFieldIds.contains(fieldId)) {
+                    if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
                         return true;
                     }
-                    int[] extras = globalIndex.extraFieldIds();
-                    if (extras != null) {
-                        for (int extra : extras) {
-                            if (filterFieldIds.contains(extra)) {
-                                return true;
-                            }
+                    for (int filterFieldId : filterFieldIds) {
+                        if (containsField(globalIndex, filterFieldId)) {
+                            return true;
                         }
                     }
                     return false;
@@ -136,5 +132,20 @@ public class VectorScanImpl implements VectorScan {
 
     private static boolean isPrimaryColumn(GlobalIndexMeta meta, int fieldId) {
         return meta.indexFieldId() == fieldId;
+    }
+
+    private static boolean containsField(GlobalIndexMeta meta, int fieldId) {
+        if (meta.indexFieldId() == fieldId) {
+            return true;
+        }
+        int[] extraFieldIds = meta.extraFieldIds();
+        if (extraFieldIds != null) {
+            for (int extraFieldId : extraFieldIds) {
+                if (extraFieldId == fieldId) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

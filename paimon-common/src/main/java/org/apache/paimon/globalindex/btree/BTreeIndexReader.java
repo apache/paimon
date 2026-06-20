@@ -22,6 +22,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
@@ -135,7 +137,8 @@ public class BTreeIndexReader implements Closeable {
             throws IOException {
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
-        BTreeIndexMeta indexMeta = BTreeIndexMeta.deserialize(globalIndexIOMeta.metadata());
+        SortedIndexFileMeta indexMeta =
+                SortedIndexFileMeta.deserialize(globalIndexIOMeta.metadata());
         if (indexMeta.getFirstKey() != null) {
             this.minKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getFirstKey()));
             this.maxKey = keySerializer.deserialize(MemorySlice.wrap(indexMeta.getLastKey()));

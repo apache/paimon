@@ -25,9 +25,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
@@ -61,6 +60,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -84,7 +84,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .column(vectorFieldName, new ArrayType(DataTypes.FLOAT())));
     }
 
-    protected Schema.Builder multiVectorSchemaBuilder() {
+    protected Schema.Builder hybridVectorSchemaBuilder() {
         return withVectorSchemaOptions(
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
@@ -101,12 +101,12 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testMultiVectorSearchBuilderExposesRouteBuilders() throws Exception {
+    public void testHybridSearchBuilderExposesRouteBuilders() throws Exception {
         catalog.createTable(
-                identifier("multi_vector_builder_table"),
-                multiVectorSchemaBuilder().build(),
+                identifier("hybrid_vector_builder_table"),
+                hybridVectorSchemaBuilder().build(),
                 false);
-        FileStoreTable table = getTable(identifier("multi_vector_builder_table"));
+        FileStoreTable table = getTable(identifier("hybrid_vector_builder_table"));
 
         float[][] titleVectors = {{1.0f, 0.0f}, {0.9f, 0.1f}, {0.0f, 1.0f}};
         float[][] bodyVectors = {{0.0f, 1.0f}, {0.1f, 0.9f}, {1.0f, 0.0f}};
@@ -114,18 +114,18 @@ public class VectorSearchBuilderTest extends TableTestBase {
         buildAndCommitIndex(table, "title_vec", titleVectors);
         buildAndCommitIndex(table, "body_vec", bodyVectors);
 
-        MultiVectorSearchBuilder builder =
-                table.newMultiVectorSearchBuilder()
-                        .addRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
-                        .addRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
+        HybridSearchBuilder builder =
+                table.newHybridSearchBuilder()
+                        .addVectorRoute("title_vec", new float[] {1.0f, 0.0f}, 2)
+                        .addVectorRoute("body_vec", new float[] {0.0f, 1.0f}, 2, 2.0f)
                         .withLimit(2)
                         .withWeightedScoreRanker();
-        List<MultiVectorSearchBuilder.Route> routes = builder.routeBuilders();
+        List<HybridSearchBuilder.Route> routes = builder.routeBuilders();
 
         assertThat(routes).hasSize(2);
 
-        List<MultiVectorSearchBuilder.RouteResult> routeResults = new ArrayList<>();
-        for (MultiVectorSearchBuilder.Route route : routes) {
+        List<HybridSearchBuilder.RouteResult> routeResults = new ArrayList<>();
+        for (HybridSearchBuilder.Route route : routes) {
             routeResults.add(
                     builder.toRouteResult(route, route.vectorSearchBuilder().executeLocal()));
         }
@@ -521,6 +521,30 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchRequiresVectorColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                new Range(0, 1),
+                Arrays.asList(table.rowType().getField("id"), table.rowType().getField("vec")));
+
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+
+        VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
+    }
+
+    @Test
     public void testVectorSearchSplitSerialization() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -573,6 +597,138 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
+    @Test
+    public void testBatchVectorSearch() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.1f, 0.95f},
+            {0.98f, 0.05f},
+            {0.0f, 1.0f},
+            {0.05f, 0.98f}
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        float[][] queryVectors = {
+            {1.0f, 0.0f},
+            {0.0f, 1.0f},
+            {0.7f, 0.7f}
+        };
+
+        BatchVectorSearchBuilder searchBuilder =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(queryVectors)
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+
+        List<GlobalIndexResult> results =
+                searchBuilder.newBatchVectorRead().readBatch(searchBuilder.newVectorScan().scan());
+
+        assertThat(results).hasSize(3);
+
+        // Query 0 near (1,0): should find rows 0 (1,0) and 3 (0.98,0.05)
+        assertThat(results.get(0).results().isEmpty()).isFalse();
+        ReadBuilder rb0 = table.newReadBuilder();
+        List<Integer> ids0 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                rb0.newRead()
+                        .createReader(rb0.newScan().withGlobalIndexResult(results.get(0)).plan())) {
+            reader.forEachRemaining(row -> ids0.add(row.getInt(0)));
+        }
+        assertThat(ids0).contains(0);
+
+        // Query 1 near (0,1): should find rows 4 (0,1) and 5 (0.05,0.98)
+        assertThat(results.get(1).results().isEmpty()).isFalse();
+        ReadBuilder rb1 = table.newReadBuilder();
+        List<Integer> ids1 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                rb1.newRead()
+                        .createReader(rb1.newScan().withGlobalIndexResult(results.get(1)).plan())) {
+            reader.forEachRemaining(row -> ids1.add(row.getInt(0)));
+        }
+        assertThat(ids1).contains(4);
+    }
+
+    @Test
+    public void testBatchVectorSearchWithMultipleIndexFiles() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] allVectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.1f, 0.95f},
+            {0.98f, 0.05f},
+            {0.0f, 1.0f},
+            {0.05f, 0.98f}
+        };
+
+        writeVectors(table, allVectors);
+        buildAndCommitMultipleIndexFiles(table, allVectors);
+
+        List<GlobalIndexResult> results =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.85f, 0.15f}, {0.0f, 1.0f}})
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(2);
+
+        List<Integer> ids0 = readIds(table, results.get(0));
+        assertThat(ids0.size()).isLessThanOrEqualTo(3);
+        assertThat(ids0).contains(0, 3);
+
+        List<Integer> ids1 = readIds(table, results.get(1));
+        assertThat(ids1.size()).isLessThanOrEqualTo(3);
+        assertThat(ids1).contains(4, 5);
+    }
+
+    @Test
+    public void testBatchSingleVector() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.0f, 1.0f},
+            {0.98f, 0.05f}
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        float[] queryVector = {0.9f, 0.1f};
+
+        GlobalIndexResult singleResult =
+                table.newVectorSearchBuilder()
+                        .withVector(queryVector)
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        List<GlobalIndexResult> batchResults =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {queryVector})
+                        .withLimit(3)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(batchResults).hasSize(1);
+        assertThat(batchResults.get(0).results().getIntCardinality())
+                .isEqualTo(singleResult.results().getIntCardinality());
+
+        for (long rowId : singleResult.results()) {
+            assertThat(batchResults.get(0).results().contains(rowId)).isTrue();
+        }
+    }
+
     // ====================== Helper methods ======================
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
@@ -602,6 +758,16 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
     }
 
+    private List<Integer> readIds(FileStoreTable table, GlobalIndexResult result) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
+    }
+
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
         buildAndCommitIndex(table, VECTOR_FIELD_NAME, vectors);
     }
@@ -611,15 +777,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(fieldName);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -654,15 +820,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         int mid = vectors.length / 2;
 
         // Build first index file covering rows [0, mid)
-        GlobalIndexSingletonWriter writer1 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer1 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
         for (int i = 0; i < mid; i++) {
-            writer1.write(vectors[i]);
+            writer1.write(vectors[i], i);
         }
         List<ResultEntry> entries1 = writer1.finish();
         Range rowRange1 = new Range(0, mid - 1);
@@ -677,15 +843,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         entries1);
 
         // Build second index file covering rows [mid, end)
-        GlobalIndexSingletonWriter writer2 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer2 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
         for (int i = mid; i < vectors.length; i++) {
-            writer2.write(vectors[i]);
+            writer2.write(vectors[i], i - mid);
         }
         List<ResultEntry> entries2 = writer2.finish();
         Range rowRange2 = new Range(mid, vectors.length - 1);
@@ -816,18 +982,28 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitVectorIndex(FileStoreTable table, float[][] vectors, Range rowRange)
             throws Exception {
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                rowRange,
+                Collections.singletonList(table.rowType().getField(VECTOR_FIELD_NAME)));
+    }
+
+    private void buildAndCommitVectorIndexWithFields(
+            FileStoreTable table, float[][] vectors, Range rowRange, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -837,7 +1013,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        vectorField.id(),
+                        indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
@@ -859,8 +1035,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField idField = table.rowType().getField("id");
 
-        GlobalIndexParallelWriter writer =
-                (GlobalIndexParallelWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
         for (int id : ids) {
@@ -898,15 +1074,15 @@ public class VectorSearchBuilderTest extends TableTestBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 

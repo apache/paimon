@@ -227,13 +227,18 @@ class FileScanner:
         # bucket set per ``total_buckets`` value.
         self._bucket_selector = self._init_bucket_selector()
 
-        def schema_fields_func(schema_id: int):
-            return self.table.schema_manager.get_schema(schema_id).fields
-
         self.simple_stats_evolutions = SimpleStatsEvolutions(
-            schema_fields_func,
+            self._schema_fields,
             self.table.table_schema.id
         )
+
+    def _schema_fields(self, schema_id: int):
+        """Resolve schema fields, short-circuiting current table schema id to avoid
+        filesystem access (REST catalog would get 403).
+        """
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema.fields
+        return self.table.schema_manager.get_schema(schema_id).fields
 
     def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
         if not self.deletion_vectors_enabled:

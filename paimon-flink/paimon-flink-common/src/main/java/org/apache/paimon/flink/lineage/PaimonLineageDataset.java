@@ -27,7 +27,7 @@ import java.util.Map;
 
 /**
  * A {@link LineageDataset} representing a Paimon table, identified by its fully qualified name and
- * physical warehouse path as the namespace.
+ * catalog warehouse option as the namespace.
  */
 public class PaimonLineageDataset implements LineageDataset {
 

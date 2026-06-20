@@ -23,7 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkMultiVectorSearchBuilderImpl, SparkVectorSearchBuilderImpl}
+import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
@@ -65,16 +65,16 @@ abstract class PaimonBaseScan(table: InnerTable)
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
     val globalSearchCount =
-      Seq(pushedVectorSearch, pushedMultiVectorSearch, pushedFullTextSearch).count(_.isDefined)
+      Seq(pushedVectorSearch, pushedHybridSearch, pushedFullTextSearch).count(_.isDefined)
     if (globalSearchCount > 1) {
       throw new UnsupportedOperationException(
-        "Cannot push down vector search, multi-vector search and full-text search simultaneously.")
+        "Cannot push down vector search, hybrid search and full-text search simultaneously.")
     }
     if (pushedVectorSearch.isDefined) {
       return evalVectorSearch()
     }
-    if (pushedMultiVectorSearch.isDefined) {
-      return evalMultiVectorSearch()
+    if (pushedHybridSearch.isDefined) {
+      return evalHybridSearch()
     }
     if (pushedFullTextSearch.isDefined) {
       return evalFullTextSearch()
@@ -104,18 +104,18 @@ abstract class PaimonBaseScan(table: InnerTable)
     vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
   }
 
-  private def evalMultiVectorSearch(): GlobalIndexResult = {
-    val multiVectorSearch = pushedMultiVectorSearch.get
-    val multiVectorSearchBuilder =
+  private def evalHybridSearch(): GlobalIndexResult = {
+    val hybridSearch = pushedHybridSearch.get
+    val hybridSearchBuilder =
       if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
-        new SparkMultiVectorSearchBuilderImpl(table)
+        new SparkHybridSearchBuilderImpl(table)
       } else {
-        table.newMultiVectorSearchBuilder()
+        table.newHybridSearchBuilder()
       }
-    val builder = multiVectorSearchBuilder
-      .withLimit(multiVectorSearch.limit())
-      .withRanker(multiVectorSearch.ranker())
-    multiVectorSearch.routes().asScala.foreach(route => builder.addRoute(route))
+    val builder = hybridSearchBuilder
+      .withLimit(hybridSearch.limit())
+      .withRanker(hybridSearch.ranker())
+    hybridSearch.routes().asScala.foreach(route => builder.addRoute(route))
     if (pushedPartitionFilters.nonEmpty) {
       builder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
     }
@@ -130,8 +130,17 @@ abstract class PaimonBaseScan(table: InnerTable)
     val ftBuilder = table
       .newFullTextSearchBuilder()
       .withQueryText(fullTextSearch.queryText())
+      .withQueryOperator(fullTextSearch.queryOperator())
       .withTextColumn(fullTextSearch.fieldName())
       .withLimit(fullTextSearch.limit())
+    if (pushedPartitionFilters.nonEmpty) {
+      ftBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      throw new UnsupportedOperationException(
+        "Full-text search does not support non-partition filters because full-text indexes " +
+          "cannot apply row-id pre-filters before top-k ranking.")
+    }
     ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
   }
 

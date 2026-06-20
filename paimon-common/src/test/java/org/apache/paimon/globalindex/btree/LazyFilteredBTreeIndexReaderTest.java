@@ -20,9 +20,9 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -82,6 +82,65 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
         }
 
         return written;
+    }
+
+    private int firstStrictlyGreaterKeyIndex() {
+        for (int i = 1; i < dataNum; i++) {
+            if (comparator.compare(data.get(i - 1).getKey(), data.get(i).getKey()) < 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @TestTemplate
+    public void testFallbackScanDisabledByBudget() throws Exception {
+        options.set(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE, MemorySize.ofBytes(1));
+        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+
+        List<GlobalIndexIOMeta> written = writeData();
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        Object literal = data.get(dataNum / 2).getKey();
+        Object min = data.get(0).getKey();
+        Object max = data.get(dataNum - 1).getKey();
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
+
+            GlobalIndexResult result = reader.visitEqual(ref, literal).join().get();
+            assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
+        }
+    }
+
+    @TestTemplate
+    public void testFallbackBudgetUsesSelectedFiles() throws Exception {
+        int split = firstStrictlyGreaterKeyIndex();
+        if (split <= 0 || split >= dataNum) {
+            return;
+        }
+
+        List<GlobalIndexIOMeta> written = new ArrayList<>(2);
+        written.add(writeData(data.subList(0, split)));
+        written.add(writeData(data.subList(split, dataNum)));
+
+        options.set(
+                BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE,
+                MemorySize.ofBytes(written.get(1).fileSize()));
+        globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
+
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        Object min = data.get(0).getKey();
+        Object max = data.get(dataNum - 1).getKey();
+        Object secondFileMin = data.get(split).getKey();
+
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(fileReader, written, newDirectExecutorService())) {
+            assertThat(reader.visitBetween(ref, min, max).join()).isEmpty();
+
+            GlobalIndexResult result = reader.visitGreaterOrEqual(ref, secondFileMin).join().get();
+            assertResult(result, filter(obj -> comparator.compare(obj, secondFileMin) >= 0));
+        }
     }
 
     @TestTemplate
@@ -233,7 +292,7 @@ public class LazyFilteredBTreeIndexReaderTest extends AbstractIndexReaderTest {
 
     private GlobalIndexIOMeta writeDataWithIndexer(
             BTreeGlobalIndexer indexer, List<Pair<Object, Long>> subData) throws IOException {
-        GlobalIndexParallelWriter indexWriter = indexer.createWriter(fileWriter);
+        GlobalIndexSingleColumnWriter indexWriter = indexer.createWriter(fileWriter);
         for (Pair<Object, Long> pair : subData) {
             indexWriter.write(pair.getKey(), pair.getValue());
         }

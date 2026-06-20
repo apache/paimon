@@ -18,6 +18,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.types.RowType;
+
 import javax.annotation.Nullable;
 
 import java.util.Collections;
@@ -36,6 +38,19 @@ public interface PredicateVisitor<T> {
             return Collections.emptySet();
         }
         return predicate.visit(new FieldNameCollector());
+    }
+
+    static Set<Integer> collectFieldIds(RowType rowType, @Nullable Predicate predicate) {
+        if (predicate == null) {
+            return Collections.emptySet();
+        }
+        Set<Integer> fieldIds = new HashSet<>();
+        for (String name : collectFieldNames(predicate)) {
+            if (rowType.containsField(name)) {
+                fieldIds.add(rowType.getField(name).id());
+            }
+        }
+        return fieldIds;
     }
 
     /** A visitor that collects all field names referenced by a predicate. */

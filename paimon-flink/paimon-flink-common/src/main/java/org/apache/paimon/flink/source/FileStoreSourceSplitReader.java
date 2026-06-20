@@ -191,9 +191,19 @@ public class FileStoreSourceSplitReader
 
     @Override
     public void close() throws Exception {
-        if (currentReader != null) {
-            if (currentReader.lazyRecordReader != null) {
-                currentReader.lazyRecordReader.close();
+        try {
+            if (currentFirstBatch != null) {
+                try {
+                    currentFirstBatch.releaseBatch();
+                } finally {
+                    currentFirstBatch = null;
+                }
+            }
+        } finally {
+            if (currentReader != null) {
+                if (currentReader.lazyRecordReader != null) {
+                    currentReader.lazyRecordReader.close();
+                }
             }
         }
     }
@@ -319,8 +329,11 @@ public class FileStoreSourceSplitReader
 
         @Override
         public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+            try {
+                this.iterator.releaseBatch();
+            } finally {
+                pool.recycler().recycle(this);
+            }
         }
     }
 
