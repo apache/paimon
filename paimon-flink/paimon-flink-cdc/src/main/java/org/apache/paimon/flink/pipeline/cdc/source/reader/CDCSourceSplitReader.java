@@ -185,9 +185,19 @@ public class CDCSourceSplitReader
     @Override
     public void close() throws Exception {
         currentSchemaChangeEvents.clear();
-        if (currentReader != null) {
-            if (currentReader.lazyRecordReader != null) {
-                currentReader.lazyRecordReader.close();
+        try {
+            if (currentFirstBatch != null) {
+                try {
+                    currentFirstBatch.releaseBatch();
+                } finally {
+                    currentFirstBatch = null;
+                }
+            }
+        } finally {
+            if (currentReader != null) {
+                if (currentReader.lazyRecordReader != null) {
+                    currentReader.lazyRecordReader.close();
+                }
             }
         }
     }
@@ -199,7 +209,7 @@ public class CDCSourceSplitReader
 
         final TableAwareFileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
-            return;
+            throw new IOException("Cannot fetch from another split - no split remaining");
         }
 
         // update metric when split changes
@@ -320,8 +330,11 @@ public class CDCSourceSplitReader
 
         @Override
         public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+            try {
+                this.iterator.releaseBatch();
+            } finally {
+                pool.recycler().recycle(this);
+            }
         }
     }
 
