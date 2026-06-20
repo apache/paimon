@@ -27,6 +27,7 @@ import org.apache.paimon.rest.responses.ErrorResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -37,6 +38,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -260,5 +262,17 @@ public class HttpClientTest {
                             || e.getMessage().contains("Database connection failed"),
                     "Error message should contain the original non-JSON response");
         }
+    }
+
+    @Test
+    public void testPostSetsJsonContentType() throws Exception {
+        server.enqueueResponse(mockResponseDataStr, 200);
+        httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
+        RecordedRequest request = server.takeRequest(10, TimeUnit.SECONDS);
+        String contentType = request.getHeader("Content-Type");
+        Assertions.assertNotNull(contentType, "POST request must carry a Content-Type header");
+        Assertions.assertTrue(
+                contentType.contains("application/json"),
+                "POST body must be sent as application/json, but was: " + contentType);
     }
 }
