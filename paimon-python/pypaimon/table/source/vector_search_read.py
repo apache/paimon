@@ -225,8 +225,16 @@ def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, o
         LUMINA_IDENTIFIERS,
         LuminaVectorGlobalIndexReader,
     )
+    from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
+        VINDEX_IDENTIFIERS,
+        VindexVectorGlobalIndexReader,
+    )
     if index_type in LUMINA_IDENTIFIERS:
         return LuminaVectorGlobalIndexReader(
+            file_io, index_path, index_io_meta_list, options
+        )
+    if index_type in VINDEX_IDENTIFIERS:
+        return VindexVectorGlobalIndexReader(
             file_io, index_path, index_io_meta_list, options
         )
     raise ValueError("Unsupported vector index type: '%s'" % index_type)

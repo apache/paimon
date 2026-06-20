@@ -1220,6 +1220,39 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 print(f"Lumina vector search ({label}) matched rows: ids={ids}")
                 self.assertIn(0, ids)
 
+    def test_read_vindex_vector_index(self):
+        """Test reading a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table('default.test_vindex_vector')
+
+        builder = table.new_vector_search_builder()
+        builder.with_vector_column('embedding')
+        builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+        builder.with_limit(3)
+
+        result = builder.execute_local()
+        row_ids = sorted(list(result.results()))
+        print(f"paimon-vindex vector search for [1,0,0,0]: row_ids={row_ids}")
+        self.assertIn(0, row_ids)
+        self.assertEqual(len(row_ids), 3)
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        print(f"paimon-vindex vector search matched rows: ids={ids}")
+        self.assertIn(0, ids)
+
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java
         populated with both a Lumina vector index on `embedding` and a BTree
