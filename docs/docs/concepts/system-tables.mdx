@@ -609,7 +609,8 @@ SELECT * FROM sys.all_table_options;
 
 ### Catalog Options Table
 
-You can query the catalog's option information through catalog options table. The options not shown will be the default value. You can take reference to [Configuration](../maintenance/configurations#coreoptions).
+You can query the catalog's option information through catalog options table when `catalog-options-table.enabled` is set to `true`.
+The options not shown will be the default value. You can take reference to [Configuration](../maintenance/configurations#coreoptions).
 
 ```sql
 SELECT * FROM sys.catalog_options;

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
@@ -92,7 +94,15 @@ public class SystemTableLoader {
                 .orElse(null);
     }
 
+    public static List<String> loadGlobalTableNames(Options catalogOptions) {
+        List<String> tableNames = new ArrayList<>(GLOBAL_SYSTEM_TABLES);
+        if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+            tableNames.remove(CATALOG_OPTIONS);
+        }
+        return tableNames;
+    }
+
     public static List<String> loadGlobalTableNames() {
-        return GLOBAL_SYSTEM_TABLES;
+        return loadGlobalTableNames(new Options());
     }
 }

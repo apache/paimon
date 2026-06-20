@@ -255,7 +255,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
-            return SystemTableLoader.loadGlobalTableNames();
+            return SystemTableLoader.loadGlobalTableNames(context.options());
         }
 
         // check db exists
@@ -289,7 +289,7 @@ public abstract class AbstractCatalog implements Catalog {
         CatalogUtils.validateTableType(this, tableType);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
-                    SystemTableLoader.loadGlobalTableNames().stream()
+                    SystemTableLoader.loadGlobalTableNames(context.options()).stream()
                             .map(
                                     tableName -> {
                                         try {

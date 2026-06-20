@@ -222,7 +222,7 @@ public class RESTCatalog implements Catalog {
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
             if (isSystemDatabase(databaseName)) {
-                return SystemTableLoader.loadGlobalTableNames();
+                return SystemTableLoader.loadGlobalTableNames(context.options());
             }
             return api.listTables(databaseName);
         } catch (NoSuchResourceException e) {
@@ -241,6 +241,12 @@ public class RESTCatalog implements Catalog {
             @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
+            if (isSystemDatabase(databaseName)) {
+                CatalogUtils.validateNamePattern(this, tableNamePattern);
+                CatalogUtils.validateTableType(this, tableType);
+                return new PagedList<>(
+                        SystemTableLoader.loadGlobalTableNames(context.options()), null);
+            }
             return api.listTablesPaged(
                     databaseName, maxResults, pageToken, tableNamePattern, tableType);
         } catch (NoSuchResourceException e) {
@@ -257,6 +263,23 @@ public class RESTCatalog implements Catalog {
             @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
+            if (isSystemDatabase(db)) {
+                CatalogUtils.validateNamePattern(this, tableNamePattern);
+                CatalogUtils.validateTableType(this, tableType);
+                List<Table> systemTables =
+                        SystemTableLoader.loadGlobalTableNames(context.options()).stream()
+                                .map(
+                                        tableName -> {
+                                            try {
+                                                return getTable(Identifier.create(db, tableName));
+                                            } catch (TableNotExistException ignored) {
+                                                return null;
+                                            }
+                                        })
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.toList());
+                return new PagedList<>(systemTables, null);
+            }
             PagedList<GetTableResponse> tables =
                     api.listTableDetailsPaged(
                             db, maxResults, pageToken, tableNamePattern, tableType);
@@ -273,6 +296,17 @@ public class RESTCatalog implements Catalog {
     @Override
     public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
         try {
+            if (isSystemDatabase(databaseName)) {
+                List<Table> result = new ArrayList<>();
+                for (String tableName : SystemTableLoader.loadGlobalTableNames(context.options())) {
+                    try {
+                        result.add(getTable(Identifier.create(databaseName, tableName)));
+                    } catch (TableNotExistException ignored) {
+                        // ignore
+                    }
+                }
+                return result;
+            }
             List<GetTableResponse> tables = api.listTableDetails(databaseName);
             return tables.stream().map(t -> toTable(databaseName, t)).collect(Collectors.toList());
         } catch (NoSuchResourceException e) {
