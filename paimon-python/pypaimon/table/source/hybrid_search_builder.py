@@ -376,11 +376,28 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         scores = {}
         for route_result in route_results:
             result = route_result.result
+            weight = route_result.route.weight
             score_getter = result.score_getter()
-            for row_id in result.results():
-                contribution = route_result.route.weight * (
-                    score_getter(row_id) or 0.0)
-                scores[row_id] = scores.get(row_id, 0.0) + contribution
+
+            # Route score scales are heterogeneous (e.g. bounded vector similarity
+            # vs unbounded BM25), so raw scores are not comparable across routes.
+            # Min-max normalize each route into [0, 1] before weighting, so that
+            # weights -- not a route's numeric magnitude -- decide its influence on
+            # the fused score. This mirrors the Java HybridSearchRanker.
+            route_scores = {
+                row_id: (score_getter(row_id) or 0.0)
+                for row_id in result.results()
+            }
+            if not route_scores:
+                continue
+            min_score = min(route_scores.values())
+            score_range = max(route_scores.values()) - min_score
+            for row_id, raw in route_scores.items():
+                # No spread within the route (single hit or all ties) carries no
+                # relative signal, so every hit maps to 1.0 rather than zeroed out.
+                normalized = (
+                    (raw - min_score) / score_range if score_range > 0.0 else 1.0)
+                scores[row_id] = scores.get(row_id, 0.0) + weight * normalized
         return _top_k(scores, self._limit)
 
     def _split_partition_filter(self, predicate):
