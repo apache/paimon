@@ -21,12 +21,13 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.options.Options
+import org.apache.paimon.options.CatalogOptions.TABLE_TYPE
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.read.PaimonSplitScanBuilder
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
-import org.apache.paimon.table.{Table, _}
+import org.apache.paimon.table.{CatalogTableType, Table, _}
 import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
 
 import org.apache.spark.sql.connector.catalog._
@@ -83,6 +84,9 @@ abstract class PaimonSparkTableBase(val table: Table)
         }
         if (properties.containsKey(CoreOptions.PATH.key())) {
           properties.put(TableCatalog.PROP_LOCATION, properties.get(CoreOptions.PATH.key()))
+        }
+        if (CatalogTableType.EXTERNAL.toString.equalsIgnoreCase(dataTable.options().get(TABLE_TYPE.key()))) {
+          properties.put(TableCatalog.PROP_EXTERNAL, "true")
         }
         properties
       case _ => Collections.emptyMap()

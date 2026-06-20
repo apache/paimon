@@ -156,6 +156,30 @@ public class SparkCatalogWithHiveTest {
         }
     }
 
+    @Test
+    public void testDescribeExternalAndManagedTableType() throws IOException {
+        try (SparkSession spark = createSessionBuilder().getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
+            spark.sql("USE spark_catalog.test_db");
+
+            spark.sql("CREATE EXTERNAL TABLE external_table (a INT, bb INT, c STRING)");
+            assertThat(
+                            spark.sql("DESC FORMATTED external_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("EXTERNAL");
+
+            spark.sql("CREATE TABLE managed_table (a INT)");
+            assertThat(
+                            spark.sql("DESC FORMATTED managed_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("MANAGED");
+        }
+    }
+
     private SparkSession.Builder createSessionBuilder() {
         Path warehousePath = new Path("file:" + tempDir.toString());
         return SparkSession.builder()
