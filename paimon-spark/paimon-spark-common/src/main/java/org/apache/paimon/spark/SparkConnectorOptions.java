@@ -106,6 +106,14 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to read row in the form of changelog (add rowkind column in row to represent its change type).");
 
+    public static final ConfigOption<Boolean> FORMAT_TABLE_LAZY_PARTITION_PRUNING =
+            key("format-table.engine.lazy-partition-pruning")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, engine format table defers file listing and prunes partition "
+                                    + "directories level-by-level using partition filters.");
+
     public static final ConfigOption<Boolean> READ_ALLOW_FULL_SCAN =
             key("read.allow.fullScan")
                     .booleanType()

@@ -47,7 +47,7 @@ import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableC
 import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.write.BatchWrite
-import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
+import org.apache.spark.sql.execution.{SparkFormatTableFileIndex, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -338,7 +338,7 @@ object Spark3Shim {
     extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema) {
 
     override def partitionSpec(): PartitionSpec = {
-      SparkFormatTable.alignPartitionSpec(super.partitionSpec(), partitionSchema)
+      SparkFormatTableFileIndex.alignPartitionSpec(super.partitionSpec(), partitionSchema)
     }
   }
 }

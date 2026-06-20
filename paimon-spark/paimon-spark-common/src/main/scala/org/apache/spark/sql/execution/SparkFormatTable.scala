@@ -20,7 +20,6 @@ package org.apache.spark.sql.execution
 
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
@@ -30,108 +29,19 @@ import org.apache.spark.sql.connector.catalog.TableCapability._
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, SupportsOverwriteV2, Write, WriteBuilder}
-import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.FileFormat
+import org.apache.spark.sql.execution.datasources.PartitioningAwareFileIndex
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.datasources.v2.text.{TextScanBuilder, TextTable}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
 
 import scala.collection.JavaConverters._
-
-/** Format Table implementation with spark. */
-object SparkFormatTable {
-
-  // Copy from spark and override FileIndex's partitionSchema
-  def createFileIndex(
-      options: CaseInsensitiveStringMap,
-      sparkSession: SparkSession,
-      paths: Seq[String],
-      userSpecifiedSchema: Option[StructType],
-      partitionSchema: StructType): PartitioningAwareFileIndex = {
-
-    def globPaths: Boolean = {
-      val entry = options.get(DataSource.GLOB_PATHS_KEY)
-      Option(entry).forall(_ == "true")
-    }
-
-    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
-    // Hadoop Configurations are case-sensitive.
-    val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
-    if (
-      SparkShimLoader.shim.hasFileStreamSinkMetadata(
-        paths,
-        hadoopConf,
-        sparkSession.sessionState.conf)
-    ) {
-      // We are reading from the results of a streaming query. We will load files from
-      // the metadata log instead of listing them using HDFS APIs.
-      SparkShimLoader.shim.createPartitionedMetadataLogFileIndex(
-        sparkSession,
-        new Path(paths.head),
-        options.asScala.toMap,
-        userSpecifiedSchema,
-        partitionSchema = partitionSchema)
-    } else {
-      // This is a non-streaming file based datasource.
-      val rootPathsSpecified = DataSource.checkAndGlobPathIfNecessary(
-        paths,
-        hadoopConf,
-        checkEmptyGlobPath = true,
-        checkFilesExist = true,
-        enableGlobbing = globPaths)
-      val fileStatusCache = FileStatusCache.getOrCreate(sparkSession)
-
-      new PartitionedInMemoryFileIndex(
-        sparkSession,
-        rootPathsSpecified,
-        caseSensitiveMap,
-        userSpecifiedSchema,
-        fileStatusCache,
-        partitionSchema = partitionSchema)
-    }
-  }
-
-  // Visible to shim-local PartitionedMetadataLogFileIndex subclasses.
-  private[sql] def alignPartitionSpec(
-      inferred: PartitionSpec,
-      partitionSchema: StructType): PartitionSpec = {
-    if (inferred.partitionColumns.isEmpty && partitionSchema.nonEmpty) {
-      PartitionSpec(partitionSchema, inferred.partitions)
-    } else {
-      inferred
-    }
-  }
-
-  // Extend from InMemoryFileIndex to override partitionSchema
-  private class PartitionedInMemoryFileIndex(
-      sparkSession: SparkSession,
-      rootPathsSpecified: Seq[Path],
-      parameters: Map[String, String],
-      userSpecifiedSchema: Option[StructType],
-      fileStatusCache: FileStatusCache = NoopCache,
-      userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
-      metadataOpsTimeNs: Option[Long] = None,
-      override val partitionSchema: StructType)
-    extends InMemoryFileIndex(
-      sparkSession,
-      rootPathsSpecified,
-      parameters,
-      userSpecifiedSchema,
-      fileStatusCache,
-      userSpecifiedPartitionSpec,
-      metadataOpsTimeNs) {
-
-    override def partitionSpec(): PartitionSpec = {
-      alignPartitionSpec(super.partitionSpec(), partitionSchema)
-    }
-  }
-}
 
 trait PartitionedFormatTable extends SupportsPartitionManagement {
 
@@ -216,7 +126,7 @@ class PartitionedCSVTable(
   }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
-    SparkFormatTable.createFileIndex(
+    SparkFormatTableFileIndex.createFileIndex(
       options,
       sparkSession,
       paths,
@@ -252,7 +162,7 @@ class PartitionedTextTable(
   }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
-    SparkFormatTable.createFileIndex(
+    SparkFormatTableFileIndex.createFileIndex(
       options,
       sparkSession,
       paths,
@@ -277,7 +187,7 @@ class PartitionedOrcTable(
   }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
-    SparkFormatTable.createFileIndex(
+    SparkFormatTableFileIndex.createFileIndex(
       options,
       sparkSession,
       paths,
@@ -302,7 +212,7 @@ class PartitionedParquetTable(
   }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
-    SparkFormatTable.createFileIndex(
+    SparkFormatTableFileIndex.createFileIndex(
       options,
       sparkSession,
       paths,
@@ -327,7 +237,7 @@ class PartitionedJsonTable(
   }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
-    SparkFormatTable.createFileIndex(
+    SparkFormatTableFileIndex.createFileIndex(
       options,
       sparkSession,
       paths,
