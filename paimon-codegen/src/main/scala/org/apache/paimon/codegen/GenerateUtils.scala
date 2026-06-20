@@ -125,8 +125,12 @@ object GenerateUtils {
       val sortUtil =
         classOf[org.apache.paimon.utils.SortUtil].getCanonicalName
       s"$sortUtil.compareBinary($leftTerm, $rightTerm)"
-    case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE =>
+    case TINYINT | SMALLINT | INTEGER | BIGINT | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"($leftTerm > $rightTerm ? 1 : $leftTerm < $rightTerm ? -1 : 0)"
+    case FLOAT =>
+      s"java.lang.Float.compare($leftTerm, $rightTerm)"
+    case DOUBLE =>
+      s"java.lang.Double.compare($leftTerm, $rightTerm)"
     case ARRAY | VECTOR =>
       val elementType = t.getTypeRoot match {
         case ARRAY => t.asInstanceOf[ArrayType].getElementType
