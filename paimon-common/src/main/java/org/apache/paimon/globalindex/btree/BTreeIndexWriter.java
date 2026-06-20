@@ -20,9 +20,10 @@ package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceOutput;
@@ -42,9 +43,9 @@ import java.util.List;
 import java.util.zip.CRC32;
 
 /**
- * The {@link GlobalIndexSingletonWriter} implementation for BTree index. Note that users must keep
- * written keys monotonically incremental. All null keys are stored in a separate bitmap, which will
- * be serialized and appended to the file end on close. The layout is as below:
+ * The {@link GlobalIndexSingleColumnWriter} implementation for BTree index. Note that users must
+ * keep written keys monotonically incremental. All null keys are stored in a separate bitmap, which
+ * will be serialized and appended to the file end on close. The layout is as below:
  *
  * <pre>
  *    +-----------------------------------+------+
@@ -67,7 +68,7 @@ import java.util.zip.CRC32;
  * <p>For efficiency, we combine entries with the same keys and store a compact list of row ids for
  * each key.
  */
-public class BTreeIndexWriter implements GlobalIndexParallelWriter {
+public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
 
     private final String fileName;
     private final PositionOutputStream out;
@@ -172,7 +173,7 @@ public class BTreeIndexWriter implements GlobalIndexParallelWriter {
         }
 
         byte[] metaBytes =
-                new BTreeIndexMeta(
+                new SortedIndexFileMeta(
                                 firstKey == null ? null : keySerializer.serialize(firstKey),
                                 lastKey == null ? null : keySerializer.serialize(lastKey),
                                 nullBitmap.initialized())

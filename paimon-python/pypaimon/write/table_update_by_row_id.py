@@ -57,6 +57,12 @@ class TableUpdateByRowId:
 
     This update is designed for adding/updating specific columns in existing tables.
     Input data should contain _ROW_ID column.
+
+    Python is the writer-side source of truth for update-by-row-id. The Java
+    side ships the read path (``BlobFallbackRecordReader``) and pins the
+    on-disk blob delta layout via ``BlobUpdateTest`` only; there is no Java
+    writer. Changes to the blob delta layout here must stay compatible with
+    that reader.
     """
 
     FIRST_ROW_ID_COLUMN = '_FIRST_ROW_ID'
@@ -171,7 +177,11 @@ class TableUpdateByRowId:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        sorted_data = data.sort_by([(SpecialFields.ROW_ID.name, "ascending")])
+        sort_keys = [(SpecialFields.ROW_ID.name, "ascending")]
+        if hasattr(data, "sort_by"):
+            sorted_data = data.sort_by(sort_keys)
+        else:
+            sorted_data = data.take(pc.sort_indices(data, sort_keys=sort_keys))
         data_with_first_row_id = self._calculate_first_row_id(sorted_data)
         self._write_by_first_row_id(data_with_first_row_id, column_names)
 
@@ -270,11 +280,21 @@ class TableUpdateByRowId:
             original_data: Optional[pa.Table],
             update_data: pa.Table,
             column_names: List[str],
-            first_row_id: int) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
+            first_row_id: int,
+    ) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
         For rows without updates, use the original values (if available).
+
+        Blob delta files cover ``[first_row_id, first_row_id + max_updated_pos]``
+        — anchored at the original file's first_row_id, spanning up to and
+        including the last updated row. The span is NOT shrunk at the head:
+        ``BlobFallbackRecordReader`` resolves placeholders by relative offset
+        from the delta file's ``first_row_id``, so anchoring anywhere other
+        than the original ``first_row_id`` would misalign unchanged rows
+        before ``min_updated_pos`` with the older blob file. This anchor is
+        the same in every blob column being updated.
 
         Args:
             original_data: Original data from the file (may be None if no columns need to be read)
@@ -283,7 +303,8 @@ class TableUpdateByRowId:
             first_row_id: The first_row_id of this file group
 
         Returns:
-            Normal merged PyArrow Table and blob values to write row-by-row.
+            Normal merged PyArrow Table, and per-blob-column values list. All
+            blob value lists have the same length (= ``max_updated_pos + 1``).
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -294,11 +315,11 @@ class TableUpdateByRowId:
 
         # Build a boolean mask: True at positions that need to be updated
         all_indices = pa.array(range(original_data.num_rows), type=pa.int64())
-        mask = pc.is_in(all_indices, relative_indices)
+        mask = pc.is_in(all_indices, value_set=relative_indices)
 
         # Build the merged table column by column
         merged_columns = {}
-        blob_columns = {}
+        blob_columns: Dict[str, List[object]] = {}
         update_by_col = {
             col_name: update_data[col_name].combine_chunks()
             for col_name in column_names
@@ -307,33 +328,36 @@ class TableUpdateByRowId:
             int(relative_index.as_py()): idx
             for idx, relative_index in enumerate(relative_indices)
         }
+        # Caller (_write_by_first_row_id) only enters this method with a
+        # non-empty group, so update_positions is non-empty here.
+        blob_row_count = max(update_positions) + 1
         for col_name in column_names:
             update_col = update_by_col[col_name]
-            original_col = original_data[col_name].combine_chunks()
-            if update_col.type != original_col.type:
-                update_col = self._coerce_column(
-                    update_col, original_col.type)
             if self._is_blob_column(col_name):
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
                     if i in update_positions
                     else Blob.PLACE_HOLDER
-                    for i in range(original_data.num_rows)
+                    for i in range(blob_row_count)
                 ]
-            else:
-                try:
-                    merged_columns[col_name] = pc.replace_with_mask(
-                        original_col, mask, update_col)
-                except pa.lib.ArrowNotImplementedError:
-                    n = original_data.num_rows
-                    combined = pa.concat_arrays(
-                        [original_col, update_col])
-                    offset = len(original_col)
-                    indices = np.arange(n, dtype=np.int64)
-                    for orig_pos, upd_idx in update_positions.items():
-                        indices[orig_pos] = offset + upd_idx
-                    merged_columns[col_name] = combined.take(
-                        pa.array(indices))
+                continue
+            original_col = original_data[col_name].combine_chunks()
+            if update_col.type != original_col.type:
+                update_col = self._coerce_column(
+                    update_col, original_col.type)
+            try:
+                merged_columns[col_name] = pc.replace_with_mask(
+                    original_col, mask, update_col)
+            except pa.lib.ArrowNotImplementedError:
+                n = original_data.num_rows
+                combined = pa.concat_arrays(
+                    [original_col, update_col])
+                offset = len(original_col)
+                indices = np.arange(n, dtype=np.int64)
+                for orig_pos, upd_idx in update_positions.items():
+                    indices[orig_pos] = offset + upd_idx
+                merged_columns[col_name] = combined.take(
+                    pa.array(indices))
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
@@ -419,7 +443,7 @@ class TableUpdateByRowId:
 
             if new_files:
                 self._assign_update_file_metadata(
-                    new_files, first_row_id, column_names, original_data.num_rows)
+                    new_files, first_row_id, column_names, blob_columns)
                 self.commit_messages.append(
                     CommitMessage(
                         partition=partition_tuple,
@@ -436,8 +460,15 @@ class TableUpdateByRowId:
 
     @staticmethod
     def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
-                                     column_names: List[str], expected_row_count: int):
-        blob_end = first_row_id + expected_row_count
+                                     column_names: List[str],
+                                     blob_columns: Dict[str, List[object]]):
+        # All blob columns share the same anchored span (see
+        # _merge_update_with_original docstring), so any column's length is
+        # the per-blob delta-file row count.
+        blob_row_count = (
+            len(next(iter(blob_columns.values()))) if blob_columns else 0
+        )
+        blob_end = first_row_id + blob_row_count
         blob_starts = {}
         # BlobWriter.prepare_commit preserves write/rolling order, which is required
         # for assigning continuous row-id ranges to rolled blob files.

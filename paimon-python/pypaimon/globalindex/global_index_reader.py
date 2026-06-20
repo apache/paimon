@@ -106,6 +106,11 @@ class GlobalIndexReader(ABC):
     def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> 'Future[Optional[GlobalIndexResult]]':
         return _completed_future(None)
 
+    def visit_not_between(
+        self, field_ref: FieldRef, min_v: object, max_v: object
+    ) -> 'Future[Optional[GlobalIndexResult]]':
+        return _completed_future(None)
+
     @abstractmethod
     def close(self) -> None:
         pass

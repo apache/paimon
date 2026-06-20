@@ -455,6 +455,85 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testCheckRowIdExistenceNormalFileRejectsAdjacentDataFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
+        baseEntries.add(createFileEntryWithRowId("f2", ADD, 2L, 2L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1", ADD, 0L, 4L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 4L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceDedicatedFileCoveredByDataFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 4L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 2L));
+
+        assertThat(detection.checkRowIdExistence(baseEntries, deltaEntries, 4L)).isEmpty();
+    }
+
+    @Test
+    void testCheckRowIdExistenceDedicatedFileRejectsAdjacentDataFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
+        baseEntries.add(createFileEntryWithRowId("f2", ADD, 2L, 2L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 4L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 4L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceDedicatedFileRejectsRangeNotCoveredByOneDataFile() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("f1", ADD, 0L, 2L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 3L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 3L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
+    void testCheckRowIdExistenceDedicatedFileIgnoresBaseDedicatedFiles() {
+        ConflictDetection detection = createConflictDetection();
+
+        List<SimpleFileEntry> baseEntries = new ArrayList<>();
+        baseEntries.add(createFileEntryWithRowId("old.blob", ADD, 0L, 2L));
+
+        List<SimpleFileEntry> deltaEntries = new ArrayList<>();
+        deltaEntries.add(createFileEntryWithRowId("p1.blob", ADD, 0L, 2L));
+
+        Optional<RuntimeException> result =
+                detection.checkRowIdExistence(baseEntries, deltaEntries, 2L);
+        assertThat(result).isPresent();
+        assertThat(result.get().getMessage()).contains("Row ID existence conflict");
+    }
+
+    @Test
     void testCheckRowIdExistenceSkipsNewlyAppendedFiles() {
         ConflictDetection detection = createConflictDetection();
 

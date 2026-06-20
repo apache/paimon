@@ -25,6 +25,8 @@ import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 /**
  * Spark-aware {@link VectorSearchBuilderImpl} which produces a {@link SparkVectorReadImpl} so the
  * per-split vector index evaluation is dispatched through Spark instead of the local thread pool.
+ *
+ * <p>Single-vector only; batch search has no Spark-dispatched path yet (TODO).
  */
 public class SparkVectorSearchBuilderImpl extends VectorSearchBuilderImpl {
 

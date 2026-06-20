@@ -59,15 +59,6 @@ public class SparkVectorReadImpl extends VectorReadImpl {
             Predicate filter,
             int limit,
             DataField vectorColumn,
-            float[] vector) {
-        super(table, filter, limit, vectorColumn, vector);
-    }
-
-    public SparkVectorReadImpl(
-            FileStoreTable table,
-            Predicate filter,
-            int limit,
-            DataField vectorColumn,
             float[] vector,
             Map<String, String> options) {
         super(table, filter, limit, vectorColumn, vector, options);
@@ -124,6 +115,7 @@ public class SparkVectorReadImpl extends VectorReadImpl {
                                         split.rowRangeStart(),
                                         split.rowRangeEnd(),
                                         split.vectorIndexFiles(),
+                                        vector,
                                         includeRowIds,
                                         executor));
                     }

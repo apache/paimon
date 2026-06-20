@@ -34,7 +34,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
@@ -93,6 +93,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
+import static org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexOptions.BITMAP_INDEX_COMPRESSION;
 import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_COMPRESSION;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -515,6 +516,100 @@ public class JavaPyE2ETest {
         testBtreeIndexWriteNull();
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBitmapIndexWrite() throws Exception {
+        // create table
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/test_bitmap_index_string");
+        LocalFileIO.create().delete(tablePath, true);
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // write data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k1"), BinaryString.fromString("v1")));
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k2"), BinaryString.fromString("v2")));
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k2"), BinaryString.fromString("v2b")));
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k3"), BinaryString.fromString("v3")));
+            write.write(GenericRow.of(null, BinaryString.fromString("v_null")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // build index
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "bitmap").withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
+        }
+
+        // assert index
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 5);
+
+        // read index
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(predicateBuilder.equal(0, BinaryString.fromString("k2")));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsExactlyInAnyOrder("v2", "v2b");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testCompressedGlobalIndexWrite() throws Exception {
+        for (String compression : Arrays.asList("lz4", "lzo")) {
+            writeCompressedGlobalIndexTable(
+                    "btree", "test_btree_index_" + compression + "_fallback", compression);
+            writeCompressedGlobalIndexTable(
+                    "bitmap", "test_bitmap_index_" + compression + "_fallback", compression);
+        }
+    }
+
     private void testBtreeIndexWriteString() throws Exception {
         testBtreeIndexWriteGeneric(
                 DataTypes.STRING(),
@@ -572,7 +667,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(
@@ -603,6 +699,90 @@ public class JavaPyE2ETest {
                 .createReader(readBuilder.newScan().plan())
                 .forEachRemaining(r -> result.add(r.getString(1).toString()));
         assertThat(result).containsOnly("v2");
+    }
+
+    private void writeCompressedGlobalIndexTable(
+            String indexType, String tableName, String compression) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+        LocalFileIO.create().delete(tablePath, true);
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        if ("btree".equals(indexType)) {
+            options.set(BTREE_INDEX_COMPRESSION, compression);
+        } else {
+            options.set(BITMAP_INDEX_COMPRESSION, compression);
+        }
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 300; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString(String.format("key-%03d", i)),
+                                BinaryString.fromString("value-" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, indexType).withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
+        }
+
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 300);
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(
+                                predicateBuilder.greaterOrEqual(
+                                        0, BinaryString.fromString("key-295")));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "value-295", "value-296", "value-297", "value-298", "value-299");
     }
 
     private void testBtreeIndexWriteLarge() throws Exception {
@@ -648,7 +828,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(
@@ -726,7 +907,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
                     builder.build(
@@ -1288,6 +1470,73 @@ public class JavaPyE2ETest {
         LOG.info("compact_conflict_test: compact done, 5 files merged into 1 (1000 rows)");
     }
 
+    /**
+     * Step 1 for blob compact conflict test: write a blob table with 2 data files so compaction
+     * will merge them. Each file has 100 rows of (id, name, blob_data).
+     */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBlobCompactConflictWriteBase() throws Exception {
+        Identifier id = identifier("blob_compact_conflict_test");
+        try {
+            catalog.dropTable(id, true);
+        } catch (Exception ignore) {
+        }
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.STRING())
+                        .column("f2", DataTypes.BLOB())
+                        .option("target-file-size", "100 MB")
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option("compaction.min.file-num", "2")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(id, schema, false);
+
+        byte[] blobBytes = new byte[64];
+        java.util.Random rng = new java.util.Random(42);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(id);
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite w = builder.newWrite()) {
+            for (int i = 0; i < 100; i++) {
+                rng.nextBytes(blobBytes);
+                w.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name" + i),
+                                new org.apache.paimon.data.BlobData(blobBytes.clone())));
+            }
+            builder.newCommit().commit(w.prepareCommit());
+        }
+
+        table = (FileStoreTable) catalog.getTable(id);
+        builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite w = builder.newWrite()) {
+            for (int i = 100; i < 200; i++) {
+                rng.nextBytes(blobBytes);
+                w.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name" + i),
+                                new org.apache.paimon.data.BlobData(blobBytes.clone())));
+            }
+            builder.newCommit().commit(w.prepareCommit());
+        }
+        LOG.info("blob_compact_conflict_test: 2 base files written (100 rows each, total 200)");
+    }
+
+    /** Step 3 for blob compact conflict test: run compact. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBlobCompactConflictRunCompact() throws Exception {
+        Identifier id = identifier("blob_compact_conflict_test");
+        doDataEvolutionCompact((FileStoreTable) catalog.getTable(id), true);
+        LOG.info("blob_compact_conflict_test: compact done (compactBlob=true)");
+    }
+
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testDataEvolutionWrite() throws Exception {
@@ -1373,8 +1622,13 @@ public class JavaPyE2ETest {
     }
 
     private void doDataEvolutionCompact(FileStoreTable table) throws Exception {
+        doDataEvolutionCompact(table, false);
+    }
+
+    private void doDataEvolutionCompact(FileStoreTable table, boolean compactBlob)
+            throws Exception {
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false, false);
+                new DataEvolutionCompactCoordinator(table, compactBlob, false);
         List<CommitMessage> messages = new ArrayList<>();
         try {
             List<DataEvolutionCompactTask> tasks;

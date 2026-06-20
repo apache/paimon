@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -63,11 +64,11 @@ public class CreateGlobalIndexProcedureTest {
         Options userOptions =
                 CreateGlobalIndexProcedure.createUserOptions(
                         tableOptions,
-                        BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.key()
+                        SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE.key()
                                 + "=200, procedure-only=procedure-value");
 
         assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION)).isEqualTo("zstd");
-        assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE))
+        assertThat(userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE))
                 .isEqualTo(200L);
         assertThat(userOptions.get("unrelated-table-option")).isEqualTo("table-value");
         assertThat(userOptions.get("procedure-only")).isEqualTo("procedure-value");

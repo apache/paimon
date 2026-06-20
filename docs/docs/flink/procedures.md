@@ -1004,7 +1004,7 @@ All available procedures are listed below.
          To create a global index on a table for accelerating queries. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>index_column(required): the column name to build index on.</li>
-            <li>index_type(required): the type of global index, supported types include 'btree', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'tantivy-fulltext'.</li>
+            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'tantivy-fulltext'.</li>
             <li>partitions(optional): partition filter for selective index creation.</li>
             <li>options(optional): additional dynamic options for index creation.</li>
       </td>
@@ -1014,6 +1014,12 @@ All available procedures are listed below.
             `table` => 'default.T',<br/>
             `index_column` => 'name',<br/>
             `index_type` => 'btree')<br/><br/>
+         -- Create bitmap index<br/>
+         CALL sys.create_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'tag',<br/>
+            `index_type` => 'bitmap',<br/>
+            `options` => 'sorted-index.records-per-range=1000000')<br/><br/>
          -- Create index for specific partitions<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>

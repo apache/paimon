@@ -65,7 +65,7 @@ public class SnapshotManager implements Serializable {
 
     public static final String SNAPSHOT_PREFIX = "snapshot-";
 
-    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 3;
+    public static final int EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM = 300;
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -232,22 +232,30 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, this::tryGetSnapshot);
+    }
+
+    public static Snapshot retryEarliestSnapshot(
+            long earliestSnapshotId,
+            @Nullable Long stopSnapshotId,
+            FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction) {
         if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+            stopSnapshotId = earliestSnapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
         }
 
+        long snapshotId = earliestSnapshotId;
         do {
             try {
-                return tryGetSnapshot(snapshotId);
+                return snapshotFunction.apply(snapshotId);
             } catch (FileNotFoundException e) {
                 snapshotId++;
                 if (snapshotId > stopSnapshotId) {
-                    return null;
+                    throw new RuntimeException(
+                            String.format(
+                                    "Cannot find earliest snapshot from #%s to #%s.",
+                                    earliestSnapshotId, stopSnapshotId),
+                            e);
                 }
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
             }
         } while (true);
     }

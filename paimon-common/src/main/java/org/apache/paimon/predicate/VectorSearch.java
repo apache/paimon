@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
@@ -28,7 +27,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-/** VectorSearch to perform vector similarity search. * */
+/**
+ * VectorSearch to perform vector similarity search.
+ *
+ * <p>This is an internal pushdown representation. Use {@code Table.newVectorSearchBuilder()} to
+ * configure vector search from Java.
+ */
 public class VectorSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -46,7 +50,7 @@ public class VectorSearch implements Serializable {
 
     public VectorSearch(float[] vector, int limit, String fieldName, Map<String, String> options) {
         if (vector == null) {
-            throw new IllegalArgumentException("Search cannot be null");
+            throw new IllegalArgumentException("Search vector cannot be null");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
@@ -90,15 +94,8 @@ public class VectorSearch implements Serializable {
 
     public VectorSearch offsetRange(long from, long to) {
         if (includeRowIds != null) {
-            RoaringNavigableMap64 range = new RoaringNavigableMap64();
-            range.addRange(new Range(from, to));
-            RoaringNavigableMap64 and64 = RoaringNavigableMap64.and(range, includeRowIds);
-            final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
-            for (long rowId : and64) {
-                roaringNavigableMap64Offset.add(rowId - from);
-            }
             VectorSearch target = new VectorSearch(vector, limit, fieldName, options());
-            target.withIncludeRowIds(roaringNavigableMap64Offset);
+            target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
             return target;
         }
         return this;

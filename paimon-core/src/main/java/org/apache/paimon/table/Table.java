@@ -28,7 +28,9 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.BatchVectorSearchBuilder;
 import org.apache.paimon.table.source.FullTextSearchBuilder;
+import org.apache.paimon.table.source.HybridSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.RowType;
@@ -225,6 +227,18 @@ public interface Table extends Serializable {
 
     /** Returns a new vector search builder. */
     VectorSearchBuilder newVectorSearchBuilder();
+
+    /** Returns a new hybrid search builder. */
+    default HybridSearchBuilder newHybridSearchBuilder() {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support hybrid search.");
+    }
+
+    /** Returns a new batch vector search builder. */
+    default BatchVectorSearchBuilder newBatchVectorSearchBuilder() {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support batch vector search.");
+    }
 
     /** Returns a new full-text search builder. */
     FullTextSearchBuilder newFullTextSearchBuilder();

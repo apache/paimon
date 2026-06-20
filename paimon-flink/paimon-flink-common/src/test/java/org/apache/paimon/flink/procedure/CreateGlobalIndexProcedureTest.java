@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -41,11 +42,11 @@ public class CreateGlobalIndexProcedureTest {
         Options userOptions =
                 CreateGlobalIndexProcedure.createUserOptions(
                         tableOptions,
-                        BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.key()
+                        SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE.key()
                                 + "=200;procedure-only=procedure-value");
 
         assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION)).isEqualTo("zstd");
-        assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE))
+        assertThat(userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE))
                 .isEqualTo(200L);
         assertThat(userOptions.get("unrelated-table-option")).isEqualTo("table-value");
         assertThat(userOptions.get("procedure-only")).isEqualTo("procedure-value");

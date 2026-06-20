@@ -45,7 +45,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BlobFallbackRecordReader}. */
 public class BlobFallbackRecordReaderTest {
@@ -134,18 +133,19 @@ public class BlobFallbackRecordReaderTest {
     }
 
     @Test
-    public void testBlobFallbackRecordReaderThrowsIfAllRowsArePlaceholders() {
+    public void testBlobFallbackRecordReaderReturnsNullIfAllRowsArePlaceholders() throws Exception {
         DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);
         DataFileMeta oldFile = blobFile("old-placeholder-file", 0, 1, 1);
 
-        assertThatThrownBy(
-                        () ->
-                                readFallback(
-                                        Arrays.asList(newFile, oldFile),
-                                        null,
-                                        placeholderRows(newFile, 0, oldFile, 0)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("all blob files at the same row id store a placeholder");
+        ReadResult rows =
+                readFallback(
+                        Arrays.asList(newFile, oldFile),
+                        null,
+                        placeholderRows(newFile, 0, oldFile, 0));
+
+        assertThat(rows.rowIds).isEmpty();
+        assertThat(rows.nullBlobRowCount).isEqualTo(1);
+        assertThat(rows.placeholderRowCount).isEqualTo(0);
     }
 
     @Test
@@ -363,6 +363,7 @@ public class BlobFallbackRecordReaderTest {
         final List<Long> sequenceNumbers = new ArrayList<>();
         final List<Integer> batchSizes = new ArrayList<>();
         int placeholderRowCount;
+        int nullBlobRowCount;
 
         static ReadResult read(RecordReader<InternalRow> reader) throws Exception {
             try {
@@ -385,7 +386,9 @@ public class BlobFallbackRecordReaderTest {
         }
 
         private void add(InternalRow row) {
-            if (row.getBlob(BLOB_INDEX) == BlobPlaceholder.INSTANCE) {
+            if (row.isNullAt(BLOB_INDEX)) {
+                nullBlobRowCount++;
+            } else if (row.getBlob(BLOB_INDEX) == BlobPlaceholder.INSTANCE) {
                 placeholderRowCount++;
             } else {
                 rowIds.add(row.getLong(1));

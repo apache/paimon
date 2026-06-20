@@ -81,6 +81,18 @@ class _StubTable:
                 return _G()
         return _P()
 
+    def new_vector_search_builder(self):
+        from pypaimon.table.source.vector_search_builder import (
+            VectorSearchBuilderImpl,
+        )
+        return VectorSearchBuilderImpl(self)
+
+    def new_full_text_search_builder(self):
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+        return FullTextSearchBuilderImpl(self)
+
 
 def _field(fid, name, dtype="INT"):
     return DataField(id=fid, name=name,
@@ -969,7 +981,7 @@ class VectorSearchFilterTest(unittest.TestCase):
 
         class _FakeLazyReader:
             def __init__(self_inner, key_serializer, file_io, index_path,
-                         io_metas, executor=None):
+                         io_metas, executor=None, fallback_scan_max_size=None):
                 captured_io_metas.append(list(io_metas))
 
             def close(self_inner):
@@ -1049,7 +1061,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
                 _StubBTreeReader):
             with mock.patch(
-                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
+                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
                     return_value=wide_meta):
                 scanner = GlobalIndexScanner(
                     fields=table.fields,
@@ -1171,8 +1183,8 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexReader",
                 _StubBTreeReader):
             with mock.patch(
-                    "pypaimon.globalindex.btree.lazy_filtered_btree_reader.BTreeIndexMeta.deserialize",
-                    return_value=BTreeIndexMeta(first_key=None, last_key=None, has_nulls=False)):
+                    "pypaimon.globalindex.sorted_file_global_index_reader.SortedIndexFileMeta.deserialize",
+                    return_value=BTreeIndexMeta(first_key=b'', last_key=b'zzzz', has_nulls=False)):
                 scanner = GlobalIndexScanner(
                     fields=table.fields,
                     file_io=table.file_io,
@@ -1182,11 +1194,11 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                 try:
                     result = scanner.scan(
                         Predicate(method="like", index=0, field="name",
-                                  literals=["abc%"]))
+                                  literals=["a_c%"]))
                 finally:
                     scanner.close()
 
-        self.assertEqual([("like", "abc%")], observed_calls)
+        self.assertEqual([("like", "a_c%")], observed_calls)
         self.assertIsNotNone(result)
         self.assertEqual([3], sorted(list(result.results())))
 
@@ -1251,6 +1263,170 @@ class VectorSearchPartitionedFilterTest(unittest.TestCase):
                 PredicateBuilder.and_predicates(
                     [pb.equal("pt", 1), pb.equal("id", 5)]))
         self.assertIn("non-partition", str(ctx.exception))
+
+
+class HybridSearchBuilderTest(unittest.TestCase):
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_hybrid_search_ranks_multiple_routes(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        id_field = _field(0, "id")
+        title_embedding = _field(1, "title_embedding", "FLOAT")
+        body_embedding = _field(2, "body_embedding", "FLOAT")
+        content = _field(3, "content", "STRING")
+        table = _StubTable(
+            fields=[id_field, title_embedding, body_embedding, content],
+            entries=[],
+        )
+
+        captured_builders = []
+
+        class _FakeRouteBuilder:
+            def __init__(self, result):
+                self._result = result
+                self.calls = []
+
+            def with_vector_column(self, name):
+                self.calls.append(("vector_column", name))
+                return self
+
+            def with_query_vector(self, vector):
+                self.calls.append(("query_vector", vector))
+                return self
+
+            def with_text_column(self, name):
+                self.calls.append(("text_column", name))
+                return self
+
+            def with_query_text(self, query_text):
+                self.calls.append(("query_text", query_text))
+                return self
+
+            def with_query_operator(self, query_operator):
+                self.calls.append(("query_operator", query_operator))
+                return self
+
+            def with_limit(self, limit):
+                self.calls.append(("limit", limit))
+                return self
+
+            def with_options(self, options):
+                self.calls.append(("options", options))
+                return self
+
+            def execute_local(self):
+                return self._result
+
+        vector_result = DictBasedScoredIndexResult({1: 0.9, 2: 0.8})
+        text_result = DictBasedScoredIndexResult({2: 0.7, 3: 0.6})
+
+        def new_vector_search_builder():
+            builder = _FakeRouteBuilder(vector_result)
+            captured_builders.append(builder)
+            return builder
+
+        def new_full_text_search_builder():
+            builder = _FakeRouteBuilder(text_result)
+            captured_builders.append(builder)
+            return builder
+
+        table.new_vector_search_builder = new_vector_search_builder
+        table.new_full_text_search_builder = new_full_text_search_builder
+
+        result = (
+            HybridSearchBuilderImpl(table)
+            .add_vector_route(
+                "title_embedding", [1.0, 0.0], 10, weight=1.0,
+                options={"ivf.nprobe": "32"})
+            .add_full_text_route(
+                "content", "paimon search", 10, weight=1.0,
+                query_operator="and")
+            .with_limit(2)
+            .with_rrf_ranker()
+            .execute_local()
+        )
+
+        self.assertEqual(2, result.results().cardinality())
+        self.assertIn(2, list(result.results()))
+        self.assertGreater(result.score_getter()(2), result.score_getter()(1))
+        self.assertIn(("options", {"ivf.nprobe": "32"}),
+                      captured_builders[0].calls)
+        self.assertIn(("query_operator", "and"), captured_builders[1].calls)
+
+    def test_hybrid_search_rejects_data_filter_with_full_text_route(self):
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        id_field = _field(0, "id")
+        content = _field(1, "content", "STRING")
+        table = _StubTable(fields=[id_field, content], entries=[])
+        pb = PredicateBuilder(table.fields)
+
+        builder = (
+            HybridSearchBuilderImpl(table)
+            .add_full_text_route("content", "paimon search", 10)
+            .with_filter(pb.equal("id", 1))
+            .with_limit(5)
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            builder.route_builders()
+        self.assertIn("full-text routes", str(ctx.exception))
+
+    def test_hybrid_search_partition_filter_prunes_full_text_route(self):
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        pt_field = _field(0, "pt")
+        content = _field(1, "content", "STRING")
+        partition_pt1 = GenericRow([1], [pt_field])
+        partition_pt2 = GenericRow([2], [pt_field])
+        entries = [
+            _entry(partition_pt1, field_id=1, index_type="tantivy-fulltext",
+                   file_name="ft-pt1.index", row_range_start=0,
+                   row_range_end=4),
+            _entry(partition_pt2, field_id=1, index_type="tantivy-fulltext",
+                   file_name="ft-pt2.index", row_range_start=5,
+                   row_range_end=9),
+        ]
+        table = _StubTable(
+            fields=[pt_field, content],
+            entries=entries,
+            partition_fields=[pt_field],
+        )
+        _patch_snapshot(self, entries)
+
+        pb = PredicateBuilder(table.fields)
+        route_builders = (
+            HybridSearchBuilderImpl(table)
+            .add_full_text_route("content", "paimon search", 10)
+            .with_filter(pb.equal("pt", 2))
+            .with_limit(5)
+            .route_builders()
+        )
+        splits = (
+            route_builders[0]
+            .search_builder
+            .new_full_text_scan()
+            .scan()
+            .splits()
+        )
+
+        self.assertEqual(1, len(splits))
+        self.assertEqual(
+            ["ft-pt2.index"],
+            [f.file_name for f in splits[0].full_text_index_files],
+        )
 
 
 class VectorSearchManySplitsTest(unittest.TestCase):
@@ -1414,6 +1590,89 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         self.assertEqual(result.results().cardinality(), 10)
         scores = sorted(result.score_getter()(rid) for rid in result.results())
         self.assertEqual(scores, [float(i) for i in range(1190, 1200)])
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+
+class BatchVectorSearchTest(unittest.TestCase):
+    """Batch vector search returns one result per query vector, in input order."""
+
+    def test_batch_returns_per_query_results_in_order(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index",
+                       row_range_start=0, row_range_end=99)
+        table = _StubTable(fields=[embedding_field], entries=[entry])
+        _patch_snapshot(self, [entry])
+
+        # The fake reader routes each query vector to a distinct row id derived
+        # from the vector itself, so result i must reflect query_vectors[i].
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader:
+                def visit_vector_search(self_inner, vs):
+                    row_id = int(vs.vector[0])
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: 1.0}))
+
+                def close(self_inner):
+                    pass
+
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *a):
+                    return False
+            return _FakeReader()
+
+        query_vectors = [[10.0], [20.0], [30.0]]
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            results = (
+                BatchVectorSearchBuilderImpl(table)
+                .with_vector_column("embedding")
+                .with_query_vectors(query_vectors)
+                .with_limit(5)
+                .execute_batch_local()
+            )
+
+        self.assertEqual(len(results), len(query_vectors))
+        for i, query_vector in enumerate(query_vectors):
+            expected_row = int(query_vector[0])
+            self.assertTrue(results[i].results().contains(expected_row))
+            self.assertEqual(results[i].results().cardinality(), 1)
+        # Different query vectors yield different results.
+        self.assertNotEqual(
+            list(results[0].results()), list(results[1].results()))
+
+    def test_batch_empty_splits_returns_empty_per_query(self):
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        table = _StubTable(fields=[embedding_field], entries=[])
+        _patch_snapshot(self, [])
+
+        results = (
+            BatchVectorSearchBuilderImpl(table)
+            .with_vector_column("embedding")
+            .with_query_vectors([[1.0], [2.0]])
+            .with_limit(5)
+            .execute_batch_local()
+        )
+        self.assertEqual(len(results), 2)
+        for result in results:
+            self.assertEqual(result.results().cardinality(), 0)
 
     def tearDown(self):
         mock.patch.stopall()

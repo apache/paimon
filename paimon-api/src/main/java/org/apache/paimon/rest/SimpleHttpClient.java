@@ -24,6 +24,7 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
@@ -55,7 +56,11 @@ public class SimpleHttpClient implements Closeable {
         }
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
-            httpPost.setEntity(new StringEntity(encodedBody));
+            ContentType contentType =
+                    body instanceof Map
+                            ? ContentType.APPLICATION_FORM_URLENCODED
+                            : ContentType.APPLICATION_JSON;
+            httpPost.setEntity(new StringEntity(encodedBody, contentType));
         }
 
         return exec(httpPost);

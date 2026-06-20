@@ -131,7 +131,7 @@ public class IcebergConversions {
                 precision >= 3 && precision <= 6,
                 "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 6.");
         long encoded = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
-        return precision == 3 ? Timestamp.fromEpochMillis(encoded) : Timestamp.fromMicros(encoded);
+        return Timestamp.fromMicros(encoded);
     }
 
     private static ByteBuffer timeToByteBuffer(int millisOfDay, int precision) {

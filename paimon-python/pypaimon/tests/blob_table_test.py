@@ -1103,24 +1103,24 @@ class DedicatedFormatWriterTest(unittest.TestCase):
 
         update_files = [f for msg in update_messages for f in msg.new_files]
         update_blob_files = [f for f in update_files if f.file_name.endswith('.blob')]
-        self.assertGreater(len(update_blob_files), 0)
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 2)
+        self.assertEqual(update_blob_files[0].first_row_id, 0)
         self.assertTrue(all(f.write_cols == ['blob_data'] for f in update_files))
-        update_blob_lengths = []
         blob_fields = [field for field in table.fields if field.name == 'blob_data']
-        for blob_file in update_blob_files:
-            blob_reader = FormatBlobReader(
-                file_io=table.file_io,
-                file_path=blob_file.file_path,
-                read_fields=['blob_data'],
-                full_fields=blob_fields,
-                push_down_predicate=None,
-                blob_as_descriptor=False,
-            )
-            update_blob_lengths.extend(blob_reader.blob_lengths)
-            blob_reader.close()
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['blob_data'],
+            full_fields=blob_fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        update_blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
         self.assertEqual(
             update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
-            2,
+            1,
         )
 
         read_builder = table.new_read_builder()
@@ -1134,6 +1134,366 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             2: b'updated-blob-2',
             3: b'blob-3',
         })
+
+    def test_blob_update_single_row_at_first_position(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_first_row', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_first_row')
+
+        initial = pa.Table.from_pydict({
+            'id': list(range(10)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(10)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_first_row')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([0], type=pa.int64()),
+            'blob_data': pa.array([b'updated-0'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 1)
+        self.assertEqual(update_blob_files[0].first_row_id, 0)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id[0], b'updated-0')
+        self.assertEqual(by_id[9], b'blob-9')
+
+    def test_blob_update_all_rows_full_span(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_full', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_full')
+
+        num_rows = 5
+        initial = pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(num_rows)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_full')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array(list(range(num_rows)), type=pa.int64()),
+            'blob_data': pa.array(
+                [f'updated-{i}'.encode() for i in range(num_rows)],
+                type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, num_rows)
+        self.assertEqual(update_blob_files[0].first_row_id, 0)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        for i in range(num_rows):
+            self.assertEqual(by_id[i], f'updated-{i}'.encode())
+
+    def test_blob_update_multiple_blob_columns(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_a', pa.large_binary()),
+            ('blob_b', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_two_cols', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_two_cols')
+
+        initial = pa.Table.from_pydict({
+            'id': list(range(5)),
+            'blob_a': [f'a-{i}'.encode() for i in range(5)],
+            'blob_b': [f'b-{i}'.encode() for i in range(5)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_two_cols')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_a', 'blob_b'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([2], type=pa.int64()),
+            'blob_a': pa.array([b'a-updated'], type=pa.large_binary()),
+            'blob_b': pa.array([b'b-updated'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 2)
+        for f in update_blob_files:
+            self.assertEqual(f.row_count, 3)
+            self.assertEqual(f.first_row_id, 0)
+        cols_written = sorted(f.write_cols[0] for f in update_blob_files)
+        self.assertEqual(cols_written, ['blob_a', 'blob_b'])
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        rows = result.select(['id', 'blob_a', 'blob_b']).to_pylist()
+        by_id = {r['id']: r for r in rows}
+        self.assertEqual(by_id[2]['blob_a'], b'a-updated')
+        self.assertEqual(by_id[2]['blob_b'], b'b-updated')
+        self.assertEqual(by_id[0]['blob_a'], b'a-0')
+        self.assertEqual(by_id[4]['blob_b'], b'b-4')
+
+    def test_blob_update_across_multiple_file_groups(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_multi_group', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_multi_group')
+
+        # Two separate commits -> two data files with distinct first_row_id.
+        first = pa.Table.from_pydict({
+            'id': [0, 1, 2, 3, 4],
+            'blob_data': [f'a-{i}'.encode() for i in range(5)],
+        }, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(first)
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        table = self.catalog.get_table('test_db.blob_update_multi_group')
+        second = pa.Table.from_pydict({
+            'id': [5, 6, 7, 8, 9],
+            'blob_data': [f'b-{i}'.encode() for i in range(5)],
+        }, schema=pa_schema)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(second)
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        # Touch one row in each group: _ROW_ID 0 (group A, pos 0)
+        # and _ROW_ID 7 (group B, pos 2).
+        table = self.catalog.get_table('test_db.blob_update_multi_group')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([0, 7], type=pa.int64()),
+            'blob_data': pa.array(
+                [b'updated-0', b'updated-7'],
+                type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 2)
+        by_first = {f.first_row_id: f for f in update_blob_files}
+        self.assertEqual(set(by_first), {0, 5})
+        self.assertEqual(by_first[0].row_count, 1)
+        self.assertEqual(by_first[5].row_count, 3)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id[0], b'updated-0')
+        self.assertEqual(by_id[7], b'updated-7')
+        self.assertEqual(by_id[3], b'a-3')
+        self.assertEqual(by_id[5], b'b-0')
+
+    def test_blob_update_scattered_endpoints_spans_full_range(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_scattered', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_scattered')
+
+        num_rows = 100
+        initial = pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(num_rows)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_scattered')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([0, 99], type=pa.int64()),
+            'blob_data': pa.array(
+                [b'updated-blob-0', b'updated-blob-99'],
+                type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, num_rows)
+        self.assertEqual(update_blob_files[0].first_row_id, 0)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id[0], b'updated-blob-0')
+        self.assertEqual(by_id[99], b'updated-blob-99')
+        self.assertEqual(by_id[50], b'blob-50')
+
+    def test_blob_update_shrinks_delta_to_max_updated_row(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(
+            'test_db.blob_update_max_span', schema, False)
+        table = self.catalog.get_table('test_db.blob_update_max_span')
+
+        num_rows = 100
+        initial = pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'blob_data': [f'blob-{i}'.encode() for i in range(num_rows)],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        table = self.catalog.get_table('test_db.blob_update_max_span')
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([50], type=pa.int64()),
+            'blob_data': pa.array(
+                [b'updated-blob-50'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_builder.new_commit().commit(update_messages)
+
+        update_blob_files = [
+            f for msg in update_messages for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].row_count, 51)
+        self.assertEqual(update_blob_files[0].first_row_id, 0)
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        by_id = {
+            row['id']: row['blob_data']
+            for row in result.select(['id', 'blob_data']).to_pylist()
+        }
+        self.assertEqual(by_id[50], b'updated-blob-50')
+        self.assertEqual(by_id[0], b'blob-0')
+        self.assertEqual(by_id[99], b'blob-99')
 
     def test_update_blob_column_with_rolling_files(self):
         from pypaimon import Schema
@@ -1286,7 +1646,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             blob_reader.close()
         self.assertEqual(
             update_blob_lengths.count(BlobFormatWriter.PLACE_HOLDER_LENGTH),
-            3,
+            2,
         )
 
         update_builder.new_commit().commit(update_messages)

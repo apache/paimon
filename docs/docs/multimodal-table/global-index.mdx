@@ -3,9 +3,6 @@ title: "Global Index"
 sidebar_position: 8
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -32,9 +29,19 @@ under the License.
 Global Index is a powerful indexing mechanism for Data Evolution (append) tables. It enables efficient row-level lookups and filtering
 without full-table scans. Paimon supports multiple global index types:
 
-- **BTree Index**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
-- **Vector Index**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
-- **Full-Text Index**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
+- **[BTree Index](./global-index/btree)**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
+- **[Bitmap Index](./global-index/bitmap)**: A bitmap based index for enum-like scalar dimensions and tag columns. Supports equality, IN, prefix match on string columns, complement predicates, and null checks with compressed row-id bitmaps.
+- **[Vector Index](./global-index/vector)**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
+- **[Full-Text Index](./global-index/full-text)**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
+- **[Hybrid Search](./global-index/hybrid-search)**: A multi-route search API that combines results from multiple vector routes, multiple full-text routes, or both before reading table rows.
+
+| Index Type | Best For | Notes |
+|---|---|---|
+| BTree | Scalar filters on numeric, string, date, and timestamp columns | Best when predicates are selective, such as equality, IN, range, and null checks. |
+| Bitmap | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
+| Vector | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
+| Full-Text | Keyword search over text columns | Uses Tantivy scoring and tokenizer configuration stored with each index file. |
+| Hybrid Search | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
 
@@ -62,278 +69,129 @@ CREATE TABLE my_table (
 );
 ```
 
-## BTree Index
+## Lifecycle
 
-BTree index builds a logical B-tree structure over SST files, enabling efficient point lookups and range queries on scalar columns.
-
-**Build BTree Index**
+Create global indexes with the `create_global_index` procedure. You can build an index for all
+partitions or only selected partitions:
 
 ```sql
--- Create BTree index on 'name' column
 CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree',
+    partitions => 'dt=2026-06-18;dt=2026-06-19'
+);
+```
+
+Drop index files with `drop_global_index`:
+
+```sql
+CALL sys.drop_global_index(
     table => 'db.my_table',
     index_column => 'name',
     index_type => 'btree'
 );
 ```
 
-**Query with BTree Index**
-
-Once a BTree index is built, it is automatically used during scan when a filter predicate matches the indexed column.
+Global indexes are stored in index files and recorded in table metadata. To inspect index files and
+their row-id coverage, query the `table_indexes` system table:
 
 ```sql
-SELECT * FROM my_table WHERE name IN ('a200', 'a300');
+SELECT index_type, index_field_name, row_range_start, row_range_end
+FROM my_table$table_indexes
+WHERE index_field_name IS NOT NULL;
 ```
+
+You can also query `file_key_ranges` to inspect data file row-id ranges and diagnose coverage:
+
+```sql
+SELECT file_path, first_row_id, record_count
+FROM my_table$file_key_ranges;
+```
+
+For workloads that need newly appended rows to become visible only after existing global indexes
+cover them, enable the visibility callback:
+
+```sql
+ALTER TABLE my_table SET (
+    'visibility-callback.enabled' = 'true',
+    'visibility-callback.timeout' = '30 min'
+);
+```
+
+## Coverage and Freshness
+
+Global index files cover row-id ranges. If more rows are appended after an index is built, those
+new rows are not automatically covered by the existing index files. Run `create_global_index` again
+to build index files for newly uncovered data. By default, queries use fast search and only read
+indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
+
+To improve freshness for query types that support raw-data search, set:
+
+```sql
+ALTER TABLE my_table SET ('global-index.search-mode' = 'full');
+```
+
+With `full` search, supported global-index queries first use the snapshot `nextRowId` and global
+index row-id coverage to detect whether any row range is missing from the index. Raw data is scanned
+only when such a gap exists. Use `detail` search when data files may have been rewritten or updated
+after index creation; it scans data file metadata to find the exact unindexed row ranges and can
+handle index invalidation caused by updates or rewrites.
+
+To temporarily disable global-index scan acceleration while keeping the index files, set:
+
+```sql
+ALTER TABLE my_table SET ('global-index.enabled' = 'false');
+```
+
+Set it back to `true` to use global indexes during scans again.
+
+## Build Options
+
+These table options affect global index build and read behavior:
+
+| Option | Default | Description |
+|---|---|---|
+| `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `global-index.search-mode` | `fast` | Search mode for global-index queries. `fast` searches indexed data only. `full` checks snapshot `nextRowId` against global index row-id coverage and scans raw data only if a gap exists. `detail` scans data file metadata to find exact unindexed rows and can handle index invalidation caused by updates or rewrites. |
+| `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
+| `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
+| `global-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building non-sorted global indexes. |
+| `global-index.thread-num` | `32` | Maximum number of concurrent threads for global index I/O. |
+| `visibility-callback.enabled` | `false` | Whether batch or bounded-stream commits wait until existing global indexes cover newly added files. |
+| `visibility-callback.timeout` | `30 min` | Maximum wait time for visibility callback. |
+
+## BTree Index
+
+Use BTree indexes for scalar column lookups and range predicates. See [BTree Index](./global-index/btree)
+for build and query examples.
+
+## Bitmap Index
+
+Use Bitmap indexes for enum-like dimensions and tag columns queried by equality, IN, string prefix
+match, complement, or null predicates. See [Bitmap Index](./global-index/bitmap) for build examples,
+options, and file format details.
 
 ## Vector Index
 
-Vector Index provides approximate nearest neighbor (ANN) search for vector similarity search scenarios such as
-recommendation systems, image retrieval, and RAG (Retrieval Augmented Generation) applications.
-
-Supported vector index types:
-
-| Index Type | Description |
-|---|---|
-| `ivf-flat` | IVF index with flat vector storage. |
-| `ivf-pq` | IVF index with product quantization. |
-| `ivf-hnsw-flat` | IVF index with HNSW flat quantizer. |
-| `ivf-hnsw-sq` | IVF index with HNSW scalar quantizer. |
-
-**Build Vector Index**
-
-```sql
--- Create IVF-PQ vector index on 'embedding' column
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'embedding',
-    index_type => 'ivf-pq',
-    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
-);
-```
-
-For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-type>.dimension`.
-For `VECTOR<FLOAT>` columns, Paimon uses the dimension from the column type.
-
-Supported vector index options:
-
-| Option | Default | Description |
-|---|---|---|
-| `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
-| `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
-| `<index-type>.nlist` | `256` | Number of IVF clusters used during index build. |
-| `<index-type>.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. |
-| `<index-type>.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
-| `<index-type>.hnsw.m` | `20` | HNSW graph out-degree for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-
-**Vector Search**
-
-Search-time options are passed with each vector search request:
-
-| Option | Default | Description |
-|---|---|---|
-| `ivf.nprobe` | `16` | Number of IVF clusters to probe during search. |
-| `hnsw.ef_search` | `0` | HNSW search width during search. `0` uses the native library default. |
-
-<Tabs groupId="vector-search">
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-```sql
--- Search for top-5 nearest neighbors
-SELECT * FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5);
-```
-
-</TabItem>
-
-<TabItem value="flink-sql-procedure" label="Flink SQL (Procedure)">
-
-Unlike Spark's table-valued function, Flink uses a `CALL` procedure to perform vector search.
-The procedure returns JSON-serialized rows as strings.
-
-```sql
--- Search for top-5 nearest neighbors
-CALL sys.vector_search(
-    `table` => 'db.my_table',
-    vector_column => 'embedding',
-    query_vector => '1.0,2.0,3.0',
-    top_k => 5
-);
-
--- With projection (only return specific columns)
-CALL sys.vector_search(
-    `table` => 'db.my_table',
-    vector_column => 'embedding',
-    query_vector => '1.0,2.0,3.0',
-    top_k => 5,
-    projection => 'id,name'
-);
-```
-
-</TabItem>
-
-<TabItem value="java-api" label="Java API">
-
-```java
-Table table = catalog.getTable(identifier);
-
-// Step 1: Build vector search
-float[] queryVector = {1.0f, 2.0f, 3.0f};
-GlobalIndexResult result = table.newVectorSearchBuilder()
-        .withVector(queryVector)
-        .withLimit(5)
-        .withVectorColumn("embedding")
-        .withOption("ivf.nprobe", "16")
-        .executeLocal();
-
-// Step 2: Read matching rows using the search result
-ReadBuilder readBuilder = table.newReadBuilder();
-TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
-try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
-    reader.forEachRemaining(row -> {
-        System.out.println("id=" + row.getInt(0) + ", name=" + row.getString(1));
-    });
-}
-```
-
-</TabItem>
-
-</Tabs>
+Use Vector indexes for approximate nearest neighbor (ANN) search. See [Vector Index](./global-index/vector)
+for supported index types, options, and search examples.
 
 ## Full-Text Index
 
-Full-Text Index provides text search capabilities powered by Tantivy. It is suitable for text retrieval scenarios
-such as document search, log analysis, and content-based filtering.
+Use Full-Text indexes for text retrieval powered by Tantivy. See [Full-Text Index](./global-index/full-text)
+for tokenizer options and search examples.
 
-**Build Full-Text Index**
+## Hybrid Search
 
-```sql
--- Create full-text index on 'content' column
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'tantivy-fulltext'
-);
-```
-
-For other content where users often search by short character fragments, build the
-index with Tantivy's `ngram` tokenizer:
-
-```sql
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2'
-);
-```
-
-For Chinese word segmentation, build the index with the `jieba` tokenizer:
-
-```sql
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=jieba'
-);
-```
-
-For LanceDB-style analyzer customization, choose a base tokenizer and compose token filters:
-
-```sql
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true'
-);
-```
-
-Supported tokenizer options:
-
-| Option | Default | Description |
-|---|---|---|
-| `tantivy.tokenizer` | `default` | Tokenizer used by the full-text index. Supported values: `default`, `simple`, `whitespace`, `raw`, `ngram`, `jieba`. |
-| `tantivy.ngram.min-gram` | `2` | Minimum gram length for the `ngram` tokenizer. |
-| `tantivy.ngram.max-gram` | `2` | Maximum gram length for the `ngram` tokenizer. |
-| `tantivy.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
-| `tantivy.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
-| `tantivy.max-token-length` | `40` | Maximum token length kept by configurable tokenizers. |
-| `tantivy.ascii-folding` | `false` | Whether to normalize non-ASCII Latin characters to ASCII. |
-| `tantivy.stem` | `false` | Whether to apply stemming to emitted tokens. |
-| `tantivy.language` | `english` | Language used by stemming and built-in stop word filters. |
-| `tantivy.remove-stop-words` | `false` | Whether to remove built-in stop words for the configured language. |
-| `tantivy.stop-words` | ` ` | Semicolon-separated custom stop words to remove. |
-| `tantivy.with-position` | `true` | Whether to store term positions for phrase queries. Disable it to reduce index size when phrase queries are not needed. |
-
-Tokenizer settings are persisted in global index metadata. Existing index files keep using the
-tokenizer they were built with, even if later index builds use different options.
-Paimon does not load arbitrary Rust tokenizer plugins from configuration; custom analysis is
-provided by composing the supported tokenizer and filter options above. PyPaimon can query
-`jieba` indexes when the Python `jieba` package is installed.
-
-**Full-Text Search**
-
-<Tabs groupId="fulltext-search">
-
-<TabItem value="spark-sql" label="Spark SQL">
-
-```sql
--- Search for top-10 documents matching the query
-SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10);
-```
-
-</TabItem>
-
-<TabItem value="java-api" label="Java API">
-
-```java
-Table table = catalog.getTable(identifier);
-
-// Step 1: Build full-text search
-GlobalIndexResult result = table.newFullTextSearchBuilder()
-        .withQueryText("paimon lake format")
-        .withQueryOperator("and")
-        .withLimit(10)
-        .withTextColumn("content")
-        .executeLocal();
-
-// Step 2: Read matching rows using the search result
-ReadBuilder readBuilder = table.newReadBuilder();
-TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
-try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
-    reader.forEachRemaining(row -> {
-        System.out.println("id=" + row.getInt(0) + ", content=" + row.getString(1));
-    });
-}
-```
-
-</TabItem>
-
-<TabItem value="python-sdk" label="Python SDK">
-
-```python
-table = catalog.get_table('db.my_table')
-
-# Step 1: Build full-text search
-builder = table.new_full_text_search_builder()
-builder.with_text_column('content')
-builder.with_query_text('paimon lake format')
-builder.with_query_operator('and')
-builder.with_limit(10)
-result = builder.execute_local()
-
-# Step 2: Read matching rows using the search result
-read_builder = table.new_read_builder()
-scan = read_builder.new_scan().with_global_index_result(result)
-plan = scan.plan()
-table_read = read_builder.new_read()
-pa_table = table_read.to_arrow(plan.splits())
-print(pa_table)
-```
-
-</TabItem>
-
-</Tabs>
+Use Hybrid Search to query multiple vector routes, multiple full-text routes, or a mix of both in one request. See
+[Hybrid Search](./global-index/hybrid-search) for route configuration, rankers, and API examples.

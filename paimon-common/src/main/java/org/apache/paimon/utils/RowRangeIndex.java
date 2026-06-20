@@ -43,8 +43,12 @@ public class RowRangeIndex {
     }
 
     public static RowRangeIndex create(List<Range> ranges) {
+        return create(ranges, true);
+    }
+
+    public static RowRangeIndex create(List<Range> ranges, boolean mergeAdjacent) {
         checkArgument(ranges != null, "Ranges cannot be null");
-        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, true));
+        return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, mergeAdjacent));
     }
 
     public List<Range> ranges() {
@@ -61,6 +65,13 @@ public class RowRangeIndex {
         return candidate < starts.length
                 && starts[candidate] <= range.from
                 && ends[candidate] >= range.to;
+    }
+
+    public boolean containsExactly(Range range) {
+        int candidate = lowerBound(starts, range.from);
+        return candidate < starts.length
+                && starts[candidate] == range.from
+                && ends[candidate] == range.to;
     }
 
     public List<Range> intersectedRanges(long start, long end) {

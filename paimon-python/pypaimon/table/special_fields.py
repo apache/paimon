@@ -17,7 +17,7 @@
 
 from typing import List
 
-from ..schema.data_types import AtomicType, DataField
+from ..schema.data_types import AtomicType, DataField, SYSTEM_FIELD_ID_START
 
 
 class SpecialFields:
@@ -35,10 +35,17 @@ class SpecialFields:
         '_ROW_ID'
     }
 
+    SYSTEM_FIELD_ID_START = SYSTEM_FIELD_ID_START
+
     @staticmethod
     def is_system_field(field_name: str) -> bool:
         """Check if a field is a system field."""
         return field_name in SpecialFields.SYSTEM_FIELD_NAMES
+
+    @staticmethod
+    def is_system_field_id(field_id: int) -> bool:
+        """Check if a field id is reserved for system fields."""
+        return field_id >= SYSTEM_FIELD_ID_START
 
     @staticmethod
     def find_system_fields(read_fields: List[DataField]) -> dict:

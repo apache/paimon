@@ -222,6 +222,8 @@ class GlobalIndexEvaluator:
             return reader.visit_like(field_ref, literals[0])
         elif method == 'between':
             return reader.visit_between(field_ref, literals[0], literals[1])
+        elif method == 'notBetween':
+            return reader.visit_not_between(field_ref, literals[0], literals[1])
 
         from pypaimon.globalindex.global_index_reader import _completed_future
         return _completed_future(None)

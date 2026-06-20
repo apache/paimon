@@ -37,8 +37,14 @@ public interface GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             ExecutorService executor);
 
-    static GlobalIndexer create(String type, DataField dataField, Options options) {
+    static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(dataField, options);
+        return globalIndexerFactory.create(indexField, options);
+    }
+
+    static GlobalIndexer create(
+            String type, DataField indexField, List<DataField> extraFields, Options options) {
+        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
+        return globalIndexerFactory.create(indexField, extraFields, options);
     }
 }

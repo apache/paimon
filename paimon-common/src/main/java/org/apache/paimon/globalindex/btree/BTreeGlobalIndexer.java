@@ -23,6 +23,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
@@ -61,11 +62,14 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
 
     private final KeySerializer keySerializer;
     private final Options options;
+    private final long fallbackScanMaxSize;
     private final LazyField<CacheManager> cacheManager;
 
     public BTreeGlobalIndexer(DataField dataField, Options options) {
         this.keySerializer = KeySerializer.create(dataField.type());
         this.options = options;
+        this.fallbackScanMaxSize =
+                options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
         this.cacheManager =
                 new LazyField<>(
                         () ->
@@ -96,6 +100,11 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
         return new LazyFilteredBTreeReader(
-                files, keySerializer, fileReader, cacheManager.get(), executor);
+                files,
+                keySerializer,
+                fileReader,
+                cacheManager.get(),
+                fallbackScanMaxSize,
+                executor);
     }
 }

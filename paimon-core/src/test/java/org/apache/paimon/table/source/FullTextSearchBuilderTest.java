@@ -25,7 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
@@ -33,6 +33,8 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -49,10 +51,12 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FullTextSearchBuilder} using test-only brute-force full-text index. */
 public class FullTextSearchBuilderTest extends TableTestBase {
@@ -110,6 +114,48 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Rows 0, 1, 3 contain "Paimon"
         assertThat(ids).containsAnyOf(0, 1, 3);
+    }
+
+    @Test
+    public void testHybridSearchBuilderWithFullTextRoute() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {
+            "Apache Paimon is a lake format",
+            "Paimon supports full-text search",
+            "Vector search is also supported"
+        };
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        ScoredGlobalIndexResult result =
+                table.newHybridSearchBuilder()
+                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                        .withLimit(3)
+                        .executeLocal();
+
+        assertThat(result.results().isEmpty()).isFalse();
+        assertThat(result.scoreGetter().score(result.results().iterator().next())).isGreaterThan(0);
+    }
+
+    @Test
+    public void testHybridSearchRejectsDataFilterWithFullTextRoute() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).equal(0, 1);
+
+        assertThatThrownBy(
+                        () ->
+                                table.newHybridSearchBuilder()
+                                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                                        .withFilter(idFilter)
+                                        .withLimit(3)
+                                        .routeBuilders())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("does not support non-partition filters");
     }
 
     @Test
@@ -299,6 +345,30 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).contains(0, 1, 2);
     }
 
+    @Test
+    public void testFullTextSearchRequiresTextColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Arrays.asList(
+                        table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)));
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQueryText("Paimon")
+                        .withLimit(2)
+                        .withTextColumn(TEXT_FIELD_NAME);
+
+        FullTextScan.Plan plan = searchBuilder.newFullTextScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
+    }
+
     // ====================== Helper methods ======================
 
     private void writeDocuments(FileStoreTable table, String[] documents) throws Exception {
@@ -313,18 +383,27 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     private void buildAndCommitIndex(FileStoreTable table, String[] documents) throws Exception {
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)));
+    }
+
+    private void buildAndCommitIndexWithFields(
+            FileStoreTable table, String[] documents, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
-        for (String doc : documents) {
-            writer.write(doc);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(documents[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 
@@ -335,7 +414,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        textField.id(),
+                        indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
@@ -359,15 +438,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         int mid = documents.length / 2;
 
         // Build first index file covering rows [0, mid)
-        GlobalIndexSingletonWriter writer1 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer1 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
         for (int i = 0; i < mid; i++) {
-            writer1.write(documents[i]);
+            writer1.write(documents[i], i);
         }
         List<ResultEntry> entries1 = writer1.finish();
         Range rowRange1 = new Range(0, mid - 1);
@@ -382,15 +461,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         entries1);
 
         // Build second index file covering rows [mid, end)
-        GlobalIndexSingletonWriter writer2 =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer2 =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestFullTextGlobalIndexerFactory.IDENTIFIER,
                                 textField,
                                 options);
         for (int i = mid; i < documents.length; i++) {
-            writer2.write(documents[i]);
+            writer2.write(documents[i], i - mid);
         }
         List<ResultEntry> entries2 = writer2.finish();
         Range rowRange2 = new Range(mid, documents.length - 1);

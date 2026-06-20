@@ -54,6 +54,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexIOMeta ioMeta;
 
     private String[] documents;
+    private long[] rowIds;
     private int count;
 
     public TestFullTextGlobalIndexReader(
@@ -79,21 +80,22 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         }
 
         String[] queryTerms = queryText.toLowerCase(Locale.ROOT).split("\\s+");
+        boolean requireAllTerms = "and".equals(fullTextSearch.queryOperator());
 
         // Min-heap: smallest score at head, so we evict the weakest candidate.
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
 
         for (int i = 0; i < count; i++) {
-            float score = computeScore(documents[i], queryTerms);
+            float score = computeScore(documents[i], queryTerms, requireAllTerms);
             if (score <= 0) {
                 continue;
             }
             if (topK.size() < effectiveK) {
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             } else if (score > topK.peek().score) {
                 topK.poll();
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             }
         }
 
@@ -112,12 +114,15 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 Optional.of(ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get)));
     }
 
-    private static float computeScore(String document, String[] queryTerms) {
+    private static float computeScore(
+            String document, String[] queryTerms, boolean requireAllTerms) {
         String lowerDoc = document.toLowerCase(Locale.ROOT);
         float score = 0;
         for (String term : queryTerms) {
             if (lowerDoc.contains(term)) {
                 score += 1.0f / queryTerms.length;
+            } else if (requireAllTerms) {
+                return 0;
             }
         }
         return score;
@@ -138,12 +143,14 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
 
             // Read documents
             documents = new String[count];
+            rowIds = new long[count];
             for (int i = 0; i < count; i++) {
-                byte[] lenBytes = new byte[4];
-                readFully(in, lenBytes);
-                ByteBuffer lenBuf = ByteBuffer.wrap(lenBytes);
-                lenBuf.order(ByteOrder.LITTLE_ENDIAN);
-                int textLen = lenBuf.getInt();
+                byte[] entryHeaderBytes = new byte[Long.BYTES + Integer.BYTES];
+                readFully(in, entryHeaderBytes);
+                ByteBuffer entryHeader = ByteBuffer.wrap(entryHeaderBytes);
+                entryHeader.order(ByteOrder.LITTLE_ENDIAN);
+                rowIds[i] = entryHeader.getLong();
+                int textLen = entryHeader.getInt();
 
                 byte[] textBytes = new byte[textLen];
                 readFully(in, textBytes);
@@ -170,6 +177,7 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         documents = null;
+        rowIds = null;
     }
 
     // =================== unsupported predicate operations =====================

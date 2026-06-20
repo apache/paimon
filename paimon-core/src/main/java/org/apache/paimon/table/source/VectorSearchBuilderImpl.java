@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link VectorSearchBuilder}. */
 public class VectorSearchBuilderImpl implements VectorSearchBuilder {
@@ -105,6 +106,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorRead newVectorRead() {
+        checkNotNull(vector, "vector must be set via withVector()");
         return new VectorReadImpl(table, filter, limit, vectorColumn, vector, options);
     }
 }

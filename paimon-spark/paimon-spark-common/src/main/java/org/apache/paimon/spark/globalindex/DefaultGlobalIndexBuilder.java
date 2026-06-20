@@ -20,23 +20,29 @@ package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
@@ -51,6 +57,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
     private final BinaryRow partition;
     private final RowType readType;
     private final DataField indexField;
+    private final List<DataField> extraFields;
     private final String indexType;
     private final Range rowRange;
     private final Options options;
@@ -63,13 +70,46 @@ public class DefaultGlobalIndexBuilder implements Serializable {
             String indexType,
             Range rowRange,
             Options options) {
+        this(
+                table,
+                partition,
+                readType,
+                indexField,
+                Collections.emptyList(),
+                indexType,
+                rowRange,
+                options);
+    }
+
+    public DefaultGlobalIndexBuilder(
+            FileStoreTable table,
+            BinaryRow partition,
+            RowType readType,
+            DataField indexField,
+            List<DataField> extraFields,
+            String indexType,
+            Range rowRange,
+            Options options) {
         this.table = table;
         this.partition = partition;
         this.readType = readType;
         this.indexField = indexField;
+        // Copy into a serializable ArrayList: callers may pass a List#subList view (e.g.
+        // indexFields.subList(1, ...)), which is not Serializable, and this builder is serialized
+        // and shipped to Spark executors. A null value means no extra columns.
+        this.extraFields =
+                extraFields == null ? Collections.emptyList() : new ArrayList<>(extraFields);
         this.indexType = indexType;
         this.rowRange = rowRange;
         this.options = options;
+    }
+
+    /** The primary index column followed by the extra columns, in index order. */
+    private List<DataField> indexedFields() {
+        List<DataField> fields = new ArrayList<>(1 + extraFields.size());
+        fields.add(indexField);
+        fields.addAll(extraFields);
+        return fields;
     }
 
     public FileStoreTable table() {
@@ -89,7 +129,7 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        indexField.id(),
+                        indexedFields(),
                         indexType,
                         resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
@@ -99,27 +139,56 @@ public class DefaultGlobalIndexBuilder implements Serializable {
 
     private List<ResultEntry> writePaimonRows(
             CloseableIterator<InternalRow> rows, LongCounter rowCounter) throws IOException {
-        GlobalIndexSingletonWriter indexWriter =
-                (GlobalIndexSingletonWriter)
-                        createIndexWriter(table, indexType, indexField, options);
+        GlobalIndexWriter indexWriter =
+                createIndexWriter(table, indexType, indexField, extraFields, options);
+        boolean multiColumn = !extraFields.isEmpty();
 
         try {
-            InternalRow.FieldGetter getter =
-                    InternalRow.createFieldGetter(
-                            indexField.type(), readType.getFieldIndex(indexField.name()));
-            rows.forEachRemaining(
-                    row -> {
-                        Object indexO = getter.getFieldOrNull(row);
-                        indexWriter.write(indexO);
-                        rowCounter.add(1);
-                    });
+            if (multiColumn) {
+                GlobalIndexMultiColumnWriter multiWriter =
+                        (GlobalIndexMultiColumnWriter) indexWriter;
+                List<DataField> indexedFields = indexedFields();
+                int[] projection = new int[indexedFields.size()];
+                for (int i = 0; i < indexedFields.size(); i++) {
+                    DataField field = indexedFields.get(i);
+                    projection[i] = readType.getFieldIndex(field.name());
+                }
+                ProjectedRow projectedRow = ProjectedRow.from(projection);
+                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    long absRowId = row.getLong(rowIdIndex);
+                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
+                        continue;
+                    }
+                    multiWriter.write(absRowId - rowRange.from, projectedRow.replaceRow(row));
+                    rowCounter.add(1);
+                }
+            } else {
+                GlobalIndexSingleColumnWriter singleWriter =
+                        (GlobalIndexSingleColumnWriter) indexWriter;
+                InternalRow.FieldGetter getter =
+                        InternalRow.createFieldGetter(
+                                indexField.type(), readType.getFieldIndex(indexField.name()));
+                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    long absRowId = row.getLong(rowIdIndex);
+                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
+                        continue;
+                    }
+                    Object indexO = getter.getFieldOrNull(row);
+                    singleWriter.write(indexO, absRowId - rowRange.from);
+                    rowCounter.add(1);
+                }
+            }
             return indexWriter.finish();
         } finally {
             closeWriterQuietly(indexWriter);
         }
     }
 
-    private static void closeWriterQuietly(GlobalIndexSingletonWriter writer) {
+    private static void closeWriterQuietly(GlobalIndexWriter writer) {
         if (writer instanceof java.io.Closeable) {
             try {
                 ((java.io.Closeable) writer).close();

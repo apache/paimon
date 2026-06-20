@@ -40,6 +40,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
+        self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.manifest_merge_min_count.return_value = 30
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
