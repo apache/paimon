@@ -129,8 +129,20 @@ ALTER TABLE my_table SET (
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Run `create_global_index` again
-to build index files for newly uncovered data. A query that can be answered by a matching global
-index reads indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
+to build index files for newly uncovered data. By default, queries use fast search and only read
+indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
+
+To improve freshness for query types that support raw-data search, set:
+
+```sql
+ALTER TABLE my_table SET ('global-index.search-mode' = 'full');
+```
+
+With `full` search, supported global-index queries first use the snapshot `nextRowId` and global
+index row-id coverage to detect whether any row range is missing from the index. Raw data is scanned
+only when such a gap exists. Use `detail` search when data files may have been rewritten or updated
+after index creation; it scans data file metadata to find the exact unindexed row ranges and can
+handle index invalidation caused by updates or rewrites.
 
 To temporarily disable global-index scan acceleration while keeping the index files, set:
 
@@ -147,6 +159,7 @@ These table options affect global index build and read behavior:
 | Option | Default | Description |
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
+| `global-index.search-mode` | `fast` | Search mode for global-index queries. `fast` searches indexed data only. `full` checks snapshot `nextRowId` against global index row-id coverage and scans raw data only if a gap exists. `detail` scans data file metadata to find exact unindexed rows and can handle index invalidation caused by updates or rewrites. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
 | `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |

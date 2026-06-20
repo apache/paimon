@@ -2543,6 +2543,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether to enable global index for scan.");
 
+    public static final ConfigOption<GlobalIndexSearchMode> GLOBAL_INDEX_SEARCH_MODE =
+            key("global-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription(
+                            "Search mode for global index queries. "
+                                    + "Supported values are 'fast', 'full', and 'detail'.");
+
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
@@ -4049,6 +4057,10 @@ public class CoreOptions implements Serializable {
         return options.get(GLOBAL_INDEX_ENABLED);
     }
 
+    public GlobalIndexSearchMode globalIndexSearchMode() {
+        return options.get(GLOBAL_INDEX_SEARCH_MODE);
+    }
+
     public Integer globalIndexThreadNum() {
         return options.get(GLOBAL_INDEX_THREAD_NUM);
     }
@@ -4845,5 +4857,36 @@ public class CoreOptions implements Serializable {
 
         /** Drop all global index entries for the whole partitions affected by the update. */
         DROP_PARTITION_INDEX
+    }
+
+    /** Search mode for global index queries. */
+    public enum GlobalIndexSearchMode implements DescribedEnum {
+        FAST("fast", "Only search indexed data."),
+        FULL(
+                "full",
+                "Use snapshot next row id and global index coverage to detect missing row ids, "
+                        + "and scan raw data only when a gap exists."),
+        DETAIL(
+                "detail",
+                "Scan data files to find exact unindexed rows. "
+                        + "This can handle index invalidation caused by updates or rewrites.");
+
+        private final String value;
+        private final String description;
+
+        GlobalIndexSearchMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
