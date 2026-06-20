@@ -124,7 +124,9 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
         if (keyProjection == null) {
             if (accumulator == null) {
-                return inputField;
+                List<InternalRow> rows = new ArrayList<>(input.size());
+                addNonNullRows(input, rows, countLimit);
+                return new GenericArray(rows.toArray());
             }
 
             InternalArray acc = (InternalArray) accumulator;
