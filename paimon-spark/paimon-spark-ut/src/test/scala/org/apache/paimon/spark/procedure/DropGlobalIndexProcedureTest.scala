@@ -81,6 +81,53 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
+  test("drop btree global index dry run") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      val values =
+        (0 until 100000).map(i => s"($i, 'name_$i')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      spark
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree')")
+        .collect()
+
+      var table = loadTable("T")
+      val before = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "btree")
+      assert(before.nonEmpty)
+
+      // Dry run: returns success but commits nothing.
+      val output = spark
+        .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree', dry_run => true)")
+        .collect()
+        .head
+      assert(output.getBoolean(0))
+
+      // Index files must still be present after a dry run.
+      table = loadTable("T")
+      val after = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "btree")
+      assert(after.size == before.size)
+    }
+  }
+
   test("create btree global index with partition") {
     withTable("T") {
       spark.sql("""

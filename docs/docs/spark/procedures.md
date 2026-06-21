@@ -538,9 +538,12 @@ This section introduce all available spark procedures about paimon.
             <li>index_column: the name of the indexed column. Cannot be empty.</li>
             <li>index_type: type of the index to drop, e.g. 'btree'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions from which to drop the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+            <li>dry_run: when true, scan the matching index files (count logged) without committing any change. Default is false.</li>
       </td>
       <td>
-         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')<br/><br/>
+         -- Preview what would be dropped without deleting<br/>
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', dry_run => true)
       </td>
    </tr>
    <tr>

@@ -67,6 +67,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
+                ProcedureParameter.optional("dry_run", DataTypes.BooleanType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -103,6 +104,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                 (args.isNullAt(3) || StringUtils.isNullOrWhitespaceOnly(args.getString(3)))
                         ? null
                         : args.getString(3);
+        boolean dryRun = !args.isNullAt(4) && args.getBoolean(4);
 
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
 
@@ -171,6 +173,11 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         LOG.info(
                                 "Waiting for global index to be deleted size: "
                                         + waitDelete.size());
+
+                        // Dry run: do not commit any change; the matched count is logged above.
+                        if (dryRun) {
+                            return new InternalRow[] {newInternalRow(true)};
+                        }
 
                         Map<BinaryRow, List<IndexFileMeta>> deleteEntries =
                                 waitDelete.stream()

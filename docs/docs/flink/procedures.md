@@ -1054,7 +1054,7 @@ All available procedures are listed below.
             `index_column` => 'columnName',<br/>
             `index_type` => 'indexType',<br/>
             `partitions` => 'partitions',<br/>
-            `dry_run` => 'dryRun')<br/>
+            `dry_run` => dryRun)<br/>
       </td>
       <td>
          To drop global index files from a table. Arguments:

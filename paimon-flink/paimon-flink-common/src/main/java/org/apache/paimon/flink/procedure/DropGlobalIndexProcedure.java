@@ -72,10 +72,7 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                         name = "partitions",
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
-                @ArgumentHint(
-                        name = "dry_run",
-                        type = @DataTypeHint("BOOLEAN"),
-                        isOptional = true)
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -147,12 +144,6 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 columnsDesc,
                 table.name());
 
-        if (waitToDelete.isEmpty()) {
-            return new String[] {
-                "No " + indexTypeLower + " global index found for columns '" + columnsDesc + "'"
-            };
-        }
-
         // Dry run: report what would be dropped without committing any change.
         if (dryRun != null && dryRun) {
             return new String[] {
@@ -165,6 +156,12 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                         + "' on table '"
                         + table.name()
                         + "'"
+            };
+        }
+
+        if (waitToDelete.isEmpty()) {
+            return new String[] {
+                "No " + indexTypeLower + " global index found for columns '" + columnsDesc + "'"
             };
         }
 
