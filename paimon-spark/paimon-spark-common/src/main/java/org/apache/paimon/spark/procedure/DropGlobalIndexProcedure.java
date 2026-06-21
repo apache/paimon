@@ -73,7 +73,8 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField(
+                                "dropped_file_count", DataTypes.LongType, true, Metadata.empty())
                     });
 
     protected DropGlobalIndexProcedure(TableCatalog tableCatalog) {
@@ -174,9 +175,9 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                 "Waiting for global index to be deleted size: "
                                         + waitDelete.size());
 
-                        // Dry run: do not commit any change; the matched count is logged above.
+                        // Dry run: report how many would be dropped, commit nothing.
                         if (dryRun) {
-                            return new InternalRow[] {newInternalRow(true)};
+                            return new InternalRow[] {newInternalRow((long) waitDelete.size())};
                         }
 
                         Map<BinaryRow, List<IndexFileMeta>> deleteEntries =
@@ -209,7 +210,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                             commit.commit(commitMessages);
                         }
 
-                        return new InternalRow[] {newInternalRow(true)};
+                        return new InternalRow[] {newInternalRow((long) waitDelete.size())};
                     } catch (Exception e) {
                         throw new RuntimeException(
                                 String.format(

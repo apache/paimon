@@ -63,12 +63,13 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
       val totalRowCount = btreeEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100000L)
 
+      val droppedCount = btreeEntries.size
       output = spark
         .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree')")
         .collect()
         .head
 
-      assert(output.getBoolean(0))
+      assert(output.getLong(0) == droppedCount)
 
       table = loadTable("T")
       btreeEntries = table
@@ -109,12 +110,12 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         .filter(_.indexFile().indexType() == "btree")
       assert(before.nonEmpty)
 
-      // Dry run: returns success but commits nothing.
+      // Dry run: reports the would-drop count but commits nothing.
       val output = spark
         .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree', dry_run => true)")
         .collect()
         .head
-      assert(output.getBoolean(0))
+      assert(output.getLong(0) == before.size)
 
       // Index files must still be present after a dry run.
       table = loadTable("T")
