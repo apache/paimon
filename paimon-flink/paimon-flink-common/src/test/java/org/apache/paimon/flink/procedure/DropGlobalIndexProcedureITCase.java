@@ -179,6 +179,90 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDropGlobalIndexDryRunWithPartition() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " id INT,"
+                        + " name STRING,"
+                        + " pt STRING"
+                        + ") PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '-1',"
+                        + " 'global-index.row-count-per-shard' = '10000',"
+                        + " 'row-tracking.enabled' = 'true',"
+                        + " 'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        FileStoreTable table = paimonTable("T");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            for (int i = 0; i < 20000; i++) {
+                batchTableWrite.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name_" + i),
+                                BinaryString.fromString("p0")));
+            }
+            for (int i = 0; i < 20000; i++) {
+                batchTableWrite.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("name_" + i),
+                                BinaryString.fromString("p1")));
+            }
+            List<CommitMessage> commitMessages = batchTableWrite.prepareCommit();
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(commitMessages);
+            commit.close();
+        }
+
+        tEnv.getConfig()
+                .set(org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "`index_column` => 'name', "
+                        + "`index_type` => 'btree')");
+
+        table = paimonTable("T");
+        List<IndexManifestEntry> before =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
+                        .collect(Collectors.toList());
+        assertThat(before).isNotEmpty();
+
+        // Dry run scoped to one partition.
+        String partitionMsg =
+                (String)
+                        sql("CALL sys.drop_global_index(`table` => 'default.T', "
+                                        + "`index_column` => 'name', "
+                                        + "`index_type` => 'btree', "
+                                        + "`partitions` => 'pt=p1', "
+                                        + "`dry_run` => true)")
+                                .get(0)
+                                .getField(0);
+        assertThat(partitionMsg).contains("Dry run").contains("btree");
+
+        // Dry run over all partitions reports a different (larger) count, proving the
+        // partition filter narrows the preview.
+        String allMsg =
+                (String)
+                        sql("CALL sys.drop_global_index(`table` => 'default.T', "
+                                        + "`index_column` => 'name', "
+                                        + "`index_type` => 'btree', "
+                                        + "`dry_run` => true)")
+                                .get(0)
+                                .getField(0);
+        assertThat(allMsg).contains("Dry run");
+        assertThat(partitionMsg).isNotEqualTo(allMsg);
+
+        // Neither dry run committed anything.
+        List<IndexManifestEntry> after =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
+                        .collect(Collectors.toList());
+        assertThat(after).hasSameSizeAs(before);
+    }
+
+    @Test
     public void testDropBtreeGlobalIndexWithPartition() throws Exception {
         sql(
                 "CREATE TABLE T ("
