@@ -67,7 +67,8 @@ public class HybridSearchRoute implements Serializable {
     }
 
     public static HybridSearchRoute fullText(
-            FullTextQuery query, int limit, float weight, Map<String, String> options) {
+            String queryJson, int limit, float weight, Map<String, String> options) {
+        FullTextQuery query = FullTextQuery.fromJson(queryJson);
         return new HybridSearchRoute(
                 RouteType.FULL_TEXT, query.columns().get(0), null, query, limit, weight, options);
     }
@@ -208,9 +209,9 @@ public class HybridSearchRoute implements Serializable {
             return queryVector(vector);
         }
 
-        public Builder query(FullTextQuery query) {
-            this.fullTextQuery = query;
-            this.fieldName = query.columns().get(0);
+        public Builder query(String queryJson) {
+            this.fullTextQuery = FullTextQuery.fromJson(queryJson);
+            this.fieldName = fullTextQuery.columns().get(0);
             return this;
         }
 
@@ -238,7 +239,14 @@ public class HybridSearchRoute implements Serializable {
 
         public HybridSearchRoute build() {
             if (fullTextQuery != null) {
-                return fullText(fullTextQuery, limit, weight, options);
+                return new HybridSearchRoute(
+                        RouteType.FULL_TEXT,
+                        fullTextQuery.columns().get(0),
+                        null,
+                        fullTextQuery,
+                        limit,
+                        weight,
+                        options);
             }
             return HybridSearchRoute.vector(fieldName, vector, limit, weight, options);
         }

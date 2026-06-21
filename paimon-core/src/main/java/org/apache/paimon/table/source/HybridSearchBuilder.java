@@ -21,7 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.HybridSearchRoute;
 import org.apache.paimon.predicate.Predicate;
 
@@ -64,14 +63,14 @@ public interface HybridSearchBuilder extends Serializable {
     }
 
     /** Add a full-text-search route. */
-    default HybridSearchBuilder addFullTextRoute(FullTextQuery query, int limit, float weight) {
-        return addFullTextRoute(query, limit, weight, null);
+    default HybridSearchBuilder addFullTextRoute(String queryJson, int limit, float weight) {
+        return addFullTextRoute(queryJson, limit, weight, null);
     }
 
     /** Add a full-text-search route. */
     default HybridSearchBuilder addFullTextRoute(
-            FullTextQuery query, int limit, float weight, Map<String, String> options) {
-        return addRoute(HybridSearchRoute.fullText(query, limit, weight, options));
+            String queryJson, int limit, float weight, Map<String, String> options) {
+        return addRoute(HybridSearchRoute.fullText(queryJson, limit, weight, options));
     }
 
     /** The final top k ranked results to return. */

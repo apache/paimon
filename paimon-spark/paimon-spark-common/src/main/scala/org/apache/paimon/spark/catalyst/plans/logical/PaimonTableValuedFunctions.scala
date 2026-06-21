@@ -583,7 +583,7 @@ case class HybridSearchQuery(override val args: Seq[Expression])
   private def extractConfiguredFullTextRoute(
       children: Seq[Expression],
       defaultLimit: Int): HybridSearchRoute = {
-    var query: Option[FullTextQuery] = None
+    var query: Option[String] = None
     var limit: Option[Int] = None
     var weight: Option[Float] = None
     var options = Map.empty[String, String]
@@ -592,8 +592,7 @@ case class HybridSearchQuery(override val args: Seq[Expression])
       case Seq(keyExpr, valueExpr) =>
         VectorSearchQuery(Seq.empty).extractString(keyExpr) match {
           case "query" =>
-            query =
-              Some(FullTextQuery.fromJson(VectorSearchQuery(Seq.empty).extractString(valueExpr)))
+            query = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
           case "limit" =>
             limit = Some(parsePositiveLimit(valueExpr.eval()))
           case "weight" =>

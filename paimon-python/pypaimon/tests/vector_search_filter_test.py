@@ -1614,7 +1614,10 @@ class HybridSearchBuilderTest(unittest.TestCase):
                 "title_embedding", [1.0, 0.0], 10, weight=1.0,
                 options={"ivf.nprobe": "32"})
             .add_full_text_route(
-                MatchQuery("paimon search", "content", operator="and"), 10, weight=1.0)
+                '{"match":{"column":"content","terms":"paimon search",'
+                '"operator":"and"}}',
+                10,
+                weight=1.0)
             .with_limit(2)
             .with_rrf_ranker()
             .execute_local()
@@ -1640,7 +1643,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
 
         builder = (
             HybridSearchBuilderImpl(table)
-            .add_full_text_route(MatchQuery("paimon search", "content"), 10)
+            .add_full_text_route(
+                '{"match":{"column":"content","terms":"paimon search"}}', 10)
             .with_filter(pb.equal("id", 1))
             .with_limit(5)
         )
@@ -1676,7 +1680,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
         pb = PredicateBuilder(table.fields)
         route_builders = (
             HybridSearchBuilderImpl(table)
-            .add_full_text_route(MatchQuery("paimon search", "content"), 10)
+            .add_full_text_route(
+                '{"match":{"column":"content","terms":"paimon search"}}', 10)
             .with_filter(pb.equal("pt", 2))
             .with_limit(5)
             .route_builders()

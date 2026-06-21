@@ -95,10 +95,11 @@ class HybridSearchRoute:
     @classmethod
     def full_text_route(
             cls,
-            query: FullTextQuery,
+            query_json: str,
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchRoute':
+        query = FullTextQuery.from_json(query_json)
         return cls(
             route_type=cls.FULL_TEXT,
             field_name=query.referenced_columns()[0],
@@ -187,14 +188,14 @@ class HybridSearchBuilder(ABC):
 
     def add_full_text_route(
             self,
-            query: FullTextQuery,
+            query_json: str,
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchBuilder':
         """Add a full-text-search route."""
         return self.add_route(
             HybridSearchRoute.full_text_route(
-                query, limit, weight, options))
+                query_json, limit, weight, options))
 
     @abstractmethod
     def route_builders(self) -> List[HybridSearchRouteBuilder]:

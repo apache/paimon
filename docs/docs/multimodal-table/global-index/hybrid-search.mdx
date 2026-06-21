@@ -165,7 +165,7 @@ HybridSearchBuilder searchBuilder =
                         2.0f,
                         java.util.Collections.singletonMap("ivf.nprobe", "32"))
                 .addFullTextRoute(
-                        FullTextQuery.match("paimon search", "content"),
+                        "{\"match\":{\"column\":\"content\",\"terms\":\"paimon search\"}}",
                         50,
                         1.0f,
                         java.util.Collections.emptyMap())
@@ -212,8 +212,6 @@ directly. `VectorSearch` and `HybridSearch` are internal pushdown representation
 <TabItem value="python-sdk" label="Python SDK">
 
 ```python
-from pypaimon.globalindex.full_text_query import MatchQuery
-
 table = catalog.get_table("db.my_table")
 
 result = (
@@ -226,7 +224,7 @@ result = (
         options={"ivf.nprobe": "32"},
     )
     .add_full_text_route(
-        MatchQuery("paimon search", "content"),
+        '{"match":{"column":"content","terms":"paimon search"}}',
         limit=50,
         weight=1.0,
     )
