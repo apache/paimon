@@ -154,15 +154,28 @@ class LazyPartitionPruningFileIndex(
 
   override def hashCode(): Int = rootPaths.toSet.hashCode()
 
-  override def refresh(): Unit = fileStatusCache.invalidateAll()
+  @volatile private var _fullIndex: InMemoryFileIndex = _
 
-  private lazy val fullIndex: InMemoryFileIndex =
-    new InMemoryFileIndex(
-      sparkSession,
-      tableLocations,
-      parameters,
-      userSpecifiedSchema,
-      fileStatusCache)
+  private def fullIndex: InMemoryFileIndex = {
+    if (_fullIndex == null) {
+      synchronized {
+        if (_fullIndex == null) {
+          _fullIndex = new InMemoryFileIndex(
+            sparkSession,
+            tableLocations,
+            parameters,
+            userSpecifiedSchema,
+            fileStatusCache)
+        }
+      }
+    }
+    _fullIndex
+  }
+
+  override def refresh(): Unit = {
+    fileStatusCache.invalidateAll()
+    synchronized { _fullIndex = null }
+  }
 
   // Required by PartitioningAwareFileIndex but never accessed — all callers are overridden.
   override protected def leafFiles: mutable.LinkedHashMap[Path, FileStatus] =
@@ -173,7 +186,7 @@ class LazyPartitionPruningFileIndex(
   override def partitionSpec(): PartitionSpec =
     PartitionSpec(_partitionSchema, Seq.empty)
 
-  override lazy val sizeInBytes: Long = fullIndex.sizeInBytes
+  override def sizeInBytes: Long = fullIndex.sizeInBytes
 
   override def inputFiles: Array[String] = fullIndex.inputFiles
 
