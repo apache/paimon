@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.Instant;
+import org.apache.paimon.utils.HintFileUtils.LatestLookupMode;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 
@@ -184,7 +185,11 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {
-        Long snapshotId = latestSnapshotIdFromFileSystem();
+        return latestSnapshotFromFileSystem(LatestLookupMode.NORMAL);
+    }
+
+    public @Nullable Snapshot latestSnapshotFromFileSystem(LatestLookupMode mode) {
+        Long snapshotId = latestSnapshotIdFromFileSystem(mode);
         return snapshotId == null ? null : snapshot(snapshotId);
     }
 
@@ -203,8 +208,12 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long latestSnapshotIdFromFileSystem() {
+        return latestSnapshotIdFromFileSystem(LatestLookupMode.NORMAL);
+    }
+
+    public @Nullable Long latestSnapshotIdFromFileSystem(LatestLookupMode mode) {
         try {
-            return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
+            return findLatest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath, mode);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }
@@ -710,7 +719,13 @@ public class SnapshotManager implements Serializable {
 
     private @Nullable Long findLatest(Path dir, String prefix, Function<Long, Path> file)
             throws IOException {
-        return HintFileUtils.findLatest(fileIO, dir, prefix, file);
+        return findLatest(dir, prefix, file, LatestLookupMode.NORMAL);
+    }
+
+    private @Nullable Long findLatest(
+            Path dir, String prefix, Function<Long, Path> file, LatestLookupMode mode)
+            throws IOException {
+        return HintFileUtils.findLatest(fileIO, dir, prefix, file, mode);
     }
 
     private @Nullable Long findEarliest(Path dir, String prefix, Function<Long, Path> file)

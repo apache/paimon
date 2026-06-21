@@ -18,12 +18,15 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
@@ -40,9 +43,48 @@ public class HintFileUtils {
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
 
+    /** Lookup mode for discovering the latest snapshot. */
+    public enum LatestLookupMode {
+        NORMAL,
+        RECOVERY_REQUIRING_LIST
+    }
+
     @Nullable
     public static Long findLatest(FileIO fileIO, Path dir, String prefix, Function<Long, Path> file)
             throws IOException {
+        return findLatest(fileIO, dir, prefix, file, LatestLookupMode.NORMAL);
+    }
+
+    @Nullable
+    public static Long findLatest(
+            FileIO fileIO,
+            Path dir,
+            String prefix,
+            Function<Long, Path> file,
+            LatestLookupMode mode)
+            throws IOException {
+        if (mode == LatestLookupMode.RECOVERY_REQUIRING_LIST) {
+            return findLatestByListForRecovery(fileIO, dir, prefix);
+        }
+
+        if (fileIO.isObjectStore()
+                && fileIO.supportsAtomicCreateWithoutOverwrite(
+                        file.apply(Snapshot.FIRST_SNAPSHOT_ID))) {
+            Optional<Long> latestHint = readLatestHintForNoListObjectStore(fileIO, LATEST, dir);
+            Long snapshotId = latestHint.orElse(null);
+            if (supportsNoListSnapshotCommit(fileIO, file, snapshotId)) {
+                return snapshotId == null
+                        ? null
+                        : findLatestForObjectStore(fileIO, file, snapshotId);
+            }
+        }
+
+        return findLatestByHintThenList(fileIO, dir, prefix, file);
+    }
+
+    @Nullable
+    private static Long findLatestByHintThenList(
+            FileIO fileIO, Path dir, String prefix, Function<Long, Path> file) throws IOException {
         Long snapshotId = readHint(fileIO, LATEST, dir);
         if (snapshotId != null && snapshotId > 0) {
             long nextSnapshot = snapshotId + 1;
@@ -52,6 +94,88 @@ public class HintFileUtils {
             }
         }
         return findByListFiles(fileIO, Math::max, dir, prefix);
+    }
+
+    private static boolean supportsNoListSnapshotCommit(
+            FileIO fileIO, Function<Long, Path> file, @Nullable Long latestHint)
+            throws IOException {
+        long nextSnapshot = latestHint == null ? Snapshot.FIRST_SNAPSHOT_ID : latestHint + 1;
+        return fileIO.supportsAtomicCreateWithoutOverwrite(file.apply(nextSnapshot));
+    }
+
+    private static Long findLatestForObjectStore(
+            FileIO fileIO, Function<Long, Path> file, Long latestHint) {
+        Path snapshotPath = file.apply(latestHint);
+        String snapshotJson;
+        try {
+            snapshotJson = fileIO.readFileUtf8(snapshotPath);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + snapshotPath
+                            + " is missing.",
+                    e);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + snapshotPath
+                            + " is unreadable.",
+                    e);
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + snapshotPath
+                            + " is unreadable.",
+                    e);
+        }
+
+        Snapshot snapshot;
+        try {
+            snapshot = Snapshot.fromJson(snapshotJson);
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + snapshotPath
+                            + " is malformed.",
+                    e);
+        }
+
+        if (snapshot.id() != latestHint) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + snapshotPath
+                            + " contains snapshot "
+                            + snapshot.id()
+                            + ".");
+        }
+
+        return latestHint;
+    }
+
+    @Nullable
+    private static Long findLatestByListForRecovery(FileIO fileIO, Path dir, String prefix)
+            throws IOException {
+        try {
+            return findByListFiles(fileIO, Math::max, dir, prefix);
+        } catch (IOException e) {
+            throw new IOException(
+                    "Recovery requires ListBucket permission to list table prefix "
+                            + dir
+                            + " for files with prefix "
+                            + prefix
+                            + ", or restoring a valid LATEST hint.",
+                    e);
+        }
     }
 
     @Nullable
@@ -82,6 +206,50 @@ public class HintFileUtils {
             }
         }
         return null;
+    }
+
+    private static Optional<Long> readLatestHintForNoListObjectStore(
+            FileIO fileIO, String fileName, Path dir) {
+        Path path = new Path(dir, fileName);
+        int retryNumber = 0;
+        Exception exception = null;
+        while (retryNumber++ < READ_HINT_RETRY_NUM) {
+            try {
+                Optional<String> hint = fileIO.readOverwrittenFileUtf8(path);
+                if (!hint.isPresent()) {
+                    return Optional.empty();
+                }
+
+                long snapshotId = Long.parseLong(hint.get());
+                if (snapshotId <= 0) {
+                    throw new NumberFormatException("Latest snapshot id must be positive.");
+                }
+                return Optional.of(snapshotId);
+            } catch (NumberFormatException e) {
+                throw new RuntimeException(
+                        "Cannot safely use LATEST hint because it is malformed.", e);
+            } catch (FileNotFoundException e) {
+                return Optional.empty();
+            } catch (IOException | RuntimeException e) {
+                exception = e;
+                if (retryNumber < READ_HINT_RETRY_NUM) {
+                    sleepBeforeRetry();
+                }
+            }
+        }
+
+        throw new RuntimeException(
+                "Cannot safely determine latest snapshot because LATEST hint is unreadable.",
+                exception);
+    }
+
+    private static void sleepBeforeRetry() {
+        try {
+            TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
     }
 
     public static Long findByListFiles(
