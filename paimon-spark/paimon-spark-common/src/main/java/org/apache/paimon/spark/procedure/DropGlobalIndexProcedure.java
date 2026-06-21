@@ -183,6 +183,11 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                             };
                         }
 
+                        // Nothing matched: avoid committing an empty change.
+                        if (waitDelete.isEmpty()) {
+                            return new InternalRow[] {newInternalRow(true, 0L)};
+                        }
+
                         Map<BinaryRow, List<IndexFileMeta>> deleteEntries =
                                 waitDelete.stream()
                                         .map(IndexManifestEntry::toDeleteEntry)
