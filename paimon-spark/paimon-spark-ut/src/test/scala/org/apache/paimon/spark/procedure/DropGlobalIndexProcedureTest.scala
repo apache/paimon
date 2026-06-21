@@ -69,7 +69,8 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         .collect()
         .head
 
-      assert(output.getLong(0) == droppedCount)
+      assert(output.getBoolean(0))
+      assert(output.getLong(1) == droppedCount)
 
       table = loadTable("T")
       btreeEntries = table
@@ -115,7 +116,8 @@ class DropGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         .sql("CALL sys.drop_global_index(table => 'test.T', index_column => 'name', index_type => 'btree', dry_run => true)")
         .collect()
         .head
-      assert(output.getLong(0) == before.size)
+      assert(output.getBoolean(0))
+      assert(output.getLong(1) == before.size)
 
       // Index files must still be present after a dry run.
       table = loadTable("T")
