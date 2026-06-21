@@ -59,7 +59,8 @@ public class FullTextQueryTest {
         assertThat(((FullTextQuery.Phrase) phrase).slop()).isEqualTo(1);
         assertThat(phrase.toJson())
                 .isEqualTo(
-                        "{\"phrase\":{\"column\":\"content\",\"terms\":\"full text\",\"slop\":1}}");
+                        "{\"match_phrase\":{\"column\":\"content\",\"terms\":\"full text\","
+                                + "\"slop\":1}}");
 
         FullTextQuery boost =
                 FullTextQuery.boost(
@@ -78,13 +79,14 @@ public class FullTextQueryTest {
                                 + "\"prefix_length\":0}},\"negative_boost\":0.3}}");
 
         FullTextQuery multiMatch =
-                FullTextQuery.multiMatch("paimon", Arrays.asList("title", "content"));
+                FullTextQuery.multiMatch(
+                        "paimon", Arrays.asList("title", "content"), null, "and");
         assertThat(multiMatch).isInstanceOf(FullTextQuery.MultiMatch.class);
         assertThat(multiMatch.columns()).containsExactly("title", "content");
         assertThat(multiMatch.toJson())
                 .isEqualTo(
                         "{\"multi_match\":{\"query\":\"paimon\",\"columns\":[\"title\",\"content\"],"
-                                + "\"boost\":[1.0,1.0]}}");
+                                + "\"boost\":[1.0,1.0],\"operator\":\"And\"}}");
 
         FullTextQuery.BooleanQuery booleanQuery =
                 new FullTextQuery.BooleanQuery(
@@ -168,7 +170,7 @@ public class FullTextQueryTest {
         assertThat(search.query()).isInstanceOf(FullTextQuery.Phrase.class);
         assertThat(search.queryJson())
                 .isEqualTo(
-                        "{\"phrase\":{\"column\":\"content\",\"terms\":\"paimon lake\","
+                        "{\"match_phrase\":{\"column\":\"content\",\"terms\":\"paimon lake\","
                                 + "\"slop\":1}}");
     }
 }

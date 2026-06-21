@@ -844,7 +844,7 @@ class FullTextQueryDslTest(unittest.TestCase):
 
         phrase = PhraseQuery("paimon lake", "content", slop=1)
         self.assertEqual(
-            '{"phrase":{"column":"content","terms":"paimon lake","slop":1}}',
+            '{"match_phrase":{"column":"content","terms":"paimon lake","slop":1}}',
             phrase.to_json())
         self.assertEqual("match_phrase", phrase.query_type().value)
 
@@ -861,7 +861,7 @@ class FullTextQueryDslTest(unittest.TestCase):
         self.assertEqual(["title", "content"], multi_match.columns)
         self.assertEqual(
             '{"multi_match":{"query":"paimon","columns":["title","content"],'
-            '"boost":[2.0,1.0]}}',
+            '"boost":[2.0,1.0],"operator":"And"}}',
             multi_match.to_json())
 
         boolean = BooleanQuery([

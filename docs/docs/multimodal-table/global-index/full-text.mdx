@@ -114,7 +114,7 @@ Set `tantivy.with-position=false` to reduce index size when phrase queries are n
 ## Full-Text Search
 
 Full-text search accepts a JSON query DSL. The root JSON object should contain one query type.
-Paimon supports `match`, `phrase` / `match_phrase`, `boost`, `multi_match`, and `boolean`.
+Paimon supports `match`, `match_phrase` / `phrase`, `boost`, `multi_match`, and `boolean`.
 The same JSON DSL is used by Spark SQL `full_text_search(...)`, Java `FullTextQuery.fromJson(...)`,
 Python `FullTextQuery.from_json(...)`, and full-text routes in Hybrid Search.
 
@@ -138,10 +138,10 @@ SELECT * FROM full_text_search(
 );
 
 -- Structured query DSL. The JSON shape follows LanceDB full-text queries:
--- match, phrase, boost, multi_match, and boolean.
+-- match, match_phrase, boost, multi_match, and boolean.
 SELECT * FROM full_text_search(
     'my_table',
-    '{"phrase":{"column":"content","terms":"paimon lake","slop":1}}',
+    '{"match_phrase":{"column":"content","terms":"paimon lake","slop":1}}',
     10
 );
 
@@ -153,7 +153,7 @@ SELECT * FROM full_text_search(
 
 SELECT * FROM full_text_search(
     'my_table',
-    '{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0]}}',
+    '{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0],"operator":"Or"}}',
     10
 );
 ```
@@ -249,12 +249,12 @@ matches.
 
 ### Phrase
 
-Use `phrase` to match terms in order. Phrase queries require the index to store positions, so keep
-`tantivy.with-position=true` when building indexes that need phrase search.
+Use `match_phrase` to match terms in order. Phrase queries require the index to store positions,
+so keep `tantivy.with-position=true` when building indexes that need phrase search.
 
 ```json
 {
-  "phrase": {
+  "match_phrase": {
     "column": "content",
     "terms": "paimon lake",
     "slop": 1
@@ -262,8 +262,8 @@ Use `phrase` to match terms in order. Phrase queries require the index to store 
 }
 ```
 
-`match_phrase` is accepted as an alias for `phrase`, and `query` is accepted as an alias for
-`terms`.
+`phrase` is accepted as an alias for `match_phrase`, and `query` is accepted as an alias for
+`terms`. Paimon serializes phrase queries as `match_phrase`.
 
 | Field | Required | Default | Description |
 |---|---|---|---|
@@ -342,7 +342,7 @@ matches and score, and `must_not` clauses exclude matches.
     ],
     "should": [
       {
-        "phrase": {
+        "match_phrase": {
           "column": "content",
           "terms": "lake format"
         }

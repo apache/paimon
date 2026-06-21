@@ -250,7 +250,7 @@ class PhraseQuery(FullTextQuery):
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "phrase": {
+            "match_phrase": {
                 "column": self.column,
                 "terms": self.query,
                 "slop": self.slop,
@@ -343,6 +343,7 @@ class MultiMatchQuery(FullTextQuery):
                 "query": self.query,
                 "columns": list(self.columns),
                 "boost": list(self.boosts),
+                "operator": self.operator.json_value(),
             }
         }
 

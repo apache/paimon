@@ -568,7 +568,7 @@ public abstract class FullTextQuery implements Serializable {
             body.put("terms", terms);
             body.put("slop", slop);
             Map<String, Object> root = new LinkedHashMap<>();
-            root.put("phrase", body);
+            root.put("match_phrase", body);
             return root;
         }
     }
@@ -700,6 +700,7 @@ public abstract class FullTextQuery implements Serializable {
             body.put("query", query);
             body.put("columns", columns);
             body.put("boost", boosts);
+            body.put("operator", operator.jsonValue());
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("multi_match", body);
             return root;
