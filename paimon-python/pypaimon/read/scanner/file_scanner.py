@@ -384,7 +384,10 @@ class FileScanner:
             if scanner is None:
                 return None
             with scanner:
-                return scanner.scan(self.predicate)
+                result = scanner.scan(self.predicate)
+                if result is None:
+                    return None
+                return result.or_(scanner.unindexed_rows(self.predicate))
         except Exception:
             return None
 
