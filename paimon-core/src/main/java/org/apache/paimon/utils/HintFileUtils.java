@@ -43,6 +43,7 @@ public class HintFileUtils {
 
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
+    private static final String SNAPSHOT_PREFIX = "snapshot-";
 
     /** Lookup mode for discovering the latest snapshot. */
     public enum LatestLookupMode {
@@ -68,7 +69,8 @@ public class HintFileUtils {
             return findLatestByListForRecovery(fileIO, dir, prefix);
         }
 
-        if (fileIO.isObjectStore()
+        if (SNAPSHOT_PREFIX.equals(prefix)
+                && fileIO.isObjectStore()
                 && fileIO.supportsAtomicCreateWithoutOverwrite(
                         file.apply(Snapshot.FIRST_SNAPSHOT_ID))) {
             Optional<Long> latestHint = readLatestHintForNoListObjectStore(fileIO, LATEST, dir);
@@ -160,7 +162,42 @@ public class HintFileUtils {
                             + ".");
         }
 
+        failIfNextSnapshotExists(fileIO, file, latestHint);
         return latestHint;
+    }
+
+    private static void failIfNextSnapshotExists(
+            FileIO fileIO, Function<Long, Path> file, Long latestHint) {
+        Path nextSnapshotPath = file.apply(latestHint + 1);
+        boolean nextExists;
+        try {
+            fileIO.readFileUtf8(nextSnapshotPath);
+            nextExists = true;
+        } catch (FileNotFoundException e) {
+            nextExists = false;
+        } catch (IOException | RuntimeException e) {
+            if (containsAccessDenied(e)) {
+                nextExists = false;
+            } else {
+                throw new RuntimeException(
+                        "Cannot safely verify LATEST hint "
+                                + latestHint
+                                + " because "
+                                + nextSnapshotPath
+                                + " could not be checked.",
+                        e);
+            }
+        }
+
+        if (nextExists) {
+            throw new RuntimeException(
+                    "Cannot safely use LATEST hint "
+                            + latestHint
+                            + " because "
+                            + nextSnapshotPath
+                            + " already exists. Recovery requires ListBucket permission or "
+                            + "restoring a valid LATEST hint.");
+        }
     }
 
     @Nullable

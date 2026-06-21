@@ -174,6 +174,24 @@ public class HintFileUtilsTest {
     }
 
     @Test
+    public void testObjectStoreStaleLatestHintWithNextSnapshotFailsClosedWithoutList()
+            throws IOException {
+        NoListObjectStoreFileIO fileIO = new NoListObjectStoreFileIO();
+        SnapshotManager snapshotManager = snapshotManager(fileIO);
+        writeFile(new Path(snapshotManager.snapshotDirectory(), HintFileUtils.LATEST), "1");
+        writeSnapshot(snapshotManager, 1);
+        writeSnapshot(snapshotManager, 2);
+
+        assertThatThrownBy(snapshotManager::latestSnapshotId)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot safely use LATEST hint 1")
+                .hasMessageContaining("snapshot-2 already exists")
+                .hasStackTraceContaining("Recovery requires ListBucket");
+        assertThat(fileIO.listStatusCalls).isZero();
+        assertThat(fileIO.existsCalls).isZero();
+    }
+
+    @Test
     public void testObjectStoreUsesLatestHintWithoutProbingNextSnapshot() throws IOException {
         NoListObjectStoreFileIO fileIO = new NoListObjectStoreFileIO();
         SnapshotManager snapshotManager = snapshotManager(fileIO);
@@ -183,6 +201,19 @@ public class HintFileUtilsTest {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
         assertThat(fileIO.listStatusCalls).isZero();
         assertThat(fileIO.existsCalls).isZero();
+    }
+
+    @Test
+    public void testObjectStoreNonSnapshotPrefixUsesListFallback() throws IOException {
+        ListingObjectStoreFileIO fileIO = new ListingObjectStoreFileIO();
+        Path dir = new Path(tempDir.toString());
+        writeFile(new Path(dir, "changelog-1"), "not-a-snapshot-json");
+
+        assertThat(
+                        HintFileUtils.findLatest(
+                                fileIO, dir, "changelog-", id -> new Path(dir, "changelog-" + id)))
+                .isEqualTo(1);
+        assertThat(fileIO.listStatusCalls).isGreaterThan(0);
     }
 
     private SnapshotManager snapshotManager(LocalFileIO fileIO) {
