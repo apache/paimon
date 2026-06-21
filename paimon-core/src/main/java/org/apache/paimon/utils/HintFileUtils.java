@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -224,8 +225,11 @@ public class HintFileUtils {
                 throw new RuntimeException(
                         "Cannot safely use LATEST hint because it is malformed.", e);
             } catch (FileNotFoundException e) {
-                return Optional.empty();
+                return missingLatestHintForNoListObjectStore(fileIO, dir, e);
             } catch (IOException | RuntimeException e) {
+                if (containsAccessDenied(e)) {
+                    return missingLatestHintForNoListObjectStore(fileIO, dir, e);
+                }
                 exception = e;
                 if (retryNumber < READ_HINT_RETRY_NUM) {
                     sleepBeforeRetry();
@@ -236,6 +240,57 @@ public class HintFileUtils {
         throw new RuntimeException(
                 "Cannot safely determine latest snapshot because LATEST hint is unreadable.",
                 exception);
+    }
+
+    private static Optional<Long> missingLatestHintForNoListObjectStore(
+            FileIO fileIO, Path dir, Exception latestException) {
+        Optional<Long> earliestHint = readEarliestHintForNoListObjectStore(fileIO, dir);
+        if (earliestHint.isPresent()) {
+            throw new RuntimeException(
+                    "Cannot safely treat missing LATEST hint as a new table because EARLIEST "
+                            + "hint "
+                            + earliestHint.get()
+                            + " is present. Recovery requires ListBucket permission or restoring "
+                            + "a valid LATEST hint.",
+                    latestException);
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Long> readEarliestHintForNoListObjectStore(FileIO fileIO, Path dir) {
+        Path path = new Path(dir, EARLIEST);
+        try {
+            long snapshotId = Long.parseLong(fileIO.readFileUtf8(path));
+            if (snapshotId <= 0) {
+                throw new NumberFormatException("Earliest snapshot id must be positive.");
+            }
+            return Optional.of(snapshotId);
+        } catch (NumberFormatException e) {
+            throw new RuntimeException(
+                    "Cannot safely determine whether LATEST hint is absent because EARLIEST "
+                            + "hint is malformed.",
+                    e);
+        } catch (FileNotFoundException e) {
+            return Optional.empty();
+        } catch (IOException | RuntimeException e) {
+            if (containsAccessDenied(e)) {
+                return Optional.empty();
+            }
+            throw new RuntimeException(
+                    "Cannot safely determine whether LATEST hint is absent because EARLIEST "
+                            + "hint is unreadable.",
+                    e);
+        }
+    }
+
+    private static boolean containsAccessDenied(Throwable throwable) {
+        while (throwable != null) {
+            if (throwable instanceof AccessDeniedException) {
+                return true;
+            }
+            throwable = throwable.getCause();
+        }
+        return false;
     }
 
     private static void sleepBeforeRetry() {

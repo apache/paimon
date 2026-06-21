@@ -91,29 +91,39 @@ public class HintFileUtilsTest {
     }
 
     @Test
-    public void testObjectStoreUnreadableLatestHintFailsClosedWithoutList() {
+    public void testObjectStoreAccessDeniedLatestHintReturnsNullWithoutList() {
         NoListObjectStoreFileIO fileIO = new NoListObjectStoreFileIO();
         fileIO.denyLatestHintRead = true;
         SnapshotManager snapshotManager = snapshotManager(fileIO);
 
-        assertThatThrownBy(snapshotManager::latestSnapshotId)
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Cannot safely determine latest snapshot")
-                .hasStackTraceContaining("LATEST hint is unreadable");
+        assertThat(snapshotManager.latestSnapshotId()).isNull();
         assertThat(fileIO.listStatusCalls).isZero();
         assertThat(fileIO.existsCalls).isZero();
     }
 
     @Test
-    public void testObjectStoreUnreadableLatestHintDoesNotUseDefaultOverwrittenReadExistsProbe() {
+    public void testObjectStoreAccessDeniedLatestHintFailsClosedWhenEarliestHintExists()
+            throws IOException {
+        NoListObjectStoreFileIO fileIO = new NoListObjectStoreFileIO();
+        SnapshotManager snapshotManager = snapshotManager(fileIO);
+        writeFile(new Path(snapshotManager.snapshotDirectory(), HintFileUtils.EARLIEST), "2");
+        fileIO.denyLatestHintRead = true;
+
+        assertThatThrownBy(snapshotManager::latestSnapshotId)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot safely treat missing LATEST hint as a new table")
+                .hasStackTraceContaining("Recovery requires ListBucket");
+        assertThat(fileIO.listStatusCalls).isZero();
+        assertThat(fileIO.existsCalls).isZero();
+    }
+
+    @Test
+    public void testObjectStoreAccessDeniedLatestHintDoesNotUseDefaultOverwrittenReadExistsProbe() {
         DefaultOverwrittenReadNoListObjectStoreFileIO fileIO =
                 new DefaultOverwrittenReadNoListObjectStoreFileIO();
         SnapshotManager snapshotManager = snapshotManager(fileIO);
 
-        assertThatThrownBy(snapshotManager::latestSnapshotId)
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Cannot safely determine latest snapshot")
-                .hasStackTraceContaining("LATEST hint is unreadable");
+        assertThat(snapshotManager.latestSnapshotId()).isNull();
         assertThat(fileIO.listStatusCalls).isZero();
         assertThat(fileIO.existsCalls).isZero();
     }
