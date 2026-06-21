@@ -1053,7 +1053,8 @@ All available procedures are listed below.
             `table` => 'table',<br/>
             `index_column` => 'columnName',<br/>
             `index_type` => 'indexType',<br/>
-            `partitions` => 'partitions')<br/>
+            `partitions` => 'partitions',<br/>
+            `dry_run` => 'dryRun')<br/>
       </td>
       <td>
          To drop global index files from a table. Arguments:
@@ -1061,6 +1062,7 @@ All available procedures are listed below.
             <li>index_column(required): the column name for which to drop the index.</li>
             <li>index_type(required): the type of global index to drop, e.g., 'btree'.</li>
             <li>partitions(optional): partition specification for selective index deletion.</li>
+            <li>dry_run(optional): when true, report how many index files would be dropped without committing any change. Default is false.</li>
       </td>
       <td>
          -- Drop all btree indexes for column 'name'<br/>
@@ -1073,7 +1075,13 @@ All available procedures are listed below.
             `table` => 'default.T',<br/>
             `index_column` => 'name',<br/>
             `index_type` => 'btree',<br/>
-            `partitions` => 'pt=p1;pt=p2')
+            `partitions` => 'pt=p1;pt=p2')<br/><br/>
+         -- Preview what would be dropped without deleting<br/>
+         CALL sys.drop_global_index(<br/>
+            `table` => 'default.T',<br/>
+            `index_column` => 'name',<br/>
+            `index_type` => 'btree',<br/>
+            `dry_run` => true)
       </td>
    </tr>
    <tr>

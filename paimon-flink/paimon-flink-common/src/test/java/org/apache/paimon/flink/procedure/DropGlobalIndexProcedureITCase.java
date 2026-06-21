@@ -116,6 +116,69 @@ public class DropGlobalIndexProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDropGlobalIndexDryRun() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " id INT,"
+                        + " name STRING"
+                        + ") WITH ("
+                        + " 'bucket' = '-1',"
+                        + " 'global-index.row-count-per-shard' = '10000',"
+                        + " 'row-tracking.enabled' = 'true',"
+                        + " 'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        FileStoreTable table = paimonTable("T");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            for (int i = 0; i < 100000; i++) {
+                batchTableWrite.write(GenericRow.of(i, BinaryString.fromString("name_" + i)));
+            }
+            List<CommitMessage> commitMessages = batchTableWrite.prepareCommit();
+            BatchTableCommit commit = builder.newCommit();
+            commit.commit(commitMessages);
+            commit.close();
+        }
+
+        tEnv.getConfig()
+                .set(org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T', "
+                        + "`index_column` => 'name', "
+                        + "`index_type` => 'btree')");
+        table = paimonTable("T");
+        List<IndexManifestEntry> btreeEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
+                        .collect(Collectors.toList());
+        assertThat(btreeEntries).isNotEmpty();
+
+        // Dry run: should report how many would be dropped, but keep the index intact.
+        List<Row> dryRunResult =
+                sql(
+                        "CALL sys.drop_global_index(`table` => 'default.T', "
+                                + "`index_column` => 'name', "
+                                + "`index_type` => 'btree', "
+                                + "`dry_run` => true)");
+        assertThat(dryRunResult).hasSize(1);
+        assertThat(dryRunResult.get(0).getField(0))
+                .isInstanceOf(String.class)
+                .asString()
+                .contains("Dry run")
+                .contains(String.valueOf(btreeEntries.size()))
+                .contains("btree")
+                .contains("name");
+
+        // Index files must still be present after a dry run.
+        table = paimonTable("T");
+        List<IndexManifestEntry> afterDryRun =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(entry -> entry.indexFile().indexType().equals("btree"))
+                        .collect(Collectors.toList());
+        assertThat(afterDryRun).hasSameSizeAs(btreeEntries);
+    }
+
+    @Test
     public void testDropBtreeGlobalIndexWithPartition() throws Exception {
         sql(
                 "CREATE TABLE T ("

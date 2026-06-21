@@ -71,6 +71,10 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "partitions",
                         type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "dry_run",
+                        type = @DataTypeHint("BOOLEAN"),
                         isOptional = true)
             })
     public String[] call(
@@ -78,7 +82,8 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
             String tableId,
             String indexColumn,
             String indexType,
-            String partitions)
+            String partitions,
+            Boolean dryRun)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -145,6 +150,21 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
         if (waitToDelete.isEmpty()) {
             return new String[] {
                 "No " + indexTypeLower + " global index found for columns '" + columnsDesc + "'"
+            };
+        }
+
+        // Dry run: report what would be dropped without committing any change.
+        if (dryRun != null && dryRun) {
+            return new String[] {
+                "Dry run: "
+                        + waitToDelete.size()
+                        + " "
+                        + indexTypeLower
+                        + " global index files would be dropped for columns '"
+                        + columnsDesc
+                        + "' on table '"
+                        + table.name()
+                        + "'"
             };
         }
 
