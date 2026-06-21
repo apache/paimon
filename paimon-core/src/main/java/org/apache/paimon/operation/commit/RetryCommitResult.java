@@ -42,7 +42,21 @@ public abstract class RetryCommitResult implements CommitResult {
             List<SimpleFileEntry> baseDataFiles,
             Exception exception,
             @Nullable ManifestMergeResult manifestMergeResult) {
-        return new CommitFailRetryResult(snapshot, baseDataFiles, exception, manifestMergeResult);
+        return forCommitFail(snapshot, baseDataFiles, exception, manifestMergeResult, false);
+    }
+
+    public static RetryCommitResult forCommitFail(
+            Snapshot snapshot,
+            List<SimpleFileEntry> baseDataFiles,
+            Exception exception,
+            @Nullable ManifestMergeResult manifestMergeResult,
+            boolean requiresLatestSnapshotRecovery) {
+        return new CommitFailRetryResult(
+                snapshot,
+                baseDataFiles,
+                exception,
+                manifestMergeResult,
+                requiresLatestSnapshotRecovery);
     }
 
     public static RetryCommitResult forRollback(Exception exception) {
@@ -60,16 +74,19 @@ public abstract class RetryCommitResult implements CommitResult {
         public final @Nullable Snapshot latestSnapshot;
         public final @Nullable List<SimpleFileEntry> baseDataFiles;
         public final @Nullable ManifestMergeResult manifestMergeResult;
+        public final boolean requiresLatestSnapshotRecovery;
 
         private CommitFailRetryResult(
                 @Nullable Snapshot latestSnapshot,
                 @Nullable List<SimpleFileEntry> baseDataFiles,
                 Exception exception,
-                @Nullable ManifestMergeResult manifestMergeResult) {
+                @Nullable ManifestMergeResult manifestMergeResult,
+                boolean requiresLatestSnapshotRecovery) {
             super(exception);
             this.latestSnapshot = latestSnapshot;
             this.baseDataFiles = baseDataFiles;
             this.manifestMergeResult = manifestMergeResult;
+            this.requiresLatestSnapshotRecovery = requiresLatestSnapshotRecovery;
         }
     }
 

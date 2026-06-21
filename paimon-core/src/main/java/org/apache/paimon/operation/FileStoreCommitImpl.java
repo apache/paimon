@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.RenamingSnapshotCommit.SnapshotCommitConflictRequiresListRecoveryException;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -73,6 +74,7 @@ import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.HintFileUtils.LatestLookupMode;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.ListUtils;
@@ -718,9 +720,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String statsFileName) {
         int retryCount = 0;
         RetryCommitResult retryResult = null;
+        Snapshot recoveredLatestSnapshot = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            Snapshot latestSnapshot =
+                    recoveredLatestSnapshot == null
+                            ? snapshotManager.latestSnapshot()
+                            : recoveredLatestSnapshot;
+            recoveredLatestSnapshot = null;
             CommitChanges changes = changesProvider.provide(latestSnapshot);
             CommitResult result =
                     tryCommitOnce(
@@ -742,6 +749,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             retryResult = (RetryCommitResult) result;
+            if (retryResult instanceof CommitFailRetryResult
+                    && ((CommitFailRetryResult) retryResult).requiresLatestSnapshotRecovery) {
+                recoveredLatestSnapshot =
+                        recoverLatestSnapshotByListing(
+                                ((CommitFailRetryResult) retryResult).exception);
+            }
 
             if (System.currentTimeMillis() - startMillis > options.commitTimeout()
                     || retryCount >= options.commitMaxRetries()) {
@@ -756,6 +769,30 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             retryCount++;
         }
         return retryCount + 1;
+    }
+
+    private Snapshot recoverLatestSnapshotByListing(Exception cause) {
+        try {
+            Snapshot latestSnapshot =
+                    snapshotManager.latestSnapshotFromFileSystem(
+                            LatestLookupMode.RECOVERY_REQUIRING_LIST);
+            if (latestSnapshot == null) {
+                throw new RuntimeException(
+                        "Cannot recover latest snapshot after snapshot commit conflict because listing returned no snapshots.");
+            }
+            return latestSnapshot;
+        } catch (RuntimeException e) {
+            RuntimeException recoveryException =
+                    new RuntimeException(
+                            "Cannot recover latest snapshot after missing or stale LATEST. "
+                                    + "Recovery requires listing the snapshot directory; grant S3 ListBucket "
+                                    + "for this table prefix or restore a valid LATEST hint.",
+                            e);
+            if (cause != null) {
+                recoveryException.addSuppressed(cause);
+            }
+            throw recoveryException;
+        }
     }
 
     private void checkSameBucketFromSnapshot(
@@ -1130,6 +1167,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
             success = commitSnapshotImpl(newSnapshot, deltaStatistics);
+        } catch (SnapshotCommitConflictRequiresListRecoveryException e) {
+            LOG.warn("Recover latest snapshot by listing for snapshot commit conflict.", e);
+            return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e, null, true);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn("Retry commit for exception.", e);
@@ -1352,6 +1392,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
             return snapshotCommit.commit(newSnapshot, options.branch(), statistics);
+        } catch (SnapshotCommitConflictRequiresListRecoveryException e) {
+            throw e;
         } catch (Throwable e) {
             // exception when performing the atomic rename,
             // we cannot clean up because we can't determine the success

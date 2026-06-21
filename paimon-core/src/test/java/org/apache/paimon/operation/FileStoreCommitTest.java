@@ -25,6 +25,7 @@ import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.RenamingSnapshotCommit.SnapshotCommitConflictRequiresListRecoveryException;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
@@ -63,6 +64,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.HintFileUtils.LatestLookupMode;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -1188,6 +1190,40 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testSnapshotCommitConflictTriggersListRecoveryFromCommitLoop() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue first = gen.next();
+        store.commitData(Collections.singletonList(first), gen::getPartition, value -> 0);
+
+        KeyValue second = gen.next();
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(second),
+                gen::getPartition,
+                value -> 0,
+                false,
+                18L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        RecoveryTrackingSnapshotManager snapshotManager =
+                new RecoveryTrackingSnapshotManager(store.snapshotManager());
+        RecoveryOnceSnapshotCommit snapshotCommit =
+                new RecoveryOnceSnapshotCommit(
+                        new RenamingSnapshotCommit(snapshotManager, Lock.empty()));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "recover-after-conflict", snapshotCommit, snapshotManager)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        assertThat(snapshotCommit.attempts).isEqualTo(2);
+        assertThat(snapshotManager.recoveryLookups).isEqualTo(1);
+        assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(2L);
+    }
+
+    @Test
     public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists()
             throws Exception {
         TestFileStore store =
@@ -1584,6 +1620,20 @@ public class FileStoreCommitTest {
                 store.options().dataEvolutionEnabled());
     }
 
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            SnapshotManager snapshotManager) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                store.options(),
+                store.options().dataEvolutionEnabled(),
+                snapshotManager);
+    }
+
     private ManifestEntry addFile(
             BinaryRow partition, int bucket, int totalBuckets, long maxSequenceNumber) {
         return ManifestEntry.create(
@@ -1614,6 +1664,22 @@ public class FileStoreCommitTest {
             SnapshotCommit snapshotCommit,
             CoreOptions options,
             boolean dataEvolutionEnabled) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                options,
+                dataEvolutionEnabled,
+                store.snapshotManager());
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled,
+            SnapshotManager snapshotManager) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -1624,7 +1690,7 @@ public class FileStoreCommitTest {
                 store.partitionType(),
                 options,
                 store.pathFactory(),
-                store.snapshotManager(),
+                snapshotManager,
                 store.manifestFileFactory(),
                 store.manifestListFactory(),
                 store.indexManifestFileFactory(),
@@ -1645,7 +1711,7 @@ public class FileStoreCommitTest {
                                 dataEvolutionEnabled,
                                 options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
-                                store.snapshotManager(),
+                                snapshotManager,
                                 scanner),
                 null);
     }
@@ -1682,6 +1748,55 @@ public class FileStoreCommitTest {
     @SafeVarargs
     private static List<List<ManifestEntry>> conflictAttempts(List<ManifestEntry>... attempts) {
         return Arrays.asList(attempts);
+    }
+
+    private static class RecoveryTrackingSnapshotManager extends SnapshotManager {
+
+        private int recoveryLookups;
+
+        private RecoveryTrackingSnapshotManager(SnapshotManager delegate) {
+            super(delegate.fileIO(), delegate.tablePath(), delegate.branch(), null, null);
+        }
+
+        @Override
+        public Snapshot latestSnapshotFromFileSystem(LatestLookupMode mode) {
+            if (mode == LatestLookupMode.RECOVERY_REQUIRING_LIST) {
+                recoveryLookups++;
+            }
+            return super.latestSnapshotFromFileSystem(mode);
+        }
+    }
+
+    private static class RecoveryOnceSnapshotCommit implements SnapshotCommit {
+
+        private final SnapshotCommit delegate;
+        private int attempts;
+
+        private RecoveryOnceSnapshotCommit(SnapshotCommit delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean commit(
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception {
+            attempts++;
+            if (attempts == 1) {
+                throw new SnapshotCommitConflictRequiresListRecoveryException(
+                        "Cannot safely commit snapshot "
+                                + snapshot.id()
+                                + " because it already exists with different content. recovery requires listing",
+                        null);
+            }
+            return delegate.commit(snapshot, branch, statistics);
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
     }
 
     private static class ConflictingSnapshotCommit implements SnapshotCommit {
