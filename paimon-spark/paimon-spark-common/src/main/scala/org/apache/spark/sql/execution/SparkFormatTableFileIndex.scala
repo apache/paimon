@@ -156,6 +156,11 @@ class LazyPartitionPruningFileIndex(
 
   @volatile private var _fullIndex: InMemoryFileIndex = _
 
+  @volatile private var _estimatedSizeInBytes: Long = -1L
+
+  // Leaf partitions sampled to estimate the average partition size.
+  private val SAMPLE_PARTITIONS = 3
+
   private def fullIndex: InMemoryFileIndex = {
     if (_fullIndex == null) {
       synchronized {
@@ -174,7 +179,10 @@ class LazyPartitionPruningFileIndex(
 
   override def refresh(): Unit = {
     fileStatusCache.invalidateAll()
-    synchronized { _fullIndex = null }
+    synchronized {
+      _fullIndex = null
+      _estimatedSizeInBytes = -1L
+    }
   }
 
   // Required by PartitioningAwareFileIndex but never accessed — all callers are overridden.
@@ -186,7 +194,79 @@ class LazyPartitionPruningFileIndex(
   override def partitionSpec(): PartitionSpec =
     PartitionSpec(_partitionSchema, Seq.empty)
 
-  override def sizeInBytes: Long = fullIndex.sizeInBytes
+  // Used only by the optimizer for broadcast decisions; a full listing would defeat lazy pruning,
+  // so estimate cheaply (idempotent, cached) until the full index exists, then report its exact size.
+  override def sizeInBytes: Long = {
+    val idx = _fullIndex
+    if (idx != null) {
+      idx.sizeInBytes
+    } else {
+      if (_estimatedSizeInBytes < 0) {
+        _estimatedSizeInBytes = estimateSizeBySampling()
+      }
+      _estimatedSizeInBytes
+    }
+  }
+
+  /**
+   * Cheap whole-table size estimate without a full listing: partition count from per-level fan-outs
+   * along one path, times the average size of up to [[SAMPLE_PARTITIONS]] sampled leaf partitions.
+   * Falls back to `defaultSizeInBytes` (not broadcast) on empty table / empty sample / overflow, so
+   * we never underestimate and wrongly broadcast a large table. Reads via `fs.listStatus`, so it
+   * never touches `HiveCatalogMetrics`.
+   */
+  private def estimateSizeBySampling(): Long = {
+    val unknownSize = sparkSession.sessionState.conf.defaultSizeInBytes
+    val levels = _partitionSchema.fields.length
+
+    var path = tableLocations.head
+    var partitionCount = 1L
+    var leafSiblings: Array[FileStatus] = Array.empty
+    var level = 0
+    while (level < levels) {
+      val fs = path.getFileSystem(hadoopConf)
+      val subdirs =
+        try {
+          fs.listStatus(path)
+            .filter(s => s.isDirectory && isDataPath(s.getPath.getName))
+            .filter(_.getPath.getName.contains("="))
+        } catch {
+          case _: java.io.FileNotFoundException => Array.empty[FileStatus]
+        }
+      if (subdirs.isEmpty) {
+        return unknownSize
+      }
+      partitionCount *= subdirs.length
+      leafSiblings = subdirs
+      path = subdirs.head.getPath
+      level += 1
+    }
+
+    // leafSiblings are the leaf partition dirs under the last visited parent.
+    val samples = leafSiblings.take(SAMPLE_PARTITIONS)
+    if (samples.isEmpty) {
+      return unknownSize
+    }
+    val sampledSizes = samples.map {
+      leaf =>
+        val fs = leaf.getPath.getFileSystem(hadoopConf)
+        try {
+          fs.listStatus(leaf.getPath).filter(_.isFile).map(_.getLen).sum
+        } catch {
+          case _: java.io.FileNotFoundException => 0L
+        }
+    }
+    val avgPartitionSize = sampledSizes.sum / sampledSizes.length
+    if (avgPartitionSize <= 0) {
+      return unknownSize
+    }
+
+    try {
+      Math.multiplyExact(avgPartitionSize, partitionCount)
+    } catch {
+      case _: ArithmeticException => unknownSize
+    }
+  }
 
   override def inputFiles: Array[String] = fullIndex.inputFiles
 
