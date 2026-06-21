@@ -1076,14 +1076,16 @@ class VectorSearchFilterTest(unittest.TestCase):
 
         # Vector index covers all rows, but there is no scalar id index, so
         # full mode must produce a raw split for the scalar-filtered path.
-        table = _StubTable(fields=[self.id_field, self.embedding_field],
-                           entries=[
-                               _entry(None, field_id=1,
-                                      index_type="lumina-vector-ann",
-                                      file_name="vec-all.index",
-                                      row_range_start=0,
-                                      row_range_end=9)
-                           ])
+        table = _StubTable(
+            fields=[self.id_field, self.embedding_field],
+            entries=[
+                _entry(None, field_id=1,
+                       index_type="lumina-vector-ann",
+                       file_name="vec-all.index",
+                       row_range_start=0,
+                       row_range_end=9)
+            ],
+        )
         table.options = _Options()
         table.snapshot_manager = lambda: _Snapshots()
         self._scan_patch.stop()
@@ -1431,11 +1433,13 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
                        file_name="name-id.index",
                        row_range_start=0, row_range_end=9).index_file
         multi.global_index_meta.extra_field_ids = [1]
-        table = _StubTable(fields=[name_field, id_field, emb_field],
-                           entries=[
-                               IndexManifestEntry(kind=0, partition=None,
-                                                  bucket=0, index_file=multi)
-                           ])
+        table = _StubTable(
+            fields=[name_field, id_field, emb_field],
+            entries=[
+                IndexManifestEntry(kind=0, partition=None,
+                                   bucket=0, index_file=multi)
+            ],
+        )
         _patch_snapshot(self, table._entries)
 
         class _StubBTreeReader:
