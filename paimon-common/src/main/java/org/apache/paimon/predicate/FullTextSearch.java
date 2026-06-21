@@ -19,96 +19,51 @@
 package org.apache.paimon.predicate;
 
 import java.io.Serializable;
+import java.util.List;
 
-/** FullTextSearch to perform full-text search on a text column. */
+/** FullTextSearch to perform full-text search with a structured query. */
 public class FullTextSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final String queryText;
-    private final String fieldName;
-    private final int limit;
-    private final String queryOperator;
     private final FullTextQuery query;
+    private final int limit;
 
-    public FullTextSearch(String queryText, int limit, String fieldName) {
-        this(queryText, limit, fieldName, "or");
-    }
-
-    public FullTextSearch(String queryText, int limit, String fieldName, String queryOperator) {
-        if (queryText == null || queryText.isEmpty()) {
-            throw new IllegalArgumentException("Query text cannot be null or empty");
-        }
-        if (limit <= 0) {
-            throw new IllegalArgumentException("Limit must be positive, got: " + limit);
-        }
-        if (fieldName == null || fieldName.isEmpty()) {
-            throw new IllegalArgumentException("Field name cannot be null or empty");
-        }
-        this.queryText = queryText;
-        this.limit = limit;
-        this.fieldName = fieldName;
-        String normalizedOperator =
-                queryOperator == null ? "or" : queryOperator.trim().toLowerCase();
-        if (!"or".equals(normalizedOperator) && !"and".equals(normalizedOperator)) {
-            throw new IllegalArgumentException(
-                    "Query operator must be 'or' or 'and', got: " + queryOperator);
-        }
-        this.queryOperator = normalizedOperator;
-        this.query =
-                FullTextQuery.isJsonQuery(queryText)
-                        ? FullTextQuery.fromJson(queryText)
-                        : FullTextQuery.match(queryText, normalizedOperator);
-    }
-
-    public FullTextSearch(FullTextQuery query, int limit, String fieldName) {
+    public FullTextSearch(FullTextQuery query, int limit) {
         if (query == null) {
             throw new IllegalArgumentException("Query cannot be null");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
-        if (fieldName == null || fieldName.isEmpty()) {
-            throw new IllegalArgumentException("Field name cannot be null or empty");
-        }
         this.query = query;
-        this.queryText = query.queryText();
         this.limit = limit;
-        this.fieldName = fieldName;
-        this.queryOperator =
-                query instanceof FullTextQuery.Match
-                        ? ((FullTextQuery.Match) query).operator().jsonValue()
-                        : "or";
-    }
-
-    public String queryText() {
-        return queryText;
     }
 
     public int limit() {
         return limit;
     }
 
-    public String fieldName() {
-        return fieldName;
+    public List<String> columns() {
+        return query.columns();
     }
 
-    public String queryOperator() {
-        return queryOperator;
+    public String fieldName() {
+        return query.singleColumn();
     }
 
     public FullTextQuery query() {
-        return query == null ? FullTextQuery.match(queryText, queryOperator) : query;
+        return query;
     }
 
     public String queryJson() {
-        return query().toJson();
+        return query.toJson();
     }
 
     @Override
     public String toString() {
         return String.format(
-                "FullTextSearch{field=%s, query='%s', limit=%d, operator=%s, queryJson=%s}",
-                fieldName, queryText, limit, queryOperator, queryJson());
+                "FullTextSearch{columns=%s, limit=%d, queryJson=%s}",
+                columns(), limit, queryJson());
     }
 }

@@ -24,6 +24,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -35,10 +38,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private final FileStoreTable table;
 
     private int limit;
-    private DataField textColumn;
-    private String queryText;
     private FullTextQuery query;
-    private String queryOperator = "or";
     private PartitionPredicate partitionFilter;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
@@ -58,47 +58,30 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     }
 
     @Override
-    public FullTextSearchBuilder withTextColumn(String name) {
-        this.textColumn = table.rowType().getField(name);
-        return this;
-    }
-
-    @Override
-    public FullTextSearchBuilder withQueryText(String queryText) {
-        this.queryText = queryText;
-        this.query = null;
-        return this;
-    }
-
-    @Override
     public FullTextSearchBuilder withQuery(FullTextQuery query) {
         this.query = query;
-        this.queryText = null;
-        return this;
-    }
-
-    @Override
-    public FullTextSearchBuilder withQueryOperator(String queryOperator) {
-        this.queryOperator = queryOperator;
         return this;
     }
 
     @Override
     public FullTextScan newFullTextScan() {
-        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        return new FullTextScanImpl(table, partitionFilter, textColumn);
+        return new FullTextScanImpl(table, partitionFilter, textColumns());
     }
 
     @Override
     public FullTextRead newFullTextRead() {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
-        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        checkArgument(
-                query != null || queryText != null,
-                "Query must be set via withQuery() or withQueryText()");
-        if (query != null) {
-            return new FullTextReadImpl(table, limit, textColumn, query);
+        return new FullTextReadImpl(table, limit, textColumns(), query);
+    }
+
+    private List<DataField> textColumns() {
+        checkNotNull(query, "Query must be set via withQuery()");
+        List<DataField> textColumns = new ArrayList<>();
+        for (String columnName : query.columns()) {
+            DataField textColumn = table.rowType().getField(columnName);
+            checkNotNull(textColumn, "Text column '%s' does not exist.", columnName);
+            textColumns.add(textColumn);
         }
-        return new FullTextReadImpl(table, limit, textColumn, queryText, queryOperator);
+        return textColumns;
     }
 }

@@ -20,10 +20,12 @@ mod jni_directory;
 use jni::objects::{JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jfloat, jint, jlong, jobject};
 use jni::JNIEnv;
-use serde::Deserialize;
+use serde::de::{Error as DeError, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use std::fmt;
 use std::ptr;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BoostQuery, BooleanQuery, Occur, Query, QueryParser};
+use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, QueryParser};
 use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions,
 };
@@ -32,7 +34,7 @@ use tantivy::tokenizer::{
     SimpleTokenizer, Stemmer, StopWordFilter, TextAnalyzer, TextAnalyzerBuilder,
     WhitespaceTokenizer,
 };
-use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy};
+use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Score};
 use tantivy_jieba::JiebaTokenizer;
 
 use crate::jni_directory::JniDirectory;
@@ -65,6 +67,7 @@ struct TantivySearcherHandle {
 #[serde(rename_all = "snake_case")]
 enum FullTextQueryJson {
     Match(MatchQueryJson),
+    #[serde(alias = "match_phrase")]
     Phrase(PhraseQueryJson),
     Boost(BoostQueryJson),
     Boolean(BooleanQueryJson),
@@ -74,22 +77,29 @@ enum FullTextQueryJson {
 
 #[derive(Deserialize)]
 struct MatchQueryJson {
+    #[allow(dead_code)]
+    column: Option<String>,
     #[serde(alias = "query")]
     terms: String,
     #[serde(default = "default_boost")]
     boost: f32,
-    #[serde(default)]
+    #[serde(default = "default_fuzziness")]
+    #[serde(deserialize_with = "deserialize_fuzziness")]
     fuzziness: Option<u8>,
     #[serde(default = "default_max_expansions")]
+    #[serde(alias = "maxExpansions")]
     max_expansions: usize,
     #[serde(default)]
     operator: QueryOperatorJson,
     #[serde(default)]
+    #[serde(alias = "prefixLength")]
     prefix_length: u32,
 }
 
 #[derive(Deserialize)]
 struct PhraseQueryJson {
+    #[allow(dead_code)]
+    column: Option<String>,
     #[serde(alias = "query")]
     terms: String,
     #[serde(default)]
@@ -98,9 +108,11 @@ struct PhraseQueryJson {
 
 #[derive(Deserialize)]
 struct BoostQueryJson {
-    query: Box<FullTextQueryJson>,
-    #[serde(default = "default_boost")]
-    factor: f32,
+    positive: Box<FullTextQueryJson>,
+    negative: Box<FullTextQueryJson>,
+    #[serde(default = "default_negative_boost")]
+    #[serde(alias = "negativeBoost")]
+    negative_boost: f32,
 }
 
 #[derive(Deserialize)]
@@ -111,13 +123,82 @@ struct BooleanQueryJson {
     must: Vec<FullTextQueryJson>,
     #[serde(default)]
     must_not: Vec<FullTextQueryJson>,
+    #[serde(default)]
+    queries: Vec<BooleanClauseJson>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BooleanClauseJson {
+    Tuple(BooleanClauseTupleJson),
+    Object {
+        occur: BooleanOccurJson,
+        query: FullTextQueryJson,
+    },
+}
+
+struct BooleanClauseTupleJson(BooleanOccurJson, FullTextQueryJson);
+
+impl<'de> Deserialize<'de> for BooleanClauseTupleJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TupleVisitor;
+
+        impl<'de> Visitor<'de> for TupleVisitor {
+            type Value = BooleanClauseTupleJson;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a two-element boolean clause tuple")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let occur = seq
+                    .next_element()?
+                    .ok_or_else(|| DeError::invalid_length(0, &self))?;
+                let query = seq
+                    .next_element()?
+                    .ok_or_else(|| DeError::invalid_length(1, &self))?;
+                Ok(BooleanClauseTupleJson(occur, query))
+            }
+        }
+
+        deserializer.deserialize_tuple(2, TupleVisitor)
+    }
 }
 
 #[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum BooleanOccurJson {
+    Should,
+    Must,
+    MustNot,
+}
+
 enum QueryOperatorJson {
     Or,
     And,
+}
+
+impl<'de> Deserialize<'de> for QueryOperatorJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "Or" | "or" | "OR" => Ok(Self::Or),
+            "And" | "and" | "AND" => Ok(Self::And),
+            _ => Err(DeError::custom(format!(
+                "invalid full-text query operator: {}",
+                value
+            ))),
+        }
+    }
 }
 
 impl Default for QueryOperatorJson {
@@ -130,8 +211,38 @@ fn default_boost() -> f32 {
     1.0
 }
 
+fn default_fuzziness() -> Option<u8> {
+    Some(0)
+}
+
+fn default_negative_boost() -> f32 {
+    0.5
+}
+
 fn default_max_expansions() -> usize {
     50
+}
+
+fn deserialize_fuzziness<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let Some(text) = value.as_str() {
+        if text.eq_ignore_ascii_case("auto") {
+            return Ok(None);
+        }
+    }
+    if let Some(number) = value.as_u64() {
+        return Ok(Some(number as u8));
+    }
+    Err(serde::de::Error::custom(format!(
+        "invalid match query fuzziness: {}",
+        value
+    )))
 }
 
 #[derive(Clone, Deserialize)]
@@ -401,7 +512,10 @@ fn build_query_from_json(
                 return Err("match query terms cannot be empty".to_string());
             }
             if query.boost <= 0.0 {
-                return Err(format!("match query boost must be positive, got {}", query.boost));
+                return Err(format!(
+                    "match query boost must be positive, got {}",
+                    query.boost
+                ));
             }
             if query.max_expansions == 0 {
                 return Err("match query max_expansions must be positive".to_string());
@@ -421,16 +535,10 @@ fn build_query_from_json(
             }
             if query.prefix_length != 0 {
                 return Err(
-                    "match query prefix_length is not supported by Tantivy 0.22".to_string(),
+                    "match query prefix_length is not supported by Tantivy 0.22".to_string()
                 );
             }
-            let parser = query_parser_for(
-                searcher,
-                field,
-                query.operator,
-                query.fuzziness,
-                0,
-            );
+            let parser = query_parser_for(searcher, field, query.operator, query.fuzziness, 0);
             let parsed = parser
                 .parse_query(&query.terms)
                 .map_err(|e| format!("Failed to parse match query '{}': {}", query.terms, e))?;
@@ -455,23 +563,37 @@ fn build_query_from_json(
                 .parse_query(&query_string)
                 .map_err(|e| format!("Failed to parse phrase query '{}': {}", query.terms, e))
         }
-        FullTextQueryJson::Boost(query) => {
-            if query.factor <= 0.0 {
-                return Err(format!("boost factor must be positive, got {}", query.factor));
-            }
-            let inner = build_query_from_json(searcher, field, *query.query)?;
-            Ok(Box::new(BoostQuery::new(inner, query.factor)))
-        }
+        FullTextQueryJson::Boost(query) => build_boost_query_from_json(searcher, field, query),
         FullTextQueryJson::Boolean(query) => {
             let mut subqueries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
             for child in query.should {
-                subqueries.push((Occur::Should, build_query_from_json(searcher, field, child)?));
+                subqueries.push((
+                    Occur::Should,
+                    build_query_from_json(searcher, field, child)?,
+                ));
             }
             for child in query.must {
                 subqueries.push((Occur::Must, build_query_from_json(searcher, field, child)?));
             }
             for child in query.must_not {
-                subqueries.push((Occur::MustNot, build_query_from_json(searcher, field, child)?));
+                subqueries.push((
+                    Occur::MustNot,
+                    build_query_from_json(searcher, field, child)?,
+                ));
+            }
+            for clause in query.queries {
+                let (occur, child) = match clause {
+                    BooleanClauseJson::Tuple(BooleanClauseTupleJson(occur, child)) => {
+                        (occur, child)
+                    }
+                    BooleanClauseJson::Object { occur, query } => (occur, query),
+                };
+                let occur = match occur {
+                    BooleanOccurJson::Should => Occur::Should,
+                    BooleanOccurJson::Must => Occur::Must,
+                    BooleanOccurJson::MustNot => Occur::MustNot,
+                };
+                subqueries.push((occur, build_query_from_json(searcher, field, child)?));
             }
             if subqueries.is_empty() {
                 return Err("boolean query must contain at least one clause".to_string());
@@ -482,6 +604,132 @@ fn build_query_from_json(
             "multi_match is not supported by single-column Tantivy full-text indexes".to_string(),
         ),
     }
+}
+
+struct DemoteQuery {
+    positive: Box<dyn Query>,
+    negative: Box<dyn Query>,
+    negative_boost: f32,
+}
+
+impl Clone for DemoteQuery {
+    fn clone(&self) -> Self {
+        Self {
+            positive: self.positive.box_clone(),
+            negative: self.negative.box_clone(),
+            negative_boost: self.negative_boost,
+        }
+    }
+}
+
+impl std::fmt::Debug for DemoteQuery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DemoteQuery")
+            .field("negative_boost", &self.negative_boost)
+            .finish()
+    }
+}
+
+impl Query for DemoteQuery {
+    fn weight(
+        &self,
+        enable_scoring: tantivy::query::EnableScoring<'_>,
+    ) -> tantivy::Result<Box<dyn tantivy::query::Weight>> {
+        let positive = self.positive.weight(enable_scoring.clone())?;
+        let negative = self.negative.weight(enable_scoring)?;
+        Ok(Box::new(DemoteWeight {
+            positive,
+            negative,
+            negative_boost: self.negative_boost,
+        }))
+    }
+}
+
+struct DemoteWeight {
+    positive: Box<dyn tantivy::query::Weight>,
+    negative: Box<dyn tantivy::query::Weight>,
+    negative_boost: f32,
+}
+
+impl tantivy::query::Weight for DemoteWeight {
+    fn scorer(
+        &self,
+        reader: &tantivy::SegmentReader,
+        boost: Score,
+    ) -> tantivy::Result<Box<dyn tantivy::query::Scorer>> {
+        let positive = self.positive.scorer(reader, boost)?;
+        let negative = self.negative.scorer(reader, boost)?;
+        Ok(Box::new(DemoteScorer {
+            positive,
+            negative,
+            negative_boost: self.negative_boost,
+        }))
+    }
+
+    fn explain(
+        &self,
+        reader: &tantivy::SegmentReader,
+        doc: tantivy::DocId,
+    ) -> tantivy::Result<tantivy::query::Explanation> {
+        self.positive.explain(reader, doc)
+    }
+}
+
+struct DemoteScorer {
+    positive: Box<dyn tantivy::query::Scorer>,
+    negative: Box<dyn tantivy::query::Scorer>,
+    negative_boost: f32,
+}
+
+impl tantivy::DocSet for DemoteScorer {
+    fn advance(&mut self) -> tantivy::DocId {
+        self.positive.advance()
+    }
+
+    fn seek(&mut self, target: tantivy::DocId) -> tantivy::DocId {
+        self.positive.seek(target)
+    }
+
+    fn doc(&self) -> tantivy::DocId {
+        self.positive.doc()
+    }
+
+    fn size_hint(&self) -> u32 {
+        self.positive.size_hint()
+    }
+}
+
+impl tantivy::query::Scorer for DemoteScorer {
+    fn score(&mut self) -> Score {
+        let mut score = self.positive.score();
+        let doc = self.positive.doc();
+        if self.negative.doc() < doc {
+            self.negative.seek(doc);
+        }
+        if self.negative.doc() == doc {
+            score *= self.negative_boost;
+        }
+        score
+    }
+}
+
+fn build_boost_query_from_json(
+    searcher: &tantivy::Searcher,
+    field: Field,
+    query: BoostQueryJson,
+) -> Result<Box<dyn Query>, String> {
+    if query.negative_boost <= 0.0 {
+        return Err(format!(
+            "boost query negative_boost must be positive, got {}",
+            query.negative_boost
+        ));
+    }
+    Ok(Box::new(DemoteQuery {
+        positive: build_query_from_json(searcher, field, *query.positive)?,
+        negative: build_query_from_json(searcher, field, *query.negative)?,
+        negative_boost: query.negative_boost,
+    }))
 }
 
 fn search_with_query(
@@ -505,7 +753,7 @@ fn search_with_query(
 fn build_search_result(
     env: &mut JNIEnv,
     searcher: &tantivy::Searcher,
-    top_docs: &[(f32, tantivy::DocAddress)],
+    top_docs: &[(Score, DocAddress)],
 ) -> jobject {
     let count = top_docs.len();
 
@@ -548,10 +796,7 @@ fn build_search_result(
     let class = match env.find_class("org/apache/paimon/tantivy/SearchResult") {
         Ok(c) => c,
         Err(e) => {
-            return throw_and_return_null(
-                env,
-                &format!("Failed to find SearchResult class: {}", e),
-            )
+            return throw_and_return_null(env, &format!("Failed to find SearchResult class: {}", e))
         }
     };
     let obj = match env.new_object(
@@ -564,10 +809,7 @@ fn build_search_result(
     ) {
         Ok(o) => o,
         Err(e) => {
-            return throw_and_return_null(
-                env,
-                &format!("Failed to create SearchResult: {}", e),
-            )
+            return throw_and_return_null(env, &format!("Failed to create SearchResult: {}", e))
         }
     };
 

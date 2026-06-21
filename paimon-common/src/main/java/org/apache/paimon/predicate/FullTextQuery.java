@@ -27,15 +27,17 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Structured query DSL for single-column full-text search. */
+/** Structured full-text query DSL aligned with LanceDB FTS query JSON. */
 public abstract class FullTextQuery implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -45,7 +47,7 @@ public abstract class FullTextQuery implements Serializable {
         OR,
         AND;
 
-        static Operator fromString(String value) {
+        public static Operator fromString(String value) {
             if (value == null) {
                 return OR;
             }
@@ -61,7 +63,7 @@ public abstract class FullTextQuery implements Serializable {
         }
 
         public String jsonValue() {
-            return name().toLowerCase(Locale.ROOT);
+            return name().substring(0, 1) + name().substring(1).toLowerCase(Locale.ROOT);
         }
     }
 
@@ -85,34 +87,76 @@ public abstract class FullTextQuery implements Serializable {
             }
             throw new IllegalArgumentException("Unknown boolean query occur: " + value);
         }
-
-        public String jsonValue() {
-            return name();
-        }
     }
 
-    public static Match match(String terms) {
-        return new Match(terms, 1.0f, 0, 50, Operator.OR, 0);
+    public static Match match(String query, String column) {
+        return new Match(query, column, 1.0f, 0, 50, Operator.OR, 0);
     }
 
-    public static Match match(String terms, String operator) {
-        return new Match(terms, 1.0f, 0, 50, Operator.fromString(operator), 0);
+    public static Match match(String query, String column, String operator) {
+        return match(query, column, Operator.fromString(operator));
     }
 
-    public static Phrase phrase(String terms) {
-        return new Phrase(terms, 0);
+    public static Match match(String query, String column, Operator operator) {
+        return new Match(query, column, 1.0f, 0, 50, operator, 0);
     }
 
-    public static Phrase phrase(String terms, int slop) {
-        return new Phrase(terms, slop);
+    public static Phrase phrase(String query, String column) {
+        return new Phrase(query, column, 0);
     }
 
-    public static Boost boost(FullTextQuery query, float factor) {
-        return new Boost(query, factor);
+    public static Phrase phrase(String query, String column, int slop) {
+        return new Phrase(query, column, slop);
     }
 
-    public static boolean isJsonQuery(String queryText) {
-        return queryText != null && queryText.trim().startsWith("{");
+    public static Boost boost(FullTextQuery positive, FullTextQuery negative) {
+        return new Boost(positive, negative, 0.5f);
+    }
+
+    public static Boost boost(FullTextQuery positive, FullTextQuery negative, float negativeBoost) {
+        return new Boost(positive, negative, negativeBoost);
+    }
+
+    public static MultiMatch multiMatch(String query, List<String> columns) {
+        return new MultiMatch(query, columns, null, Operator.OR);
+    }
+
+    public static MultiMatch multiMatch(String query, List<String> columns, List<Float> boosts) {
+        return new MultiMatch(query, columns, boosts, Operator.OR);
+    }
+
+    public static MultiMatch multiMatch(String query, List<String> columns, String operator) {
+        return multiMatch(query, columns, null, operator);
+    }
+
+    public static MultiMatch multiMatch(
+            String query, List<String> columns, List<Float> boosts, String operator) {
+        return new MultiMatch(query, columns, boosts, Operator.fromString(operator));
+    }
+
+    public static MultiMatch multiMatch(
+            String query, List<String> columns, List<Float> boosts, Operator operator) {
+        return new MultiMatch(query, columns, boosts, operator);
+    }
+
+    public static BooleanQuery bool(List<Clause> queries) {
+        return new BooleanQuery(queries);
+    }
+
+    public static BooleanQuery bool() {
+        return new BooleanQuery(Collections.emptyList(), false);
+    }
+
+    public static Clause occurShould(FullTextQuery query) {
+        return new Clause(Occur.SHOULD, query);
+    }
+
+    public static Clause occurMust(FullTextQuery query) {
+        return new Clause(Occur.MUST, query);
+    }
+
+    public static Clause occurMustNot(FullTextQuery query) {
+        return new Clause(Occur.MUST_NOT, query);
     }
 
     public static FullTextQuery fromJson(String json) {
@@ -130,39 +174,42 @@ public abstract class FullTextQuery implements Serializable {
         if (node.has("match")) {
             JsonNode match = node.get("match");
             return new Match(
-                    textValue(match, "terms", textValue(match, "query", null)),
+                    textValueAny(match, null, "terms", "query"),
+                    textValue(match, "column", null),
                     floatValue(match, "boost", 1.0f),
-                    nullableIntValue(match, "fuzziness", 0),
-                    intValue(match, "max_expansions", 50),
+                    fuzzinessValue(match),
+                    intValueAny(match, 50, "max_expansions", "maxExpansions"),
                     Operator.fromString(textValue(match, "operator", "or")),
-                    intValue(match, "prefix_length", 0));
+                    intValueAny(match, 0, "prefix_length", "prefixLength"));
         }
         if (node.has("phrase") || node.has("match_phrase")) {
             JsonNode phrase = node.has("phrase") ? node.get("phrase") : node.get("match_phrase");
             return new Phrase(
-                    textValue(phrase, "terms", textValue(phrase, "query", null)),
+                    textValueAny(phrase, null, "terms", "query"),
+                    textValue(phrase, "column", null),
                     intValue(phrase, "slop", 0));
         }
         if (node.has("boost")) {
             JsonNode boost = node.get("boost");
-            if (boost.has("query")) {
-                return new Boost(
-                        fromJsonNode(boost.get("query")),
-                        floatValue(boost, "factor", floatValue(boost, "boost", 1.0f)));
-            }
-            if (boost.has("positive") && !boost.has("negative")) {
-                return new Boost(
-                        fromJsonNode(boost.get("positive")),
-                        floatValue(boost, "factor", floatValue(boost, "boost", 1.0f)));
-            }
-            throw new IllegalArgumentException(
-                    "Boost query must use {'boost': {'query': ..., 'factor': ...}}.");
+            return new Boost(
+                    fromJsonNode(boost.get("positive")),
+                    fromJsonNode(boost.get("negative")),
+                    floatValueAny(boost, 0.5f, "negative_boost", "negativeBoost"));
+        }
+        if (node.has("multi_match")) {
+            JsonNode multiMatch = node.get("multi_match");
+            return new MultiMatch(
+                    textValue(multiMatch, "query", null),
+                    stringList(multiMatch.get("columns")),
+                    nullableFloatList(fieldValue(multiMatch, "boost", "boosts")),
+                    Operator.fromString(textValue(multiMatch, "operator", "or")));
         }
         if (node.has("boolean")) {
             JsonNode bool = node.get("boolean");
-            List<FullTextQuery> should = queryList(bool.get("should"));
-            List<FullTextQuery> must = queryList(bool.get("must"));
-            List<FullTextQuery> mustNot = queryList(bool.get("must_not"));
+            List<Clause> clauses = new ArrayList<>();
+            addClauses(clauses, Occur.SHOULD, bool.get("should"));
+            addClauses(clauses, Occur.MUST, bool.get("must"));
+            addClauses(clauses, Occur.MUST_NOT, bool.get("must_not"));
             if (bool.has("queries")) {
                 for (JsonNode clause : bool.get("queries")) {
                     Occur occur;
@@ -174,48 +221,21 @@ public abstract class FullTextQuery implements Serializable {
                         occur = Occur.fromString(textValue(clause, "occur", null));
                         queryNode = clause.get("query");
                     }
-                    addBooleanQuery(should, must, mustNot, occur, fromJsonNode(queryNode));
+                    clauses.add(new Clause(occur, fromJsonNode(queryNode)));
                 }
             }
-            return new BooleanQuery(should, must, mustNot);
-        }
-        if (node.has("multi_match")) {
-            throw new IllegalArgumentException(
-                    "multi_match is not supported by single-column full-text query DSL.");
+            return new BooleanQuery(clauses);
         }
         throw new IllegalArgumentException("Unknown full-text query JSON: " + node);
     }
 
-    private static List<FullTextQuery> queryList(@Nullable JsonNode node) {
-        List<FullTextQuery> queries = new ArrayList<>();
+    private static void addClauses(List<Clause> clauses, Occur occur, @Nullable JsonNode node) {
         if (node == null || node.isNull()) {
-            return queries;
+            return;
         }
         checkArgument(node.isArray(), "Boolean query clauses must be arrays.");
         for (JsonNode child : node) {
-            queries.add(fromJsonNode(child));
-        }
-        return queries;
-    }
-
-    private static void addBooleanQuery(
-            List<FullTextQuery> should,
-            List<FullTextQuery> must,
-            List<FullTextQuery> mustNot,
-            Occur occur,
-            FullTextQuery query) {
-        switch (occur) {
-            case SHOULD:
-                should.add(query);
-                break;
-            case MUST:
-                must.add(query);
-                break;
-            case MUST_NOT:
-                mustNot.add(query);
-                break;
-            default:
-                throw new IllegalArgumentException("Unknown occur: " + occur);
+            clauses.add(new Clause(occur, fromJsonNode(child)));
         }
     }
 
@@ -225,6 +245,29 @@ public abstract class FullTextQuery implements Serializable {
             return defaultValue;
         }
         return value.asText();
+    }
+
+    private static String textValueAny(
+            JsonNode node, @Nullable String defaultValue, String... fields) {
+        JsonNode value = fieldValue(node, fields);
+        if (value == null || value.isNull()) {
+            return defaultValue;
+        }
+        return value.asText();
+    }
+
+    @Nullable
+    private static JsonNode fieldValue(JsonNode node, String... fields) {
+        if (node == null) {
+            return null;
+        }
+        for (String field : fields) {
+            JsonNode value = node.get(field);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private static Integer nullableIntValue(
@@ -241,6 +284,29 @@ public abstract class FullTextQuery implements Serializable {
         return value == null ? defaultValue : value;
     }
 
+    private static int intValueAny(JsonNode node, int defaultValue, String... fields) {
+        JsonNode value = fieldValue(node, fields);
+        if (value == null || value.isNull()) {
+            return defaultValue;
+        }
+        return value.asInt();
+    }
+
+    @Nullable
+    private static Integer fuzzinessValue(JsonNode node) {
+        JsonNode value = fieldValue(node, "fuzziness");
+        if (value == null) {
+            return 0;
+        }
+        if (value.isNull()) {
+            return null;
+        }
+        if (value.isTextual() && "auto".equalsIgnoreCase(value.asText())) {
+            return null;
+        }
+        return value.asInt();
+    }
+
     private static float floatValue(JsonNode node, String field, float defaultValue) {
         JsonNode value = node == null ? null : node.get(field);
         if (value == null || value.isNull()) {
@@ -249,20 +315,77 @@ public abstract class FullTextQuery implements Serializable {
         return (float) value.asDouble();
     }
 
+    private static float floatValueAny(JsonNode node, float defaultValue, String... fields) {
+        JsonNode value = fieldValue(node, fields);
+        if (value == null || value.isNull()) {
+            return defaultValue;
+        }
+        return (float) value.asDouble();
+    }
+
+    private static List<String> stringList(JsonNode node) {
+        checkArgument(node != null && node.isArray(), "columns must be an array.");
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            values.add(value.asText());
+        }
+        return values;
+    }
+
+    @Nullable
+    private static List<Float> nullableFloatList(@Nullable JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        checkArgument(node.isArray(), "boost must be an array.");
+        List<Float> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            values.add((float) value.asDouble());
+        }
+        return values;
+    }
+
     public final String toJson() {
         return JsonSerdeUtil.toFlatJson(toRootMap());
     }
 
     public abstract String queryText();
 
+    /** Returns all columns referenced by this query. */
+    public abstract List<String> columns();
+
+    public final String singleColumn() {
+        List<String> columns = columns();
+        checkArgument(
+                columns.size() == 1,
+                "Full-text query must reference exactly one column, but got: %s",
+                columns);
+        return columns.get(0);
+    }
+
     abstract Map<String, Object> toRootMap();
+
+    private static void checkColumn(String column) {
+        checkArgument(column != null && !column.isEmpty(), "Column cannot be null or empty.");
+    }
 
     private static void checkTerms(String terms) {
         checkArgument(terms != null && !terms.isEmpty(), "Query terms cannot be null or empty.");
     }
 
-    private static void checkBoost(float boost) {
-        checkArgument(boost > 0, "Boost factor must be positive, got: %s", boost);
+    private static void checkBoost(float boost, String name) {
+        checkArgument(boost > 0, "%s must be positive, got: %s", name, boost);
+    }
+
+    private static List<String> distinctColumns(Iterable<String> columns) {
+        List<String> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String column : columns) {
+            if (seen.add(column)) {
+                result.add(column);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
 
     /** Match query. */
@@ -271,6 +394,7 @@ public abstract class FullTextQuery implements Serializable {
         private static final long serialVersionUID = 1L;
 
         private final String terms;
+        private final String column;
         private final float boost;
         @Nullable private final Integer fuzziness;
         private final int maxExpansions;
@@ -279,27 +403,24 @@ public abstract class FullTextQuery implements Serializable {
 
         public Match(
                 String terms,
+                String column,
                 float boost,
                 @Nullable Integer fuzziness,
                 int maxExpansions,
                 Operator operator,
                 int prefixLength) {
+            checkColumn(column);
             checkTerms(terms);
-            checkBoost(boost);
+            checkBoost(boost, "Boost factor");
             checkArgument(
                     maxExpansions > 0, "maxExpansions must be positive, got: %s", maxExpansions);
             checkArgument(
-                    maxExpansions == 50,
-                    "maxExpansions is not supported by Tantivy, keep the default 50.");
-            checkArgument(
                     prefixLength >= 0, "prefixLength must be non-negative, got: %s", prefixLength);
-            checkArgument(
-                    prefixLength == 0,
-                    "prefixLength is not supported by Tantivy, keep the default 0.");
             if (fuzziness != null) {
                 checkArgument(fuzziness >= 0, "fuzziness must be non-negative, got: %s", fuzziness);
                 checkArgument(fuzziness <= 2, "fuzziness must be <= 2, got: %s", fuzziness);
             }
+            this.column = column;
             this.terms = terms;
             this.boost = boost;
             this.fuzziness = fuzziness;
@@ -309,15 +430,40 @@ public abstract class FullTextQuery implements Serializable {
         }
 
         public Match withBoost(float boost) {
-            return new Match(terms, boost, fuzziness, maxExpansions, operator, prefixLength);
+            return new Match(
+                    terms, column, boost, fuzziness, maxExpansions, operator, prefixLength);
         }
 
         public Match withFuzziness(@Nullable Integer fuzziness) {
-            return new Match(terms, boost, fuzziness, maxExpansions, operator, prefixLength);
+            return new Match(
+                    terms, column, boost, fuzziness, maxExpansions, operator, prefixLength);
+        }
+
+        public Match withMaxExpansions(int maxExpansions) {
+            return new Match(
+                    terms, column, boost, fuzziness, maxExpansions, operator, prefixLength);
         }
 
         public Match withOperator(Operator operator) {
-            return new Match(terms, boost, fuzziness, maxExpansions, operator, prefixLength);
+            return new Match(
+                    terms, column, boost, fuzziness, maxExpansions, operator, prefixLength);
+        }
+
+        public Match withOperator(String operator) {
+            return withOperator(Operator.fromString(operator));
+        }
+
+        public Match withPrefixLength(int prefixLength) {
+            return new Match(
+                    terms, column, boost, fuzziness, maxExpansions, operator, prefixLength);
+        }
+
+        public String column() {
+            return column;
+        }
+
+        public String query() {
+            return terms;
         }
 
         public String terms() {
@@ -351,8 +497,14 @@ public abstract class FullTextQuery implements Serializable {
         }
 
         @Override
+        public List<String> columns() {
+            return Collections.singletonList(column);
+        }
+
+        @Override
         Map<String, Object> toRootMap() {
             Map<String, Object> body = new LinkedHashMap<>();
+            body.put("column", column);
             body.put("terms", terms);
             body.put("boost", boost);
             body.put("fuzziness", fuzziness);
@@ -371,13 +523,24 @@ public abstract class FullTextQuery implements Serializable {
         private static final long serialVersionUID = 1L;
 
         private final String terms;
+        private final String column;
         private final int slop;
 
-        public Phrase(String terms, int slop) {
+        public Phrase(String terms, String column, int slop) {
+            checkColumn(column);
             checkTerms(terms);
             checkArgument(slop >= 0, "slop must be non-negative, got: %s", slop);
+            this.column = column;
             this.terms = terms;
             this.slop = slop;
+        }
+
+        public String column() {
+            return column;
+        }
+
+        public String query() {
+            return terms;
         }
 
         public String terms() {
@@ -394,8 +557,14 @@ public abstract class FullTextQuery implements Serializable {
         }
 
         @Override
+        public List<String> columns() {
+            return Collections.singletonList(column);
+        }
+
+        @Override
         Map<String, Object> toRootMap() {
             Map<String, Object> body = new LinkedHashMap<>();
+            body.put("column", column);
             body.put("terms", terms);
             body.put("slop", slop);
             Map<String, Object> root = new LinkedHashMap<>();
@@ -404,41 +573,158 @@ public abstract class FullTextQuery implements Serializable {
         }
     }
 
-    /** Score multiplier query. */
+    /** Boost query. */
     public static final class Boost extends FullTextQuery {
 
         private static final long serialVersionUID = 1L;
 
-        private final FullTextQuery query;
-        private final float factor;
+        private final FullTextQuery positive;
+        private final FullTextQuery negative;
+        private final float negativeBoost;
 
-        public Boost(FullTextQuery query, float factor) {
-            this.query = checkNotNull(query, "Boost query cannot be null.");
-            checkBoost(factor);
-            this.factor = factor;
+        public Boost(FullTextQuery positive, FullTextQuery negative, float negativeBoost) {
+            this.positive = checkNotNull(positive, "Positive boost query cannot be null.");
+            this.negative = checkNotNull(negative, "Negative boost query cannot be null.");
+            checkBoost(negativeBoost, "Negative boost");
+            this.negativeBoost = negativeBoost;
         }
 
-        public FullTextQuery query() {
-            return query;
+        public FullTextQuery positive() {
+            return positive;
         }
 
-        public float factor() {
-            return factor;
+        public FullTextQuery negative() {
+            return negative;
+        }
+
+        public float negativeBoost() {
+            return negativeBoost;
         }
 
         @Override
         public String queryText() {
-            return query.queryText();
+            return positive.queryText();
+        }
+
+        @Override
+        public List<String> columns() {
+            List<String> columns = new ArrayList<>();
+            columns.addAll(positive.columns());
+            columns.addAll(negative.columns());
+            return distinctColumns(columns);
         }
 
         @Override
         Map<String, Object> toRootMap() {
             Map<String, Object> body = new LinkedHashMap<>();
-            body.put("query", query.toRootMap());
-            body.put("factor", factor);
+            body.put("positive", positive.toRootMap());
+            body.put("negative", negative.toRootMap());
+            body.put("negative_boost", negativeBoost);
             Map<String, Object> root = new LinkedHashMap<>();
             root.put("boost", body);
             return root;
+        }
+    }
+
+    /** Multi-match query. */
+    public static final class MultiMatch extends FullTextQuery {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String query;
+        private final List<String> columns;
+        private final List<Float> boosts;
+        private final Operator operator;
+
+        public MultiMatch(
+                String query,
+                List<String> columns,
+                @Nullable List<Float> boosts,
+                Operator operator) {
+            checkTerms(query);
+            checkArgument(
+                    columns != null && !columns.isEmpty(), "columns cannot be null or empty.");
+            List<String> checkedColumns = new ArrayList<>();
+            for (String column : columns) {
+                checkColumn(column);
+                checkedColumns.add(column);
+            }
+            List<Float> checkedBoosts;
+            if (boosts == null) {
+                checkedBoosts = new ArrayList<>(checkedColumns.size());
+                for (int i = 0; i < checkedColumns.size(); i++) {
+                    checkedBoosts.add(1.0f);
+                }
+            } else {
+                checkArgument(
+                        boosts.size() == checkedColumns.size(),
+                        "The number of boosts must match the number of columns.");
+                checkedBoosts = new ArrayList<>(boosts.size());
+                for (Float boost : boosts) {
+                    checkArgument(boost != null, "Boost cannot be null.");
+                    checkBoost(boost, "Boost");
+                    checkedBoosts.add(boost);
+                }
+            }
+            this.query = query;
+            this.columns = Collections.unmodifiableList(checkedColumns);
+            this.boosts = Collections.unmodifiableList(checkedBoosts);
+            this.operator = operator == null ? Operator.OR : operator;
+        }
+
+        public String query() {
+            return query;
+        }
+
+        @Override
+        public String queryText() {
+            return query;
+        }
+
+        @Override
+        public List<String> columns() {
+            return columns;
+        }
+
+        public List<Float> boosts() {
+            return boosts;
+        }
+
+        public Operator operator() {
+            return operator;
+        }
+
+        @Override
+        Map<String, Object> toRootMap() {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("query", query);
+            body.put("columns", columns);
+            body.put("boost", boosts);
+            Map<String, Object> root = new LinkedHashMap<>();
+            root.put("multi_match", body);
+            return root;
+        }
+    }
+
+    /** Boolean query clause. */
+    public static final class Clause implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Occur occur;
+        private final FullTextQuery query;
+
+        public Clause(Occur occur, FullTextQuery query) {
+            this.occur = checkNotNull(occur, "Boolean query occur cannot be null.");
+            this.query = checkNotNull(query, "Boolean query cannot be null.");
+        }
+
+        public Occur occur() {
+            return occur;
+        }
+
+        public FullTextQuery query() {
+            return query;
         }
     }
 
@@ -447,46 +733,87 @@ public abstract class FullTextQuery implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
+        private final List<Clause> queries;
         private final List<FullTextQuery> should;
         private final List<FullTextQuery> must;
         private final List<FullTextQuery> mustNot;
 
-        public BooleanQuery(
-                List<FullTextQuery> should, List<FullTextQuery> must, List<FullTextQuery> mustNot) {
-            this.should = immutableQueries(should);
-            this.must = immutableQueries(must);
-            this.mustNot = immutableQueries(mustNot);
-            checkArgument(
-                    !this.should.isEmpty() || !this.must.isEmpty() || !this.mustNot.isEmpty(),
-                    "Boolean query must contain at least one clause.");
+        public BooleanQuery(List<Clause> queries) {
+            this(queries, true);
         }
 
-        private static List<FullTextQuery> immutableQueries(List<FullTextQuery> queries) {
-            List<FullTextQuery> result = new ArrayList<>();
+        private BooleanQuery(List<Clause> queries, boolean checkNonEmpty) {
+            List<Clause> checkedQueries = new ArrayList<>();
             if (queries != null) {
-                for (FullTextQuery query : queries) {
-                    result.add(checkNotNull(query, "Boolean query clause cannot be null."));
+                for (Clause query : queries) {
+                    checkedQueries.add(checkNotNull(query, "Boolean query clause cannot be null."));
+                }
+            }
+            if (checkNonEmpty) {
+                checkArgument(
+                        !checkedQueries.isEmpty(),
+                        "Boolean query must contain at least one clause.");
+            }
+            this.queries = Collections.unmodifiableList(checkedQueries);
+            this.should = filterQueries(checkedQueries, Occur.SHOULD);
+            this.must = filterQueries(checkedQueries, Occur.MUST);
+            this.mustNot = filterQueries(checkedQueries, Occur.MUST_NOT);
+        }
+
+        public BooleanQuery(
+                List<FullTextQuery> should, List<FullTextQuery> must, List<FullTextQuery> mustNot) {
+            this(toClauses(should, must, mustNot));
+        }
+
+        private static List<Clause> toClauses(
+                List<FullTextQuery> should, List<FullTextQuery> must, List<FullTextQuery> mustNot) {
+            List<Clause> clauses = new ArrayList<>();
+            addClauses(clauses, Occur.SHOULD, should);
+            addClauses(clauses, Occur.MUST, must);
+            addClauses(clauses, Occur.MUST_NOT, mustNot);
+            return clauses;
+        }
+
+        private static void addClauses(
+                List<Clause> clauses, Occur occur, @Nullable List<FullTextQuery> queries) {
+            if (queries == null) {
+                return;
+            }
+            for (FullTextQuery query : queries) {
+                clauses.add(new Clause(occur, query));
+            }
+        }
+
+        private static List<FullTextQuery> filterQueries(List<Clause> queries, Occur occur) {
+            List<FullTextQuery> result = new ArrayList<>();
+            for (Clause query : queries) {
+                if (query.occur() == occur) {
+                    result.add(query.query());
                 }
             }
             return Collections.unmodifiableList(result);
         }
 
         public BooleanQuery should(FullTextQuery query) {
-            List<FullTextQuery> next = new ArrayList<>(should);
-            next.add(query);
-            return new BooleanQuery(next, must, mustNot);
+            return with(Occur.SHOULD, query);
         }
 
         public BooleanQuery must(FullTextQuery query) {
-            List<FullTextQuery> next = new ArrayList<>(must);
-            next.add(query);
-            return new BooleanQuery(should, next, mustNot);
+            return with(Occur.MUST, query);
         }
 
         public BooleanQuery mustNot(FullTextQuery query) {
-            List<FullTextQuery> next = new ArrayList<>(mustNot);
-            next.add(query);
-            return new BooleanQuery(should, must, next);
+            return with(Occur.MUST_NOT, query);
+        }
+
+        private BooleanQuery with(Occur occur, FullTextQuery query) {
+            List<Clause> next = new ArrayList<>(queries);
+            next.add(new Clause(occur, query));
+            return new BooleanQuery(next);
+        }
+
+        public List<Clause> queries() {
+            return queries;
         }
 
         public List<FullTextQuery> should() {
@@ -504,6 +831,15 @@ public abstract class FullTextQuery implements Serializable {
         @Override
         public String queryText() {
             return "";
+        }
+
+        @Override
+        public List<String> columns() {
+            List<String> columns = new ArrayList<>();
+            for (Clause query : queries) {
+                columns.addAll(query.query().columns());
+            }
+            return distinctColumns(columns);
         }
 
         @Override

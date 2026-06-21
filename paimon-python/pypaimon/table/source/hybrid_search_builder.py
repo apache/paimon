@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.vector_search_result import (
     DictBasedScoredIndexResult,
@@ -52,8 +53,7 @@ class HybridSearchRoute:
     limit: int
     weight: float = 1.0
     vector: Optional[List[float]] = None
-    query_text: Optional[str] = None
-    query_operator: str = "or"
+    full_text_query: Optional[FullTextQuery] = None
     options: Dict[str, str] = field(default_factory=dict)
 
     VECTOR = "vector"
@@ -66,20 +66,13 @@ class HybridSearchRoute:
             raise ValueError("Field name cannot be None or empty")
         if self.route_type == self.VECTOR and self.vector is None:
             raise ValueError("Search vector cannot be None for vector route")
-        if self.route_type == self.FULL_TEXT and not self.query_text:
+        if self.route_type == self.FULL_TEXT and self.full_text_query is None:
             raise ValueError(
-                "Query text cannot be None or empty for full-text route")
+                "Query cannot be None for full-text route")
         if self.limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self.limit)
         if self.weight <= 0:
             raise ValueError("Weight must be positive, got: %s" % self.weight)
-        operator = "or" if self.query_operator is None else (
-            self.query_operator.strip().lower())
-        if operator not in ("or", "and"):
-            raise ValueError(
-                "Query operator must be 'or' or 'and', got: %s"
-                % self.query_operator)
-        self.query_operator = operator
         self.options = dict(self.options or {})
 
     @classmethod
@@ -102,17 +95,14 @@ class HybridSearchRoute:
     @classmethod
     def full_text_route(
             cls,
-            field_name: str,
-            query_text: str,
-            query_operator: str,
+            query: FullTextQuery,
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchRoute':
         return cls(
             route_type=cls.FULL_TEXT,
-            field_name=field_name,
-            query_text=query_text,
-            query_operator=query_operator,
+            field_name=query.referenced_columns()[0],
+            full_text_query=query,
             limit=limit,
             weight=weight,
             options=dict(options or {}),
@@ -123,6 +113,11 @@ class HybridSearchRoute:
 
     def is_full_text(self) -> bool:
         return self.route_type == self.FULL_TEXT
+
+    def columns(self) -> List[str]:
+        if self.is_full_text():
+            return self.full_text_query.referenced_columns()
+        return [self.field_name]
 
 
 @dataclass
@@ -192,16 +187,14 @@ class HybridSearchBuilder(ABC):
 
     def add_full_text_route(
             self,
-            text_column: str,
-            query_text: str,
+            query: FullTextQuery,
             limit: int,
             weight: float = 1.0,
-            query_operator: str = "or",
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchBuilder':
         """Add a full-text-search route."""
         return self.add_route(
             HybridSearchRoute.full_text_route(
-                text_column, query_text, query_operator, limit, weight, options))
+                query, limit, weight, options))
 
     @abstractmethod
     def route_builders(self) -> List[HybridSearchRouteBuilder]:
@@ -349,9 +342,7 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
     def _new_full_text_search_builder(self, route):
         builder = (
             self._table.new_full_text_search_builder()
-            .with_text_column(route.field_name)
-            .with_query_text(route.query_text)
-            .with_query_operator(route.query_operator)
+            .with_query(route.full_text_query)
             .with_limit(route.limit)
         )
         if self._partition_filter is not None:

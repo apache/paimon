@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.tantivy.NativeLoader;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -137,7 +138,7 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
-            FullTextSearch search = new FullTextSearch("paimon", 10, "text");
+            FullTextSearch search = new FullTextSearch(FullTextQuery.match("paimon", "text"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -206,7 +207,7 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
-            FullTextSearch search = new FullTextSearch("售货员", 10, "text");
+            FullTextSearch search = new FullTextSearch(FullTextQuery.match("售货员", "text"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -230,7 +231,8 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
-            FullTextSearch search = new FullTextSearch("nonexistent", 10, "text");
+            FullTextSearch search =
+                    new FullTextSearch(FullTextQuery.match("nonexistent", "text"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -256,7 +258,7 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
-            FullTextSearch search = new FullTextSearch("paimon", 10, "text");
+            FullTextSearch search = new FullTextSearch(FullTextQuery.match("paimon", "text"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -302,7 +304,8 @@ public class TantivyFullTextGlobalIndexTest {
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             // Search for the special keyword — should match every 10th doc
-            FullTextSearch search = new FullTextSearch("special_keyword", 1000, "text");
+            FullTextSearch search =
+                    new FullTextSearch(FullTextQuery.match("special_keyword", "text"), 1000);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -332,7 +335,7 @@ public class TantivyFullTextGlobalIndexTest {
 
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             // Limit to 5 results
-            FullTextSearch search = new FullTextSearch("paimon", 5, "text");
+            FullTextSearch search = new FullTextSearch(FullTextQuery.match("paimon", "text"), 5);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -352,7 +355,7 @@ public class TantivyFullTextGlobalIndexTest {
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
         GlobalIndexFileReader fileReader = createFileReader();
-        FullTextSearch search = new FullTextSearch("paimon", 10, "text");
+        FullTextSearch search = new FullTextSearch(FullTextQuery.match("paimon", "text"), 10);
 
         // First query: pool miss, searcher is loaded and returned to pool on close.
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
@@ -389,12 +392,42 @@ public class TantivyFullTextGlobalIndexTest {
         try (TantivyFullTextGlobalIndexReader reader =
                 (TantivyFullTextGlobalIndexReader)
                         indexer.createReader(fileReader, metas, newDirectExecutorService())) {
-            FullTextSearch search = new FullTextSearch("indexer", 10, "text");
+            FullTextSearch search = new FullTextSearch(FullTextQuery.match("indexer", "text"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
             assertThat(searchResult.get().results().getLongCardinality()).isEqualTo(1);
             assertThat(searchResult.get().results().contains(0L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testStructuredBoostQueryDemotesNegativeMatches() throws IOException {
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
+
+        writer.write(BinaryString.fromString("paimon lake"), 0);
+        writer.write(BinaryString.fromString("paimon vector"), 1);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
+
+        try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
+            FullTextSearch search =
+                    new FullTextSearch(
+                            FullTextQuery.boost(
+                                    FullTextQuery.match("paimon", "text"),
+                                    FullTextQuery.match("vector", "text"),
+                                    0.5f),
+                            10);
+            Optional<ScoredGlobalIndexResult> searchResult =
+                    reader.visitFullTextSearch(search).join();
+            assertThat(searchResult).isPresent();
+            assertThat(searchResult.get().results().contains(0L)).isTrue();
+            assertThat(searchResult.get().results().contains(1L)).isTrue();
+            assertThat(searchResult.get().scoreGetter().score(0L))
+                    .isGreaterThan(searchResult.get().scoreGetter().score(1L));
         }
     }
 }

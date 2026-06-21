@@ -127,7 +127,15 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         }
         if (query instanceof FullTextQuery.Boost) {
             FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
-            return computeScore(document, boost.query()) * boost.factor();
+            float score = computeScore(document, boost.positive());
+            if (computeScore(document, boost.negative()) > 0) {
+                score *= boost.negativeBoost();
+            }
+            return score;
+        }
+        if (query instanceof FullTextQuery.MultiMatch) {
+            throw new IllegalArgumentException(
+                    "multi_match is not supported by single-column full-text indexes");
         }
         if (query instanceof FullTextQuery.BooleanQuery) {
             return computeBooleanScore(document, (FullTextQuery.BooleanQuery) query);
