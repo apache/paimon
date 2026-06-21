@@ -1224,6 +1224,43 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testSnapshotCommitConflictDoesNotRecoverWhenRetryBudgetExhausted()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "0");
+        TestFileStore store = createStore(false, options);
+
+        KeyValue record = gen.next();
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(record),
+                gen::getPartition,
+                value -> 0,
+                false,
+                18L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        RecoveryTrackingSnapshotManager snapshotManager =
+                new RecoveryTrackingSnapshotManager(store.snapshotManager());
+        RecoveryOnceSnapshotCommit snapshotCommit =
+                new RecoveryOnceSnapshotCommit(
+                        new RenamingSnapshotCommit(snapshotManager, Lock.empty()));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "recover-after-conflict", snapshotCommit, snapshotManager)) {
+            assertThatThrownBy(() -> commit.commit(checkNotNull(committableRef.get()), false))
+                    .hasMessageContaining("Commit failed after")
+                    .hasRootCauseInstanceOf(
+                            SnapshotCommitConflictRequiresListRecoveryException.class);
+        }
+
+        assertThat(snapshotCommit.attempts).isEqualTo(1);
+        assertThat(snapshotManager.recoveryLookups).isZero();
+    }
+
+    @Test
     public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists()
             throws Exception {
         TestFileStore store =

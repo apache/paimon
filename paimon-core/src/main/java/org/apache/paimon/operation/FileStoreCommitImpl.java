@@ -749,20 +749,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
 
             retryResult = (RetryCommitResult) result;
-            if (retryResult instanceof CommitFailRetryResult
-                    && ((CommitFailRetryResult) retryResult).requiresLatestSnapshotRecovery) {
-                recoveredLatestSnapshot =
-                        recoverLatestSnapshotByListing(
-                                ((CommitFailRetryResult) retryResult).exception);
-            }
-
-            if (System.currentTimeMillis() - startMillis > options.commitTimeout()
-                    || retryCount >= options.commitMaxRetries()) {
+            boolean canRetry =
+                    System.currentTimeMillis() - startMillis <= options.commitTimeout()
+                            && retryCount < options.commitMaxRetries();
+            if (!canRetry) {
                 String message =
                         String.format(
                                 "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
                                 options.commitTimeout(), retryCount);
                 throw new RuntimeException(message, retryResult.exception);
+            }
+
+            if (retryResult instanceof CommitFailRetryResult
+                    && ((CommitFailRetryResult) retryResult).requiresLatestSnapshotRecovery) {
+                recoveredLatestSnapshot =
+                        recoverLatestSnapshotByListing(
+                                ((CommitFailRetryResult) retryResult).exception);
             }
 
             retryWaiter.retryWait(retryCount);
