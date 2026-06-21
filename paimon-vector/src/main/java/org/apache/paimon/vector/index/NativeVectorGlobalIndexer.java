@@ -21,7 +21,7 @@ package org.apache.paimon.vector.index;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataType;
@@ -32,7 +32,9 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** Native vector global indexer backed by paimon-vector-index-java. */
-public class NativeVectorGlobalIndexer implements GlobalIndexer {
+public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
+
+    private static final String DEFAULT_METRIC = "inner_product";
 
     private final DataType fieldType;
     private final Map<String, String> options;
@@ -56,5 +58,10 @@ public class NativeVectorGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
         return new NativeVectorGlobalIndexReader(fileReader, files, fieldType, executor);
+    }
+
+    @Override
+    public String metric() {
+        return options.getOrDefault("metric", DEFAULT_METRIC);
     }
 }

@@ -101,12 +101,13 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn);
+        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
     public VectorRead newVectorRead() {
         checkNotNull(vector, "vector must be set via withVector()");
-        return new VectorReadImpl(table, filter, limit, vectorColumn, vector, options);
+        return new VectorReadImpl(
+                table, partitionFilter, filter, limit, vectorColumn, vector, options);
     }
 }

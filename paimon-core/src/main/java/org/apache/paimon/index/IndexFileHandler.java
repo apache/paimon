@@ -34,6 +34,8 @@ import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -96,7 +98,7 @@ public class IndexFileHandler {
         return scan(snapshotManager.latestSnapshot(), indexType);
     }
 
-    public List<IndexManifestEntry> scan(Snapshot snapshot, String indexType) {
+    public List<IndexManifestEntry> scan(@Nullable Snapshot snapshot, String indexType) {
         if (snapshot == null) {
             return Collections.emptyList();
         }
@@ -115,7 +117,7 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> scan(
-            Snapshot snapshot, Filter<IndexManifestEntry> readTFilter) {
+            @Nullable Snapshot snapshot, Filter<IndexManifestEntry> readTFilter) {
         if (snapshot == null) {
             return Collections.emptyList();
         }

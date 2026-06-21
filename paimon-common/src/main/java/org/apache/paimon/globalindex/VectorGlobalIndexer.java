@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.globalindex;
 
-import org.apache.paimon.globalindex.GlobalIndexResult;
+/** A {@link GlobalIndexer} that supports vector similarity search. */
+public interface VectorGlobalIndexer extends GlobalIndexer {
 
-/** Vector read to read index files. */
-public interface VectorRead {
-
-    GlobalIndexResult read(VectorScan.Plan plan);
+    /** Returns the metric name used to convert vector distances to comparable scores. */
+    String metric();
 }

@@ -169,6 +169,31 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testGlobalIndexScannerKeepsUnindexedRowsSeparate() throws Exception {
+        write(500L);
+        createIndex("f1");
+        appendRows(500, 1000);
+
+        FileStoreTable table =
+                tableWithSearchMode((FileStoreTable) catalog.getTable(identifier()), "full");
+        Predicate predicate =
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a100"),
+                                        BinaryString.fromString("a700")));
+
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
+            assertThat(scanner.scan(predicate).get().results().toRangeList())
+                    .containsExactly(new Range(100L, 100L));
+            assertThat(scanner.unindexedRows(predicate).results().toRangeList())
+                    .containsExactly(new Range(500L, 999L));
+        }
+    }
+
+    @Test
     public void testBTreeGlobalIndexSearchModeUsesAllPredicateFieldCoverage() throws Exception {
         write(500L);
         createIndex("f1");
