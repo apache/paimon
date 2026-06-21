@@ -1261,6 +1261,67 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testManifestCompactConflictTriggersListRecovery() throws Exception {
+        TestFileStore store = createStore(false);
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        store.commitData(keyValues, s -> partition, kv -> 0);
+        store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap());
+        Snapshot latest =
+                store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
+                        .get(0);
+
+        RecoveryTrackingSnapshotManager snapshotManager =
+                new RecoveryTrackingSnapshotManager(store.snapshotManager());
+        RecoveryOnceSnapshotCommit snapshotCommit =
+                new RecoveryOnceSnapshotCommit(
+                        new RenamingSnapshotCommit(snapshotManager, Lock.empty()));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "compact-recover-after-conflict", snapshotCommit, snapshotManager)) {
+            commit.compactManifest();
+        }
+
+        assertThat(snapshotCommit.attempts).isEqualTo(2);
+        assertThat(snapshotManager.recoveryLookups).isEqualTo(1);
+        assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(latest.id() + 1);
+    }
+
+    @Test
+    public void testReplaceManifestListConflictReturnsFalse() throws Exception {
+        TestFileStore store = createStore(false);
+        Snapshot latest =
+                store.commitData(
+                                Collections.singletonList(gen.next()),
+                                gen::getPartition,
+                                value -> 0)
+                        .get(0);
+        ManifestList manifestList = store.manifestListFactory().create();
+        Pair<String, Long> baseManifestList =
+                manifestList.write(manifestList.readDataManifests(latest));
+        Pair<String, Long> deltaManifestList = manifestList.write(Collections.emptyList());
+
+        RecoveryTrackingSnapshotManager snapshotManager =
+                new RecoveryTrackingSnapshotManager(store.snapshotManager());
+        RecoveryOnceSnapshotCommit snapshotCommit =
+                new RecoveryOnceSnapshotCommit(
+                        new RenamingSnapshotCommit(snapshotManager, Lock.empty()));
+        boolean replaced;
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store, "replace-recover-after-conflict", snapshotCommit, snapshotManager)) {
+            replaced =
+                    commit.replaceManifestList(
+                            latest, latest.totalRecordCount(), baseManifestList, deltaManifestList);
+        }
+
+        assertThat(replaced).isFalse();
+        assertThat(snapshotCommit.attempts).isEqualTo(1);
+        assertThat(snapshotManager.recoveryLookups).isZero();
+    }
+
+    @Test
     public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists()
             throws Exception {
         TestFileStore store =

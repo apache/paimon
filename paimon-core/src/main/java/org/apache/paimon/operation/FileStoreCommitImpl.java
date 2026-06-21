@@ -1305,14 +1305,39 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.properties(),
                         nextRowId);
 
-        return commitSnapshotImpl(newSnapshot, emptyList());
+        try {
+            return commitSnapshotImpl(newSnapshot, emptyList());
+        } catch (SnapshotCommitConflictRequiresListRecoveryException e) {
+            LOG.warn("Manifest list replacement conflicted with a newer snapshot.", e);
+            return false;
+        }
     }
 
     public void compactManifest() {
         int retryCount = 0;
+        Snapshot recoveredLatestSnapshot = null;
         long startMillis = System.currentTimeMillis();
         while (true) {
-            boolean success = compactManifestOnce();
+            boolean success;
+            try {
+                success = compactManifestOnce(recoveredLatestSnapshot);
+                recoveredLatestSnapshot = null;
+            } catch (SnapshotCommitConflictRequiresListRecoveryException e) {
+                LOG.warn("Recover latest snapshot by listing for manifest compaction conflict.", e);
+                if (System.currentTimeMillis() - startMillis > options.commitTimeout()
+                        || retryCount >= options.commitMaxRetries()) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                    options.commitTimeout(), retryCount),
+                            e);
+                }
+
+                recoveredLatestSnapshot = recoverLatestSnapshotByListing(e);
+                retryWaiter.retryWait(retryCount);
+                retryCount++;
+                continue;
+            }
             if (success) {
                 break;
             }
@@ -1330,8 +1355,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean compactManifestOnce() {
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+    private boolean compactManifestOnce(@Nullable Snapshot recoveredLatestSnapshot) {
+        Snapshot latestSnapshot =
+                recoveredLatestSnapshot == null
+                        ? snapshotManager.latestSnapshot()
+                        : recoveredLatestSnapshot;
 
         if (latestSnapshot == null) {
             return true;
