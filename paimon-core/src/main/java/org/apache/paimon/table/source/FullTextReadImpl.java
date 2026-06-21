@@ -31,6 +31,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -53,6 +54,7 @@ public class FullTextReadImpl implements FullTextRead {
     private final DataField textColumn;
     private final String queryText;
     private final String queryOperator;
+    private final FullTextQuery query;
 
     public FullTextReadImpl(
             FileStoreTable table, int limit, DataField textColumn, String queryText) {
@@ -70,6 +72,17 @@ public class FullTextReadImpl implements FullTextRead {
         this.textColumn = textColumn;
         this.queryText = queryText;
         this.queryOperator = queryOperator;
+        this.query = null;
+    }
+
+    public FullTextReadImpl(
+            FileStoreTable table, int limit, DataField textColumn, FullTextQuery query) {
+        this.table = table;
+        this.limit = limit;
+        this.textColumn = textColumn;
+        this.queryText = null;
+        this.queryOperator = "or";
+        this.query = query;
     }
 
     @Override
@@ -147,7 +160,9 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         FullTextSearch fullTextSearch =
-                new FullTextSearch(queryText, limit, textColumn.name(), queryOperator);
+                query == null
+                        ? new FullTextSearch(queryText, limit, textColumn.name(), queryOperator)
+                        : new FullTextSearch(query, limit, textColumn.name());
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));

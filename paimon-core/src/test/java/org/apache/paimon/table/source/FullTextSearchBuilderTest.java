@@ -33,6 +33,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -194,6 +195,47 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).hasSize(2);
         // Rows 1 and 2 contain both "Paimon" and "search"
         assertThat(ids).contains(1, 2);
+    }
+
+    @Test
+    public void testStructuredFullTextSearchPhraseAndBooleanQuery() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {
+            "Apache Paimon lake format",
+            "Paimon full-text search support",
+            "full-text search in Apache Paimon",
+            "Vector search capabilities",
+        };
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        GlobalIndexResult phraseResult =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.phrase("full-text search"))
+                        .withLimit(10)
+                        .withTextColumn(TEXT_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(readIds(table, phraseResult)).containsExactlyInAnyOrder(1, 2);
+
+        FullTextQuery booleanQuery =
+                new FullTextQuery.BooleanQuery(
+                        java.util.Collections.emptyList(),
+                        java.util.Arrays.asList(
+                                FullTextQuery.match("Paimon"), FullTextQuery.match("search")),
+                        java.util.Collections.singletonList(FullTextQuery.match("Vector")));
+
+        GlobalIndexResult booleanResult =
+                table.newFullTextSearchBuilder()
+                        .withQuery(booleanQuery)
+                        .withLimit(10)
+                        .withTextColumn(TEXT_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(readIds(table, booleanResult)).containsExactlyInAnyOrder(1, 2);
     }
 
     @Test
@@ -429,6 +471,16 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
         }
+    }
+
+    private List<Integer> readIds(FileStoreTable table, GlobalIndexResult result) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     private void buildAndCommitMultipleIndexFiles(FileStoreTable table, String[] documents)

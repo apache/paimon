@@ -182,6 +182,53 @@ class FullTextSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("full-text search - structured JSON DSL") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (0, 'Apache Paimon lake format'),
+                  |  (1, 'Paimon supports full-text search'),
+                  |  (2, 'full-text search in Apache Paimon'),
+                  |  (3, 'vector similarity search')
+                  |""".stripMargin)
+
+      spark
+        .sql(
+          s"CALL sys.create_global_index(table => 'test.T', index_column => 'content', index_type => '$indexType')")
+        .collect()
+
+      val phraseQuery = """{"phrase":{"terms":"full-text search"}}"""
+      val phraseResult = spark
+        .sql(s"""
+                |SELECT id FROM full_text_search('T', 'content', '$phraseQuery', 10)
+                |ORDER BY id
+                |""".stripMargin)
+        .collect()
+
+      assert(phraseResult.map(_.getInt(0)).toSeq == Seq(1, 2))
+
+      val booleanQuery =
+        """{"boolean":{"must":[{"match":{"terms":"Paimon"}},{"match":{"terms":"search"}}],"must_not":[{"match":{"terms":"vector"}}]}}"""
+      val booleanResult = spark
+        .sql(s"""
+                |SELECT id FROM full_text_search('T', 'content', '$booleanQuery', 10)
+                |ORDER BY id
+                |""".stripMargin)
+        .collect()
+
+      assert(booleanResult.map(_.getInt(0)).toSeq == Seq(1, 2))
+    }
+  }
+
   // ========== Integration Tests ==========
 
   test("end-to-end: write, index, search cycle") {

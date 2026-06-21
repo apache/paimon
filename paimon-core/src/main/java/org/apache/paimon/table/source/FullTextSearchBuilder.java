@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FullTextQuery;
 
 import java.io.Serializable;
 
@@ -40,6 +41,9 @@ public interface FullTextSearchBuilder extends Serializable {
 
     /** The query text to search. */
     FullTextSearchBuilder withQueryText(String queryText);
+
+    /** The structured full-text query to search. */
+    FullTextSearchBuilder withQuery(FullTextQuery query);
 
     /** The default query operator. Supported values are 'or' and 'and'. */
     FullTextSearchBuilder withQueryOperator(String queryOperator);

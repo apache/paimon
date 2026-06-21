@@ -23,7 +23,7 @@ use jni::JNIEnv;
 use serde::Deserialize;
 use std::ptr;
 use tantivy::collector::TopDocs;
-use tantivy::query::QueryParser;
+use tantivy::query::{BoostQuery, BooleanQuery, Occur, Query, QueryParser};
 use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions,
 };
@@ -59,6 +59,79 @@ struct TantivyIndex {
 struct TantivySearcherHandle {
     reader: IndexReader,
     text_field: Field,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FullTextQueryJson {
+    Match(MatchQueryJson),
+    Phrase(PhraseQueryJson),
+    Boost(BoostQueryJson),
+    Boolean(BooleanQueryJson),
+    #[allow(dead_code)]
+    MultiMatch(serde_json::Value),
+}
+
+#[derive(Deserialize)]
+struct MatchQueryJson {
+    #[serde(alias = "query")]
+    terms: String,
+    #[serde(default = "default_boost")]
+    boost: f32,
+    #[serde(default)]
+    fuzziness: Option<u8>,
+    #[serde(default = "default_max_expansions")]
+    max_expansions: usize,
+    #[serde(default)]
+    operator: QueryOperatorJson,
+    #[serde(default)]
+    prefix_length: u32,
+}
+
+#[derive(Deserialize)]
+struct PhraseQueryJson {
+    #[serde(alias = "query")]
+    terms: String,
+    #[serde(default)]
+    slop: u32,
+}
+
+#[derive(Deserialize)]
+struct BoostQueryJson {
+    query: Box<FullTextQueryJson>,
+    #[serde(default = "default_boost")]
+    factor: f32,
+}
+
+#[derive(Deserialize)]
+struct BooleanQueryJson {
+    #[serde(default)]
+    should: Vec<FullTextQueryJson>,
+    #[serde(default)]
+    must: Vec<FullTextQueryJson>,
+    #[serde(default)]
+    must_not: Vec<FullTextQueryJson>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum QueryOperatorJson {
+    Or,
+    And,
+}
+
+impl Default for QueryOperatorJson {
+    fn default() -> Self {
+        Self::Or
+    }
+}
+
+fn default_boost() -> f32 {
+    1.0
+}
+
+fn default_max_expansions() -> usize {
+    50
 }
 
 #[derive(Clone, Deserialize)]
@@ -296,6 +369,209 @@ fn build_schema(config: &TokenizerConfig) -> (Schema, Field, Field) {
     );
     let text_field = builder.add_text_field("text", text_options);
     (builder.build(), row_id_field, text_field)
+}
+
+fn query_parser_for(
+    searcher: &tantivy::Searcher,
+    field: Field,
+    operator: QueryOperatorJson,
+    fuzziness: Option<u8>,
+    prefix_length: u32,
+) -> QueryParser {
+    let mut query_parser = QueryParser::for_index(&searcher.index(), vec![field]);
+    if matches!(operator, QueryOperatorJson::And) {
+        query_parser.set_conjunction_by_default();
+    }
+    if let Some(distance) = fuzziness {
+        if distance > 0 {
+            query_parser.set_field_fuzzy(field, prefix_length > 0, distance, true);
+        }
+    }
+    query_parser
+}
+
+fn build_query_from_json(
+    searcher: &tantivy::Searcher,
+    field: Field,
+    query_json: FullTextQueryJson,
+) -> Result<Box<dyn Query>, String> {
+    match query_json {
+        FullTextQueryJson::Match(query) => {
+            if query.terms.is_empty() {
+                return Err("match query terms cannot be empty".to_string());
+            }
+            if query.boost <= 0.0 {
+                return Err(format!("match query boost must be positive, got {}", query.boost));
+            }
+            if query.max_expansions == 0 {
+                return Err("match query max_expansions must be positive".to_string());
+            }
+            if let Some(distance) = query.fuzziness {
+                if distance > 2 {
+                    return Err(format!(
+                        "match query fuzziness must be <= 2 for Tantivy, got {}",
+                        distance
+                    ));
+                }
+            }
+            if query.max_expansions != default_max_expansions() {
+                return Err(
+                    "match query max_expansions is not supported by Tantivy 0.22".to_string(),
+                );
+            }
+            if query.prefix_length != 0 {
+                return Err(
+                    "match query prefix_length is not supported by Tantivy 0.22".to_string(),
+                );
+            }
+            let parser = query_parser_for(
+                searcher,
+                field,
+                query.operator,
+                query.fuzziness,
+                0,
+            );
+            let parsed = parser
+                .parse_query(&query.terms)
+                .map_err(|e| format!("Failed to parse match query '{}': {}", query.terms, e))?;
+            if (query.boost - 1.0).abs() > f32::EPSILON {
+                Ok(Box::new(BoostQuery::new(parsed, query.boost)))
+            } else {
+                Ok(parsed)
+            }
+        }
+        FullTextQueryJson::Phrase(query) => {
+            if query.terms.is_empty() {
+                return Err("phrase query terms cannot be empty".to_string());
+            }
+            let parser = query_parser_for(searcher, field, QueryOperatorJson::Or, None, 0);
+            let escaped = query.terms.replace('\\', "\\\\").replace('"', "\\\"");
+            let query_string = if query.slop == 0 {
+                format!("\"{}\"", escaped)
+            } else {
+                format!("\"{}\"~{}", escaped, query.slop)
+            };
+            parser
+                .parse_query(&query_string)
+                .map_err(|e| format!("Failed to parse phrase query '{}': {}", query.terms, e))
+        }
+        FullTextQueryJson::Boost(query) => {
+            if query.factor <= 0.0 {
+                return Err(format!("boost factor must be positive, got {}", query.factor));
+            }
+            let inner = build_query_from_json(searcher, field, *query.query)?;
+            Ok(Box::new(BoostQuery::new(inner, query.factor)))
+        }
+        FullTextQueryJson::Boolean(query) => {
+            let mut subqueries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+            for child in query.should {
+                subqueries.push((Occur::Should, build_query_from_json(searcher, field, child)?));
+            }
+            for child in query.must {
+                subqueries.push((Occur::Must, build_query_from_json(searcher, field, child)?));
+            }
+            for child in query.must_not {
+                subqueries.push((Occur::MustNot, build_query_from_json(searcher, field, child)?));
+            }
+            if subqueries.is_empty() {
+                return Err("boolean query must contain at least one clause".to_string());
+            }
+            Ok(Box::new(BooleanQuery::new(subqueries)))
+        }
+        FullTextQueryJson::MultiMatch(_) => Err(
+            "multi_match is not supported by single-column Tantivy full-text indexes".to_string(),
+        ),
+    }
+}
+
+fn search_with_query(
+    env: &mut JNIEnv,
+    handle: &TantivySearcherHandle,
+    query: Box<dyn Query>,
+    limit: jint,
+) -> jobject {
+    if limit <= 0 {
+        return throw_and_return_null(env, &format!("Limit must be positive, got: {}", limit));
+    }
+    let searcher = handle.reader.searcher();
+    let top_docs = match searcher.search(&query, &TopDocs::with_limit(limit as usize)) {
+        Ok(d) => d,
+        Err(e) => return throw_and_return_null(env, &format!("Search failed: {}", e)),
+    };
+
+    build_search_result(env, &searcher, &top_docs)
+}
+
+fn build_search_result(
+    env: &mut JNIEnv,
+    searcher: &tantivy::Searcher,
+    top_docs: &[(f32, tantivy::DocAddress)],
+) -> jobject {
+    let count = top_docs.len();
+
+    let row_id_array = match env.new_long_array(count as i32) {
+        Ok(a) => a,
+        Err(e) => {
+            return throw_and_return_null(env, &format!("Failed to create long array: {}", e))
+        }
+    };
+    let score_array = match env.new_float_array(count as i32) {
+        Ok(a) => a,
+        Err(e) => {
+            return throw_and_return_null(env, &format!("Failed to create float array: {}", e))
+        }
+    };
+
+    let mut row_ids: Vec<jlong> = Vec::with_capacity(count);
+    let mut scores: Vec<jfloat> = Vec::with_capacity(count);
+
+    for (score, doc_address) in top_docs {
+        let segment_reader = searcher.segment_reader(doc_address.segment_ord);
+        let fast_fields = match segment_reader.fast_fields().u64("row_id") {
+            Ok(f) => f,
+            Err(e) => {
+                return throw_and_return_null(env, &format!("Failed to get fast field: {}", e))
+            }
+        };
+        let row_id = fast_fields.first(doc_address.doc_id).unwrap_or(0) as jlong;
+        row_ids.push(row_id);
+        scores.push(*score as jfloat);
+    }
+
+    if let Err(e) = env.set_long_array_region(&row_id_array, 0, &row_ids) {
+        return throw_and_return_null(env, &format!("Failed to set long array: {}", e));
+    }
+    if let Err(e) = env.set_float_array_region(&score_array, 0, &scores) {
+        return throw_and_return_null(env, &format!("Failed to set float array: {}", e));
+    }
+
+    let class = match env.find_class("org/apache/paimon/tantivy/SearchResult") {
+        Ok(c) => c,
+        Err(e) => {
+            return throw_and_return_null(
+                env,
+                &format!("Failed to find SearchResult class: {}", e),
+            )
+        }
+    };
+    let obj = match env.new_object(
+        class,
+        "([J[F)V",
+        &[
+            JValue::Object(&JObject::from(row_id_array)),
+            JValue::Object(&JObject::from(score_array)),
+        ],
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            return throw_and_return_null(
+                env,
+                &format!("Failed to create SearchResult: {}", e),
+            )
+        }
+    };
+
+    obj.into_raw()
 }
 
 fn create_index_internal(mut env: JNIEnv, index_path: JString, config: TokenizerConfig) -> jlong {
@@ -727,79 +1003,39 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchInde
             )
         }
     };
-    let top_docs = match searcher.search(&query, &TopDocs::with_limit(limit as usize)) {
-        Ok(d) => d,
-        Err(e) => return throw_and_return_null(&mut env, &format!("Search failed: {}", e)),
-    };
+    search_with_query(&mut env, handle, query, limit)
+}
 
-    let count = top_docs.len();
-
-    // Build Java long[] and float[]
-    let row_id_array = match env.new_long_array(count as i32) {
-        Ok(a) => a,
+#[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchIndexJson(
+    mut env: JNIEnv,
+    _class: JClass,
+    searcher_ptr: jlong,
+    query_json: JString,
+    limit: jint,
+) -> jobject {
+    let handle = unsafe { &*(searcher_ptr as *const TantivySearcherHandle) };
+    let query_json_str: String = match env.get_string(&query_json) {
+        Ok(s) => s.into(),
         Err(e) => {
-            return throw_and_return_null(&mut env, &format!("Failed to create long array: {}", e))
+            return throw_and_return_null(&mut env, &format!("Failed to get query JSON: {}", e))
         }
     };
-    let score_array = match env.new_float_array(count as i32) {
-        Ok(a) => a,
-        Err(e) => {
-            return throw_and_return_null(&mut env, &format!("Failed to create float array: {}", e))
-        }
-    };
-
-    let mut row_ids: Vec<jlong> = Vec::with_capacity(count);
-    let mut scores: Vec<jfloat> = Vec::with_capacity(count);
-
-    // Use fast field reader for efficient row_id retrieval
-    for (score, doc_address) in &top_docs {
-        let segment_reader = searcher.segment_reader(doc_address.segment_ord);
-        let fast_fields = match segment_reader.fast_fields().u64("row_id") {
-            Ok(f) => f,
-            Err(e) => {
-                return throw_and_return_null(&mut env, &format!("Failed to get fast field: {}", e))
-            }
-        };
-        let row_id = fast_fields.first(doc_address.doc_id).unwrap_or(0) as jlong;
-        row_ids.push(row_id);
-        scores.push(*score as jfloat);
-    }
-
-    if let Err(e) = env.set_long_array_region(&row_id_array, 0, &row_ids) {
-        return throw_and_return_null(&mut env, &format!("Failed to set long array: {}", e));
-    }
-    if let Err(e) = env.set_float_array_region(&score_array, 0, &scores) {
-        return throw_and_return_null(&mut env, &format!("Failed to set float array: {}", e));
-    }
-
-    // Construct SearchResult object
-    let class = match env.find_class("org/apache/paimon/tantivy/SearchResult") {
-        Ok(c) => c,
+    let query_json = match serde_json::from_str::<FullTextQueryJson>(&query_json_str) {
+        Ok(q) => q,
         Err(e) => {
             return throw_and_return_null(
                 &mut env,
-                &format!("Failed to find SearchResult class: {}", e),
+                &format!("Failed to parse query JSON '{}': {}", query_json_str, e),
             )
         }
     };
-    let obj = match env.new_object(
-        class,
-        "([J[F)V",
-        &[
-            JValue::Object(&JObject::from(row_id_array)),
-            JValue::Object(&JObject::from(score_array)),
-        ],
-    ) {
-        Ok(o) => o,
-        Err(e) => {
-            return throw_and_return_null(
-                &mut env,
-                &format!("Failed to create SearchResult: {}", e),
-            )
-        }
+    let searcher = handle.reader.searcher();
+    let query = match build_query_from_json(&searcher, handle.text_field, query_json) {
+        Ok(q) => q,
+        Err(e) => return throw_and_return_null(&mut env, &e),
     };
-
-    obj.into_raw()
+    search_with_query(&mut env, handle, query, limit)
 }
 
 #[no_mangle]

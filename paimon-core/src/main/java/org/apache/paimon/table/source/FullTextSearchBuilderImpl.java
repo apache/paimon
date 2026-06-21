@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
@@ -36,6 +37,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private int limit;
     private DataField textColumn;
     private String queryText;
+    private FullTextQuery query;
     private String queryOperator = "or";
     private PartitionPredicate partitionFilter;
 
@@ -64,6 +66,14 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     @Override
     public FullTextSearchBuilder withQueryText(String queryText) {
         this.queryText = queryText;
+        this.query = null;
+        return this;
+    }
+
+    @Override
+    public FullTextSearchBuilder withQuery(FullTextQuery query) {
+        this.query = query;
+        this.queryText = null;
         return this;
     }
 
@@ -83,7 +93,12 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     public FullTextRead newFullTextRead() {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         checkNotNull(textColumn, "Text column must be set via withTextColumn()");
-        checkNotNull(queryText, "Query text must be set via withQueryText()");
+        checkArgument(
+                query != null || queryText != null,
+                "Query must be set via withQuery() or withQueryText()");
+        if (query != null) {
+            return new FullTextReadImpl(table, limit, textColumn, query);
+        }
         return new FullTextReadImpl(table, limit, textColumn, queryText, queryOperator);
     }
 }

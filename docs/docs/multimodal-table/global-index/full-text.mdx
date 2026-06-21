@@ -130,6 +130,22 @@ SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10);
 
 -- Search for top-10 documents matching all query terms.
 SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10, 'and');
+
+-- Structured single-column query DSL. Supported query types are match, phrase,
+-- boost, and boolean. multi_match is reserved for future multi-column indexes.
+SELECT * FROM full_text_search(
+    'my_table',
+    'content',
+    '{"phrase":{"terms":"paimon lake","slop":1}}',
+    10
+);
+
+SELECT * FROM full_text_search(
+    'my_table',
+    'content',
+    '{"boolean":{"must":[{"match":{"terms":"paimon"}},{"match":{"terms":"format"}}],"must_not":[{"match":{"terms":"vector"}}]}}',
+    10
+);
 ```
 
 </TabItem>
@@ -141,8 +157,7 @@ Table table = catalog.getTable(identifier);
 
 // Step 1: Build full-text search
 GlobalIndexResult result = table.newFullTextSearchBuilder()
-        .withQueryText("paimon lake format")
-        .withQueryOperator("and")
+        .withQuery(FullTextQuery.phrase("paimon lake", 1))
         .withLimit(10)
         .withTextColumn("content")
         .executeLocal();
