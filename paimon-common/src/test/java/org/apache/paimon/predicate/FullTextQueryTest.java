@@ -79,8 +79,7 @@ public class FullTextQueryTest {
                                 + "\"prefix_length\":0}},\"negative_boost\":0.3}}");
 
         FullTextQuery multiMatch =
-                FullTextQuery.multiMatch(
-                        "paimon", Arrays.asList("title", "content"), null, "and");
+                FullTextQuery.multiMatch("paimon", Arrays.asList("title", "content"), null, "and");
         assertThat(multiMatch).isInstanceOf(FullTextQuery.MultiMatch.class);
         assertThat(multiMatch.columns()).containsExactly("title", "content");
         assertThat(multiMatch.toJson())
