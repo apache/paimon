@@ -21,9 +21,20 @@ package org.apache.paimon.s3;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.s3a.S3ADataBlocks;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
+import org.apache.hadoop.fs.s3a.WriteOperationHelper;
+import org.apache.hadoop.fs.s3a.api.RequestFactory;
+import org.apache.hadoop.fs.s3a.audit.AuditSpanS3A;
+import org.apache.hadoop.fs.s3a.impl.PutObjectOptions;
+import org.apache.hadoop.fs.s3a.impl.StoreContext;
+import org.apache.hadoop.fs.statistics.DurationTrackerFactory;
+import org.apache.hadoop.fs.store.audit.AuditSpan;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.ByteArrayOutputStream;
@@ -37,6 +48,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link S3FileIO}. */
 public class S3FileIOTest {
+
+    private static final AuditSpanS3A TEST_AUDIT_SPAN = new TestingAuditSpan();
 
     @Test
     public void testOverwriteOutputStreamBypassesHadoopCreate() throws Exception {
@@ -107,6 +120,45 @@ public class S3FileIOTest {
     }
 
     @Test
+    public void testNoOverwriteDirectPutPreconditionFailureMapsToFileAlreadyExists()
+            throws Exception {
+        for (int statusCode : new int[] {409, 412}) {
+            IOException failure = s3Failure(statusCode);
+            DirectPutTestingS3FileIO fileIO = new DirectPutTestingS3FileIO(failure);
+            Path path = new Path("s3://bucket/table/snapshot/snapshot-1");
+
+            PositionOutputStream out = fileIO.newOutputStream(path, false);
+            out.write("snapshot".getBytes(StandardCharsets.UTF_8));
+
+            assertThatThrownBy(out::close)
+                    .isInstanceOf(FileAlreadyExistsException.class)
+                    .hasMessageContaining("snapshot-1")
+                    .hasCause(failure);
+            assertThat(fileIO.createFileSystemCalls).isEqualTo(1);
+            assertThat(fileIO.fileSystem.writeHelper.request.ifNoneMatch()).isEqualTo("*");
+        }
+    }
+
+    @Test
+    public void testOverwriteDirectPutPreconditionFailureKeepsOriginalIOException()
+            throws Exception {
+        for (int statusCode : new int[] {409, 412}) {
+            IOException failure = s3Failure(statusCode);
+            DirectPutTestingS3FileIO fileIO = new DirectPutTestingS3FileIO(failure);
+            Path path = new Path("s3://bucket/table/snapshot/snapshot-1");
+
+            PositionOutputStream out = fileIO.newOutputStream(path, true);
+            out.write("snapshot".getBytes(StandardCharsets.UTF_8));
+
+            assertThatThrownBy(out::close)
+                    .isSameAs(failure)
+                    .isNotInstanceOf(FileAlreadyExistsException.class);
+            assertThat(fileIO.createFileSystemCalls).isEqualTo(1);
+            assertThat(fileIO.fileSystem.writeHelper.request.ifNoneMatch()).isNull();
+        }
+    }
+
+    @Test
     public void testNoOverwritePutObjectRequestUsesIfNoneMatchHeader() {
         PutObjectRequest request =
                 PutObjectRequest.builder()
@@ -158,6 +210,29 @@ public class S3FileIOTest {
         assertThat(fileIO.createFileSystemCalls).isEqualTo(1);
     }
 
+    @Test
+    public void testSnapshotMetadataPathClassification() throws Exception {
+        S3FileIO fileIO = new S3FileIO();
+
+        assertThat(
+                        fileIO.supportsAtomicCreateWithoutOverwrite(
+                                new Path("s3://bucket/table/snapshot/EARLIEST")))
+                .isTrue();
+        assertThat(
+                        fileIO.supportsAtomicCreateWithoutOverwrite(
+                                new Path("s3://bucket/table/snapshot/not-snapshot")))
+                .isFalse();
+        assertThat(
+                        fileIO.supportsAtomicCreateWithoutOverwrite(
+                                new Path("s3://bucket/table/metadata/snapshot-1")))
+                .isFalse();
+    }
+
+    private static IOException s3Failure(int statusCode) {
+        return new IOException(
+                S3Exception.builder().statusCode(statusCode).message("S3 failure").build());
+    }
+
     private static class TestingS3FileIO extends S3FileIO {
 
         private int directOutputStreamCalls;
@@ -178,6 +253,120 @@ public class S3FileIOTest {
             createFileSystemCalls++;
             throw new UncheckedIOException(new IOException("Hadoop create called"));
         }
+    }
+
+    private static class DirectPutTestingS3FileIO extends S3FileIO {
+
+        private final FailingS3AFileSystem fileSystem;
+        private int createFileSystemCalls;
+
+        private DirectPutTestingS3FileIO(IOException failure) {
+            this.fileSystem = new FailingS3AFileSystem(failure);
+        }
+
+        @Override
+        protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
+            createFileSystemCalls++;
+            return fileSystem;
+        }
+    }
+
+    private static class FailingS3AFileSystem extends S3AFileSystem {
+
+        private final FailingWriteOperationHelper writeHelper;
+
+        private FailingS3AFileSystem(IOException failure) {
+            this.writeHelper = new FailingWriteOperationHelper(this, failure);
+        }
+
+        @Override
+        public AuditSpanS3A getActiveAuditSpan() {
+            return TEST_AUDIT_SPAN;
+        }
+
+        @Override
+        public WriteOperationHelper createWriteOperationHelper(AuditSpan auditSpan) {
+            return writeHelper;
+        }
+
+        @Override
+        public String pathToKey(org.apache.hadoop.fs.Path path) {
+            String uriPath = path.toUri().getPath();
+            return uriPath.startsWith("/") ? uriPath.substring(1) : uriPath;
+        }
+
+        @Override
+        public String getBucket() {
+            return "bucket";
+        }
+
+        @Override
+        public StoreContext createStoreContext() {
+            return null;
+        }
+
+        @Override
+        public RequestFactory getRequestFactory() {
+            return null;
+        }
+    }
+
+    private static class FailingWriteOperationHelper extends WriteOperationHelper {
+
+        private final IOException failure;
+        private PutObjectRequest request;
+
+        private FailingWriteOperationHelper(S3AFileSystem fileSystem, IOException failure) {
+            super(fileSystem, new Configuration(), null, null, TEST_AUDIT_SPAN, null);
+            this.failure = failure;
+        }
+
+        @Override
+        public PutObjectRequest createPutObjectRequest(
+                String key, long length, PutObjectOptions options) {
+            return PutObjectRequest.builder()
+                    .bucket("bucket")
+                    .key(key)
+                    .contentLength(length)
+                    .build();
+        }
+
+        @Override
+        public PutObjectResponse putObject(
+                PutObjectRequest request,
+                PutObjectOptions options,
+                S3ADataBlocks.BlockUploadData uploadData,
+                DurationTrackerFactory durationTrackerFactory)
+                throws IOException {
+            this.request = request;
+            throw failure;
+        }
+    }
+
+    private static class TestingAuditSpan implements AuditSpanS3A {
+
+        @Override
+        public String getSpanId() {
+            return "test-span";
+        }
+
+        @Override
+        public String getOperationName() {
+            return "test";
+        }
+
+        @Override
+        public long getTimestamp() {
+            return 0L;
+        }
+
+        @Override
+        public AuditSpan activate() {
+            return this;
+        }
+
+        @Override
+        public void deactivate() {}
     }
 
     private static class CapturingPositionOutputStream extends PositionOutputStream {

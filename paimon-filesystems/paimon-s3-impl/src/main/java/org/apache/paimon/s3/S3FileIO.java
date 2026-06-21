@@ -284,7 +284,7 @@ public class S3FileIO extends HadoopCompliantFileIO {
                         StubDurationTrackerFactory.STUB_DURATION_TRACKER_FACTORY);
                 closed = true;
             } catch (IOException e) {
-                if (isPreconditionFailed(e)) {
+                if (!overwrite && isPreconditionFailed(e)) {
                     throw fileAlreadyExists(path, e);
                 }
                 throw e;
