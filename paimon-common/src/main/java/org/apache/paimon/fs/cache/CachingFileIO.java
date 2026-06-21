@@ -122,6 +122,11 @@ public class CachingFileIO implements FileIO {
     }
 
     @Override
+    public boolean supportsAtomicCreateWithoutOverwrite(Path path) throws IOException {
+        return delegate.supportsAtomicCreateWithoutOverwrite(path);
+    }
+
+    @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         return delegate.getFileStatus(path);
     }

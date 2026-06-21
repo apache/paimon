@@ -95,6 +95,15 @@ public interface FileIO extends Serializable, Closeable {
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
 
     /**
+     * Whether {@link #newOutputStream(Path, boolean)} with {@code overwrite=false} can create this
+     * path without first listing or probing the parent directory, and can fail atomically if the
+     * object already exists.
+     */
+    default boolean supportsAtomicCreateWithoutOverwrite(Path path) throws IOException {
+        return false;
+    }
+
+    /**
      * Opens a TwoPhaseOutputStream at the indicated Path for transactional writing.
      *
      * <p>This method creates a stream that supports transactional writing operations. The written

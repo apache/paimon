@@ -115,6 +115,11 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public boolean supportsAtomicCreateWithoutOverwrite(Path path) throws IOException {
+        return fileIO().supportsAtomicCreateWithoutOverwrite(path);
+    }
+
+    @Override
     public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
         return fileIO().newTwoPhaseOutputStream(path, overwrite);
