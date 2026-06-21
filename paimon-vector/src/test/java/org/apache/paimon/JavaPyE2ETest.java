@@ -303,9 +303,7 @@ public class JavaPyE2ETest {
 
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(
-                    GenericRow.of(
-                            3, new GenericArray(new float[] {1.0f, 0.0f, 0.0f, 0.0f})));
+            write.write(GenericRow.of(3, new GenericArray(new float[] {1.0f, 0.0f, 0.0f, 0.0f})));
             commit.commit(write.prepareCommit());
         }
 
