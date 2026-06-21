@@ -102,6 +102,61 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
     }
 
+    @Test
+    public void testRestoreDoesNotExpireKeptSnapshots() throws Exception {
+        sql("CREATE TABLE T (id INT, name STRING)");
+
+        FileStoreTable table = paimonTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        commitRow(table, 1, "a");
+        commitRow(table, 2, "b");
+        commitRow(table, 3, "c");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        // Configure aggressive expiration that would otherwise drop every snapshot but the latest.
+        sql(
+                "ALTER TABLE T SET ("
+                        + "'snapshot.num-retained.min' = '1', "
+                        + "'snapshot.num-retained.max' = '1')");
+
+        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+                .containsExactly(Row.of(3L, 1L, 4L));
+
+        // Restore-as-latest must not delete snapshots whose id is larger than the restored one,
+        // even with snapshot.num-retained.max = 1. The restore path skips automatic expiration.
+        assertEquals(4, snapshotManager.latestSnapshotId());
+        assertTrue(snapshotManager.snapshotExists(1));
+        assertTrue(snapshotManager.snapshotExists(2));
+        assertTrue(snapshotManager.snapshotExists(3));
+    }
+
+    @Test
+    public void testRestoreKeepsRowIdMonotonic() throws Exception {
+        sql("CREATE TABLE RT (id INT, name STRING) WITH ('row-tracking.enabled' = 'true')");
+
+        FileStoreTable table = paimonTable("RT");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        commitRow(table, 1, "a");
+        commitRow(table, 2, "b");
+        commitRow(table, 3, "c");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        Long latestNextRowId = snapshotManager.latestSnapshot().nextRowId();
+        assertThat(latestNextRowId).isNotNull();
+
+        // Restore the first snapshot, whose own nextRowId is smaller than the current latest.
+        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.RT', snapshot_id => 1)"))
+                .containsExactly(Row.of(3L, 1L, 4L));
+
+        // nextRowId must not move backwards: otherwise new appends would reuse row ids already
+        // assigned by snapshots 2 and 3, breaking the global uniqueness of _ROW_ID. The restore
+        // snapshot keeps the larger of the previous latest and the target nextRowId.
+        Snapshot restored = table.snapshot(4);
+        assertThat(restored.nextRowId()).isEqualTo(latestNextRowId);
+    }
+
     private void assertRestoreDelta(
             FileStoreTable table,
             long snapshotId,

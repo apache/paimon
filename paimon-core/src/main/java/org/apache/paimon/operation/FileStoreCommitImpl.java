@@ -1218,6 +1218,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Pair<String, Long> baseManifestList =
                 manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
+        // For row-tracking tables nextRowId must stay monotonic: restoring an older snapshot must
+        // not move it backwards, otherwise new appends would reuse row ids already assigned by the
+        // snapshots between the target and the previous latest, breaking the global uniqueness of
+        // _ROW_ID. Keep the larger of the previous latest and the target nextRowId.
+        Long nextRowId = maxNextRowId(latest.nextRowId(), targetSnapshot.nextRowId());
         Snapshot newSnapshot =
                 new Snapshot(
                         latest.id() + 1,
@@ -1239,9 +1244,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.watermark(),
                         targetSnapshot.statistics(),
                         targetSnapshot.properties(),
-                        targetSnapshot.nextRowId());
+                        nextRowId);
 
         return commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+    }
+
+    @Nullable
+    private static Long maxNextRowId(@Nullable Long left, @Nullable Long right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return Math.max(left, right);
     }
 
     public void compactManifest() {

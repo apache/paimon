@@ -208,7 +208,12 @@ public class TableCommitImpl implements InnerTableCommit {
         checkCommitted();
         boolean success = commit.restoreAsLatest(targetSnapshot);
         if (success) {
-            maintain(COMMIT_IDENTIFIER, maintainExecutor, true);
+            // Skip automatic expiration for the restore path. Restore-as-latest promises not to
+            // delete snapshots or tags whose snapshot id is larger than the restored snapshot, but
+            // the newly committed latest snapshot would otherwise let expiration (e.g. a low
+            // snapshot.num-retained.max) immediately remove the restored snapshot and the later
+            // snapshots/tags it is meant to preserve.
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, false);
         }
         return success;
     }
