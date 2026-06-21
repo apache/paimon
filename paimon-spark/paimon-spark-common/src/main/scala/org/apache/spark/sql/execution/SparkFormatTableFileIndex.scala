@@ -203,7 +203,7 @@ class LazyPartitionPruningFileIndex(
   override def listFiles(
       partitionFilters: Seq[Expression],
       dataFilters: Seq[Expression]): Seq[PartitionDirectory] = {
-    if (_partitionSchema.isEmpty || partitionFilters.isEmpty) {
+    if (_partitionSchema.isEmpty || partitionFilters.isEmpty || _fullIndex != null) {
       return fullIndex.listFiles(partitionFilters, dataFilters)
     }
     if (recursiveFileLookup) {
