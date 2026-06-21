@@ -215,12 +215,7 @@ public class HintFileUtils {
         Exception exception = null;
         while (retryNumber++ < READ_HINT_RETRY_NUM) {
             try {
-                Optional<String> hint = fileIO.readOverwrittenFileUtf8(path);
-                if (!hint.isPresent()) {
-                    return Optional.empty();
-                }
-
-                long snapshotId = Long.parseLong(hint.get());
+                long snapshotId = Long.parseLong(fileIO.readFileUtf8(path));
                 if (snapshotId <= 0) {
                     throw new NumberFormatException("Latest snapshot id must be positive.");
                 }

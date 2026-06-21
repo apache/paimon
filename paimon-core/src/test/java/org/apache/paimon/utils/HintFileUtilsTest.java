@@ -105,6 +105,20 @@ public class HintFileUtilsTest {
     }
 
     @Test
+    public void testObjectStoreUnreadableLatestHintDoesNotUseDefaultOverwrittenReadExistsProbe() {
+        DefaultOverwrittenReadNoListObjectStoreFileIO fileIO =
+                new DefaultOverwrittenReadNoListObjectStoreFileIO();
+        SnapshotManager snapshotManager = snapshotManager(fileIO);
+
+        assertThatThrownBy(snapshotManager::latestSnapshotId)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Cannot safely determine latest snapshot")
+                .hasStackTraceContaining("LATEST hint is unreadable");
+        assertThat(fileIO.listStatusCalls).isZero();
+        assertThat(fileIO.existsCalls).isZero();
+    }
+
+    @Test
     public void testObjectStoreLatestHintMissingSnapshotFailsClosedWithoutList()
             throws IOException {
         NoListObjectStoreFileIO fileIO = new NoListObjectStoreFileIO();
@@ -235,6 +249,50 @@ public class HintFileUtilsTest {
             } catch (java.io.FileNotFoundException e) {
                 return Optional.empty();
             }
+        }
+
+        @Override
+        public String readFileUtf8(Path path) throws IOException {
+            if (denyLatestHintRead && HintFileUtils.LATEST.equals(path.getName())) {
+                throw new AccessDeniedException(path.toString());
+            }
+            return super.readFileUtf8(path);
+        }
+    }
+
+    private static class DefaultOverwrittenReadNoListObjectStoreFileIO extends LocalFileIO {
+
+        private int listStatusCalls;
+        private int existsCalls;
+
+        @Override
+        public boolean isObjectStore() {
+            return true;
+        }
+
+        @Override
+        public boolean supportsAtomicCreateWithoutOverwrite(Path path) {
+            return true;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            listStatusCalls++;
+            throw new AccessDeniedException(path.toString());
+        }
+
+        @Override
+        public boolean exists(Path path) throws IOException {
+            existsCalls++;
+            throw new AccessDeniedException(path.toString());
+        }
+
+        @Override
+        public String readFileUtf8(Path path) throws IOException {
+            if (HintFileUtils.LATEST.equals(path.getName())) {
+                throw new AccessDeniedException(path.toString());
+            }
+            return super.readFileUtf8(path);
         }
     }
 
