@@ -26,6 +26,7 @@ import org.apache.paimon.table.sink._
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataType
 import org.apache.paimon.types.DataTypeRoot.BLOB
+import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
 import org.apache.paimon.utils.SerializationUtils
 
@@ -44,14 +45,26 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
   override val table: FileStoreTable =
     paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
 
+  // Whole top-level column write (kept for callers that only update full columns).
   def writePartialFields(
       data: DataFrame,
       columnNames: Seq[String],
       rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
+    writePartialFields(
+      data,
+      table.rowType().projectByPaths(columnNames.asJava),
+      rawBlobPlaceholderMarkerColumns)
+  }
+
+  // Sub-field-aware write: writeType is already pruned to the written top-level columns and
+  // (possibly) nested sub-fields via dotted paths.
+  def writePartialFields(
+      data: DataFrame,
+      writeType: RowType,
+      rawBlobPlaceholderMarkerColumns: Map[String, String]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
-    assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
-    val writeType = table.rowType().project(columnNames.asJava)
+    assert(data.columns.length == writeType.getFieldCount + 2 + rawBlobPlaceholderMarkerColumns.size)
 
     val options = new CoreOptions(table.schema().options())
     val blobInlineFields = options.blobInlineField().asScala.toSeq
