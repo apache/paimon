@@ -63,4 +63,9 @@ public class LanceVectorSearchTest extends VectorSearchBuilderTest {
     @Test
     @Override
     public void testVectorSearchWithCosineMetric() {}
+
+    @Disabled("Requires Hadoop dependencies")
+    @Test
+    @Override
+    public void testVectorSearchFullModeScansUnindexedData() {}
 }
