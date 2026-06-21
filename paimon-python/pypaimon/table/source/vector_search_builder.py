@@ -216,6 +216,7 @@ class AbstractVectorSearchBuilderImpl:
             self._vector_column,
             filter_=self._filter,
             partition_filter=self._partition_filter,
+            options=self._options,
         )
 
 
@@ -245,5 +246,6 @@ class VectorSearchBuilderImpl(AbstractVectorSearchBuilderImpl, VectorSearchBuild
             self._vector_column,
             self._query_vector,
             filter_=self._filter,
+            partition_filter=self._partition_filter,
             options=self._options,
         )

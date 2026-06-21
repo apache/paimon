@@ -448,6 +448,27 @@ class JavaPyReadWriteTest(unittest.TestCase):
         if sys.version_info[:2] >= (3, 7):
             self._test_index_manifest_inherited_after_write()
 
+    def test_read_btree_raw_fallback(self):
+        table = self.catalog.get_table('default.test_btree_raw_fallback')
+        fast_builder = table.new_read_builder()
+        fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
+        fast_builder.with_filter(fast_predicate)
+        fast_result = fast_builder.new_read().to_arrow(
+            fast_builder.new_scan().plan().splits())
+        self.assertEqual(0, fast_result.num_rows)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        read_builder = full_table.new_read_builder()
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().equal('k', 'k4'))
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'k': ['k4'],
+            'v': ['v4'],
+        })
+        self.assertEqual(expected, actual)
+
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
         read_builder: ReadBuilder = table.new_read_builder()
@@ -1252,6 +1273,47 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids = pa_table.column('id').to_pylist()
         print(f"paimon-vindex vector search matched rows: ids={ids}")
         self.assertIn(0, ids)
+
+    def test_read_vindex_vector_raw_fallback(self):
+        """Test raw fallback for a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table(
+            'default.test_vindex_vector_raw_fallback')
+        fast_result = (table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        fast_ids = sorted(list(fast_result.results()))
+        print(
+            "paimon-vindex fast-mode vector search matched rows: "
+            f"ids={fast_ids}")
+        self.assertNotIn(3, fast_ids)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        full_result = (full_table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        row_ids = sorted(list(full_result.results()))
+        print(
+            "paimon-vindex full-mode vector search matched rows: "
+            f"ids={row_ids}")
+        self.assertEqual([3], row_ids)
+
+        read_builder = full_table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(full_result)
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(scan.plan().splits())
+        self.assertEqual(pa_table.num_rows, 1)
+        self.assertEqual([3], pa_table.column('id').to_pylist())
 
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java
