@@ -22,10 +22,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitState;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
+import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newFile;
@@ -42,7 +46,7 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
         Identifier identifier = Identifier.create("test_database", "test_table");
         TableAwareFileStoreSourceSplit split =
                 new TableAwareFileStoreSourceSplit(
-                        "split-1", newDataSplit(), 0L, identifier, null, 1L);
+                        "split-1", newDataSplit(), 0L, identifier, null, 1L, 2L);
 
         TableAwareFileStoreSourceSplit.Serializer serializer =
                 new TableAwareFileStoreSourceSplit.Serializer();
@@ -50,6 +54,27 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
         TableAwareFileStoreSourceSplit deserialized =
                 serializer.deserialize(serializer.getVersion(), serialized);
         assertThat(deserialized).isEqualTo(split);
+    }
+
+    @Test
+    public void testDeserializeVersion1() throws Exception {
+        Identifier identifier = Identifier.create("test_database", "test_table");
+        DataSplit dataSplit = newDataSplit();
+
+        TableAwareFileStoreSourceSplit.Serializer serializer =
+                new TableAwareFileStoreSourceSplit.Serializer();
+        TableAwareFileStoreSourceSplit deserialized =
+                serializer.deserialize(
+                        1, serializeVersion1("split-1", dataSplit, 3L, identifier, null, 1L));
+
+        assertThat(deserialized.splitId()).isEqualTo("split-1");
+        assertThat(deserialized.split()).isEqualTo(dataSplit);
+        assertThat(deserialized.recordsToSkip()).isEqualTo(3L);
+        assertThat(deserialized.getIdentifier()).isEqualTo(identifier);
+        assertThat(deserialized.getLastSchemaId()).isNull();
+        assertThat(deserialized.getSchemaId()).isEqualTo(1L);
+        assertThat(deserialized.schemaChangeEventsToSkip()).isEqualTo(0L);
+        assertThat(deserialized.isLegacySchemaProgress()).isTrue();
     }
 
     @Test
@@ -74,6 +99,23 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
         assertThat(tableAwareRestored.getSchemaId()).isEqualTo(2L);
     }
 
+    @Test
+    public void testUpdateWithRecordsToSkipPreservesSchemaProgress() throws Exception {
+        Identifier identifier = Identifier.create("test_database", "test_table");
+        DataSplit dataSplit = newDataSplit();
+        TableAwareFileStoreSourceSplit.Serializer serializer =
+                new TableAwareFileStoreSourceSplit.Serializer();
+        TableAwareFileStoreSourceSplit split =
+                serializer.deserialize(
+                        1, serializeVersion1("split-1", dataSplit, 3L, identifier, 1L, 2L));
+
+        TableAwareFileStoreSourceSplit updated = split.updateWithRecordsToSkip(10L);
+
+        assertThat(updated.recordsToSkip()).isEqualTo(10L);
+        assertThat(updated.schemaChangeEventsToSkip()).isEqualTo(0L);
+        assertThat(updated.isLegacySchemaProgress()).isTrue();
+    }
+
     private static DataSplit newDataSplit() {
         return DataSplit.builder()
                 .withSnapshot(1)
@@ -84,5 +126,24 @@ public class TableAwareFileStoreSourceSplitSerializerTest {
                 .rawConvertible(false)
                 .withBucketPath("/temp/2") // not used
                 .build();
+    }
+
+    private static byte[] serializeVersion1(
+            String splitId,
+            DataSplit split,
+            long recordsToSkip,
+            Identifier identifier,
+            Long lastSchemaId,
+            long schemaId)
+            throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        view.writeUTF(splitId);
+        InstantiationUtil.serializeObject(view, split);
+        view.writeLong(recordsToSkip);
+        view.writeUTF(JsonSerdeUtil.toJson(identifier));
+        view.writeLong(lastSchemaId == null ? -1L : lastSchemaId);
+        view.writeLong(schemaId);
+        return out.toByteArray();
     }
 }

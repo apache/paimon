@@ -231,13 +231,31 @@ public class CDCSourceSplitReader
         currentReader = createLazyRecordReader(nextSplit.split());
         currentDataRowsRead = nextSplit.recordsToSkip();
         currentSchemaChangeEvents.clear();
-        if (currentDataRowsRead == 0) {
-            currentSchemaChangeEvents.addAll(schemaChangeEvents);
+        long schemaChangeEventsToSkip =
+                schemaChangeEventsToSkip(nextSplit, schemaChangeEvents.size());
+        for (int i = (int) schemaChangeEventsToSkip; i < schemaChangeEvents.size(); i++) {
+            currentSchemaChangeEvents.add(schemaChangeEvents.get(i));
         }
 
         if (currentDataRowsRead > 0) {
             seek(currentDataRowsRead);
         }
+    }
+
+    private long schemaChangeEventsToSkip(
+            TableAwareFileStoreSourceSplit split, int schemaChangeEventCount) throws IOException {
+        long schemaChangeEventsToSkip =
+                split.isLegacySchemaProgress() && split.recordsToSkip() > 0
+                        ? schemaChangeEventCount
+                        : split.schemaChangeEventsToSkip();
+        if (schemaChangeEventsToSkip < 0 || schemaChangeEventsToSkip > schemaChangeEventCount) {
+            throw new IOException(
+                    String.format(
+                            "Invalid schema change event skip count %s for split %s. "
+                                    + "The split has only %s schema change events.",
+                            schemaChangeEventsToSkip, split.splitId(), schemaChangeEventCount));
+        }
+        return schemaChangeEventsToSkip;
     }
 
     @VisibleForTesting
