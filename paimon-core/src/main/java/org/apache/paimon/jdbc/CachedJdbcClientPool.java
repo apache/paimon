@@ -21,14 +21,11 @@ package org.apache.paimon.jdbc;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-import static org.apache.paimon.jdbc.JdbcCatalogOptions.CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS;
 import static org.apache.paimon.options.CatalogOptions.CLIENT_POOL_SIZE;
 import static org.apache.paimon.options.CatalogOptions.URI;
 
@@ -37,59 +34,55 @@ import static org.apache.paimon.options.CatalogOptions.URI;
  * same JVM. This prevents each Flink operator from creating its own connection pool when using the
  * JDBC catalog.
  *
- * <p>The cache is keyed by JDBC URI and catalog key. Pools are evicted after a configurable
- * inactivity duration.
+ * <p>The cache is keyed by JDBC URI and catalog key. Pools live for the lifetime of the JVM and are
+ * closed via a shutdown hook.
  */
 public class CachedJdbcClientPool {
 
-    private static volatile Cache<Key, JdbcClientPool> clientPoolCache;
+    private static final ConcurrentMap<Key, JdbcClientPool> CLIENT_POOLS =
+            new ConcurrentHashMap<>();
+
+    static {
+        Runtime.getRuntime()
+                .addShutdownHook(
+                        new Thread(
+                                () -> {
+                                    for (JdbcClientPool pool : CLIENT_POOLS.values()) {
+                                        pool.close();
+                                    }
+                                    CLIENT_POOLS.clear();
+                                },
+                                "jdbc-client-pool-shutdown"));
+    }
 
     private final Key key;
     private final int poolSize;
     private final String dbUrl;
     private final Map<String, String> props;
-    private final long evictionInterval;
 
     public CachedJdbcClientPool(Options options, Map<String, String> props) {
         this.dbUrl = options.get(URI);
         this.poolSize = options.get(CLIENT_POOL_SIZE);
-        this.evictionInterval = options.get(CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS);
         this.props = props;
         this.key = Key.of(dbUrl, options.get(JdbcCatalogOptions.CATALOG_KEY));
-        init();
-    }
-
-    private synchronized void init() {
-        if (clientPoolCache == null) {
-            clientPoolCache =
-                    Caffeine.newBuilder()
-                            .expireAfterAccess(evictionInterval, TimeUnit.MILLISECONDS)
-                            .removalListener(
-                                    (ignored, value, cause) -> {
-                                        if (value != null) {
-                                            ((JdbcClientPool) value).close();
-                                        }
-                                    })
-                            .build();
-        }
     }
 
     /** Returns the shared {@link JdbcClientPool} for this cache key, creating one if needed. */
     public JdbcClientPool get() {
-        return clientPoolCache.get(key, k -> new JdbcClientPool(poolSize, dbUrl, props));
+        return CLIENT_POOLS.computeIfAbsent(key, k -> new JdbcClientPool(poolSize, dbUrl, props));
     }
 
     @VisibleForTesting
-    static Cache<Key, JdbcClientPool> clientPoolCache() {
-        return clientPoolCache;
+    static ConcurrentMap<Key, JdbcClientPool> clientPools() {
+        return CLIENT_POOLS;
     }
 
     @VisibleForTesting
-    static synchronized void resetCache() {
-        if (clientPoolCache != null) {
-            clientPoolCache.invalidateAll();
-            clientPoolCache = null;
+    static void resetCache() {
+        for (JdbcClientPool pool : CLIENT_POOLS.values()) {
+            pool.close();
         }
+        CLIENT_POOLS.clear();
     }
 
     static class Key {

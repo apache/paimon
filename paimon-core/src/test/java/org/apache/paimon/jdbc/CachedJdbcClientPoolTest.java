@@ -110,11 +110,11 @@ public class CachedJdbcClientPoolTest {
         JdbcClientPool pool = cache.get();
 
         assertThat(pool).isNotNull();
-        assertThat(CachedJdbcClientPool.clientPoolCache().estimatedSize()).isGreaterThan(0);
+        assertThat(CachedJdbcClientPool.clientPools()).isNotEmpty();
 
         CachedJdbcClientPool.resetCache();
 
-        assertThat(CachedJdbcClientPool.clientPoolCache()).isNull();
+        assertThat(CachedJdbcClientPool.clientPools()).isEmpty();
     }
 
     private static Options createOptions(String uri, String catalogKey) {

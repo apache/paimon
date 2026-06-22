@@ -22,8 +22,6 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
-import java.util.concurrent.TimeUnit;
-
 /** Options for jdbc catalog. */
 public final class JdbcCatalogOptions {
 
@@ -39,15 +37,6 @@ public final class JdbcCatalogOptions {
                     .defaultValue(255)
                     .withDescription(
                             "Set the maximum length of the lock key. The 'lock-key' is composed of concatenating three fields : 'catalog-key', 'database', and 'table'.");
-
-    public static final ConfigOption<Long> CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS =
-            ConfigOptions.key("client-pool-cache.eviction-interval-ms")
-                    .longType()
-                    .defaultValue(TimeUnit.MINUTES.toMillis(5))
-                    .withDescription(
-                            "Eviction interval for the shared JDBC client pool cache. "
-                                    + "When multiple catalog instances in the same JVM share a connection pool, "
-                                    + "idle pools are evicted after this duration of inactivity.");
 
     private JdbcCatalogOptions() {}
 
