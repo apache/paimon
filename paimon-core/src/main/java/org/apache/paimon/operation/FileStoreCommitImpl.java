@@ -1199,7 +1199,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         // if empty properties, just set to null
                         latest.properties(),
                         nextRowId,
-                        latest.operation());
+                        null);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
@@ -1279,7 +1279,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.statistics(),
                         latestSnapshot.properties(),
                         latestSnapshot.nextRowId(),
-                        latestSnapshot.operation());
+                        null);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
