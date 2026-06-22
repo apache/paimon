@@ -26,8 +26,8 @@ import org.apache.paimon.data.columnar.TimestampColumnVector;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Parquet write timestamp precision 0-3 as int64 mills, 4-6 as int64 micros, 7-9 as int96, this
- * class wrap the real vector to provide {@link TimestampColumnVector} interface.
+ * Parquet write timestamp precision 0-6 as int64 micros, 7-9 as int96, this class wrap the real
+ * vector to provide {@link TimestampColumnVector} interface.
  */
 public class ParquetTimestampVector implements TimestampColumnVector {
 

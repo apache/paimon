@@ -380,7 +380,7 @@ public class ParquetRowDataWriter {
         }
 
         private void writeTimestamp(Timestamp value) {
-            recordConsumer.addLong(value.getMillisecond());
+            recordConsumer.addLong(value.toMicros());
         }
     }
 
