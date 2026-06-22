@@ -139,12 +139,8 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self.assertEqual([(1, 'Alice'), (2, 'Bob_new'), (3, 'Carol')], rows)
 
-    def test_existing_table_duplicate_keys_all_updated(self):
-        """If the table already holds multiple rows with the same key, upsert
-        must update ALL of them, leaving no stale rows."""
+    def test_upsert_for_existing_table_duplicate_keys(self):
         table = self._create_table()
-        # Two physical rows sharing key id=1 (plain appends; append-only
-        # tables allow duplicate keys).
         self._write_arrow(table, pa.Table.from_pydict({
             'id': [1], 'name': ['old_A'], 'age': [10], 'city': ['X'],
         }, schema=self.pa_schema))
