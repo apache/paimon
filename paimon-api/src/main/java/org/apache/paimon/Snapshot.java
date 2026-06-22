@@ -279,6 +279,53 @@ public class Snapshot implements Serializable {
                 operation);
     }
 
+    public Snapshot(
+            int version,
+            long id,
+            long schemaId,
+            String baseManifestList,
+            @Nullable Long baseManifestListSize,
+            String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
+            @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
+            @Nullable String indexManifest,
+            String commitUser,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            long totalRecordCount,
+            long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark,
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId) {
+        this(
+                version,
+                id,
+                schemaId,
+                baseManifestList,
+                baseManifestListSize,
+                deltaManifestList,
+                deltaManifestListSize,
+                changelogManifestList,
+                changelogManifestListSize,
+                indexManifest,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark,
+                statistics,
+                properties,
+                nextRowId,
+                null);
+    }
+
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_VERSION) int version,
