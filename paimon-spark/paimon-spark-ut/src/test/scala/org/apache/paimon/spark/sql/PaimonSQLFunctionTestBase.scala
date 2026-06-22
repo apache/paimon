@@ -132,6 +132,79 @@ abstract class PaimonSQLFunctionTestBase extends PaimonSparkTestWithRestCatalogB
     }
   }
 
+  test("Paimon SQL Function: SQL configs captured at creation time") {
+    assume(gteqSpark4_1)
+    withUserDefinedFunction("div_func" -> false) {
+      // Create with ANSI enabled — division by zero should throw at query time.
+      sql("SET spark.sql.ansi.enabled=true")
+      sql("CREATE FUNCTION div_func(x INT) RETURNS DOUBLE RETURN 1 / x")
+      sql("SET spark.sql.ansi.enabled=false")
+
+      // Even though ANSI is now disabled in the session, the function was created with ANSI=true,
+      // so division by zero should still throw ArithmeticException.
+      val e = intercept[Exception] {
+        sql("SELECT div_func(0)").collect()
+      }
+      assert(
+        e.getMessage.contains("Division by zero") ||
+          e.getMessage.contains("ArithmeticException") ||
+          e.getMessage.contains("DIVIDE_BY_ZERO"))
+
+      sql("RESET spark.sql.ansi.enabled")
+    }
+  }
+
+  test("Paimon SQL Function: non-deterministic function body") {
+    assume(gteqSpark4_1)
+    withUserDefinedFunction("rnd" -> false) {
+      sql("CREATE FUNCTION rnd() RETURNS DOUBLE RETURN rand()")
+      val r1 = sql("SELECT rnd()").collect()(0).getDouble(0)
+      val r2 = sql("SELECT rnd()").collect()(0).getDouble(0)
+      assert(r1 >= 0.0 && r1 < 1.0)
+      assert(r2 >= 0.0 && r2 < 1.0)
+    }
+  }
+
+  test("Paimon SQL Function: reject aggregate in scalar function body") {
+    assume(gteqSpark4_1)
+    val e = intercept[Exception] {
+      sql("CREATE FUNCTION bad_agg(x INT) RETURNS INT RETURN SUM(x)")
+    }
+    assert(e.getMessage.contains("CANNOT_CONTAIN_COMPLEX_FUNCTIONS"))
+  }
+
+  test("Paimon SQL Function: reject window function in scalar function body") {
+    assume(gteqSpark4_1)
+    val e = intercept[Exception] {
+      sql("CREATE FUNCTION bad_win(x INT) RETURNS INT RETURN ROW_NUMBER() OVER (ORDER BY x)")
+    }
+    assert(e.getMessage.contains("CANNOT_CONTAIN_COMPLEX_FUNCTIONS"))
+  }
+
+  test("Paimon SQL Function: reject duplicate parameter names") {
+    assume(gteqSpark4_1)
+    val e = intercept[Exception] {
+      sql("CREATE FUNCTION bad_dup(x INT, x INT) RETURNS INT RETURN x + x")
+    }
+    assert(e.getMessage.toLowerCase.contains("duplicate"))
+  }
+
+  test("Paimon SQL Function: reject non-trailing defaults") {
+    assume(gteqSpark4_1)
+    val e = intercept[Exception] {
+      sql("CREATE FUNCTION bad_def(x INT DEFAULT 1, y INT) RETURNS INT RETURN x + y")
+    }
+    assert(e.getMessage.toLowerCase.contains("default"))
+  }
+
+  test("Paimon SQL Function: omitting RETURNS clause") {
+    assume(gteqSpark4_1)
+    withUserDefinedFunction("inc" -> false) {
+      sql("CREATE FUNCTION inc(x INT) RETURN x + 1")
+      checkAnswer(sql("SELECT inc(10)"), Row(11))
+    }
+  }
+
   test("Paimon SQL Function: table function is not supported yet") {
     val e = intercept[Exception] {
       sql("""
