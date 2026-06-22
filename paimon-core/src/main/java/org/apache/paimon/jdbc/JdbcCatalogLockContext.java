@@ -19,7 +19,6 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.CatalogLockContext;
-import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 /** Jdbc lock context. */
@@ -41,11 +40,7 @@ public class JdbcCatalogLockContext implements CatalogLockContext {
 
     public JdbcClientPool connections() {
         if (connections == null) {
-            connections =
-                    new JdbcClientPool(
-                            options.get(CatalogOptions.CLIENT_POOL_SIZE),
-                            options.get(CatalogOptions.URI.key()),
-                            options.toMap());
+            connections = new CachedJdbcClientPool(options, options.toMap()).get();
         }
         return connections;
     }
