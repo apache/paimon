@@ -343,10 +343,9 @@ class TableUpsertByKey:
             key_to_row_ids: Dict[_KeyTuple, List[int]],
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
-        """Update matched rows by rewriting them in-place via
-        :class:`TableUpdateByRowId`. A key matching several existing rows
-        updates all of them to the same input row."""
-        # Expand each matched input row once per existing row id sharing its key.
+        """Update matched rows in-place via :class:`TableUpdateByRowId`;
+        a key matching several existing rows updates all of them."""
+        # Fan out each matched input row to all its existing row ids.
         expanded_input_indices: List[int] = []
         row_ids: List[int] = []
         for i in matched_indices:
