@@ -256,6 +256,25 @@ class LineageUtilsTest {
     }
 
     @Test
+    void testConfigFacetIncludesMetadataOptionsAndExcludesArbitrary() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.iceberg.storage", "hadoop-catalog");
+        options.put("metadata.iceberg.uri", "s3://my-bucket/iceberg");
+        options.put("some.arbitrary.secret", "should-not-appear");
+
+        FileStoreTable table = createTable(options, Collections.emptyList(), Arrays.asList("f0"));
+
+        LineageVertex vertex = LineageUtils.sinkLineageVertex("paimon.db.t", table);
+        LineageDataset dataset = vertex.datasets().get(0);
+
+        DatasetConfigFacet configFacet = (DatasetConfigFacet) dataset.facets().get("config");
+        Map<String, String> config = configFacet.config();
+        assertThat(config).containsEntry("metadata.iceberg.storage", "hadoop-catalog");
+        assertThat(config).containsEntry("metadata.iceberg.uri", "s3://my-bucket/iceberg");
+        assertThat(config).doesNotContainKey("some.arbitrary.secret");
+    }
+
+    @Test
     void testConfigFacetWithEmptyKeys() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Collections.emptyList());
