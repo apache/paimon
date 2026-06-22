@@ -191,7 +191,6 @@ class AlterResourceRequest(RESTRequest):
         }
 
 
-
 # Wire DTO for ``POST /databases/{db}/tables/{tbl}/tags``. Mirrors Java
 # ``CreateTagRequest`` (paimon-api/.../rest/requests/CreateTagRequest.java) — only
 # three fields are serialized. ``ignoreIfExists`` is intentionally NOT included
