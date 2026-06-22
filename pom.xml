@@ -520,6 +520,19 @@ under the License.
         </profile>
 
         <profile>
+            <!-- paimon-eslib depends on Java-11 eslib-api/eslib-core (Lucene 9.12), so it must be
+                 built with JDK 11+. Activated only on JDK 11+ (like paimon-iceberg) so the default
+                 JDK-8 build skips it instead of failing the RequireJavaVersion enforcer rule. -->
+            <id>paimon-eslib</id>
+            <modules>
+                <module>paimon-eslib</module>
+            </modules>
+            <activation>
+                <jdk>11</jdk>
+            </activation>
+        </profile>
+
+        <profile>
             <!-- JDK 9+ supports the ignore-source-errors flag for javadoc -->
             <id>javadoc-jdk9+</id>
             <activation>
