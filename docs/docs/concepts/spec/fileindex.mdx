@@ -98,8 +98,17 @@ Content of bloom filter index is simple:
 This class use (64-bits) long hash. Store the num hash function (one integer) and bit set bytes only. Hash bytes type 
 (like varchar, binary, etc.) using xx hash, hash numeric type by [specified number hash](http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
 
-BloomFilter only support the following data type: TinyIntType, SmallIntType, IntType, BigIntType, FloatType, DoubleType,
-DateType, TimeType, TimestampType, LocalZonedTimestampType, CharType, VarCharType, BinaryType, VarBinaryType.
+BloomFilter supports the following data types:
+
+| Data type | Hash function |
+|-----------|--------------|
+| `CharType`, `VarCharType` | xx hash (64-bit) |
+| `BinaryType`, `VarBinaryType` | xx hash (64-bit) |
+| `TinyIntType`, `SmallIntType`, `IntType`, `BigIntType` | Thomas Wang hash |
+| `FloatType`, `DoubleType` | Thomas Wang hash (on IEEE 754 bit representation) |
+| `DateType`, `TimeType`, `TimestampType`, `LocalZonedTimestampType` | Thomas Wang hash |
+
+BloomFilter does not support: `BooleanType`, `DecimalType`, `VariantType`, `BlobType`, `ArrayType`, `VectorType`, `MultisetType`, `MapType`, `RowType`.
 
 ## Index: Bitmap
 
