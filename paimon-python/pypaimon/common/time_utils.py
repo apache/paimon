@@ -15,6 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import calendar
+from datetime import datetime, timedelta
+from typing import List
+
+
 def parse_duration(text: str) -> int:
     if text is None:
         raise ValueError("text cannot be None")
@@ -77,3 +82,108 @@ def parse_duration(text: str) -> int:
         raise ValueError(f"Duration cannot be negative: {text}")
 
     return result_ms_int
+
+
+# ---------------------------------------------------------------------------
+# Codecs for Java temporal types as serialized by Jackson's JavaTimeModule.
+#
+# These mirror the on-disk JSON shapes that Paimon's Java side reads/writes so
+# that a tag file written by pypaimon is interoperable with Java and vice versa
+# (see ``org.apache.paimon.tag.Tag`` and ``TagTest``):
+#   - ``LocalDateTime`` -> JSON array ``[year, month, day, hour, minute,
+#     second, nanoOfSecond]``
+#   - ``Duration``      -> JSON number of (fractional) seconds, e.g. ``86400.0``
+#
+# Resolution note: Python's ``datetime`` / ``timedelta`` are microsecond-based,
+# so a Java create-time or duration finer than a microsecond is truncated to
+# microseconds on read. Tag granularity is coarse, so this is not a concern in
+# practice.
+# ---------------------------------------------------------------------------
+
+_NANOS_PER_MICRO = 1000
+
+
+def local_datetime_to_json_array(dt: datetime) -> List[int]:
+    """Encode a naive ``datetime`` as Java ``LocalDateTime`` array form.
+
+    Python ``datetime`` only has microsecond resolution, so the emitted
+    nanoOfSecond is ``microsecond * 1000`` (never finer than microseconds).
+    """
+    return [
+        dt.year,
+        dt.month,
+        dt.day,
+        dt.hour,
+        dt.minute,
+        dt.second,
+        dt.microsecond * _NANOS_PER_MICRO,
+    ]
+
+
+def json_array_to_local_datetime(arr: List[int]) -> datetime:
+    """Decode a Java ``LocalDateTime`` array form into a naive ``datetime``.
+
+    Jackson omits trailing zero components, so the array may be shorter than 7;
+    missing components default to 0. A Java nanoOfSecond finer than a
+    microsecond is truncated to microseconds (Python's resolution limit).
+    """
+    padded = list(arr) + [0] * (7 - len(arr))
+    year, month, day, hour, minute, second, nano = padded[:7]
+    return datetime(
+        year, month, day, hour, minute, second, nano // _NANOS_PER_MICRO
+    )
+
+
+def duration_to_json_seconds(td: timedelta):
+    """Encode a ``timedelta`` as Java ``Duration`` decimal-seconds number."""
+    return td.total_seconds()
+
+
+def json_seconds_to_duration(seconds) -> timedelta:
+    """Decode a Java ``Duration`` decimal-seconds number into a ``timedelta``."""
+    return timedelta(seconds=seconds)
+
+
+def duration_to_iso8601(td: timedelta) -> str:
+    """Render a non-negative ``timedelta`` like ``java.time.Duration.toString()``.
+
+    Examples: 1 day -> ``PT24H`` (Duration has no day unit), 30 min ->
+    ``PT30M``, 5 s -> ``PT5S``, zero -> ``PT0S``. Matches what Paimon's Java
+    ``$tags`` system table surfaces for ``time_retained``. Retentions only ever
+    come from ``parse_duration``, which rejects negatives, so only the
+    non-negative form is supported.
+    """
+    total_micros = (
+        td.days * 86_400_000_000 + td.seconds * 1_000_000 + td.microseconds
+    )
+    if total_micros <= 0:
+        return "PT0S"
+
+    total_seconds, micros = divmod(total_micros, 1_000_000)
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    buf = "PT"
+    if hours != 0:
+        buf += "{}H".format(hours)
+    if minutes != 0:
+        buf += "{}M".format(minutes)
+    if secs != 0 or micros != 0 or buf == "PT":
+        frac = ""
+        if micros != 0:
+            frac = "." + ("%06d" % micros).rstrip("0")
+        buf += "{}{}S".format(secs, frac)
+    return buf
+
+
+def local_datetime_to_millis(dt: datetime) -> int:
+    """Convert a naive ``LocalDateTime`` to epoch millis (treated as UTC).
+
+    The tag create-time is timezone-less (Java ``LocalDateTime``); interpreting
+    it as UTC keeps the millis self-consistent with the ``$tags`` system table,
+    whose ``create_time`` mirrors Java ``Timestamp.fromLocalDateTime`` (also
+    zone-less wall-clock arithmetic). Uses integer math with floored
+    sub-millisecond truncation (matching Java ``Instant.toEpochMilli``), so it
+    is exact and correct for pre-epoch instants too.
+    """
+    return calendar.timegm(dt.timetuple()) * 1000 + dt.microsecond // 1000
