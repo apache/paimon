@@ -18,84 +18,10 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.index.IndexFileMeta;
-
 import java.io.Serializable;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
 
-/** Split of full-text search. */
-public class FullTextSearchSplit implements Serializable {
+/** Base split of full-text search. */
+public abstract class FullTextSearchSplit implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    private final String columnName;
-    private final long rowRangeStart;
-    private final long rowRangeEnd;
-    private final List<IndexFileMeta> fullTextIndexFiles;
-
-    public FullTextSearchSplit(
-            long rowRangeStart, long rowRangeEnd, List<IndexFileMeta> fullTextIndexFiles) {
-        this(null, rowRangeStart, rowRangeEnd, fullTextIndexFiles);
-    }
-
-    public FullTextSearchSplit(
-            String columnName,
-            long rowRangeStart,
-            long rowRangeEnd,
-            List<IndexFileMeta> fullTextIndexFiles) {
-        this.columnName = columnName;
-        this.rowRangeStart = rowRangeStart;
-        this.rowRangeEnd = rowRangeEnd;
-        this.fullTextIndexFiles = Collections.unmodifiableList(fullTextIndexFiles);
-    }
-
-    public String columnName() {
-        return columnName;
-    }
-
-    public long rowRangeStart() {
-        return rowRangeStart;
-    }
-
-    public long rowRangeEnd() {
-        return rowRangeEnd;
-    }
-
-    public List<IndexFileMeta> fullTextIndexFiles() {
-        return fullTextIndexFiles;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        FullTextSearchSplit that = (FullTextSearchSplit) o;
-        return Objects.equals(columnName, that.columnName)
-                && rowRangeStart == that.rowRangeStart
-                && rowRangeEnd == that.rowRangeEnd
-                && Objects.equals(fullTextIndexFiles, that.fullTextIndexFiles);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(columnName, rowRangeStart, rowRangeEnd, fullTextIndexFiles);
-    }
-
-    @Override
-    public String toString() {
-        return "FullTextSearchSplit{"
-                + "columnName='"
-                + columnName
-                + '\''
-                + ", rowRangeStart="
-                + rowRangeStart
-                + ", rowRangeEnd="
-                + rowRangeEnd
-                + ", fullTextIndexFiles="
-                + fullTextIndexFiles
-                + '}';
-    }
 }

@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import List
 
+from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
     TANTIVY_FULLTEXT_IDENTIFIER,
 )
@@ -110,5 +111,19 @@ class FullTextScanImpl(FullTextScan):
                 splits.append(
                     FullTextSearchSplit(
                         column_name, range_key.from_, range_key.to, files))
+
+        if all_index_files:
+            raw_row_ranges = GlobalIndexCoverage(
+                self._table,
+                snapshot,
+                partition_filter,
+                all_index_files,
+            ).unindexed_ranges(list(text_column_ids))
+            if raw_row_ranges:
+                raise NotImplementedError(
+                    "Python full-text search does not support "
+                    "global-index.search-mode=full/detail for uncovered row "
+                    "ranges yet. Raw full-text search requires rebuilding "
+                    "temporary full-text indexes.")
 
         return FullTextScanPlan(splits)

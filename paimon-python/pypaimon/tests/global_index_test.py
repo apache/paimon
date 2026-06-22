@@ -126,6 +126,22 @@ class GlobalIndexCoverageTest(unittest.TestCase):
 
         self.assertEqual([Range(5, 9)], coverage.unindexed_ranges(0))
 
+    def test_full_mode_accepts_multiple_field_ids(self):
+        from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+
+        table = _CoverageTable("full")
+        coverage = GlobalIndexCoverage(
+            table,
+            _CoverageSnapshot(10),
+            None,
+            [
+                _coverage_index_file(0, 0, 9),
+                _coverage_index_file(1, 0, 4),
+            ],
+        )
+
+        self.assertEqual([Range(5, 9)], coverage.unindexed_ranges([0, 1]))
+
     def test_full_mode_intersects_coverage_for_all_predicate_fields(self):
         from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
 

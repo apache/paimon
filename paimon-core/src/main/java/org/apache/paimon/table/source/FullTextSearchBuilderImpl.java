@@ -71,7 +71,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     @Override
     public FullTextRead newFullTextRead() {
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
-        return new FullTextReadImpl(table, limit, textColumns(), query);
+        return new FullTextReadImpl(table, partitionFilter, limit, textColumns(), query);
     }
 
     private List<DataField> textColumns() {

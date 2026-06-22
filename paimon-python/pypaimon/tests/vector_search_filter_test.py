@@ -121,7 +121,7 @@ def _entry(partition_row, field_id, index_type, file_name,
                               index_file=index_file)
 
 
-def _patch_snapshot(testcase, entries):
+def _patch_snapshot(testcase, entries, snapshot=None):
     """Stub IndexFileHandler.scan + snapshot resolution."""
 
     mock.patch.stopall()
@@ -144,7 +144,7 @@ def _patch_snapshot(testcase, entries):
     testcase._scan_patch.start()
     testcase._travel_patch = mock.patch(
         "pypaimon.snapshot.time_travel_util.TimeTravelUtil.try_travel_to_snapshot",
-        return_value=object())
+        return_value=snapshot if snapshot is not None else object())
     testcase._travel_patch.start()
 
 
@@ -1120,6 +1120,31 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertEqual(
             ["ft.index"],
             [f.file_name for f in splits[0].full_text_index_files])
+
+    def test_full_text_scan_rejects_full_mode_raw_search(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+        from pypaimon.table.source.full_text_scan import FullTextScanImpl
+
+        class _Options:
+            options = Options({"global-index.search-mode": "full"})
+
+            def global_index_search_mode(self_inner):
+                return CoreOptions(self_inner.options).global_index_search_mode()
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="ft.index", row_range_start=0, row_range_end=4)
+        table = _StubTable(fields=[text_field], entries=[entry])
+        table.options = _Options()
+        _patch_snapshot(self, [entry], types.SimpleNamespace(next_row_id=10))
+
+        with self.assertRaises(NotImplementedError) as ctx:
+            FullTextScanImpl(table, [text_field]).scan()
+
+        self.assertIn("global-index.search-mode=full/detail", str(ctx.exception))
+        self.assertIn("rebuilding temporary full-text indexes", str(ctx.exception))
 
 
 class VectorSearchFilterTest(unittest.TestCase):
