@@ -90,6 +90,11 @@ public class CoreOptions implements Serializable {
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
 
+    public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
+
+    public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
+            "map.shared-shredding.max-columns";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -4845,6 +4850,59 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
                         .stringType()
                         .noDefaultValue());
+    }
+
+    public MapStorageLayout mapStorageLayout(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MAP_STORAGE_LAYOUT)
+                        .enumType(MapStorageLayout.class)
+                        .defaultValue(MapStorageLayout.DEFAULT));
+    }
+
+    public int mapSharedShreddingMaxColumns(String fieldName) {
+        int maxColumns =
+                options.get(
+                        key(FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_MAX_COLUMNS)
+                                .intType()
+                                .defaultValue(256));
+        checkArgument(maxColumns > 0, "options %s must > 0", MAP_SHARED_SHREDDING_MAX_COLUMNS);
+        return maxColumns;
+    }
+
+    /** MAP storage layout. */
+    public enum MapStorageLayout implements DescribedEnum {
+        DEFAULT(
+                "default",
+                "Store MAP columns with the normal key-value array layout. This is the compatible "
+                        + "layout used when no field-level MAP layout option is configured."),
+        SHARED_SHREDDING(
+                "shared-shredding",
+                "Store MAP<STRING, T> columns as a physical row with reusable value columns, a "
+                        + "field mapping, and an overflow map. This layout is intended for maps "
+                        + "whose string keys repeat across rows and can benefit from more columnar "
+                        + "storage.");
+
+        private final String value;
+        private final String description;
+
+        MapStorageLayout(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 
     /**
