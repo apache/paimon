@@ -167,8 +167,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             'city': ['NYC', 'LA', 'Chicago'],
         }, schema=self.pa_schema))
 
-        # (id, name) = (1, Alice) appears twice in the table → matches the
-        # first occurrence; (2, Carol) is new.
+        # (id, name) = (1, Alice) appears twice → both are updated; (2, Carol) is new.
         self._upsert(table, pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['Alice', 'Carol'],
@@ -183,7 +182,12 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
             result['city'].to_pylist(),
         ))
-        self.assertIn((2, 'Carol', 'Dallas'), rows)
+        self.assertEqual([
+            (1, 'Alice', 'Updated'),
+            (1, 'Alice', 'Updated'),
+            (2, 'Bob', 'Chicago'),
+            (2, 'Carol', 'Dallas'),
+        ], rows)
 
     def test_sequential_upserts(self):
         """A second upsert sees the rows inserted by the first."""

@@ -37,8 +37,8 @@ class TableUpsertByKey:
     Table upsert by one or more user-specified key columns for append-only tables.
 
     For each row in the input Arrow table:
-    - If a row with the same upsert_keys composite value already exists → update that row
-      (in-place rewrite).
+    - If one or more rows with the same upsert_keys composite value already exist →
+      update all of them (in-place rewrite).
     - If no matching row exists → append as a new row.
 
     All upsert_keys must be columns present in both the input data and the table schema.
