@@ -169,7 +169,8 @@ class TableUpsertByKey:
         )
 
         # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
-        #    appear in the input (memory ∝ |input|, not |partition|).
+        #    appear in the input (memory ∝ matched existing rows, not the
+        #    whole partition).
         key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
@@ -282,8 +283,7 @@ class TableUpsertByKey:
     ) -> Dict[_KeyTuple, List[int]]:
         """
         Scan the partition in batches and collect key → [_ROW_ID, ...] for
-        rows whose composite key is in *input_key_set*. All row ids sharing a
-        key are kept so every matching row can be updated.
+        rows whose composite key is in *input_key_set*.
 
         The partition spec (if any) is pushed down as an ``and`` of per-key
         equality predicates so non-matching partitions are pruned by the
@@ -343,9 +343,7 @@ class TableUpsertByKey:
             key_to_row_ids: Dict[_KeyTuple, List[int]],
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
-        """Update matched rows in-place via :class:`TableUpdateByRowId`;
-        a key matching several existing rows updates all of them."""
-        # Fan out each matched input row to all its existing row ids.
+        """Update matched rows in-place via :class:`TableUpdateByRowId`."""
         expanded_input_indices: List[int] = []
         row_ids: List[int] = []
         for i in matched_indices:
