@@ -21,6 +21,9 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import List
 
+from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+    TANTIVY_FULLTEXT_IDENTIFIER,
+)
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
 from pypaimon.utils.range import Range
 
@@ -84,7 +87,10 @@ class FullTextScanImpl(FullTextScan):
             global_index_meta = entry.index_file.global_index_meta
             if global_index_meta is None:
                 return False
-            return global_index_meta.index_field_id in text_column_ids
+            return (
+                global_index_meta.index_field_id in text_column_ids
+                and entry.index_file.index_type == TANTIVY_FULLTEXT_IDENTIFIER
+            )
 
         entries = index_file_handler.scan(snapshot, index_file_filter)
         all_index_files = [entry.index_file for entry in entries]

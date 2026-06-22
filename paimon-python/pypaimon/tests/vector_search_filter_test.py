@@ -1091,6 +1091,26 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertEqual(1.0, result.score_getter()(2))
         self.assertEqual(1.0, result.score_getter()(3))
 
+    def test_full_text_scan_ignores_other_index_types_on_same_column(self):
+        from pypaimon.table.source.full_text_scan import FullTextScanImpl
+
+        text_field = _field(1, "content", "STRING")
+        ft_entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="ft.index", row_range_start=0, row_range_end=9)
+        btree_entry = _entry(
+            None, field_id=1, index_type="btree",
+            file_name="btree.index", row_range_start=0, row_range_end=9)
+        table = _StubTable(fields=[text_field], entries=[ft_entry, btree_entry])
+        _patch_snapshot(self, [ft_entry, btree_entry])
+
+        splits = FullTextScanImpl(table, [text_field]).scan().splits()
+
+        self.assertEqual(1, len(splits))
+        self.assertEqual(
+            ["ft.index"],
+            [f.file_name for f in splits[0].full_text_index_files])
+
 
 class VectorSearchFilterTest(unittest.TestCase):
     """Non-partitioned wiring: scan + read + external_path plumbing."""
