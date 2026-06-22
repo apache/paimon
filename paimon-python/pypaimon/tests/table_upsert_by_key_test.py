@@ -139,6 +139,28 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self.assertEqual([(1, 'Alice'), (2, 'Bob_new'), (3, 'Carol')], rows)
 
+    def test_existing_table_duplicate_keys_all_updated(self):
+        """If the table already holds multiple rows with the same key, upsert
+        must update ALL of them, leaving no stale rows."""
+        table = self._create_table()
+        # Two physical rows sharing key id=1 (plain appends; append-only
+        # tables allow duplicate keys).
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_A'], 'age': [10], 'city': ['X'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_B'], 'age': [20], 'city': ['Y'],
+        }, schema=self.pa_schema))
+
+        self._upsert(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['UPDATED'], 'age': [99], 'city': ['Z'],
+        }, schema=self.pa_schema), upsert_keys=['id'])
+
+        result = self._read_all(table)
+        names = sorted(n for i, n in zip(result['id'].to_pylist(),
+                                         result['name'].to_pylist()) if i == 1)
+        self.assertEqual(['UPDATED', 'UPDATED'], names)
+
     def test_composite_key_upsert(self):
         """Upsert with a multi-column composite key."""
         table = self._create_table()
