@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SupportsWriterMetadata;
 
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
@@ -27,11 +28,14 @@ import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A simple {@link FormatWriter} implementation that wraps a {@link ParquetWriter}. */
-public class ParquetBulkWriter implements FormatWriter {
+public class ParquetBulkWriter implements FormatWriter, SupportsWriterMetadata {
 
     /** The ParquetWriter to write to. */
     private final ParquetWriter<InternalRow> parquetWriter;
@@ -39,13 +43,29 @@ public class ParquetBulkWriter implements FormatWriter {
     /** Cached footer metadata after close, used to avoid re-reading the file for stats. */
     @Nullable private ParquetMetadata footerMetadata;
 
+    private final Map<String, byte[]> metadata;
+
     /**
      * Creates a new ParquetBulkWriter wrapping the given ParquetWriter.
      *
      * @param parquetWriter The ParquetWriter to write to.
      */
     public ParquetBulkWriter(ParquetWriter<InternalRow> parquetWriter) {
+        this(parquetWriter, new HashMap<>());
+    }
+
+    public ParquetBulkWriter(
+            ParquetWriter<InternalRow> parquetWriter, Map<String, byte[]> metadata) {
         this.parquetWriter = checkNotNull(parquetWriter, "parquetWriter");
+        this.metadata = checkNotNull(metadata, "metadata");
+    }
+
+    @Override
+    public void addMetadata(Map<String, byte[]> metadata) {
+        for (Map.Entry<String, byte[]> entry : metadata.entrySet()) {
+            this.metadata.put(
+                    entry.getKey(), Arrays.copyOf(entry.getValue(), entry.getValue().length));
+        }
     }
 
     @Override

@@ -20,15 +20,25 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReadWriteTest;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SupportsReaderArrowSchema;
+import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.vector.types.Types;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
@@ -40,9 +50,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** A parquet {@link FormatReadWriteTest}. */
@@ -56,6 +70,74 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
     protected FileFormat fileFormat() {
         return new ParquetFileFormat(
                 new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+    }
+
+    @Test
+    public void testWriteMetadata() throws Exception {
+        ParquetFileFormat format =
+                new ParquetFileFormat(
+                        new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(1, "name", DataTypes.STRING()));
+
+        PositionOutputStream out = fileIO.newOutputStream(file, false);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, "zstd");
+        Map<String, String> fieldMetadata = new HashMap<>();
+        fieldMetadata.put("paimon.test.field-key", "field-value");
+        fieldMetadata.put("paimon.test.field-version", "1");
+        Schema arrowSchema =
+                new Schema(
+                        Arrays.asList(
+                                new Field(
+                                        "id",
+                                        new FieldType(
+                                                true,
+                                                Types.MinorType.INT.getType(),
+                                                null,
+                                                Collections.singletonMap("PARQUET:field_id", "0")),
+                                        null),
+                                new Field(
+                                        "name",
+                                        new FieldType(
+                                                true,
+                                                Types.MinorType.VARCHAR.getType(),
+                                                null,
+                                                fieldMetadata),
+                                        null)));
+        byte[] arrowSchemaBytes = arrowSchema.serializeAsMessage();
+        Map<String, byte[]> metadata = new HashMap<>();
+        metadata.put("paimon.test.key", "paimon-test-value".getBytes(StandardCharsets.UTF_8));
+        metadata.put(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY, arrowSchemaBytes);
+        ((SupportsWriterMetadata) writer).addMetadata(metadata);
+        writer.addElement(GenericRow.of(1, BinaryString.fromString("one")));
+        writer.close();
+        out.close();
+
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            Map<String, String> fileMetadata =
+                    reader.getFooter().getFileMetaData().getKeyValueMetaData();
+            Map<String, byte[]> decodedMetadata = FormatMetadataUtils.decodeMetadata(fileMetadata);
+            Assertions.assertThat(
+                            new String(
+                                    decodedMetadata.get("paimon.test.key"), StandardCharsets.UTF_8))
+                    .isEqualTo("paimon-test-value");
+        }
+
+        FormatReaderContext context =
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        try (FileRecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType, rowType, Collections.emptyList())
+                        .createReader(context)) {
+            Optional<Schema> readArrowSchema =
+                    ((SupportsReaderArrowSchema) reader).readArrowSchema();
+            Assertions.assertThat(readArrowSchema).hasValue(arrowSchema);
+            Assertions.assertThat(FormatMetadataUtils.readFieldMetadata(readArrowSchema.get()))
+                    .containsEntry("name", fieldMetadata);
+        }
     }
 
     @ParameterizedTest

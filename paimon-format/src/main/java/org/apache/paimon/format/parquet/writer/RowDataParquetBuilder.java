@@ -35,6 +35,9 @@ import org.apache.parquet.io.OutputFile;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
@@ -58,8 +61,16 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
+        return createWriter(out, compression, HashMap::new);
+    }
+
+    @Override
+    public ParquetWriter<InternalRow> createWriter(
+            OutputFile out, String compression, Supplier<Map<String, byte[]>> metadataSupplier)
+            throws IOException {
         ParquetRowDataBuilder builder =
                 new ParquetRowDataBuilder(out, rowType, shreddingSchemas)
+                        .withMetadataSupplier(metadataSupplier)
                         .withConf(conf)
                         .withCompressionCodec(getCompressionCodec(getCompression(compression)))
                         .withRowGroupSize(

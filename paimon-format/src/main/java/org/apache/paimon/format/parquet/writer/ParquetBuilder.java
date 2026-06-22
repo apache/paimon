@@ -23,6 +23,8 @@ import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * A builder to create a {@link ParquetWriter} from a Parquet {@link OutputFile}.
@@ -34,4 +36,10 @@ public interface ParquetBuilder<T> extends Serializable {
 
     /** Creates and configures a parquet writer to the given output file. */
     ParquetWriter<T> createWriter(OutputFile out, String compression) throws IOException;
+
+    default ParquetWriter<T> createWriter(
+            OutputFile out, String compression, Supplier<Map<String, byte[]>> metadataSupplier)
+            throws IOException {
+        return createWriter(out, compression);
+    }
 }

@@ -20,7 +20,9 @@ package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.MemorySize;
 
@@ -28,16 +30,22 @@ import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.Writer;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link FormatWriter} implementation that writes data in ORC format. */
-public class OrcBulkWriter implements FormatWriter {
+public class OrcBulkWriter implements FormatWriter, SupportsWriterMetadata {
 
     private final Writer writer;
     private final Vectorizer<InternalRow> vectorizer;
     private final VectorizedRowBatch rowBatch;
     private final PositionOutputStream underlyingStream;
+    private final Map<String, byte[]> metadata;
 
     private long currentBatchMemoryUsage = 0;
     private final long memoryLimit;
@@ -54,6 +62,15 @@ public class OrcBulkWriter implements FormatWriter {
         this.rowBatch = vectorizer.getSchema().createRowBatch(batchSize);
         this.underlyingStream = underlyingStream;
         this.memoryLimit = memoryLimit.getBytes();
+        this.metadata = new HashMap<>();
+    }
+
+    @Override
+    public void addMetadata(Map<String, byte[]> metadata) {
+        for (Map.Entry<String, byte[]> entry : metadata.entrySet()) {
+            this.metadata.put(
+                    entry.getKey(), Arrays.copyOf(entry.getValue(), entry.getValue().length));
+        }
     }
 
     @Override
@@ -75,6 +92,12 @@ public class OrcBulkWriter implements FormatWriter {
     @Override
     public void close() throws IOException {
         flush();
+        for (Map.Entry<String, String> entry :
+                FormatMetadataUtils.encodeMetadata(metadata).entrySet()) {
+            writer.addUserMetadata(
+                    entry.getKey(),
+                    ByteBuffer.wrap(entry.getValue().getBytes(StandardCharsets.UTF_8)));
+        }
         writer.close();
     }
 
