@@ -1163,3 +1163,7 @@ def add_table_subcommands(table_parser):
     update_comment_parser = alter_subparsers.add_parser('update-comment', help='Update table comment')
     update_comment_parser.add_argument('--comment', '-c', required=True, help='New table comment')
     update_comment_parser.set_defaults(func=cmd_table_alter)
+
+    # Tag subcommands: table tag <create|list|delete|get>
+    from pypaimon.cli.cli_tag import add_tag_subcommands
+    add_tag_subcommands(table_subparsers)

@@ -589,6 +589,66 @@ paimon table alter mydb.users alter-column -n age -t BIGINT -c 'User age in year
 paimon table alter mydb.users update-comment -c "Updated user information table"
 ```
 
+### Table Tag
+
+Manage tags (named snapshots) on a table. Tags are useful for time travel and pinning a snapshot for later access.
+
+```shell
+paimon table tag <create|list|get|delete> mydb.users ...
+```
+
+#### Tag Create
+
+```shell
+# Tag the latest snapshot
+paimon table tag create mydb.users v1
+
+# Tag a specific snapshot
+paimon table tag create mydb.users v1 --snapshot-id 3
+
+# Do not error if the tag already exists
+paimon table tag create mydb.users v1 --ignore-if-exists
+```
+
+Options:
+- `--snapshot-id, -s`: Snapshot id to tag (default: the latest snapshot)
+- `--ignore-if-exists, -i`: Do not raise an error if the tag already exists
+
+#### Tag List
+
+```shell
+# List all tags
+paimon table tag list mydb.users
+
+# Only tags with a name prefix
+paimon table tag list mydb.users --prefix prod_
+
+# JSON output
+paimon table tag list mydb.users --format json
+```
+
+Options:
+- `--prefix, -p`: Only list tags whose name starts with this prefix
+- `--format, -f`: Output format, `table` (default) or `json`
+
+#### Tag Get
+
+```shell
+paimon table tag get mydb.users v1
+
+# JSON output
+paimon table tag get mydb.users v1 --format json
+```
+
+Options:
+- `--format, -f`: Output format, `table` (default) or `json`
+
+#### Tag Delete
+
+```shell
+paimon table tag delete mydb.users v1
+```
+
 ## Database Commands
 
 ### DB Get
