@@ -60,7 +60,7 @@ public class FormatDataSplit implements Split {
     }
 
     /** Number of files (or file ranges) in this split. */
-    public long fileCount() {
+    public int fileCount() {
         return files.size();
     }
 
