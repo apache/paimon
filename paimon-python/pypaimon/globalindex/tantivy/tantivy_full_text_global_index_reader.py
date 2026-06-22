@@ -401,15 +401,82 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         index.register_tokenizer(self._index_options.tokenizer_name(), analyzer)
 
     def _parse_query(self, tantivy, full_text_search):
-        query_text = full_text_search.query_text
-        conjunction_by_default = full_text_search.query_operator == "and"
+        return self._parse_structured_query(tantivy, full_text_search.query)
+
+    def _parse_structured_query(self, tantivy, query):
+        from pypaimon.globalindex.full_text_query import (
+            BooleanQuery,
+            BoostQuery,
+            MatchQuery,
+            MultiMatchQuery,
+            Occur,
+            PhraseQuery,
+        )
+
+        if isinstance(query, MatchQuery):
+            return self._parse_match_query(tantivy, query)
+        if isinstance(query, PhraseQuery):
+            if self._index_options.tokenizer == "jieba":
+                raise ValueError("phrase query is not supported for jieba tokenizer indexes")
+            escaped = query.query.replace("\\", "\\\\").replace('"', '\\"')
+            query_text = '"%s"' % escaped
+            if query.slop != 0:
+                query_text = "%s~%s" % (query_text, query.slop)
+            return self._index.parse_query(query_text, ["text"])
+        if isinstance(query, BooleanQuery):
+            subqueries = []
+            for occur, child in query.queries:
+                if occur == Occur.SHOULD:
+                    tantivy_occur = tantivy.Occur.Should
+                elif occur == Occur.MUST:
+                    tantivy_occur = tantivy.Occur.Must
+                else:
+                    tantivy_occur = getattr(tantivy.Occur, "MustNot", None)
+                    if tantivy_occur is None:
+                        raise RuntimeError(
+                            "PyPaimon Tantivy full-text search requires a tantivy-py "
+                            "version with Occur.MustNot support for boolean must_not queries."
+                        )
+                subqueries.append(
+                    (tantivy_occur, self._parse_structured_query(tantivy, child)))
+            if not subqueries:
+                raise ValueError("boolean query must contain at least one clause")
+            return tantivy.Query.boolean_query(subqueries)
+        if isinstance(query, BoostQuery):
+            raise ValueError(
+                "boost query is not supported by PyPaimon Tantivy full-text reader"
+            )
+        if isinstance(query, MultiMatchQuery):
+            raise ValueError(
+                "multi_match is not supported by single-column Tantivy full-text indexes"
+            )
+        raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
+
+    def _parse_match_query(self, tantivy, query):
+        if query.boost != 1.0:
+            raise ValueError(
+                "match query boost is not supported by PyPaimon Tantivy full-text reader"
+            )
+        if query.fuzziness not in (None, 0):
+            raise ValueError(
+                "match query fuzziness is not supported by PyPaimon Tantivy full-text reader"
+            )
+        if query.max_expansions != 50:
+            raise ValueError(
+                "match query max_expansions is not supported by PyPaimon Tantivy full-text reader"
+            )
+        if query.prefix_length != 0:
+            raise ValueError(
+                "match query prefix_length is not supported by PyPaimon Tantivy full-text reader"
+            )
+        conjunction_by_default = query.operator.value == "AND"
         if self._index_options.tokenizer != "jieba":
             if conjunction_by_default:
                 return self._index.parse_query(
-                    query_text, ["text"], conjunction_by_default=True)
-            return self._index.parse_query(query_text, ["text"])
+                    query.query, ["text"], conjunction_by_default=True)
+            return self._index.parse_query(query.query, ["text"])
 
-        tokens = self._jieba_query_tokens(query_text)
+        tokens = self._jieba_query_tokens(query.query)
         if not tokens:
             return tantivy.Query.empty_query()
 
@@ -503,7 +570,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 if not hasattr(query, name):
                     missing.append("Query.%s" % name)
         if self._index_options.tokenizer == "jieba" and occur is not None:
-            for name in ("Should", "Must"):
+            for name in ("Should", "Must", "MustNot"):
                 if not hasattr(occur, name):
                     missing.append("Occur.%s" % name)
         if missing:

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.index.IndexFileMeta;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -29,15 +30,29 @@ public class FullTextSearchSplit implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private final String columnName;
     private final long rowRangeStart;
     private final long rowRangeEnd;
     private final List<IndexFileMeta> fullTextIndexFiles;
 
     public FullTextSearchSplit(
             long rowRangeStart, long rowRangeEnd, List<IndexFileMeta> fullTextIndexFiles) {
+        this(null, rowRangeStart, rowRangeEnd, fullTextIndexFiles);
+    }
+
+    public FullTextSearchSplit(
+            String columnName,
+            long rowRangeStart,
+            long rowRangeEnd,
+            List<IndexFileMeta> fullTextIndexFiles) {
+        this.columnName = columnName;
         this.rowRangeStart = rowRangeStart;
         this.rowRangeEnd = rowRangeEnd;
-        this.fullTextIndexFiles = fullTextIndexFiles;
+        this.fullTextIndexFiles = Collections.unmodifiableList(fullTextIndexFiles);
+    }
+
+    public String columnName() {
+        return columnName;
     }
 
     public long rowRangeStart() {
@@ -58,20 +73,24 @@ public class FullTextSearchSplit implements Serializable {
             return false;
         }
         FullTextSearchSplit that = (FullTextSearchSplit) o;
-        return rowRangeStart == that.rowRangeStart
+        return Objects.equals(columnName, that.columnName)
+                && rowRangeStart == that.rowRangeStart
                 && rowRangeEnd == that.rowRangeEnd
                 && Objects.equals(fullTextIndexFiles, that.fullTextIndexFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(rowRangeStart, rowRangeEnd, fullTextIndexFiles);
+        return Objects.hash(columnName, rowRangeStart, rowRangeEnd, fullTextIndexFiles);
     }
 
     @Override
     public String toString() {
         return "FullTextSearchSplit{"
-                + "rowRangeStart="
+                + "columnName='"
+                + columnName
+                + '\''
+                + ", rowRangeStart="
                 + rowRangeStart
                 + ", rowRangeEnd="
                 + rowRangeEnd

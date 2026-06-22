@@ -39,6 +39,11 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
     }
 
     @Override
+    public boolean supportsFullTextSearch() {
+        return true;
+    }
+
+    @Override
     public GlobalIndexer create(DataField field, Options options) {
         if (searcherPool == null) {
             synchronized (this) {

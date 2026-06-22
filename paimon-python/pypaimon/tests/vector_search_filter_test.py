@@ -36,6 +36,7 @@ from pypaimon.globalindex.btree.btree_index_meta import BTreeIndexMeta
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta, GlobalIndexMeta
 from pypaimon.globalindex.global_index_reader import _completed_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.globalindex.full_text_query import MatchQuery
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
@@ -291,6 +292,7 @@ class _FakeQuery:
 class _FakeOccur:
     Should = "should"
     Must = "must"
+    MustNot = "must_not"
 
 
 class _FakeSearchResults:
@@ -586,7 +588,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                         prefix_only=True, lower_case=True))])
             try:
                 result = reader.visit_full_text_search(
-                    FullTextSearch("中文", 10, "content")).result()
+                    FullTextSearch(MatchQuery("中文", "content"), 10)).result()
             finally:
                 reader.close()
         finally:
@@ -650,7 +652,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                 [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
             try:
                 reader.visit_full_text_search(
-                    FullTextSearch("hello", 5, "content")).result()
+                    FullTextSearch(MatchQuery("hello", "content"), 5)).result()
             finally:
                 reader.close()
         finally:
@@ -687,7 +689,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                         with_position=False))])
             try:
                 reader.visit_full_text_search(
-                    FullTextSearch("running", 10, "content")).result()
+                    FullTextSearch(MatchQuery("running", "content"), 10)).result()
             finally:
                 reader.close()
         finally:
@@ -727,7 +729,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             with self.assertRaisesRegex(
                     RuntimeError, "ngram tokenizer support"):
                 reader.visit_full_text_search(
-                    FullTextSearch("中文", 10, "content")).result()
+                    FullTextSearch(MatchQuery("中文", "content"), 10)).result()
         finally:
             if old_tantivy is None:
                 sys.modules.pop("tantivy", None)
@@ -762,7 +764,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                     metadata=_java_tantivy_meta(tokenizer="jieba"))])
             try:
                 result = reader.visit_full_text_search(
-                    FullTextSearch("售货员", 10, "content", "and")).result()
+                    FullTextSearch(MatchQuery("售货员", "content", operator="and"), 10)).result()
             finally:
                 reader.close()
         finally:
@@ -813,7 +815,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             try:
                 with self.assertRaisesRegex(RuntimeError, "pip install jieba"):
                     reader.visit_full_text_search(
-                        FullTextSearch("售货员", 10, "content")).result()
+                        FullTextSearch(MatchQuery("售货员", "content"), 10)).result()
             finally:
                 reader.close()
         finally:
@@ -825,6 +827,299 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                 sys.modules.pop("jieba", None)
             else:
                 sys.modules["jieba"] = old_jieba
+
+
+class FullTextQueryDslTest(unittest.TestCase):
+
+    def test_lancedb_style_query_json_round_trip(self):
+        from pypaimon.globalindex.full_text_query import (
+            BooleanQuery,
+            BoostQuery,
+            FullTextQuery,
+            FullTextOperator,
+            MatchQuery,
+            MultiMatchQuery,
+            Occur,
+            PhraseQuery,
+        )
+
+        query = FullTextQuery.from_json(
+            '{"match":{"column":"content","query":"paimon",'
+            '"maxExpansions":10,"prefixLength":1,"fuzziness":"auto"}}')
+        self.assertIsInstance(query, MatchQuery)
+        self.assertEqual("paimon", query.query)
+        self.assertIsNone(query.fuzziness)
+        self.assertEqual(10, query.max_expansions)
+        self.assertEqual(1, query.prefix_length)
+
+        phrase = PhraseQuery("paimon lake", "content", slop=1)
+        self.assertEqual(
+            '{"match_phrase":{"column":"content","terms":"paimon lake","slop":1}}',
+            phrase.to_json())
+        self.assertEqual("match_phrase", phrase.query_type().value)
+
+        boost = BoostQuery(
+            MatchQuery("paimon", "content"),
+            MatchQuery("vector", "content"),
+            negative_boost=0.2)
+        self.assertEqual(0.2, boost.negative_boost)
+        self.assertIn('"negative_boost":0.2', boost.to_json())
+
+        multi_match = MultiMatchQuery(
+            "paimon", ["title", "content"], boosts=[2.0, 1.0],
+            operator=FullTextOperator.AND)
+        self.assertEqual(["title", "content"], multi_match.columns)
+        self.assertEqual(
+            '{"multi_match":{"query":"paimon","columns":["title","content"],'
+            '"boost":[2.0,1.0],"operator":"And"}}',
+            multi_match.to_json())
+
+        boolean = BooleanQuery([
+            (Occur.MUST, MatchQuery("paimon", "content")),
+            ("must_not", MatchQuery("vector", "content")),
+        ])
+        self.assertEqual(["content"], boolean.referenced_columns())
+        self.assertEqual(1, len(boolean.must()))
+        self.assertEqual(1, len(boolean.must_not()))
+
+    def test_lancedb_boolean_queries_alias(self):
+        from pypaimon.globalindex.full_text_query import FullTextQuery
+
+        query = FullTextQuery.from_json(
+            '{"boolean":{"queries":[{"occur":"must","query":{"match":'
+            '{"column":"content","terms":"paimon"}}},["must_not",{"match":'
+            '{"column":"content","terms":"vector"}}]]}}')
+
+        self.assertEqual(1, len(query.must()))
+        self.assertEqual(1, len(query.must_not()))
+        self.assertEqual("content", query.single_column())
+
+
+class FullTextSearchBuilderDslTest(unittest.TestCase):
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_full_text_builder_threads_structured_query_to_reader(self):
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="ft.index", row_range_start=0, row_range_end=9)
+        table = _StubTable(fields=[text_field], entries=[entry])
+        _patch_snapshot(self, [entry])
+        captured_searches = []
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    captured_searches.append(fts)
+                    return _completed_future(None)
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        split = FullTextSearchSplit(
+            column_name="content",
+            row_range_start=0, row_range_end=9,
+            full_text_index_files=[entry.index_file])
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            (
+                FullTextSearchBuilderImpl(table)
+                .with_query(MatchQuery("paimon", "content", operator="and"))
+                .with_limit(10)
+                .new_full_text_read()
+                .read([split])
+            )
+
+        self.assertEqual(1, len(captured_searches))
+        self.assertEqual("content", captured_searches[0].field_name)
+        self.assertEqual(10, captured_searches[0].limit)
+        self.assertEqual(
+            '{"match":{"column":"content","terms":"paimon","boost":1.0,'
+            '"fuzziness":0,"max_expansions":50,"operator":"And",'
+            '"prefix_length":0}}',
+            captured_searches[0].query_json())
+
+    def test_full_text_builder_sends_leaf_candidate_limit_for_compound_queries(self):
+        from pypaimon.globalindex.full_text_query import BoostQuery
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="ft.index", row_range_start=0, row_range_end=99)
+        table = _StubTable(fields=[text_field], entries=[entry])
+        _patch_snapshot(self, [entry])
+        captured_limits = []
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    captured_limits.append(fts.limit)
+                    return _completed_future(None)
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        split = FullTextSearchSplit(
+            column_name="content",
+            row_range_start=0,
+            row_range_end=99,
+            full_text_index_files=[entry.index_file])
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            (
+                FullTextSearchBuilderImpl(table)
+                .with_query(
+                    BoostQuery(
+                        MatchQuery("paimon", "content"),
+                        MatchQuery("vector", "content"),
+                        negative_boost=0.1))
+                .with_limit(3)
+                .new_full_text_read()
+                .read([split])
+            )
+
+        self.assertEqual([100, 100], captured_limits)
+
+    def test_full_text_builder_supports_multi_match_across_columns(self):
+        from pypaimon.globalindex.full_text_query import MultiMatchQuery
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+
+        title_field = _field(1, "title", "STRING")
+        body_field = _field(2, "body", "STRING")
+        title_entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="title.index", row_range_start=0, row_range_end=9)
+        body_entry = _entry(
+            None, field_id=2, index_type="tantivy-fulltext",
+            file_name="body.index", row_range_start=0, row_range_end=9)
+        table = _StubTable(
+            fields=[title_field, body_field], entries=[title_entry, body_entry])
+        _patch_snapshot(self, [title_entry, body_entry])
+        captured = []
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            file_name = index_io_meta_list[0].file_name
+
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    captured.append(fts.query_json())
+                    if file_name == "title.index":
+                        return _completed_future(DictBasedScoredIndexResult({1: 2.0}))
+                    return _completed_future(DictBasedScoredIndexResult({2: 1.0}))
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            result = (
+                FullTextSearchBuilderImpl(table)
+                .with_query(MultiMatchQuery("paimon", ["title", "body"]))
+                .with_limit(10)
+                .execute_local()
+            )
+
+        self.assertEqual({1, 2}, set(result.results().to_list()))
+        self.assertEqual(2, len(captured))
+
+    def test_full_text_multi_match_adds_column_scores(self):
+        from pypaimon.globalindex.full_text_query import MultiMatchQuery
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_search_builder import (
+            FullTextSearchBuilderImpl,
+        )
+
+        title_field = _field(1, "title", "STRING")
+        body_field = _field(2, "body", "STRING")
+        title_entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="title.index", row_range_start=0, row_range_end=9)
+        body_entry = _entry(
+            None, field_id=2, index_type="tantivy-fulltext",
+            file_name="body.index", row_range_start=0, row_range_end=9)
+        table = _StubTable(
+            fields=[title_field, body_field], entries=[title_entry, body_entry])
+        _patch_snapshot(self, [title_entry, body_entry])
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            file_name = index_io_meta_list[0].file_name
+
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    if file_name == "title.index":
+                        return _completed_future(
+                            DictBasedScoredIndexResult({1: 2.0, 3: 1.0}))
+                    return _completed_future(
+                        DictBasedScoredIndexResult({1: 5.0, 2: 1.0}))
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            result = (
+                FullTextSearchBuilderImpl(table)
+                .with_query(MultiMatchQuery("paimon", ["title", "body"]))
+                .with_limit(10)
+                .execute_local()
+            )
+
+        self.assertEqual({1, 2, 3}, set(result.results().to_list()))
+        self.assertEqual(7.0, result.score_getter()(1))
+        self.assertEqual(1.0, result.score_getter()(2))
+        self.assertEqual(1.0, result.score_getter()(3))
+
+    def test_full_text_scan_ignores_other_index_types_on_same_column(self):
+        from pypaimon.table.source.full_text_scan import FullTextScanImpl
+
+        text_field = _field(1, "content", "STRING")
+        ft_entry = _entry(
+            None, field_id=1, index_type="tantivy-fulltext",
+            file_name="ft.index", row_range_start=0, row_range_end=9)
+        btree_entry = _entry(
+            None, field_id=1, index_type="btree",
+            file_name="btree.index", row_range_start=0, row_range_end=9)
+        table = _StubTable(fields=[text_field], entries=[ft_entry, btree_entry])
+        _patch_snapshot(self, [ft_entry, btree_entry])
+
+        splits = FullTextScanImpl(table, [text_field]).scan().splits()
+
+        self.assertEqual(1, len(splits))
+        self.assertEqual(
+            ["ft.index"],
+            [f.file_name for f in splits[0].full_text_index_files])
 
 
 class VectorSearchFilterTest(unittest.TestCase):
@@ -1572,16 +1867,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
                 self.calls.append(("query_vector", vector))
                 return self
 
-            def with_text_column(self, name):
-                self.calls.append(("text_column", name))
-                return self
-
-            def with_query_text(self, query_text):
-                self.calls.append(("query_text", query_text))
-                return self
-
-            def with_query_operator(self, query_operator):
-                self.calls.append(("query_operator", query_operator))
+            def with_query(self, query):
+                self.calls.append(("query", query))
                 return self
 
             def with_limit(self, limit):
@@ -1617,8 +1904,10 @@ class HybridSearchBuilderTest(unittest.TestCase):
                 "title_embedding", [1.0, 0.0], 10, weight=1.0,
                 options={"ivf.nprobe": "32"})
             .add_full_text_route(
-                "content", "paimon search", 10, weight=1.0,
-                query_operator="and")
+                '{"match":{"column":"content","terms":"paimon search",'
+                '"operator":"and"}}',
+                10,
+                weight=1.0)
             .with_limit(2)
             .with_rrf_ranker()
             .execute_local()
@@ -1629,7 +1918,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
         self.assertGreater(result.score_getter()(2), result.score_getter()(1))
         self.assertIn(("options", {"ivf.nprobe": "32"}),
                       captured_builders[0].calls)
-        self.assertIn(("query_operator", "and"), captured_builders[1].calls)
+        self.assertEqual("paimon search",
+                         captured_builders[1].calls[0][1].query)
 
     def test_hybrid_search_rejects_data_filter_with_full_text_route(self):
         from pypaimon.table.source.hybrid_search_builder import (
@@ -1643,7 +1933,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
 
         builder = (
             HybridSearchBuilderImpl(table)
-            .add_full_text_route("content", "paimon search", 10)
+            .add_full_text_route(
+                '{"match":{"column":"content","terms":"paimon search"}}', 10)
             .with_filter(pb.equal("id", 1))
             .with_limit(5)
         )
@@ -1679,7 +1970,8 @@ class HybridSearchBuilderTest(unittest.TestCase):
         pb = PredicateBuilder(table.fields)
         route_builders = (
             HybridSearchBuilderImpl(table)
-            .add_full_text_route("content", "paimon search", 10)
+            .add_full_text_route(
+                '{"match":{"column":"content","terms":"paimon search"}}', 10)
             .with_filter(pb.equal("pt", 2))
             .with_limit(5)
             .route_builders()
@@ -1945,6 +2237,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
             return _FakeReader()
 
         split = FullTextSearchSplit(
+            column_name="content",
             row_range_start=0, row_range_end=9,
             full_text_index_files=[entry.index_file])
 
@@ -1953,7 +2246,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
                 side_effect=_fake_create):
             reader = FullTextReadImpl(
                 table, limit=10, text_column=text_field,
-                query_text="test")
+                query=MatchQuery("test", "content"))
             reader.read([split])
 
         self.assertEqual(1, len(captured_io_metas))
@@ -1996,6 +2289,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
 
         splits = [
             FullTextSearchSplit(
+                column_name="content",
                 row_range_start=i, row_range_end=i,
                 full_text_index_files=[entries[i].index_file])
             for i in range(num_splits)
@@ -2006,7 +2300,7 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
                 side_effect=_fake_create):
             reader = FullTextReadImpl(
                 table, limit=10, text_column=text_field,
-                query_text="test")
+                query=MatchQuery("test", "content"))
             result = reader.read(splits)
 
         self.assertLessEqual(result.results().cardinality(), 10)

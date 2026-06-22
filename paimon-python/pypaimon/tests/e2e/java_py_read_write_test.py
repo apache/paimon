@@ -25,6 +25,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.globalindex.full_text_query import MatchQuery
 from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
@@ -1051,8 +1052,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Use FullTextSearchBuilder to search
         builder = table.new_full_text_search_builder()
-        builder.with_text_column('content')
-        builder.with_query_text('paimon')
+        builder.with_query(MatchQuery('paimon', 'content'))
         builder.with_limit(10)
 
         result = builder.execute_local()
@@ -1074,8 +1074,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "tantivy" - only row 1
         builder2 = table.new_full_text_search_builder()
-        builder2.with_text_column('content')
-        builder2.with_query_text('tantivy')
+        builder2.with_query(MatchQuery('tantivy', 'content'))
         builder2.with_limit(10)
 
         result2 = builder2.execute_local()
@@ -1093,8 +1092,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "full-text search" - rows 1, 3
         builder3 = table.new_full_text_search_builder()
-        builder3.with_text_column('content')
-        builder3.with_query_text('full-text search')
+        builder3.with_query(MatchQuery('full-text search', 'content'))
         builder3.with_limit(10)
 
         result3 = builder3.execute_local()
@@ -1117,8 +1115,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
         ngram_builder = ngram_table.new_full_text_search_builder()
-        ngram_builder.with_text_column('content')
-        ngram_builder.with_query_text('中文')
+        ngram_builder.with_query(MatchQuery('中文', 'content'))
         ngram_builder.with_limit(10)
 
         ngram_result = ngram_builder.execute_local()
@@ -1136,8 +1133,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
 
         fragment_builder = ngram_table.new_full_text_search_builder()
-        fragment_builder.with_text_column('content')
-        fragment_builder.with_query_text('片段')
+        fragment_builder.with_query(MatchQuery('片段', 'content'))
         fragment_builder.with_limit(10)
 
         fragment_result = fragment_builder.execute_local()
@@ -1146,9 +1142,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(fragment_row_ids, [4])
 
         ngram_and_builder = ngram_table.new_full_text_search_builder()
-        ngram_and_builder.with_text_column('content')
-        ngram_and_builder.with_query_text('中文 片段')
-        ngram_and_builder.with_query_operator('and')
+        ngram_and_builder.with_query(MatchQuery('中文 片段', 'content', operator='and'))
         ngram_and_builder.with_limit(10)
 
         ngram_and_result = ngram_and_builder.execute_local()
@@ -1158,8 +1152,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
         simple_builder = simple_table.new_full_text_search_builder()
-        simple_builder.with_text_column('content')
-        simple_builder.with_query_text('running')
+        simple_builder.with_query(MatchQuery('running', 'content'))
         simple_builder.with_limit(10)
 
         simple_result = simple_builder.execute_local()
@@ -1171,8 +1164,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for Chinese words using the jieba tokenizer metadata written by Java.
         jieba_builder = jieba_table.new_full_text_search_builder()
-        jieba_builder.with_text_column('content')
-        jieba_builder.with_query_text('售货员')
+        jieba_builder.with_query(MatchQuery('售货员', 'content'))
         jieba_builder.with_limit(10)
 
         jieba_result = jieba_builder.execute_local()
@@ -1190,8 +1182,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['张华在百货公司当售货员'])
 
         jieba_phrase_builder = jieba_table.new_full_text_search_builder()
-        jieba_phrase_builder.with_text_column('content')
-        jieba_phrase_builder.with_query_text('自然')
+        jieba_phrase_builder.with_query(MatchQuery('自然', 'content'))
         jieba_phrase_builder.with_limit(10)
 
         jieba_phrase_result = jieba_phrase_builder.execute_local()
@@ -1200,9 +1191,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(jieba_phrase_row_ids, [3])
 
         jieba_and_builder = jieba_table.new_full_text_search_builder()
-        jieba_and_builder.with_text_column('content')
-        jieba_and_builder.with_query_text('中文 自然')
-        jieba_and_builder.with_query_operator('and')
+        jieba_and_builder.with_query(MatchQuery('中文 自然', 'content', operator='and'))
         jieba_and_builder.with_limit(10)
 
         jieba_and_result = jieba_and_builder.execute_local()
