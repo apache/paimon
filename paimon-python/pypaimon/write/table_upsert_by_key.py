@@ -185,6 +185,14 @@ class TableUpsertByKey:
             "Upserting partition %s: %d matched, %d new",
             partition_spec, len(matched_indices), len(new_indices),
         )
+        total_updates = sum(
+            len(key_to_row_ids[input_key_tuples[i]]) for i in matched_indices)
+        if total_updates > len(matched_indices):
+            logger.info(
+                "Upsert fan-out in partition %s: %d input rows expand to "
+                "%d row updates", partition_spec,
+                len(matched_indices), total_updates,
+            )
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
