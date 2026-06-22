@@ -82,24 +82,7 @@ public class GlobalIndexCoverage {
         return unindexedRanges(Collections.singleton(fieldId));
     }
 
-    private void addCoverage(int fieldId, Range range) {
-        coverageByField.computeIfAbsent(fieldId, k -> new ArrayList<>()).add(range);
-    }
-
-    private List<Range> indexedRanges(Collection<Integer> fieldIds) {
-        List<Range> ranges = null;
-        for (Integer fieldId : fieldIds) {
-            List<Range> fieldRanges = coverageByField.get(fieldId);
-            if (fieldRanges == null || fieldRanges.isEmpty()) {
-                return Collections.emptyList();
-            }
-            fieldRanges = Range.sortAndMergeOverlap(fieldRanges, true);
-            ranges = ranges == null ? fieldRanges : Range.and(ranges, fieldRanges);
-        }
-        return ranges == null ? Collections.emptyList() : Range.sortAndMergeOverlap(ranges, true);
-    }
-
-    private List<Range> unindexedRanges(Collection<Integer> fieldIds) {
+    public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
         GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
         if (searchMode == GlobalIndexSearchMode.FAST) {
             return Collections.emptyList();
@@ -122,6 +105,23 @@ public class GlobalIndexCoverage {
             unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));
         }
         return Range.sortAndMergeOverlap(unindexedRanges, true);
+    }
+
+    private void addCoverage(int fieldId, Range range) {
+        coverageByField.computeIfAbsent(fieldId, k -> new ArrayList<>()).add(range);
+    }
+
+    private List<Range> indexedRanges(Collection<Integer> fieldIds) {
+        List<Range> ranges = null;
+        for (Integer fieldId : fieldIds) {
+            List<Range> fieldRanges = coverageByField.get(fieldId);
+            if (fieldRanges == null || fieldRanges.isEmpty()) {
+                return Collections.emptyList();
+            }
+            fieldRanges = Range.sortAndMergeOverlap(fieldRanges, true);
+            ranges = ranges == null ? fieldRanges : Range.and(ranges, fieldRanges);
+        }
+        return ranges == null ? Collections.emptyList() : Range.sortAndMergeOverlap(ranges, true);
     }
 
     private List<Range> dataRangesByDataFiles() {

@@ -53,11 +53,13 @@ class GlobalIndexCoverage:
 
     def unindexed_ranges(
         self,
-        fields_or_field_id: Union[List[DataField], int],
+        fields_or_field_id: Union[List[DataField], Collection[int], int],
         predicate: Optional[Predicate] = None,
     ) -> List[Range]:
         if isinstance(fields_or_field_id, int):
             field_ids = {fields_or_field_id}
+        elif _is_field_id_collection(fields_or_field_id):
+            field_ids = set(fields_or_field_id)
         else:
             field_by_name = {f.name: f for f in fields_or_field_id}
             field_ids = set()
@@ -143,3 +145,13 @@ def _global_index_search_mode(table):
     if hasattr(options, "global_index_search_mode"):
         return options.global_index_search_mode()
     return CoreOptions(Options.from_none()).global_index_search_mode()
+
+
+def _is_field_id_collection(fields_or_field_id):
+    if isinstance(fields_or_field_id, (str, bytes)):
+        return False
+    try:
+        iterator = iter(fields_or_field_id)
+    except TypeError:
+        return False
+    return all(isinstance(field_id, int) for field_id in iterator)
