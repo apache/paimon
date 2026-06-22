@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -457,6 +458,26 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchIgnoresOtherIndexTypesOnSameColumn() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon lake format", "vector search"};
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        buildAndCommitBTreeIndex(table, documents);
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(table, result)).containsExactly(0);
+    }
+
+    @Test
     public void testFullTextSearchNoMatchingDocuments() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -652,6 +673,44 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange,
                         textField.id(),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void buildAndCommitBTreeIndex(FileStoreTable table, String[] documents)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, BTreeGlobalIndexerFactory.IDENTIFIER, textField, options);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(BinaryString.fromString(documents[i]), i);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        Range rowRange = new Range(0, documents.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        textField.id(),
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);

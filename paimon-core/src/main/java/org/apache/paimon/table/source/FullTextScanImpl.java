@@ -19,6 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -90,7 +92,8 @@ public class FullTextScanImpl implements FullTextScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return textColumnIds.contains(globalIndex.indexFieldId());
+                    return textColumnIds.contains(globalIndex.indexFieldId())
+                            && supportsFullTextSearch(entry.indexFile().indexType());
                 };
 
         List<IndexFileMeta> allIndexFiles =
@@ -124,5 +127,15 @@ public class FullTextScanImpl implements FullTextScan {
         }
 
         return () -> splits;
+    }
+
+    private static boolean supportsFullTextSearch(String indexType) {
+        GlobalIndexerFactory factory;
+        try {
+            factory = GlobalIndexerFactoryUtils.load(indexType);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        return factory.supportsFullTextSearch();
     }
 }
