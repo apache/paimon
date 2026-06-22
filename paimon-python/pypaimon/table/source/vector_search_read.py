@@ -170,7 +170,10 @@ class AbstractVectorSearchReadImpl:
             scanner.close()
 
     def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
-        """Open a vector index reader for the split, wrapped with the row-id offset."""
+        """Open a vector index reader for the split, wrapped with the row-id offset.
+
+        The caller must close the returned reader once its future completes.
+        """
         index_io_meta_list = []
         for index_file in vector_index_files:
             meta = index_file.global_index_meta
