@@ -101,13 +101,27 @@ abstract class PaimonSQLFunctionTestBase extends PaimonSparkTestWithRestCatalogB
       sql("CREATE FUNCTION area(width DOUBLE, height DOUBLE) RETURNS DOUBLE RETURN width * height")
 
       val desc = sql("DESCRIBE FUNCTION area").collect().map(_.getString(0))
-      assert(desc.exists(_.contains("Type: SCALAR")), desc.mkString("\n"))
-      assert(desc.exists(_.contains("Input:")), desc.mkString("\n"))
+      assert(desc.exists(_.contains("SCALAR")), desc.mkString("\n"))
+      assert(desc.exists(_.contains("Input")), desc.mkString("\n"))
       assert(desc.exists(_.contains("width")), desc.mkString("\n"))
-      assert(desc.exists(_.contains("Returns: DOUBLE")), desc.mkString("\n"))
+      assert(desc.exists(_.contains("DOUBLE")), desc.mkString("\n"))
 
       val descExt = sql("DESCRIBE FUNCTION EXTENDED area").collect().map(_.getString(0))
+      assert(descExt.exists(_.contains("Deterministic")), descExt.mkString("\n"))
       assert(descExt.exists(_.contains("width * height")), descExt.mkString("\n"))
+    }
+  }
+
+  test("Paimon SQL Function: describe function with comment") {
+    withUserDefinedFunction("inc" -> false) {
+      sql("CREATE FUNCTION inc(x INT) RETURNS INT COMMENT 'increment by one' RETURN x + 1")
+
+      val desc = sql("DESCRIBE FUNCTION inc").collect().map(_.getString(0))
+      assert(desc.exists(_.contains("SCALAR")), desc.mkString("\n"))
+
+      val descExt = sql("DESCRIBE FUNCTION EXTENDED inc").collect().map(_.getString(0))
+      assert(descExt.exists(_.contains("increment by one")), descExt.mkString("\n"))
+      assert(descExt.exists(_.contains("x + 1")), descExt.mkString("\n"))
     }
   }
 
