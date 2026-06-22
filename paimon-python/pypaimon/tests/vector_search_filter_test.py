@@ -2126,6 +2126,60 @@ class VectorSearchManySplitsTest(unittest.TestCase):
         raw_read.assert_called_once()
         self.assertEqual([1, 8], sorted(list(result.results())))
 
+    def test_batch_merges_raw_search_results(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.vector_search_read import (
+            BatchVectorSearchReadImpl,
+        )
+        from pypaimon.table.source.vector_search_split import (
+            IndexVectorSearchSplit,
+            RawVectorSearchSplit,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index",
+                       row_range_start=0, row_range_end=4)
+        table = _StubTable(fields=[embedding_field], entries=[entry])
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader(GlobalIndexReader):
+                def visit_vector_search(self_inner, vs):
+                    row_id = int(vs.vector[0])
+                    return _completed_future(
+                        DictBasedScoredIndexResult({row_id: 0.5}))
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        split = IndexVectorSearchSplit(
+            row_range_start=0,
+            row_range_end=4,
+            vector_index_files=[entry.index_file],
+        )
+        raw = RawVectorSearchSplit([Range(5, 9)], [], "lumina-vector-ann")
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            reader = BatchVectorSearchReadImpl(
+                table, limit=5, vector_column=embedding_field,
+                query_vectors=[[1.0], [2.0]], filter_=None)
+            with mock.patch.object(
+                    reader, "_read_raw_search",
+                    return_value=DictBasedScoredIndexResult({8: 0.9})) as raw_read:
+                results = reader.read_batch([split, raw])
+
+        # The raw fallback must be merged into EACH query, not dropped.
+        self.assertEqual(2, raw_read.call_count)
+        self.assertEqual([1, 8], sorted(list(results[0].results())))
+        self.assertEqual([2, 8], sorted(list(results[1].results())))
+
     def test_read_uses_empty_index_prefilter_when_scalar_index_missing(self):
         from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
         from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
@@ -2341,6 +2395,7 @@ class BatchVectorSearchTest(unittest.TestCase):
     """Batch vector search returns one result per query vector, in input order."""
 
     def test_batch_returns_per_query_results_in_order(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
         from pypaimon.globalindex.vector_search_result import (
             DictBasedScoredIndexResult,
         )
@@ -2355,11 +2410,12 @@ class BatchVectorSearchTest(unittest.TestCase):
         table = _StubTable(fields=[embedding_field], entries=[entry])
         _patch_snapshot(self, [entry])
 
-        # The fake reader routes each query vector to a distinct row id derived
-        # from the vector itself, so result i must reflect query_vectors[i].
+        # A reader implementing only single search exercises the default batch
+        # fan-out; it routes each query vector to a row id derived from the
+        # vector itself, so result i must reflect query_vectors[i].
         def _fake_create(index_type, file_io, index_path,
                          index_io_meta_list, options=None):
-            class _FakeReader:
+            class _FakeReader(GlobalIndexReader):
                 def visit_vector_search(self_inner, vs):
                     row_id = int(vs.vector[0])
                     return _completed_future(
@@ -2367,12 +2423,6 @@ class BatchVectorSearchTest(unittest.TestCase):
 
                 def close(self_inner):
                     pass
-
-                def __enter__(self_inner):
-                    return self_inner
-
-                def __exit__(self_inner, *a):
-                    return False
             return _FakeReader()
 
         query_vectors = [[10.0], [20.0], [30.0]]
@@ -2395,6 +2445,63 @@ class BatchVectorSearchTest(unittest.TestCase):
         # Different query vectors yield different results.
         self.assertNotEqual(
             list(results[0].results()), list(results[1].results()))
+
+    def test_batch_uses_reader_native_batch_when_available(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.batch_vector_search_builder import (
+            BatchVectorSearchBuilderImpl,
+        )
+
+        embedding_field = _field(1, "embedding", "FLOAT")
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index",
+                       row_range_start=0, row_range_end=99)
+        table = _StubTable(fields=[embedding_field], entries=[entry])
+        _patch_snapshot(self, [entry])
+
+        calls = {"single": 0, "batch": 0}
+
+        # A reader that implements native batch must be driven through one
+        # batch call per split, not per-vector single calls.
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader(GlobalIndexReader):
+                def visit_vector_search(self_inner, vs):
+                    calls["single"] += 1
+                    return _completed_future(
+                        DictBasedScoredIndexResult({int(vs.vector[0]): 1.0}))
+
+                def visit_batch_vector_search(self_inner, bvs):
+                    calls["batch"] += 1
+                    return _completed_future([
+                        DictBasedScoredIndexResult({int(bvs.vectors[i][0]): 1.0})
+                        for i in range(bvs.vector_count)
+                    ])
+
+                def close(self_inner):
+                    pass
+            return _FakeReader()
+
+        query_vectors = [[10.0], [20.0], [30.0]]
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            results = (
+                BatchVectorSearchBuilderImpl(table)
+                .with_vector_column("embedding")
+                .with_query_vectors(query_vectors)
+                .with_limit(5)
+                .execute_batch_local()
+            )
+
+        self.assertEqual(calls["batch"], 1)
+        self.assertEqual(calls["single"], 0)
+        self.assertEqual(len(results), len(query_vectors))
+        for i, query_vector in enumerate(query_vectors):
+            self.assertTrue(results[i].results().contains(int(query_vector[0])))
 
     def test_batch_empty_splits_returns_empty_per_query(self):
         from pypaimon.table.source.batch_vector_search_builder import (
