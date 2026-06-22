@@ -87,10 +87,11 @@ The third argument is an array of full-text route configs created by `named_stru
 | `query` | Yes | N/A | LanceDB-style full-text query JSON for this route. |
 | `limit` | No | Final limit | Top K results to retrieve from this text column before ranking. |
 | `weight` | No | `1.0` | Weight for this route when ranking results. |
-| `options` | No | Empty map | Route-specific full-text search options. |
+| `options` | No | Empty map | Reserved for future full-text search options. Only an empty map is accepted. |
 
 Within each route array, every `named_struct` should use the same fields because
-Spark requires array elements to have the same struct type.
+Spark requires array elements to have the same struct type. Full-text route `options` is
+currently a reserved field; pass `map()` when the field is needed for struct-type consistency.
 
 Use route `limit` values larger than the final limit when each route should contribute enough
 candidates for ranking. For example, with a final limit of `10`, route limits such as `50` or `100`

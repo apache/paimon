@@ -1968,6 +1968,23 @@ class HybridSearchBuilderTest(unittest.TestCase):
             builder.route_builders()
         self.assertIn("full-text routes", str(ctx.exception))
 
+    def test_hybrid_search_rejects_full_text_route_options(self):
+        from pypaimon.table.source.hybrid_search_builder import (
+            HybridSearchBuilderImpl,
+        )
+
+        id_field = _field(0, "id")
+        content = _field(1, "content", "STRING")
+        table = _StubTable(fields=[id_field, content], entries=[])
+
+        with self.assertRaises(ValueError) as ctx:
+            HybridSearchBuilderImpl(table).add_full_text_route(
+                '{"match":{"column":"content","terms":"paimon search"}}',
+                10,
+                options={"some.option": "x"})
+        self.assertIn("Full-text hybrid route options are not supported yet",
+                      str(ctx.exception))
+
     def test_hybrid_search_partition_filter_prunes_full_text_route(self):
         from pypaimon.table.source.hybrid_search_builder import (
             HybridSearchBuilderImpl,

@@ -68,9 +68,17 @@ public class HybridSearchRoute implements Serializable {
 
     public static HybridSearchRoute fullText(
             String queryJson, int limit, float weight, Map<String, String> options) {
+        checkFullTextOptions(options);
         FullTextQuery query = FullTextQuery.fromJson(queryJson);
         return new HybridSearchRoute(
                 RouteType.FULL_TEXT, query.columns().get(0), null, query, limit, weight, options);
+    }
+
+    private static void checkFullTextOptions(Map<String, String> options) {
+        if (options != null && !options.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Full-text hybrid route options are not supported yet.");
+        }
     }
 
     private HybridSearchRoute(
@@ -239,6 +247,7 @@ public class HybridSearchRoute implements Serializable {
 
         public HybridSearchRoute build() {
             if (fullTextQuery != null) {
+                checkFullTextOptions(options);
                 return new HybridSearchRoute(
                         RouteType.FULL_TEXT,
                         fullTextQuery.columns().get(0),
