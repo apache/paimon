@@ -30,6 +30,8 @@ class ResourcePaths:
     PARTITIONS = "partitions"
     FUNCTIONS = "functions"
     FUNCTION_DETAILS = "function-details"
+    RESOURCES = "resources"
+    RESOURCE_DETAILS = "resource-details"
     TAGS = "tags"
     BRANCHES = "branches"
     RENAME = "rename"
@@ -103,6 +105,20 @@ class ResourcePaths:
     def function(self, database_name: str, function_name: str) -> str:
         return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                                        self.FUNCTIONS, RESTUtil.encode_string(function_name))
+
+    def resources(self, database_name: Optional[str] = None) -> str:
+        if database_name:
+            return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                        RESTUtil.encode_string(database_name), self.RESOURCES)
+        return "{}/{}".format(self.base_path, self.RESOURCES)
+
+    def resource_details(self, database_name: str) -> str:
+        return "{}/{}/{}/{}".format(self.base_path, self.DATABASES,
+                                    RESTUtil.encode_string(database_name), self.RESOURCE_DETAILS)
+
+    def resource(self, database_name: str, resource_name: str) -> str:
+        return "{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                       self.RESOURCES, RESTUtil.encode_string(resource_name))
 
     def tags(self, database_name: str, table_name: str) -> str:
         return "{}/{}/{}/{}/{}/{}".format(

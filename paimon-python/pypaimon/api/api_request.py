@@ -23,6 +23,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
 from pypaimon.function.function_change import FunctionChange
 from pypaimon.function.function_definition import FunctionDefinition
+from pypaimon.resource.resource_change import ResourceChange
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -155,6 +156,40 @@ class AlterFunctionRequest(RESTRequest):
         return {
             self.FIELD_CHANGES: [c.to_dict() for c in self.changes]
         }
+
+
+@dataclass
+class CreateResourceRequest(RESTRequest):
+    FIELD_NAME = "name"
+    FIELD_COMMENT = "comment"
+    FIELD_URI = "uri"
+    FIELD_RESOURCE_TYPE = "resourceType"
+
+    name: str = json_field(FIELD_NAME)
+    comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
+    uri: Optional[str] = json_field(FIELD_URI, default=None)
+    resource_type: Optional[str] = json_field(FIELD_RESOURCE_TYPE, default=None)
+
+    def to_dict(self) -> Dict:
+        return {
+            self.FIELD_NAME: self.name,
+            self.FIELD_COMMENT: self.comment,
+            self.FIELD_URI: self.uri,
+            self.FIELD_RESOURCE_TYPE: self.resource_type,
+        }
+
+
+@dataclass
+class AlterResourceRequest(RESTRequest):
+    FIELD_CHANGES = "changes"
+
+    changes: List[ResourceChange] = json_field(FIELD_CHANGES)
+
+    def to_dict(self) -> Dict:
+        return {
+            self.FIELD_CHANGES: [c.to_dict() for c in self.changes]
+        }
+
 
 
 # Wire DTO for ``POST /databases/{db}/tables/{tbl}/tags``. Mirrors Java

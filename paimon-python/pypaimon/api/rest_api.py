@@ -26,7 +26,8 @@ from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest
                                       CreateFunctionRequest, CreateTableRequest,
                                       CreateTagRequest, ForwardBranchRequest,
                                       RenameBranchRequest, RenameTableRequest,
-                                      RollbackTableRequest)
+                                      RollbackTableRequest, CreateResourceRequest,
+                                      AlterResourceRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetFunctionResponse,
                                        GetTableResponse,
@@ -40,7 +41,10 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListTablesResponse, ListTagsResponse,
                                        PagedList,
                                        PagedResponse, GetTableSnapshotResponse,
-                                       Partition)
+                                       Partition, GetResourceResponse,
+                                       ListResourcesResponse,
+                                       ListResourceDetailsResponse,
+                                       ListResourcesGloballyResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -62,6 +66,7 @@ class RESTApi:
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
     FUNCTION_NAME_PATTERN = "functionNamePattern"
+    RESOURCE_NAME_PATTERN = "resourceNamePattern"
     PARTITION_NAME_PATTERN = "partitionNamePattern"
     TAG_NAME_PREFIX = "tagNamePrefix"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
@@ -683,6 +688,124 @@ class RESTApi:
         request = AlterFunctionRequest(changes=changes)
         self.client.post(
             self.resource_paths.function(
+                identifier.get_database_name(), identifier.get_object_name()),
+            request,
+            self.rest_auth_function,
+        )
+
+    # ==================== Resources ==========================
+
+    def list_resources(self, database_name: str) -> List[str]:
+        return self.__list_data_from_page_api(
+            lambda query_params: self.client.get_with_params(
+                self.resource_paths.resources(database_name),
+                query_params,
+                ListResourcesResponse,
+                self.rest_auth_function,
+            )
+        )
+
+    def list_resources_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
+        response = self.client.get_with_params(
+            self.resource_paths.resources(database_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.RESOURCE_NAME_PATTERN: resource_name_pattern},
+            ),
+            ListResourcesResponse,
+            self.rest_auth_function,
+        )
+        resources = response.resources if response.resources else []
+        return PagedList(resources, response.get_next_page_token())
+
+    def list_resource_details_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+    ) -> PagedList[GetResourceResponse]:
+        response = self.client.get_with_params(
+            self.resource_paths.resource_details(database_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.RESOURCE_NAME_PATTERN: resource_name_pattern},
+            ),
+            ListResourceDetailsResponse,
+            self.rest_auth_function,
+        )
+        resource_details = response.data() if response.data() else []
+        return PagedList(resource_details, response.get_next_page_token())
+
+    def list_resources_paged_globally(
+            self,
+            database_name_pattern: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList:
+        response = self.client.get_with_params(
+            self.resource_paths.resources(),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {
+                    self.DATABASE_NAME_PATTERN: database_name_pattern,
+                    self.RESOURCE_NAME_PATTERN: resource_name_pattern,
+                },
+            ),
+            ListResourcesGloballyResponse,
+            self.rest_auth_function,
+        )
+        resources = response.data() if response.data() else []
+        return PagedList(resources, response.get_next_page_token())
+
+    def get_resource(self, identifier: Identifier) -> GetResourceResponse:
+        return self.client.get(
+            self.resource_paths.resource(
+                identifier.get_database_name(), identifier.get_object_name()),
+            GetResourceResponse,
+            self.rest_auth_function,
+        )
+
+    def create_resource(
+            self,
+            identifier: Identifier,
+            comment: Optional[str],
+            uri: str,
+            resource_type: 'ResourceType',
+    ) -> None:
+        request = CreateResourceRequest(
+            name=identifier.get_object_name(),
+            comment=comment,
+            uri=uri,
+            resource_type=resource_type.get_value(),
+        )
+        self.client.post(
+            self.resource_paths.resources(identifier.get_database_name()),
+            request,
+            self.rest_auth_function,
+        )
+
+    def drop_resource(self, identifier: Identifier) -> None:
+        self.client.delete(
+            self.resource_paths.resource(
+                identifier.get_database_name(), identifier.get_object_name()),
+            self.rest_auth_function,
+        )
+
+    def alter_resource(self, identifier: Identifier, changes: List) -> None:
+        request = AlterResourceRequest(changes=changes)
+        self.client.post(
+            self.resource_paths.resource(
                 identifier.get_database_name(), identifier.get_object_name()),
             request,
             self.rest_auth_function,
