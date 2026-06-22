@@ -24,6 +24,7 @@ that the catalog layer must produce regardless of which catalog
 implementation is in use.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -81,11 +82,20 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
         self.assertIsInstance(response, GetTagResponse)
         self.assertEqual(response.tag_name, "t1")
         self.assertIsInstance(response.snapshot, Snapshot)
-        # FileSystemCatalog does not yet track tag_create_time /
-        # tag_time_retained — both must be None until the underlying Tag
-        # dataclass is extended.
+        # A tag created without a retention carries no create-time / TTL: the
+        # file is a plain Snapshot JSON, so both surface as None.
         self.assertIsNone(response.tag_create_time)
         self.assertIsNone(response.tag_time_retained)
+
+    def test_create_tag_without_ttl_writes_plain_snapshot(self):
+        # No-TTL tags must be written as plain Snapshot JSON (no tag-specific
+        # fields) so the file stays readable by older / Java readers.
+        self.catalog.create_tag(self.identifier, "t1")
+        table = self.catalog.get_table(self.identifier)
+        tag_path = table.tag_manager().tag_path("t1")
+        content = json.loads(table.file_io.read_file_utf8(tag_path))
+        self.assertNotIn("tagCreateTime", content)
+        self.assertNotIn("tagTimeRetained", content)
 
     def test_create_tag_with_snapshot_id(self):
         self.catalog.create_tag(self.identifier, "t1", snapshot_id=1)
@@ -109,11 +119,24 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
         result = self.catalog.list_tags_paged(self.identifier)
         self.assertEqual(result.elements, ["t1"])
 
-    def test_create_tag_with_time_retained_raises_not_implemented(self):
-        with self.assertRaises(NotImplementedError) as cm:
-            self.catalog.create_tag(
-                self.identifier, "t1", time_retained="1d")
-        self.assertIn("time_retained", str(cm.exception))
+    def test_create_tag_with_time_retained(self):
+        self.catalog.create_tag(self.identifier, "t1", time_retained="1d")
+        response = self.catalog.get_tag(self.identifier, "t1")
+        # create_time surfaces as epoch millis, time_retained as an ISO-8601
+        # duration string (matching Java's Duration.toString()).
+        self.assertIsNotNone(response.tag_create_time)
+        self.assertIsInstance(response.tag_create_time, int)
+        self.assertEqual(response.tag_time_retained, "PT24H")
+
+    def test_create_tag_with_time_retained_writes_java_compatible_json(self):
+        self.catalog.create_tag(self.identifier, "t1", time_retained="1d")
+        table = self.catalog.get_table(self.identifier)
+        tag_path = table.tag_manager().tag_path("t1")
+        content = json.loads(table.file_io.read_file_utf8(tag_path))
+        # On-disk shape must match Java: LocalDateTime array + Duration seconds.
+        self.assertIsInstance(content["tagCreateTime"], list)
+        self.assertEqual(len(content["tagCreateTime"]), 7)
+        self.assertEqual(content["tagTimeRetained"], 86400.0)
 
     def test_create_tag_table_not_exists(self):
         with self.assertRaises(TableNotExistException):
@@ -220,6 +243,16 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
         table.replace_tag("latest_test")
         tag = table.tag_manager().get("latest_test")
         self.assertEqual(tag.trim_to_snapshot().id, 2)
+
+    def test_replace_tag_with_time_retained(self):
+        table = self.catalog.get_table(self.identifier)
+        table.create_tag("ttl_replace", snapshot_id=1)
+        # Replacing with a retention upgrades the plain-snapshot tag into a
+        # TTL-carrying tag.
+        table.replace_tag("ttl_replace", snapshot_id=1, time_retained="12h")
+        response = self.catalog.get_tag(self.identifier, "ttl_replace")
+        self.assertIsNotNone(response.tag_create_time)
+        self.assertEqual(response.tag_time_retained, "PT12H")
 
     def test_replace_tag_not_exists_raises(self):
         table = self.catalog.get_table(self.identifier)
