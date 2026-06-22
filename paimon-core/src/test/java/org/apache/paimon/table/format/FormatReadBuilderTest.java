@@ -185,7 +185,9 @@ public class FormatReadBuilderTest {
         long fileSize = fileIO.getFileSize(csvFile);
 
         // Test 1: Read entire CSV file (offset = 0, length = fileSize)
-        FormatDataSplit fullSplit = new FormatDataSplit(csvFile, fileSize, null);
+        FormatDataSplit fullSplit =
+                new FormatDataSplit(
+                        Arrays.asList(new FormatDataSplit.FileMeta(csvFile, fileSize)), null);
         RecordReader<InternalRow> fullReader = readBuilder.createReader(fullSplit);
         List<InternalRow> fullResult = readAllRows(fullReader, rowType);
 
@@ -204,7 +206,10 @@ public class FormatReadBuilderTest {
         // Read from offset 0 with a limited length (first 2 lines approximately)
         long partialLength = fileSize / 2;
         FormatDataSplit partialSplit =
-                new FormatDataSplit(csvFile, fileSize, 0, partialLength, null);
+                new FormatDataSplit(
+                        Arrays.asList(
+                                new FormatDataSplit.FileMeta(csvFile, fileSize, 0, partialLength)),
+                        null);
         RecordReader<InternalRow> partialReader = readBuilder.createReader(partialSplit);
         List<InternalRow> partialResult = readAllRows(partialReader, rowType);
 

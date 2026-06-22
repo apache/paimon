@@ -785,8 +785,9 @@ public class FormatTableScanTest {
         // Parquet files should NOT be split, should be a single split
         assertThat(splits).hasSize(1);
         FormatDataSplit split = (FormatDataSplit) splits.get(0);
-        assertThat(split.filePath()).isEqualTo(parquetFile);
-        assertThat(split.offset()).isEqualTo(0);
+        assertThat(split.files()).hasSize(1);
+        assertThat(split.files().get(0).filePath()).isEqualTo(parquetFile);
+        assertThat(split.files().get(0).offset()).isEqualTo(0);
     }
 
     @TestTemplate

@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.format.FormatDataSplit
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.catalog.TableCapability
@@ -445,6 +446,54 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
         sql("SHOW PARTITIONS t PARTITION (p1=2)"),
         Seq(Row("p1=2/p2=1"), Row("p1=2/p2=2")))
       checkAnswer(sql("SHOW PARTITIONS t PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
+    }
+  }
+
+  test("PaimonFormatTable: pack multiple files into one split by source.split.target-size") {
+    val tableName = "paimon_format_multifile_split"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT, f1 STRING) USING CSV TBLPROPERTIES (" +
+          "'seq'='|', 'lineSep'='\n', 'file.compression'='none', " +
+          "'format-table.implementation'='paimon')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+
+      // Three data files of equal byte size, each with two distinct rows.
+      val contents = Seq("1|aaa\n2|bbb", "3|ccc\n4|ddd", "5|eee\n6|fff")
+      contents.zipWithIndex.foreach {
+        case (content, i) =>
+          table.fileIO().writeFile(new Path(table.location(), s"part-0000$i.csv"), content, false)
+      }
+      val fileSize = contents.head.getBytes("UTF-8").length
+
+      val expected = Seq(
+        Row(1, "aaa"),
+        Row(2, "bbb"),
+        Row(3, "ccc"),
+        Row(4, "ddd"),
+        Row(5, "eee"),
+        Row(6, "fff"))
+
+      // Default target size (128MB): all three files are packed into a single split.
+      val combined = getFormatTableScan(s"SELECT * FROM $tableName").inputSplits
+      assert(combined.length == 1, s"Expected 1 packed split but got ${combined.length}")
+      assert(
+        combined.head.asInstanceOf[FormatDataSplit].files().size() == 3,
+        "The single split should contain all 3 files")
+      checkAnswer(sql(s"SELECT * FROM $tableName ORDER BY f0"), expected)
+
+      // Target size = one file size: each file becomes its own split (no slicing since len <= target).
+      withSparkSQLConf("spark.paimon.source.split.target-size" -> s"${fileSize}b") {
+        val perFile = getFormatTableScan(s"SELECT * FROM $tableName").inputSplits
+        assert(perFile.length == 3, s"Expected 3 splits but got ${perFile.length}")
+        perFile.foreach(
+          s =>
+            assert(
+              s.asInstanceOf[FormatDataSplit].files().size() == 1,
+              "Each split should contain exactly 1 file"))
+        checkAnswer(sql(s"SELECT * FROM $tableName ORDER BY f0"), expected)
+      }
     }
   }
 }

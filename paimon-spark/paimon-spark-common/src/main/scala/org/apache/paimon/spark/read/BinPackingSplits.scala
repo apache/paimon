@@ -79,7 +79,8 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackSplit => false
       case split: DataSplit => split.rawConvertible() || coreOptions.dataEvolutionEnabled()
-      // Currently, format table reader only supports reading one file.
+      // FormatDataSplit is already packed with multiple files by target size in the core scan,
+      // so each split maps directly to one input partition here.
       case _: FormatDataSplit => false
       case _ => false
     }
