@@ -22,7 +22,6 @@ import uuid
 
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.api.rest_api import RESTApi, IllegalArgumentError
 from pypaimon.catalog.catalog_exception import (
     ResourceNotExistException,
     ResourceAlreadyExistException,
@@ -169,4 +168,3 @@ class RESTResourceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

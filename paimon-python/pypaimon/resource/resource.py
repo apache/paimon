@@ -183,4 +183,3 @@ class PyResource(AbstractResource):
 
     def resource_type(self) -> ResourceType:
         return ResourceType.PY
-
