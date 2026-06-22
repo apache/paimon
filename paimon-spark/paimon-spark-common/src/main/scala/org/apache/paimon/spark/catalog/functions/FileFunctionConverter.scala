@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.catalog.functions
 
-import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.function.{Function, FunctionDefinition, FunctionImpl}
 import org.apache.paimon.spark.SparkCatalog.FUNCTION_DEFINITION_NAME
 
@@ -27,38 +26,32 @@ import org.apache.spark.sql.catalyst.catalog.{CatalogFunction, FunctionResource,
 
 import scala.collection.JavaConverters._
 
-object V1FunctionConverter {
+/**
+ * Converts between Spark's [[CatalogFunction]] (a file/Hive className UDF) and a Paimon
+ * [[Function]] carrying a [[FunctionDefinition.FileFunctionDefinition]].
+ */
+object FileFunctionConverter {
 
-  /** Converts spark [[FunctionIdentifier]] to paimon [[Identifier]]. */
-  def fromFunctionIdentifier(ident: FunctionIdentifier): Identifier = {
-    new Identifier(ident.database.get, ident.funcName)
-  }
-
-  /** Converts paimon [[Identifier]] to spark [[FunctionIdentifier]]. */
-  def toFunctionIdentifier(ident: Identifier): FunctionIdentifier = {
-    new FunctionIdentifier(ident.getObjectName, Some(ident.getDatabaseName))
-  }
-
-  /** Converts spark [[CatalogFunction]] to paimon [[Function]]. */
-  def fromV1Function(v1Function: CatalogFunction): Function = {
-    val functionIdentifier = v1Function.identifier
-    val identifier = fromFunctionIdentifier(functionIdentifier)
-    val fileResources = v1Function.resources
+  /** Converts a Spark [[CatalogFunction]] to a Paimon [[Function]]. */
+  def fromCatalogFunction(catalogFunction: CatalogFunction): Function = {
+    val functionIdentifier = catalogFunction.identifier
+    val identifier = FunctionIdentifierConverter.toPaimonIdentifier(functionIdentifier)
+    val fileResources = catalogFunction.resources
       .map(r => new FunctionDefinition.FunctionFileResource(r.resourceType.resourceType, r.uri))
       .toList
 
     val functionDefinition: FunctionDefinition = FunctionDefinition.file(
       fileResources.asJava,
       "JAVA", // Apache Spark only supports JAR persistent function now.
-      v1Function.className,
+      catalogFunction.className,
       functionIdentifier.funcName)
     val definitions = Map(FUNCTION_DEFINITION_NAME -> functionDefinition).asJava
 
     new FunctionImpl(identifier, definitions)
   }
 
-  /** Converts paimon [[Function]] to spark [[CatalogFunction]]. */
-  def toV1Function(paimonFunction: Function): CatalogFunction = {
+  /** Converts a Paimon [[Function]] to a Spark [[CatalogFunction]]. */
+  def toCatalogFunction(paimonFunction: Function): CatalogFunction = {
     paimonFunction.definition(FUNCTION_DEFINITION_NAME) match {
       case functionDefinition: FunctionDefinition.FileFunctionDefinition =>
         val fileResources = functionDefinition
