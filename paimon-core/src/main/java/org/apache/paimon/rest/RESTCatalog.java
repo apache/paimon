@@ -70,7 +70,6 @@ import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.utils.UriReaderFactory;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -105,7 +104,6 @@ public class RESTCatalog implements Catalog {
 
     private final RESTApi api;
     private final CatalogContext context;
-    private final UriReaderFactory uriReaderFactory;
     private final boolean dataTokenEnabled;
     protected final Map<String, String> tableDefaultOptions;
     private final @Nullable LocalCacheManager cacheManager;
@@ -122,7 +120,6 @@ public class RESTCatalog implements Catalog {
                         context.hadoopConf(),
                         context.preferIO(),
                         context.fallbackIO());
-        this.uriReaderFactory = new UriReaderFactory(this.context);
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
         this.cacheManager = CachingFileIO.createCacheManager(this.context);
@@ -1027,14 +1024,15 @@ public class RESTCatalog implements Catalog {
     }
 
     private Resource toResource(Identifier identifier, GetResourceResponse response) {
+        String uri = response.uri();
         return Resource.toResource(
                 ResourceType.fromValue(response.resourceType()),
                 identifier,
                 response.comment(),
-                response.uri(),
+                uri,
                 response.size(),
                 response.lastModifiedTime(),
-                uriReaderFactory);
+                fileIOForData(new Path(uri), identifier));
     }
 
     @Override

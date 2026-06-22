@@ -18,11 +18,9 @@
 
 package org.apache.paimon.resource;
 
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.UriReaderFactory;
+import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,7 +49,7 @@ public class ResourceTest {
                         file.toString(),
                         data.length,
                         Files.getLastModifiedTime(file).toMillis(),
-                        new UriReaderFactory(CatalogContext.create(new Options())));
+                        LocalFileIO.create());
 
         assertThat(resource.toBytes()).isEqualTo(data);
         try (SeekableInputStream in = resource.newInputStream()) {

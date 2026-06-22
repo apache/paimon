@@ -20,8 +20,8 @@ package org.apache.paimon.resource;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.utils.UriReaderFactory;
 
 import javax.annotation.Nullable;
 
@@ -74,7 +74,7 @@ public interface Resource extends Serializable {
      * @param uri the URI pointing to the resource location
      * @param size the size of the resource in bytes
      * @param lastModifiedTime the last modified time in milliseconds since epoch
-     * @param uriReaderFactory factory to read the resource URI
+     * @param fileIO the {@link FileIO} used to read the resource URI
      * @return a concrete {@link Resource} instance
      */
     static Resource toResource(
@@ -84,29 +84,26 @@ public interface Resource extends Serializable {
             String uri,
             long size,
             long lastModifiedTime,
-            UriReaderFactory uriReaderFactory) {
+            FileIO fileIO) {
         String name = identifier.getObjectName();
         switch (resourceType) {
             case FILE:
-                return new FileResource(
-                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
+                return new FileResource(identifier, comment, uri, size, lastModifiedTime, fileIO);
             case ARCHIVE:
                 return new ArchiveResource(
-                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
+                        identifier, comment, uri, size, lastModifiedTime, fileIO);
             case JAR:
                 if (!name.endsWith(".jar")) {
                     throw new IllegalArgumentException(
                             "JAR resource name must end with '.jar', but got: " + name);
                 }
-                return new JarResource(
-                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
+                return new JarResource(identifier, comment, uri, size, lastModifiedTime, fileIO);
             case PY:
                 if (!name.endsWith(".py")) {
                     throw new IllegalArgumentException(
                             "PY resource name must end with '.py', but got: " + name);
                 }
-                return new PyResource(
-                        identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
+                return new PyResource(identifier, comment, uri, size, lastModifiedTime, fileIO);
             default:
                 throw new IllegalArgumentException("Unknown resource type: " + resourceType);
         }

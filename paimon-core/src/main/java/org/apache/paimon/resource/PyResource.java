@@ -19,7 +19,7 @@
 package org.apache.paimon.resource;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.utils.UriReaderFactory;
+import org.apache.paimon.fs.FileIO;
 
 import javax.annotation.Nullable;
 
@@ -34,8 +34,8 @@ public class PyResource extends AbstractResource {
             String uri,
             long size,
             long lastModifiedTime,
-            UriReaderFactory uriReaderFactory) {
-        super(identifier, comment, uri, size, lastModifiedTime, uriReaderFactory);
+            FileIO fileIO) {
+        super(identifier, comment, uri, size, lastModifiedTime, fileIO);
     }
 
     @Override

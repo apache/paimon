@@ -19,9 +19,10 @@
 package org.apache.paimon.resource;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
@@ -42,7 +43,7 @@ public abstract class AbstractResource implements Resource {
     private final String uri;
     private final long size;
     private final long lastModifiedTime;
-    private final UriReaderFactory uriReaderFactory;
+    private final FileIO fileIO;
 
     protected AbstractResource(
             Identifier identifier,
@@ -50,13 +51,13 @@ public abstract class AbstractResource implements Resource {
             String uri,
             long size,
             long lastModifiedTime,
-            UriReaderFactory uriReaderFactory) {
+            FileIO fileIO) {
         this.identifier = identifier;
         this.comment = comment;
         this.uri = uri;
         this.size = size;
         this.lastModifiedTime = lastModifiedTime;
-        this.uriReaderFactory = uriReaderFactory;
+        this.fileIO = fileIO;
     }
 
     @JsonGetter("name")
@@ -120,7 +121,7 @@ public abstract class AbstractResource implements Resource {
 
     @Override
     public SeekableInputStream newInputStream() throws IOException {
-        return uriReaderFactory.create(uri).newInputStream(uri);
+        return fileIO.newInputStream(new Path(uri));
     }
 
     @Override

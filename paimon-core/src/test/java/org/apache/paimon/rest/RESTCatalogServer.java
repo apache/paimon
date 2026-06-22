@@ -123,7 +123,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TimeUtils;
-import org.apache.paimon.utils.UriReaderFactory;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
@@ -1363,7 +1362,7 @@ public class RESTCatalogServer {
                                 createRequest.uri(),
                                 0L,
                                 System.currentTimeMillis(),
-                                new UriReaderFactory(catalogContext));
+                                LocalFileIO.create());
                 resourceStore.put(resourceId.getFullName(), resource);
                 return new MockResponse().setResponseCode(200);
             default:
@@ -1405,7 +1404,7 @@ public class RESTCatalogServer {
                                 newUri,
                                 existingResource.size(),
                                 System.currentTimeMillis(),
-                                new UriReaderFactory(catalogContext));
+                                LocalFileIO.create());
                 resourceStore.put(identifier.getFullName(), updatedResource);
                 return new MockResponse().setResponseCode(200);
             default:

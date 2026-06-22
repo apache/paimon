@@ -18,13 +18,12 @@
 
 package org.apache.paimon.rest;
 
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
@@ -66,7 +65,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.UriReaderFactory;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
 
@@ -384,7 +382,7 @@ public class MockRESTMessage {
                 "/path/to/" + identifier.getObjectName(),
                 1024L,
                 System.currentTimeMillis(),
-                new UriReaderFactory(CatalogContext.create(new Options())));
+                LocalFileIO.create());
     }
 
     public static GetResourceResponse getResourceResponse() {
