@@ -174,8 +174,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     try {
                         ensureLoaded();
                         String fieldName = fullTextSearch.fieldName();
-                        // queryText() is gone on master; extract plain text from the Match query.
-                        String queryText = plainQueryText(fullTextSearch);
+                        String queryText = matchQueryText(fullTextSearch);
                         int topK = fullTextSearch.limit();
 
                         SearchResult result = searcher.fullTextSearch(fieldName, queryText, topK);
@@ -187,16 +186,25 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * master replaced {@code FullTextSearch.queryText()} with a structured {@link
-     * org.apache.paimon.predicate.FullTextQuery}. The eslib searcher takes a plain text query, so
-     * for a simple Match use its text; fall back to the JSON DSL for compound queries.
+     * Extracts the plain query text from a {@link org.apache.paimon.predicate.FullTextQuery.Match}.
+     *
+     * <p>The eslib searcher only accepts a single plain-text query per field ({@code
+     * fullTextSearch(field, text, topK)}), so only {@code Match} can be translated faithfully.
+     * Structured queries (Phrase, Boolean, Boost, MultiMatch, ...) are rejected explicitly rather
+     * than serialized to JSON and fed to the text parser, which would silently search for the
+     * literal JSON tokens and return wrong results. Supporting them requires a real
+     * structured-query translation, tracked as follow-up work.
      */
-    private static String plainQueryText(FullTextSearch fullTextSearch) {
+    private static String matchQueryText(FullTextSearch fullTextSearch) {
         org.apache.paimon.predicate.FullTextQuery ftq = fullTextSearch.query();
         if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match) {
             return ((org.apache.paimon.predicate.FullTextQuery.Match) ftq).query();
         }
-        return fullTextSearch.queryJson();
+        throw new UnsupportedOperationException(
+                "ES global index full-text search currently supports only Match queries; got "
+                        + ftq.getClass().getSimpleName()
+                        + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are not"
+                        + " yet implemented for the es-index backend.");
     }
 
     /**

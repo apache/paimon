@@ -167,6 +167,16 @@ class ESIndexGlobalIndexE2ETest {
         assertTrue(ft.isPresent(), "full-text search returns a result");
         assertEquals(10, ft.get().results().getIntCardinality(), "10 even docs");
 
+        // --- structured full-text queries are rejected explicitly (not serialized to JSON and fed
+        // to the text parser, which would return wrong results) ---
+        org.junit.jupiter.api.Assertions.assertThrows(
+                UnsupportedOperationException.class,
+                () ->
+                        reader.visitFullTextSearch(
+                                new FullTextSearch(
+                                        FullTextQuery.phrase("even document", "title"), 50)),
+                "Phrase full-text query must be rejected, not silently mis-evaluated");
+
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
         Optional<GlobalIndexResult> sf = reader.visitGreaterOrEqual(priceRef, 100).join();

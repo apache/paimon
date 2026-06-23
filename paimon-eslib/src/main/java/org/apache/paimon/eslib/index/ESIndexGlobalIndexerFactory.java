@@ -50,6 +50,15 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
+    public boolean supportsFullTextSearch() {
+        // The ES index is a hybrid backend: a FULLTEXT-typed column (whether it is the primary
+        // index field or an extra field of a multi-column index) is served by Lucene full-text
+        // search. Without this override FullTextScanImpl filters out every es-index file and the
+        // planner full-text path returns nothing.
+        return true;
+    }
+
+    @Override
     public GlobalIndexer create(DataField field, Options options) {
         return new ESIndexGlobalIndexer(
                 java.util.Collections.singletonList(field),
