@@ -329,9 +329,18 @@ public final class RowType extends DataType {
         // a tail) is selected as a whole field
         Map<String, List<String>> childToSubPaths = new HashMap<>();
         Set<String> wholeChildren = new HashSet<>();
+        Set<String> fieldNames = new HashSet<>();
+        for (DataField field : type.getFields()) {
+            fieldNames.add(field.name());
+        }
         for (String path : paths) {
             int dot = path.indexOf('.');
-            if (dot < 0) {
+            // Prefer an exact field-name match so a column whose name itself contains a dot (and
+            // any
+            // plain top-level name) is selected whole; only split into head.tail for genuine nested
+            // sub-field paths that do not name a field directly. This keeps backward compatibility
+            // with the legacy exact-name project(List).
+            if (dot < 0 || fieldNames.contains(path)) {
                 childToSubPaths.computeIfAbsent(path, k -> new ArrayList<>());
                 wholeChildren.add(path);
             } else {
@@ -385,11 +394,32 @@ public final class RowType extends DataType {
     private static void collectLeafPaths(
             List<DataField> writeFields, RowType fullType, String prefix, List<String> out) {
         for (DataField writeField : writeFields) {
-            DataField fullField = fullType.getField(writeField.id());
             String path = prefix.isEmpty() ? writeField.name() : prefix + "." + writeField.name();
-            if (writeField.type() instanceof RowType
-                    && fullField.type() instanceof RowType
-                    && !coversFully((RowType) writeField.type(), (RowType) fullField.type())) {
+            // A field absent from the reference type (e.g. the _ROW_ID / _SEQUENCE_NUMBER special
+            // fields added by row tracking, which are not part of the table's logical row type) has
+            // no sub-field split: emit it whole by name, matching the legacy getFieldNames()
+            // output.
+            if (!fullType.containsField(writeField.id())) {
+                out.add(path);
+                continue;
+            }
+            DataField fullField = fullType.getField(writeField.id());
+            boolean willExpand =
+                    writeField.type() instanceof RowType
+                            && fullField.type() instanceof RowType
+                            && !coversFully(
+                                    (RowType) writeField.type(), (RowType) fullField.type());
+            // A dotted path is only unambiguous if no name segment contains a literal '.'. A name
+            // with a dot is fine when emitted whole at top level (projectByPaths matches it
+            // exactly),
+            // but not when it participates in a multi-segment nested path.
+            if (writeField.name().indexOf('.') >= 0 && (!prefix.isEmpty() || willExpand)) {
+                throw new UnsupportedOperationException(
+                        "Sub-field-level data evolution does not support a nested field whose name "
+                                + "contains '.': "
+                                + path);
+            }
+            if (willExpand) {
                 collectLeafPaths(
                         ((RowType) writeField.type()).getFields(),
                         (RowType) fullField.type(),

@@ -78,6 +78,12 @@ public class DataEvolutionRow implements InternalRow {
                 this.rowKind = newRows[i].getRowKind();
             }
         }
+        if (rowKind == null) {
+            // a composed struct whose every source partial is null still needs a defined kind so
+            // getRowKind() never returns null; the kind of an assembled struct value is not
+            // meaningful, so default to INSERT
+            this.rowKind = RowKind.INSERT;
+        }
     }
 
     public void setRows(InternalRow[] rows) {

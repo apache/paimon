@@ -50,7 +50,7 @@ import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.{BooleanType, DataType, StructType}
+import org.apache.spark.sql.types.{BooleanType, StructType}
 
 import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
@@ -390,37 +390,48 @@ case class MergeIntoPaimonDataEvolutionTable(
     // the rest are copied from the target. Falls back to whole-column write when the changed leaves
     // cannot be safely determined, so behaviour never regresses.
     val matchedUpdateActions = matchedActions.collect { case ua: UpdateAction => ua }
+    // Gated by data-evolution.nested-field.enabled (default off): when disabled, no column is
+    // pruned, so every struct column is rewritten whole (behaviour identical to before this
+    // feature). When enabled, struct columns whose SET only touches some sub-fields are pruned.
+    val nestedFieldEnabled = table.coreOptions().dataEvolutionNestedFieldEnabled()
     val prunedByExprId: Map[ExprId, (Seq[Seq[String]], StructType)] =
-      updateColumnsSorted.flatMap {
-        attr =>
-          if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
-            None
-          } else {
-            attr.dataType match {
-              case st: StructType =>
-                val perAction = matchedUpdateActions.flatMap {
-                  ua =>
-                    ua.assignments
-                      .find(
-                        a =>
-                          isModifiedAssignment(a) && assignmentKeyAttribute(a).sameRef(attr))
-                      .map(a => changedLeaves(a.value, st, attr))
-                }
-                if (perAction.isEmpty || perAction.exists(_.isEmpty)) {
-                  None
-                } else {
-                  val union = perAction.flatten.flatten.map(_._1).distinct
-                  // prune only when it is a strict subset of all leaves of the struct
-                  if (union.isEmpty || union.map(_.size).sum >= leafCount(st)) {
+      if (!nestedFieldEnabled) Map.empty
+      else
+        updateColumnsSorted.flatMap {
+          attr =>
+            if (rawBlobUpdateColumns.exists(_.sameRef(attr))) {
+              None
+            } else {
+              attr.dataType match {
+                case st: StructType =>
+                  val perAction = matchedUpdateActions.flatMap {
+                    ua =>
+                      ua.assignments
+                        .find(
+                          a => isModifiedAssignment(a) && assignmentKeyAttribute(a).sameRef(attr))
+                        .map(a => changedLeaves(a.value, st, attr))
+                  }
+                  if (perAction.isEmpty || perAction.exists(_.isEmpty)) {
                     None
                   } else {
-                    Some(attr.exprId -> (union, prunedStructType(st, union)))
+                    val union = perAction.flatten.flatten.map(_._1).distinct
+                    // The reader composes a split struct only one level deep, so only prune when
+                    // every change addresses a direct sub-field of the top-level struct (depth 1).
+                    // A deeper change (e.g. nest.inner.x) would split an inner struct across files,
+                    // which the read path does not support, so fall back to a whole-column write.
+                    // Prune only when the changed direct sub-fields are a strict subset of all of
+                    // them (otherwise the whole column is rewritten anyway).
+                    val allDepthOne = union.forall(_.size == 1)
+                    if (union.isEmpty || !allDepthOne || union.size >= st.fields.length) {
+                      None
+                    } else {
+                      Some(attr.exprId -> (union, prunedStructType(st, union)))
+                    }
                   }
-                }
-              case _ => None
+                case _ => None
+              }
             }
-          }
-      }.toMap
+        }.toMap
 
     val mergeOutput = updateColumnsSorted.map {
       attr =>
@@ -929,12 +940,6 @@ object MergeIntoPaimonDataEvolutionTable {
     col("`" + name.replace("`", "``") + "`")
   }
 
-  /** Number of leaf fields (recursing into structs) of a data type. */
-  private def leafCount(dt: DataType): Int = dt match {
-    case st: StructType => st.fields.map(f => leafCount(f.dataType)).sum
-    case _ => 1
-  }
-
   /**
    * For an aligned UPDATE value of a struct column, return the changed leaf paths (relative to the
    * column) paired with their new value expression, or `None` if the value is not a recognizable
@@ -1010,8 +1015,7 @@ object MergeIntoPaimonDataEvolutionTable {
         if (sub.exists(_.size == 1)) {
           f
         } else {
-          f.copy(dataType =
-            prunedStructType(f.dataType.asInstanceOf[StructType], sub.map(_.tail)))
+          f.copy(dataType = prunedStructType(f.dataType.asInstanceOf[StructType], sub.map(_.tail)))
         }
     }
     StructType(fields)

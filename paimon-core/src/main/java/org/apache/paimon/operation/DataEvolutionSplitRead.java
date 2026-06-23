@@ -305,7 +305,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 // no file provides this field; it stays null (nullability checked below)
                 continue;
             }
-            if (providers.size() == 1) {
+            // Only read a field whole from a single file when that file covers ALL of its leaves.
+            // If a single file provides only some leaves of a struct (the rest absent everywhere),
+            // we must prune to the provided sub-fields so the reader is not asked for sub-fields
+            // the
+            // file does not physically contain; the missing ones stay null via the composite plan.
+            boolean allLeavesCovered = leafProvider.size() == leaves.size();
+            if (providers.size() == 1 && allLeavesCovered) {
                 int b = providers.iterator().next();
                 bunchSelection.get(b).put(rf.id(), null);
                 wholeBunch[j] = b;
@@ -316,11 +322,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         rf.name());
                 composite[j] = true;
                 for (DataField sub : ((RowType) rf.type()).getFields()) {
+                    List<Integer> subLeaves = leafIdsOf(sub);
                     Set<Integer> subProviders = new HashSet<>();
-                    for (int leaf : leafIdsOf(sub)) {
+                    int coveredSubLeaves = 0;
+                    for (int leaf : subLeaves) {
                         int p = leafProvider.getOrDefault(leaf, -1);
                         if (p >= 0) {
                             subProviders.add(p);
+                            coveredSubLeaves++;
                         }
                     }
                     if (subProviders.size() > 1) {
@@ -333,6 +342,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         + ") across multiple files.");
                     }
                     if (subProviders.size() == 1) {
+                        if (sub.type() instanceof RowType && coveredSubLeaves < subLeaves.size()) {
+                            // the single provider holds only part of this nested sub-struct;
+                            // reading
+                            // it whole would request leaves it lacks, and one-level composition
+                            // cannot prune deeper than this level yet
+                            throw new UnsupportedOperationException(
+                                    "Sub-field-level data evolution does not yet support reading a "
+                                            + "partially-written nested sub-field ("
+                                            + rf.name()
+                                            + "."
+                                            + sub.name()
+                                            + ") deeper than one level.");
+                        }
                         int b = subProviders.iterator().next();
                         bunchSelection
                                 .get(b)
@@ -397,6 +419,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     int subId = subFields.get(s).id();
                     int b = findSubProvider(rf.id(), subId, bunchSubOffset);
                     if (b < 0) {
+                        // no file provides this sub-field; it stays null, so it must be nullable
+                        checkArgument(
+                                subFields.get(s).type().isNullable(),
+                                "Sub-field %s.%s is not null but can't find any file contains it.",
+                                rf.name(),
+                                subFields.get(s).name());
                         continue;
                     }
                     Integer pIdx = bunchToPartial.get(b);

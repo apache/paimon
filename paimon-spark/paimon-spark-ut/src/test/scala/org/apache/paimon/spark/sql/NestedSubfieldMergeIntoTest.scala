@@ -49,7 +49,8 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
       sql(s"""
              |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
              |  'row-tracking.enabled' = 'true',
-             |  'data-evolution.enabled' = 'true')
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
              |""".stripMargin)
       sql(
         "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
@@ -82,7 +83,8 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
       sql(s"""
              |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
              |  'row-tracking.enabled' = 'true',
-             |  'data-evolution.enabled' = 'true')
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
              |""".stripMargin)
       sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
 
@@ -96,6 +98,37 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
              |""".stripMargin).collect()
 
       checkAnswer(sql("SELECT id, nest.a, nest.b FROM t"), Seq(Row(1, 100, "z")))
+    }
+  }
+
+  test(
+    "Sub-field data evolution: disabled by default, sub-field update rewrites the whole column") {
+    withTable("s", "t") {
+      // data-evolution.nested-field.enabled is left at its default (false)
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x'))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      // correctness still holds: nest.a updated, nest.b preserved
+      checkAnswer(sql("SELECT id, nest.a, nest.b FROM t"), Seq(Row(1, 100, "x")))
+
+      // but no sub-field incremental file is produced: the whole nest column is rewritten
+      val deltaCols = latestDeltaWriteCols("t")
+      assert(
+        !deltaCols.exists(cols => cols.contains("nest.a")),
+        s"expected no dotted (sub-field) writeCols when feature is disabled, got: $deltaCols")
     }
   }
 }

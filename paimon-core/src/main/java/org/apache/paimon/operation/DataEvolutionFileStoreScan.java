@@ -333,6 +333,15 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                         for (int k = 0; k < fieldIdsWithStats.length; k++) {
                             if (fieldId == fieldIdsWithStats[k]) {
                                 DataType fileType = dataFileSchemaWithStats.fields().get(k).type();
+                                // A sub-field-level data evolution file may store only part of a
+                                // nested struct (e.g. nest<a> of nest<a,b>); its file type then
+                                // does
+                                // not equal the full target struct. We intentionally skip stats in
+                                // that case (leaving the field as "no stats" so no file is wrongly
+                                // pruned) rather than composing partial-struct stats across files;
+                                // struct columns rarely carry useful min/max and data evolution
+                                // does
+                                // not push predicates down, so the lost benefit is negligible.
                                 if (!fileType.equalsIgnoreFieldId(targetType)) {
                                     continue loop1;
                                 }

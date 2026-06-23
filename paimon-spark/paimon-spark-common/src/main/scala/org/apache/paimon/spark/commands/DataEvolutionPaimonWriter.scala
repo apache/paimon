@@ -64,7 +64,8 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
       rawBlobPlaceholderMarkerColumns: Map[String, String]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
-    assert(data.columns.length == writeType.getFieldCount + 2 + rawBlobPlaceholderMarkerColumns.size)
+    assert(
+      data.columns.length == writeType.getFieldCount + 2 + rawBlobPlaceholderMarkerColumns.size)
 
     val options = new CoreOptions(table.schema().options())
     val blobInlineFields = options.blobInlineField().asScala.toSeq
