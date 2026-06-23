@@ -820,6 +820,25 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options3,
                                                 "")));
+
+        // Test 4: data evolution tables can sort manifests by RowID without partition keys
+        Map<String, String> options4 = new HashMap<>();
+        options4.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), "true");
+        options4.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options4.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options4.put(BUCKET.key(), String.valueOf(-1));
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options4,
+                                                "")));
     }
 
     @Test

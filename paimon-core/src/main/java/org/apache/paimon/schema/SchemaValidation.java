@@ -1164,6 +1164,9 @@ public class SchemaValidation {
 
     private static void validateManifestSort(TableSchema schema, CoreOptions options) {
         if (options.manifestSortEnabled()) {
+            if (options.dataEvolutionEnabled()) {
+                return;
+            }
             checkArgument(
                     !schema.partitionKeys().isEmpty(),
                     "Cannot enable '%s' for non-partition table.",

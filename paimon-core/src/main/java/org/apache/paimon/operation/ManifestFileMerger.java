@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -75,9 +76,12 @@ public class ManifestFileMerger {
         List<ManifestFileMeta> newFilesForAbort = new ArrayList<>();
 
         try {
-            // If manifest-sort.enabled is enabled and there are partition fields, use
-            // trySortRewrite
-            if (options.manifestSortEnabled() && partitionType.getFieldCount() > 0) {
+            // If manifest-sort.enabled is enabled and there are sortable fields, use
+            // trySortRewrite. Data evolution tables sort by RowID when all manifest files contain
+            // RowID ranges, so they do not require partition fields.
+            if (options.manifestSortEnabled()
+                    && (partitionType.getFieldCount() > 0
+                            || (options.dataEvolutionEnabled() && allContainsRowId(input)))) {
                 return ManifestFileSorter.trySortCompaction(
                         input, newFilesForAbort, manifestFile, partitionType, options);
             } else {
