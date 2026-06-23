@@ -101,8 +101,7 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
     }
   }
 
-  test(
-    "Sub-field data evolution: disabled by default, sub-field update rewrites the whole column") {
+  test("Sub-field data evolution: disabled by default, sub-field update rewrites the whole column") {
     withTable("s", "t") {
       // data-evolution.nested-field.enabled is left at its default (false)
       sql(s"""

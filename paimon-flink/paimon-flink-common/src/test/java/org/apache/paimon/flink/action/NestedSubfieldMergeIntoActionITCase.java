@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -51,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
 
+    @BeforeEach
     @Override
     public void before() throws IOException {
         super.before();
@@ -226,7 +228,7 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
         sEnv.executeSql(
                 buildDdl(
                         "T",
-                        Arrays.asList("id INT", "nest ROW<a INT, inner ROW<x INT, y INT>>"),
+                        Arrays.asList("id INT", "nest ROW<a INT, sub ROW<x INT, y INT>>"),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<String, String>() {
@@ -236,7 +238,7 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
                                 put(DATA_EVOLUTION_NESTED_FIELD_ENABLED.key(), "true");
                             }
                         }));
-        insertInto("T", "(1, CAST(ROW(10, ROW(1, 2)) AS ROW<a INT, inner ROW<x INT, y INT>>))");
+        insertInto("T", "(1, CAST(ROW(10, ROW(1, 2)) AS ROW<a INT, sub ROW<x INT, y INT>>))");
 
         sEnv.executeSql(
                 buildDdl(
@@ -257,7 +259,7 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
                         () ->
                                 builder(warehouse, database, "T")
                                         .withMergeCondition("T.id=S.id")
-                                        .withMatchedUpdateSet("T.nest.inner.x=S.newx")
+                                        .withMatchedUpdateSet("T.nest.sub.x=S.newx")
                                         .withSourceTable("S")
                                         .withSinkParallelism(2)
                                         .build()
