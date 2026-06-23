@@ -22,6 +22,7 @@ These pin down the on-disk JSON shape against the Java side
 interoperable across the Java and Python SDKs.
 """
 
+import dataclasses
 import json
 import os
 import time
@@ -56,6 +57,34 @@ def _snapshot():
         commit_identifier=0,
         commit_kind="APPEND",
         time_millis=1000,
+    )
+
+
+def _full_snapshot():
+    """A Snapshot with every optional field set to a distinctive non-None value,
+    so a trim that silently drops any of them is caught."""
+    return Snapshot(
+        version=3,
+        id=7,
+        schema_id=2,
+        base_manifest_list="base-list",
+        delta_manifest_list="delta-list",
+        total_record_count=100,
+        delta_record_count=10,
+        commit_user="u",
+        commit_identifier=42,
+        commit_kind="APPEND",
+        time_millis=1000,
+        base_manifest_list_size=111,
+        delta_manifest_list_size=222,
+        changelog_manifest_list="changelog-list",
+        changelog_manifest_list_size=333,
+        index_manifest="index-manifest",
+        changelog_record_count=5,
+        watermark=123456789,
+        statistics="stats",
+        next_row_id=900,
+        properties={"k": "v"},
     )
 
 
@@ -241,6 +270,25 @@ class TagSerdeTest(unittest.TestCase):
         snap = tag.trim_to_snapshot()
         self.assertNotIsInstance(snap, Tag)
         self.assertFalse(hasattr(snap, "tag_create_time"))
+
+    def test_trim_to_snapshot_preserves_all_snapshot_fields(self):
+        # trim_to_snapshot must copy every Snapshot field (matching Java
+        # Tag.trimToSnapshot); a prior version silently dropped
+        # base/delta/changelog_manifest_list_size and properties, so
+        # FileSystemCatalog.get_tag() lost them for TTL tags.
+        original = _full_snapshot()
+        tag = Tag.from_snapshot_and_tag_ttl(
+            original, timedelta(days=1), datetime(2024, 1, 1))
+
+        snap = tag.trim_to_snapshot()
+
+        self.assertNotIsInstance(snap, Tag)
+        # Iterate over every declared Snapshot field so adding a field later
+        # without updating trim_to_snapshot fails this test.
+        for f in dataclasses.fields(Snapshot):
+            self.assertEqual(
+                getattr(original, f.name), getattr(snap, f.name),
+                f"trim_to_snapshot dropped/changed Snapshot field '{f.name}'")
 
 
 if __name__ == "__main__":

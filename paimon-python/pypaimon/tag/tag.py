@@ -100,10 +100,14 @@ class Tag(Snapshot):
             commit_identifier=self.commit_identifier,
             commit_kind=self.commit_kind,
             time_millis=self.time_millis,
+            base_manifest_list_size=self.base_manifest_list_size,
+            delta_manifest_list_size=self.delta_manifest_list_size,
             changelog_manifest_list=self.changelog_manifest_list,
+            changelog_manifest_list_size=self.changelog_manifest_list_size,
             index_manifest=self.index_manifest,
             changelog_record_count=self.changelog_record_count,
             watermark=self.watermark,
             statistics=self.statistics,
-            next_row_id=self.next_row_id
+            next_row_id=self.next_row_id,
+            properties=self.properties,
         )
