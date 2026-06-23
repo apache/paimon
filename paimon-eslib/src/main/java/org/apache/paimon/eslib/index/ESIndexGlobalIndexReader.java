@@ -538,6 +538,14 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         if (config == null) {
             return Optional.empty();
         }
+        if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
+            // A FULLTEXT field is indexed as analyzer-produced tokens, which are not equivalent to
+            // the raw column value. Ordinary SQL predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
+            // evaluated against those tokens would return an incorrect bitmap and wrongly prune
+            // rows, so we disable them and fall back to raw scan (Optional.empty). Only true
+            // full-text search (visitFullTextSearch) is served for FULLTEXT fields.
+            return Optional.empty();
+        }
         return executeFilter(fieldRef.name(), filter);
     }
 

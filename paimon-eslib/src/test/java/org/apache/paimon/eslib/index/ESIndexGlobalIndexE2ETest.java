@@ -177,6 +177,20 @@ class ESIndexGlobalIndexE2ETest {
                                         FullTextQuery.phrase("even document", "title"), 50)),
                 "Phrase full-text query must be rejected, not silently mis-evaluated");
 
+        // --- ordinary SQL predicates on a FULLTEXT field are disabled (analyzed tokens != raw
+        // value); they must return empty so the engine falls back to raw scan instead of pruning
+        // rows with a wrong bitmap ---
+        FieldRef titleRef = new FieldRef(1, "title", DataTypes.STRING());
+        assertTrue(
+                reader.visitEqual(titleRef, "document 0 even").join().isEmpty(),
+                "= on FULLTEXT field must not be index-evaluated");
+        assertTrue(
+                reader.visitLike(titleRef, "doc%").join().isEmpty(),
+                "LIKE on FULLTEXT field must not be index-evaluated");
+        assertTrue(
+                reader.visitGreaterThan(titleRef, "abc").join().isEmpty(),
+                "> on FULLTEXT field must not be index-evaluated");
+
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
         Optional<GlobalIndexResult> sf = reader.visitGreaterOrEqual(priceRef, 100).join();

@@ -62,6 +62,10 @@ public class ESIndexGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
-        return new ESIndexGlobalIndexReader(fileReader, files, fields, indexOptions, executor);
+        // Prefer the ES-configured read/search pool (global-index.es-index.read-search-threads);
+        // it is null only when that option is set to 0, in which case fall back to the caller's
+        // executor. Without this the configured pool would be built but never used.
+        ExecutorService readExecutor = searchExecutor != null ? searchExecutor : executor;
+        return new ESIndexGlobalIndexReader(fileReader, files, fields, indexOptions, readExecutor);
     }
 }
