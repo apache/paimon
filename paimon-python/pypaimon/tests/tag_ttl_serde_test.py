@@ -97,6 +97,22 @@ class TemporalCodecTest(unittest.TestCase):
         self.assertEqual([2024, 6, 25, 10, 30, 45, 123456000], arr)
         self.assertEqual(dt, json_array_to_local_datetime(arr))
 
+    def test_local_datetime_array_omits_trailing_zero_components(self):
+        # Match Jackson's LocalDateTimeSerializer byte-for-byte: a whole-minute
+        # time emits 5 components, a whole-second time emits 6, and only a
+        # non-zero nanoOfSecond produces the 7th. All must still round-trip.
+        whole_minute = datetime(2024, 6, 25, 10, 30, 0, 0)
+        self.assertEqual([2024, 6, 25, 10, 30],
+                         local_datetime_to_json_array(whole_minute))
+        self.assertEqual(whole_minute,
+                         json_array_to_local_datetime([2024, 6, 25, 10, 30]))
+
+        whole_second = datetime(2024, 6, 25, 10, 30, 45, 0)
+        self.assertEqual([2024, 6, 25, 10, 30, 45],
+                         local_datetime_to_json_array(whole_second))
+        self.assertEqual(whole_second,
+                         json_array_to_local_datetime([2024, 6, 25, 10, 30, 45]))
+
     def test_local_datetime_array_pads_missing_components(self):
         # Jackson omits trailing zero components; missing ones default to 0.
         self.assertEqual(

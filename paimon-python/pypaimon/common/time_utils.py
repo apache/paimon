@@ -177,18 +177,21 @@ _NANOS_PER_MICRO = 1000
 def local_datetime_to_json_array(dt: datetime) -> List[int]:
     """Encode a naive ``datetime`` as Java ``LocalDateTime`` array form.
 
-    Python ``datetime`` only has microsecond resolution, so the emitted
-    nanoOfSecond is ``microsecond * 1000`` (never finer than microseconds).
+    Matches Jackson's ``LocalDateTimeSerializer`` byte-for-byte: it always emits
+    ``[year, month, day, hour, minute]``, appends ``second`` only when second or
+    nanoOfSecond is non-zero, and appends ``nanoOfSecond`` only when it is
+    non-zero -- i.e. trailing zero components are omitted. ``json_array_to_local_datetime``
+    pads them back, so a shorter array round-trips. Python ``datetime`` only has
+    microsecond resolution, so the emitted nanoOfSecond is ``microsecond * 1000``
+    (never finer than microseconds).
     """
-    return [
-        dt.year,
-        dt.month,
-        dt.day,
-        dt.hour,
-        dt.minute,
-        dt.second,
-        dt.microsecond * _NANOS_PER_MICRO,
-    ]
+    nano = dt.microsecond * _NANOS_PER_MICRO
+    arr = [dt.year, dt.month, dt.day, dt.hour, dt.minute]
+    if dt.second != 0 or nano != 0:
+        arr.append(dt.second)
+        if nano != 0:
+            arr.append(nano)
+    return arr
 
 
 def json_array_to_local_datetime(arr: List[int]) -> datetime:
