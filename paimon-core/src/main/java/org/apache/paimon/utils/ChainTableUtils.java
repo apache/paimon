@@ -40,13 +40,11 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -107,21 +105,19 @@ public class ChainTableUtils {
                 timeExtractor.extract(partitionColumns, startPartitionValues);
         LocalDateTime endPartitionTime =
                 timeExtractor.extract(partitionColumns, endPartitionValues);
-        ChainPartitionStepExtractor stepExtractor =
-                new ChainPartitionStepExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
-        TemporalAmount step = stepExtractor.extractMinStep();
+        ChainPartitionPatternResolver patternResolver =
+                new ChainPartitionPatternResolver(
+                        partitionColumns,
+                        options.partitionTimestampPattern(),
+                        options.partitionTimestampFormatter());
+        TemporalAmount step = patternResolver.extractMinStep();
         LocalDateTime candidateTime = stratPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
             BinaryRow candidatePartition =
                     serializer
                             .toBinaryRow(
                                     InternalRowPartitionComputer.convertSpecToInternalRow(
-                                            calPartValues(
-                                                    candidateTime,
-                                                    partitionColumns,
-                                                    options.partitionTimestampPattern(),
-                                                    options.partitionTimestampFormatter()),
+                                            patternResolver.calPartValues(candidateTime),
                                             partType,
                                             options.partitionDefaultName()))
                             .copy();
@@ -161,48 +157,6 @@ public class ChainTableUtils {
             fieldPredicates.add(func.apply(i, partitionObjects[i]));
         }
         return PredicateBuilder.and(fieldPredicates);
-    }
-
-    public static LinkedHashMap<String, String> calPartValues(
-            LocalDateTime dateTime,
-            List<String> partitionKeys,
-            String timestampPattern,
-            String timestampFormatter) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(timestampFormatter);
-        String formattedDateTime = dateTime.format(formatter);
-        Pattern keyPattern = Pattern.compile("\\$(\\w+)");
-        Matcher keyMatcher = keyPattern.matcher(timestampPattern);
-        List<String> keyOrder = new ArrayList<>();
-        StringBuilder regexBuilder = new StringBuilder();
-        int lastPosition = 0;
-        while (keyMatcher.find()) {
-            regexBuilder.append(
-                    Pattern.quote(timestampPattern.substring(lastPosition, keyMatcher.start())));
-            regexBuilder.append("(.+)");
-            keyOrder.add(keyMatcher.group(1));
-            lastPosition = keyMatcher.end();
-        }
-        regexBuilder.append(Pattern.quote(timestampPattern.substring(lastPosition)));
-
-        Matcher valueMatcher = Pattern.compile(regexBuilder.toString()).matcher(formattedDateTime);
-        if (!valueMatcher.matches() || valueMatcher.groupCount() != keyOrder.size()) {
-            throw new IllegalArgumentException(
-                    "Formatted datetime does not match timestamp pattern");
-        }
-
-        Map<String, String> keyValues = new HashMap<>();
-        for (int i = 0; i < keyOrder.size(); i++) {
-            keyValues.put(keyOrder.get(i), valueMatcher.group(i + 1));
-        }
-        List<String> values =
-                partitionKeys.stream()
-                        .map(key -> keyValues.getOrDefault(key, ""))
-                        .collect(Collectors.toList());
-        LinkedHashMap<String, String> res = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            res.put(partitionKeys.get(i), values.get(i));
-        }
-        return res;
     }
 
     public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
