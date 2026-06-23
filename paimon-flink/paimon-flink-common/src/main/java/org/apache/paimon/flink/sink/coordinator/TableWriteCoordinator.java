@@ -223,8 +223,7 @@ public class TableWriteCoordinator {
             return "table";
         }
         return "partition "
-                + FileStorePathFactory
-                        .getPartitionComputer(
+                + FileStorePathFactory.getPartitionComputer(
                                 table.schema().logicalPartitionType(),
                                 table.coreOptions().toConfiguration().get(PARTITION_DEFAULT_NAME),
                                 table.coreOptions().legacyPartitionName())
