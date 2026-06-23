@@ -19,6 +19,7 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
@@ -93,6 +94,10 @@ public interface FileFormatFactory {
         @Nullable
         public MemorySize blockSize() {
             return blockSize;
+        }
+
+        public boolean caseSensitive() {
+            return options.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
         }
     }
 }

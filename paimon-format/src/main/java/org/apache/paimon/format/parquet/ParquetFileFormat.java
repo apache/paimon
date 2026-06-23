@@ -27,6 +27,7 @@ import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.format.variant.VariantInferenceConfig;
 import org.apache.paimon.format.variant.VariantInferenceWriterFactory;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -105,6 +106,10 @@ public class ParquetFileFormat extends FileFormat {
             parquetOptions.set(
                     ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
         }
+
+        // case-sensitive is not a parquet.* key, so it is dropped by getIdentifierPrefixOptions;
+        // carry the resolved value onto the reader options bus for ParquetReaderFactory to read.
+        parquetOptions.set(CatalogOptions.CASE_SENSITIVE, context.caseSensitive());
 
         return parquetOptions;
     }
