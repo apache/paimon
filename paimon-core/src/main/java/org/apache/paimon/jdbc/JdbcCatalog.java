@@ -33,6 +33,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictException;
+import org.apache.paimon.jdbc.JdbcUtils.JdbcViewConflictKind;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -232,6 +234,11 @@ public class JdbcCatalog extends AbstractCatalog {
                 fetch(
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
+                        catalogKey));
+        databases.addAll(
+                fetch(
+                        row -> row.getString(JdbcUtils.VIEW_DATABASE),
+                        JdbcUtils.LIST_ALL_VIEW_DATABASES_SQL,
                         catalogKey));
         return databases.stream().distinct().collect(Collectors.toList());
     }
@@ -651,6 +658,37 @@ public class JdbcCatalog extends AbstractCatalog {
         return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
+    private <T> T runWithLocks(
+            Identifier firstIdentifier, Identifier secondIdentifier, Callable<T> callable)
+            throws Exception {
+        if (firstIdentifier.equals(secondIdentifier)) {
+            return runWithLock(firstIdentifier, callable);
+        }
+
+        Identifier firstLock = firstIdentifier;
+        Identifier secondLock = secondIdentifier;
+        if (lockKey(firstIdentifier).compareTo(lockKey(secondIdentifier)) > 0) {
+            firstLock = secondIdentifier;
+            secondLock = firstIdentifier;
+        }
+
+        Identifier nestedLock = secondLock;
+        return runWithLock(firstLock, () -> runWithLock(nestedLock, callable));
+    }
+
+    private String lockKey(Identifier identifier) {
+        return identifier.getDatabaseName() + "\0" + identifier.getObjectName();
+    }
+
+    private RuntimeException viewOperationException(
+            String operation, Identifier identifier, Exception e) {
+        if (e instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+        }
+        return new RuntimeException(
+                "Failed to " + operation + " view " + identifier.getFullName(), e);
+    }
+
     @Override
     public void repairCatalog() {
         List<String> databases;
@@ -856,6 +894,9 @@ public class JdbcCatalog extends AbstractCatalog {
                     viewSchema.comment(),
                     viewSchema.options());
         } catch (SQLException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             throw new RuntimeException("Failed to get view " + identifier.getFullName(), e);
         }
     }
@@ -864,11 +905,7 @@ public class JdbcCatalog extends AbstractCatalog {
     public void createView(Identifier identifier, View view, boolean ignoreIfExists)
             throws ViewAlreadyExistException, DatabaseNotExistException {
         // Check if database exists
-        try {
-            getDatabase(identifier.getDatabaseName());
-        } catch (DatabaseNotExistException e) {
-            throw e;
-        }
+        getDatabase(identifier.getDatabaseName());
 
         // Serialize view schema to JSON
         ViewSchema viewSchema =
@@ -896,15 +933,15 @@ public class JdbcCatalog extends AbstractCatalog {
                                 viewSchemaJson);
                         return null;
                     });
-        } catch (RuntimeException e) {
-            if (e.getMessage() != null && e.getMessage().contains("View already exists")) {
-                throw new ViewAlreadyExistException(identifier, e);
-            }
-            throw new RuntimeException("Failed to create view " + identifier.getFullName(), e);
         } catch (ViewAlreadyExistException e) {
             throw e;
+        } catch (JdbcViewConflictException e) {
+            if (e.kind() == JdbcViewConflictKind.ALREADY_EXISTS) {
+                throw new ViewAlreadyExistException(identifier, e);
+            }
+            throw viewOperationException("create", identifier, e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to create view " + identifier.getFullName(), e);
+            throw viewOperationException("create", identifier, e);
         }
     }
 
@@ -931,32 +968,39 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public void dropView(Identifier identifier, boolean ignoreIfNotExists)
             throws ViewNotExistException {
-        // Check if view exists
-        if (!JdbcUtils.viewExists(
-                connections,
-                catalogKey,
-                identifier.getDatabaseName(),
-                identifier.getObjectName())) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-            throw new ViewNotExistException(identifier);
-        }
-
-        // Delete view
-        int deletedRecords =
-                execute(
-                        connections,
-                        JdbcUtils.DROP_VIEW_SQL,
-                        catalogKey,
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName());
-
-        if (deletedRecords != 1) {
-            throw new RuntimeException(
-                    String.format(
-                            "Failed to drop view %s: affected %d rows",
-                            identifier.getFullName(), deletedRecords));
+        try {
+            runWithLock(
+                    identifier,
+                    () -> {
+                        if (!JdbcUtils.viewExists(
+                                connections,
+                                catalogKey,
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName())) {
+                            if (ignoreIfNotExists) {
+                                return null;
+                            }
+                            throw new ViewNotExistException(identifier);
+                        }
+                        int deletedRecords =
+                                execute(
+                                        connections,
+                                        JdbcUtils.DROP_VIEW_SQL,
+                                        catalogKey,
+                                        identifier.getDatabaseName(),
+                                        identifier.getObjectName());
+                        if (deletedRecords != 1) {
+                            throw new RuntimeException(
+                                    String.format(
+                                            "Failed to drop view %s: affected %d rows",
+                                            identifier.getFullName(), deletedRecords));
+                        }
+                        return null;
+                    });
+        } catch (ViewNotExistException e) {
+            throw e;
+        } catch (Exception e) {
+            throw viewOperationException("drop", identifier, e);
         }
     }
 
@@ -978,6 +1022,7 @@ public class JdbcCatalog extends AbstractCatalog {
                 databaseName);
     }
 
+    // TODO: Implement actual paging and pattern filtering
     @Override
     public PagedList<String> listViewsPaged(
             String databaseName, Integer maxResults, String pageToken, String viewNamePattern)
@@ -1014,37 +1059,65 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
             throws ViewNotExistException, ViewAlreadyExistException {
-        // Check if source view exists
-        if (!JdbcUtils.viewExists(
-                connections, catalogKey, fromView.getDatabaseName(), fromView.getObjectName())) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-            throw new ViewNotExistException(fromView);
-        }
-
-        // Check if target view already exists
-        if (JdbcUtils.viewExists(
-                connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
-            throw new ViewAlreadyExistException(toView);
-        }
-        if (JdbcUtils.tableExists(
-                connections, catalogKey, toView.getDatabaseName(), toView.getObjectName())) {
-            throw new ViewAlreadyExistException(toView);
-        }
-        if (!JdbcUtils.databaseExists(connections, catalogKey, toView.getDatabaseName())) {
-            throw new IllegalArgumentException(
-                    String.format("Database %s does not exist.", toView.getDatabaseName()));
-        }
-
-        // Rename view
         try {
-            JdbcUtils.renameView(connections, catalogKey, fromView, toView);
-        } catch (RuntimeException e) {
-            if (e.getMessage() != null && e.getMessage().contains("View already exists")) {
+            runWithLocks(
+                    fromView,
+                    toView,
+                    () -> {
+                        if (!JdbcUtils.viewExists(
+                                connections,
+                                catalogKey,
+                                fromView.getDatabaseName(),
+                                fromView.getObjectName())) {
+                            if (ignoreIfNotExists) {
+                                return null;
+                            }
+                            throw new ViewNotExistException(fromView);
+                        }
+
+                        if (!JdbcUtils.databaseExists(
+                                connections, catalogKey, toView.getDatabaseName())) {
+                            throw new IllegalArgumentException(
+                                    String.format(
+                                            "Database %s does not exist.",
+                                            toView.getDatabaseName()));
+                        }
+
+                        if (JdbcUtils.viewExists(
+                                        connections,
+                                        catalogKey,
+                                        toView.getDatabaseName(),
+                                        toView.getObjectName())
+                                || JdbcUtils.tableExists(
+                                        connections,
+                                        catalogKey,
+                                        toView.getDatabaseName(),
+                                        toView.getObjectName())) {
+                            throw new ViewAlreadyExistException(toView);
+                        }
+
+                        JdbcUtils.renameView(connections, catalogKey, fromView, toView);
+                        return null;
+                    });
+        } catch (ViewAlreadyExistException | ViewNotExistException e) {
+            throw e;
+        } catch (JdbcViewConflictException e) {
+            if (e.kind() == JdbcViewConflictKind.ALREADY_EXISTS) {
                 throw new ViewAlreadyExistException(toView, e);
-            } else if (e.getMessage() != null && e.getMessage().contains("View does not exist")) {
+            } else if (e.kind() == JdbcViewConflictKind.NOT_EXISTS) {
                 throw new ViewNotExistException(fromView, e);
+            }
+            throw new RuntimeException(
+                    "Failed to rename view from "
+                            + fromView.getFullName()
+                            + " to "
+                            + toView.getFullName(),
+                    e);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
             }
             throw new RuntimeException(
                     "Failed to rename view from "
@@ -1059,72 +1132,89 @@ public class JdbcCatalog extends AbstractCatalog {
     public void alterView(
             Identifier identifier, List<ViewChange> changes, boolean ignoreIfNotExists)
             throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
-        // Get existing view
-        View existingView;
         try {
-            existingView = getView(identifier);
-        } catch (ViewNotExistException e) {
-            if (ignoreIfNotExists) {
-                return;
-            }
+            runWithLock(
+                    identifier,
+                    () -> {
+                        View existingView;
+                        try {
+                            existingView = getView(identifier);
+                        } catch (ViewNotExistException e) {
+                            if (ignoreIfNotExists) {
+                                return null;
+                            }
+                            throw e;
+                        }
+
+                        Map<String, String> newOptions = new HashMap<>(existingView.options());
+                        String newComment = existingView.comment().orElse(null);
+                        Map<String, String> newDialects = new HashMap<>(existingView.dialects());
+                        for (ViewChange change : changes) {
+                            if (change instanceof ViewChange.SetViewOption) {
+                                ViewChange.SetViewOption setOption =
+                                        (ViewChange.SetViewOption) change;
+                                newOptions.put(setOption.key(), setOption.value());
+                            } else if (change instanceof ViewChange.RemoveViewOption) {
+                                ViewChange.RemoveViewOption removeOption =
+                                        (ViewChange.RemoveViewOption) change;
+                                newOptions.remove(removeOption.key());
+                            } else if (change instanceof ViewChange.UpdateViewComment) {
+                                ViewChange.UpdateViewComment updateComment =
+                                        (ViewChange.UpdateViewComment) change;
+                                newComment = updateComment.comment();
+                            } else if (change instanceof ViewChange.AddDialect) {
+                                ViewChange.AddDialect addDialect = (ViewChange.AddDialect) change;
+                                if (newDialects.containsKey(addDialect.dialect())) {
+                                    throw new DialectAlreadyExistException(
+                                            identifier, addDialect.dialect());
+                                }
+                                newDialects.put(addDialect.dialect(), addDialect.query());
+                            } else if (change instanceof ViewChange.UpdateDialect) {
+                                ViewChange.UpdateDialect updateDialect =
+                                        (ViewChange.UpdateDialect) change;
+                                if (!newDialects.containsKey(updateDialect.dialect())) {
+                                    throw new DialectNotExistException(
+                                            identifier, updateDialect.dialect());
+                                }
+                                newDialects.put(updateDialect.dialect(), updateDialect.query());
+                            } else if (change instanceof ViewChange.DropDialect) {
+                                ViewChange.DropDialect dropDialect =
+                                        (ViewChange.DropDialect) change;
+                                if (!newDialects.containsKey(dropDialect.dialect())) {
+                                    throw new DialectNotExistException(
+                                            identifier, dropDialect.dialect());
+                                }
+                                newDialects.remove(dropDialect.dialect());
+                            }
+                        }
+
+                        ViewSchema updatedSchema =
+                                new ViewSchema(
+                                        existingView.rowType().getFields(),
+                                        existingView.query(),
+                                        newDialects,
+                                        newComment,
+                                        newOptions);
+                        String viewSchemaJson = JsonSerdeUtil.toJson(updatedSchema);
+                        JdbcUtils.updateView(
+                                connections,
+                                catalogKey,
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName(),
+                                viewSchemaJson);
+                        return null;
+                    });
+        } catch (ViewNotExistException
+                | DialectAlreadyExistException
+                | DialectNotExistException e) {
             throw e;
-        }
-
-        // Apply changes
-        Map<String, String> newOptions = new HashMap<>(existingView.options());
-        String newComment = existingView.comment().orElse(null);
-        Map<String, String> newDialects = new HashMap<>(existingView.dialects());
-        for (ViewChange change : changes) {
-            if (change instanceof ViewChange.SetViewOption) {
-                ViewChange.SetViewOption setOption = (ViewChange.SetViewOption) change;
-                newOptions.put(setOption.key(), setOption.value());
-            } else if (change instanceof ViewChange.RemoveViewOption) {
-                ViewChange.RemoveViewOption removeOption = (ViewChange.RemoveViewOption) change;
-                newOptions.remove(removeOption.key());
-            } else if (change instanceof ViewChange.UpdateViewComment) {
-                ViewChange.UpdateViewComment updateComment = (ViewChange.UpdateViewComment) change;
-                newComment = updateComment.comment();
-            } else if (change instanceof ViewChange.AddDialect) {
-                ViewChange.AddDialect addDialect = (ViewChange.AddDialect) change;
-                if (newDialects.containsKey(addDialect.dialect())) {
-                    throw new DialectAlreadyExistException(identifier, addDialect.dialect());
-                }
-                newDialects.put(addDialect.dialect(), addDialect.query());
-            } else if (change instanceof ViewChange.UpdateDialect) {
-                ViewChange.UpdateDialect updateDialect = (ViewChange.UpdateDialect) change;
-                if (!newDialects.containsKey(updateDialect.dialect())) {
-                    throw new DialectNotExistException(identifier, updateDialect.dialect());
-                }
-                newDialects.put(updateDialect.dialect(), updateDialect.query());
-            } else if (change instanceof ViewChange.DropDialect) {
-                ViewChange.DropDialect dropDialect = (ViewChange.DropDialect) change;
-                if (!newDialects.containsKey(dropDialect.dialect())) {
-                    throw new DialectNotExistException(identifier, dropDialect.dialect());
-                }
-                newDialects.remove(dropDialect.dialect());
+        } catch (JdbcViewConflictException e) {
+            if (e.kind() == JdbcViewConflictKind.NOT_EXISTS) {
+                throw new ViewNotExistException(identifier, e);
             }
-        }
-
-        // Create updated view schema
-        ViewSchema updatedSchema =
-                new ViewSchema(
-                        existingView.rowType().getFields(),
-                        existingView.query(),
-                        newDialects,
-                        newComment,
-                        newOptions);
-        String viewSchemaJson = JsonSerdeUtil.toJson(updatedSchema);
-
-        // Update view
-        try {
-            JdbcUtils.updateView(
-                    connections,
-                    catalogKey,
-                    identifier.getDatabaseName(),
-                    identifier.getObjectName(),
-                    viewSchemaJson);
-        } catch (RuntimeException e) {
-            throw new RuntimeException("Failed to alter view " + identifier.getFullName(), e);
+            throw viewOperationException("alter", identifier, e);
+        } catch (Exception e) {
+            throw viewOperationException("alter", identifier, e);
         }
     }
 }

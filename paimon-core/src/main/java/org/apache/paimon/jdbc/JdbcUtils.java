@@ -42,6 +42,26 @@ import java.util.stream.Stream;
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
     private static final String UNIQUE_CONSTRAINT_VIOLATION_STATE = "23505";
+
+    enum JdbcViewConflictKind {
+        ALREADY_EXISTS,
+        NOT_EXISTS
+    }
+
+    /** Internal exception for JDBC view conflict (unique constraint violation or not-found). */
+    static class JdbcViewConflictException extends RuntimeException {
+        private final JdbcViewConflictKind kind;
+
+        JdbcViewConflictException(JdbcViewConflictKind kind, String message) {
+            super(message);
+            this.kind = kind;
+        }
+
+        JdbcViewConflictKind kind() {
+            return kind;
+        }
+    }
+
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
     public static final String CATALOG_KEY = "catalog_key";
     public static final String TABLE_DATABASE = "database_name";
@@ -371,6 +391,17 @@ public class JdbcUtils {
                     + VIEW_NAME
                     + " = ? ";
 
+    static final String GET_VIEW_DATABASE_SQL =
+            "SELECT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? LIMIT 1";
+
     static final String LIST_VIEWS_SQL =
             "SELECT * FROM "
                     + VIEW_TABLE_NAME
@@ -443,6 +474,15 @@ public class JdbcUtils {
                     + " = ? AND "
                     + VIEW_NAME
                     + " = ? ";
+
+    static final String LIST_ALL_VIEW_DATABASES_SQL =
+            "SELECT DISTINCT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ?";
 
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {
@@ -519,6 +559,9 @@ public class JdbcUtils {
         if (exists(connections, JdbcUtils.GET_DATABASE_PROPERTIES_SQL, storeKey, databaseName)) {
             return true;
         }
+        if (exists(connections, JdbcUtils.GET_VIEW_DATABASE_SQL, storeKey, databaseName)) {
+            return true;
+        }
         return false;
     }
 
@@ -578,6 +621,7 @@ public class JdbcUtils {
             sqlErrorHandler.accept(e);
             throw new RuntimeException(String.format("Failed to execute: %s", sql), e);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in SQL command", e);
         }
     }
@@ -827,7 +871,8 @@ public class JdbcUtils {
                 execute(
                         err -> {
                             if (isUniqueConstraintViolation(err)) {
-                                throw new RuntimeException(
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
                                         String.format(
                                                 "View already exists: %s.%s",
                                                 databaseName, viewName));
@@ -865,7 +910,8 @@ public class JdbcUtils {
                         viewName);
 
         if (updatedRecords == 0) {
-            throw new RuntimeException(
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
                     String.format("View does not exist: %s.%s", databaseName, viewName));
         } else if (updatedRecords != 1) {
             LOG.warn(
@@ -881,7 +927,8 @@ public class JdbcUtils {
                 execute(
                         err -> {
                             if (isUniqueConstraintViolation(err)) {
-                                throw new RuntimeException(
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
                                         String.format("View already exists: %s", toView));
                             }
                         },
@@ -896,7 +943,9 @@ public class JdbcUtils {
         if (updatedRecords == 1) {
             LOG.info("Renamed view from {}, to {}", fromView, toView);
         } else if (updatedRecords == 0) {
-            throw new RuntimeException(String.format("View does not exist: %s", fromView));
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
+                    String.format("View does not exist: %s", fromView));
         } else {
             LOG.warn(
                     "Rename operation affected {} rows: the view table's primary key assumption has been violated",
