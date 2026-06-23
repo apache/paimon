@@ -39,7 +39,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private final InnerTable table;
     private final String commitUser;
 
-    private boolean overwrite;
     private Map<String, String> staticPartition;
     private boolean appendCommitCheckConflict = false;
     private @Nullable Long rowIdCheckFromSnapshot = null;
@@ -50,13 +49,9 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     private BatchWriteBuilderImpl(
-            InnerTable table,
-            String commitUser,
-            boolean overwrite,
-            @Nullable Map<String, String> staticPartition) {
+            InnerTable table, String commitUser, @Nullable Map<String, String> staticPartition) {
         this.table = table;
         this.commitUser = commitUser;
-        this.overwrite = overwrite;
         this.staticPartition = staticPartition;
     }
 
@@ -77,14 +72,13 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        this.overwrite = true;
         this.staticPartition = staticPartition;
         return this;
     }
 
     @Override
     public BatchTableWrite newWrite() {
-        return table.newWrite(commitUser).withIgnorePreviousFiles(overwrite);
+        return table.newWrite(commitUser).withIgnorePreviousFiles(staticPartition != null);
     }
 
     @Override
@@ -102,8 +96,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     public BatchWriteBuilderImpl copyWithNewTable(Table newTable) {
-        return new BatchWriteBuilderImpl(
-                (InnerTable) newTable, commitUser, overwrite, staticPartition);
+        return new BatchWriteBuilderImpl((InnerTable) newTable, commitUser, staticPartition);
     }
 
     public BatchWriteBuilderImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
