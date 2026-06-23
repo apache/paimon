@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from concurrent.futures import wait
 
+from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
@@ -168,12 +169,11 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
-    def _eval(self, row_range_start, row_range_end, vector_index_files,
-              query_vector, include_row_ids):
-        from pypaimon.globalindex.global_index_reader import _completed_future
+    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
+        """Open a vector index reader for the split, wrapped with the row-id offset.
 
-        if not vector_index_files:
-            return _completed_future(None)
+        The caller must close the returned reader once its future completes.
+        """
         index_io_meta_list = []
         for index_file in vector_index_files:
             meta = index_file.global_index_meta
@@ -187,10 +187,21 @@ class AbstractVectorSearchReadImpl:
                 )
             )
 
-        index_type = vector_index_files[0].index_type
-        index_path = self._table.path_factory().global_index_path_factory().index_path()
-        file_io = self._table.file_io
-        options = self._table.table_schema.options
+        reader = _create_vector_reader(
+            vector_index_files[0].index_type,
+            self._table.file_io,
+            self._table.path_factory().global_index_path_factory().index_path(),
+            index_io_meta_list,
+            self._table.table_schema.options,
+        )
+        return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+
+    def _eval(self, row_range_start, row_range_end, vector_index_files,
+              query_vector, include_row_ids):
+        from pypaimon.globalindex.global_index_reader import _completed_future
+
+        if not vector_index_files:
+            return _completed_future(None)
 
         vector_search = VectorSearch(
             vector=query_vector,
@@ -201,11 +212,8 @@ class AbstractVectorSearchReadImpl:
         if include_row_ids is not None:
             vector_search = vector_search.with_include_row_ids(include_row_ids)
 
-        reader = _create_vector_reader(
-            index_type, file_io, index_path,
-            index_io_meta_list, options
-        )
-        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        reader, offset_reader = self._open_offset_reader(
+            vector_index_files, row_range_start, row_range_end)
         future = offset_reader.visit_vector_search(vector_search)
         future.add_done_callback(lambda _: reader.close())
         return future
@@ -252,6 +260,28 @@ class AbstractVectorSearchReadImpl:
                     % (len(stored_vector), len(query_vector)))
             scores[row_id] = _compute_score(query_vector, stored_vector, metric)
         return DictBasedScoredIndexResult(scores).top_k(self._limit)
+
+    def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
+                    query_vectors, include_row_ids):
+        from pypaimon.globalindex.global_index_reader import _completed_future
+
+        if not vector_index_files:
+            return _completed_future([None] * len(query_vectors))
+
+        batch_vector_search = BatchVectorSearch(
+            vectors=query_vectors,
+            limit=self._limit,
+            field_name=self._vector_column.name,
+            options=self._options,
+        )
+        if include_row_ids is not None:
+            batch_vector_search = batch_vector_search.with_include_row_ids(include_row_ids)
+
+        reader, offset_reader = self._open_offset_reader(
+            vector_index_files, row_range_start, row_range_end)
+        future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
 
 
 class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
@@ -329,40 +359,42 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         if not index_splits and not raw_splits:
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
+        # One native batch call per INDEX split (all query vectors at once),
+        # passing that split's pre-filter. Each future returns n per-query results.
         pre_filters = self._pre_filters(index_splits)
-        futures_by_vector = [
-            [
-                self._eval(
-                    split.row_range_start, split.row_range_end,
-                    split.vector_index_files,
-                    vector,
-                    None if not pre_filters else pre_filters[i]
-                )
-                for i, split in enumerate(index_splits)
-            ]
-            for vector in self._query_vectors
+        futures = [
+            self._eval_batch(
+                split.row_range_start, split.row_range_end,
+                split.vector_index_files, self._query_vectors,
+                None if not pre_filters else pre_filters[i],
+            )
+            for i, split in enumerate(index_splits)
         ]
 
-        for futures in futures_by_vector:
-            wait(futures)
+        wait(futures)
 
-        results = []
+        # Merge each query vector's indexed results across index splits.
+        merged_scores = [{} for _ in range(n)]
+        for future in futures:
+            split_results = future.result()
+            for i in range(n):
+                split_result = split_results[i]
+                if split_result is None:
+                    continue
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores[i]:
+                        merged_scores[i][row_id] = score_getter(row_id)
+
+        # Each query: merge indexed results with the raw (brute-force) fallback.
         raw_pre_filter = self._raw_pre_filter(raw_splits)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
-        for futures in futures_by_vector:
-            merged_scores = {}
-            for future in futures:
-                split_result = future.result()
-                if split_result is not None:
-                    score_getter = split_result.score_getter()
-                    for row_id in split_result.results():
-                        if row_id not in merged_scores:
-                            merged_scores[row_id] = score_getter(row_id)
-            indexed = DictBasedScoredIndexResult(merged_scores)
-            vector = self._query_vectors[len(results)]
+        results = []
+        for i in range(n):
+            indexed = DictBasedScoredIndexResult(merged_scores[i])
             raw = self._read_raw_search(
-                raw_ranges, raw_pre_filter, vector, raw_index_type)
+                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type)
             results.append(indexed.or_(raw).top_k(self._limit))
         return results
 
