@@ -32,7 +32,7 @@ object SplitUtils {
       case ds: DataSplit =>
         ds.dataFiles().asScala.map(_.fileSize).sum
       case fs: FormatDataSplit =>
-        if (fs.length() == null) fs.fileSize() else fs.length().longValue()
+        fs.totalSize()
       case _ => 0
     }
   }
@@ -42,7 +42,7 @@ object SplitUtils {
   def dataFileCount(split: Split): Long = {
     split match {
       case ds: DataSplit => ds.dataFiles().size()
-      case _: FormatDataSplit => 1
+      case fs: FormatDataSplit => fs.fileCount()
       case _ => 0
     }
   }

@@ -123,6 +123,9 @@ class UnionGlobalIndexReader(GlobalIndexReader):
     def visit_between(self, field_ref: FieldRef, from_v, to_v) -> 'Future[Optional[GlobalIndexResult]]':
         return self._union_futures(lambda r: r.visit_between(field_ref, from_v, to_v))
 
+    def visit_not_between(self, field_ref: FieldRef, from_v, to_v) -> 'Future[Optional[GlobalIndexResult]]':
+        return self._union_futures(lambda r: r.visit_not_between(field_ref, from_v, to_v))
+
     def close(self) -> None:
         for reader in self._readers:
             try:

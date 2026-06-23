@@ -191,7 +191,8 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+            boolean ignorePreviousFiles) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
         Preconditions.checkArgument(
                 restoreFiles.isEmpty(),

@@ -44,6 +44,43 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
   import testImplicits._
 
+  private val MaxRetryAttempts = 20
+  private val RetryIntervalMillis = 10L
+
+  private def doWithRetry(doAction: () => Unit, retryableMessages: String*): Unit = {
+    var attempts = 0
+    while (true) {
+      try {
+        doAction.apply()
+        return
+      } catch {
+        case e: Exception =>
+          attempts += 1
+          if (!isRetryable(e, retryableMessages) || attempts >= MaxRetryAttempts) {
+            throw e
+          }
+          Thread.sleep(RetryIntervalMillis)
+      }
+    }
+  }
+
+  private def isRetryable(e: Throwable, retryableMessages: Seq[String]): Boolean = {
+    hasMessage(e, "Snapshot file", "does not exist") ||
+    retryableMessages.exists(message => hasMessage(e, message))
+  }
+
+  private def hasMessage(e: Throwable, fragments: String*): Boolean = {
+    var current = e
+    while (current != null) {
+      val message = current.getMessage
+      if (message != null && fragments.forall(message.contains)) {
+        return true
+      }
+      current = current.getCause
+    }
+    false
+  }
+
   test("Data Evolution: concurrent merge and compact") {
     withTable("s", "t") {
       sql(s"""
@@ -104,27 +141,16 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
 
       def doMerge(): Unit = {
-        var success = false
-        while (!success) {
-          try {
-            sql(s"""
-                   |MERGE INTO t
-                   |USING s
-                   |ON t.id = s.id
-                   |WHEN MATCHED THEN
-                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                   |""".stripMargin).collect()
-            success = true
-          } catch {
-            case e: Exception =>
-              if (
-                !e.getMessage.contains(
-                  "multiple 'MERGE INTO' operations have encountered conflicts")
-              ) {
-                throw e
-              }
-          }
-        }
+        doWithRetry(
+          () => sql(s"""
+                       |MERGE INTO t
+                       |USING s
+                       |ON t.id = s.id
+                       |WHEN MATCHED THEN
+                       |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                       |""".stripMargin).collect(),
+          "multiple 'MERGE INTO' operations have encountered conflicts"
+        )
       }
 
       val mergeInto1 = Future {
@@ -159,25 +185,25 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
       val mergeB = Future {
         for (_ <- 1 to 10) {
-          sql(s"""
-                 |MERGE INTO t
-                 |USING sb
-                 |ON t.id = sb.id
-                 |WHEN MATCHED THEN
-                 |UPDATE SET t.b = sb.b + t.b
-                 |""".stripMargin).collect()
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sb
+                                   |ON t.id = sb.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.b = sb.b + t.b
+                                   |""".stripMargin).collect())
         }
       }
 
       val mergeC = Future {
         for (_ <- 1 to 10) {
-          sql(s"""
-                 |MERGE INTO t
-                 |USING sc
-                 |ON t.id = sc.id
-                 |WHEN MATCHED THEN
-                 |UPDATE SET t.c = sc.c + t.c
-                 |""".stripMargin).collect()
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sc
+                                   |ON t.id = sc.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.c = sc.c + t.c
+                                   |""".stripMargin).collect())
         }
       }
 
@@ -199,33 +225,19 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("INSERT INTO t VALUES (1, 0, 0)")
       Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
 
-      def doWithRetry(doAction: () => Unit): Unit = {
-        var success = false
-        while (!success) {
-          try {
-            doAction.apply()
-            success = true
-          } catch {
-            case e: Exception =>
-              if (
-                !e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")
-                && !e.getMessage.contains("Row ID existence conflict")
-              ) {
-                throw e
-              }
-          }
-        }
-      }
-
       val mergeInto = Future {
         for (i <- 1 to 10) {
-          doWithRetry(() => sql(s"""
-                                   |MERGE INTO t
-                                   |USING s
-                                   |ON t.id = s.id
-                                   |WHEN MATCHED THEN
-                                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                                   |""".stripMargin).collect())
+          doWithRetry(
+            () => sql(s"""
+                         |MERGE INTO t
+                         |USING s
+                         |ON t.id = s.id
+                         |WHEN MATCHED THEN
+                         |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                         |""".stripMargin).collect(),
+            "multiple 'MERGE INTO' and 'COMPACT' operations",
+            "Row ID existence conflict"
+          )
           if (i > 1) {
             sql(s"INSERT INTO t VALUES ($i, $i, $i)")
           }
@@ -244,7 +256,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           while (!canBeCompacted) {
             Thread.sleep(1)
           }
-          doWithRetry(() => sql("CALL sys.compact(table => 't')"))
+          doWithRetry(
+            () => sql("CALL sys.compact(table => 't')"),
+            "multiple 'MERGE INTO' and 'COMPACT' operations",
+            "Row ID existence conflict")
         }
       }
 
@@ -302,6 +317,37 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 2), Row(3, 3, 2, 3))
+      )
+
+      sql("INSERT INTO t VALUES (4, '4')")
+      sql("INSERT INTO t VALUES (5, '5')")
+      // snapshot 7: should merge files with sequence numbers [1, 6]
+      sql("CALL sys.compact(table => 't')")
+      checkAnswer(
+        sql("SELECT min_sequence_number, max_sequence_number FROM `t$files`"),
+        Seq(Row(1, 6))
+      )
+      // snapshot 8: Updated record has null sequence number
+      sql("UPDATE t SET data = 22 WHERE id = 2")
+
+      // snapshot 9 ~ 10: add new file, and set sequence number to null
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(6, 8)")
+      sql("UPDATE t SET data = 67 WHERE _SEQUENCE_NUMBER = 9")
+      checkAnswer(
+        sql(
+          "SELECT min_sequence_number, max_sequence_number FROM `t$files` order by min_sequence_number"),
+        Seq(Row(1, 8), Row(10, 10))
+      )
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(
+          Row(1, 1, 0, 1),
+          Row(2, 22, 1, 8),
+          Row(3, 3, 2, 3),
+          Row(4, 4, 3, 5),
+          Row(5, 5, 4, 6),
+          Row(6, 67, 5, 10),
+          Row(7, 67, 6, 10))
       )
     }
   }

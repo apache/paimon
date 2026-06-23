@@ -114,3 +114,9 @@ class IcebergTable(Table):
 
     def new_vector_search_builder(self):
         raise NotImplementedError("IcebergTable does not support vector search.")
+
+    def new_hybrid_search_builder(self):
+        raise NotImplementedError("IcebergTable does not support hybrid search.")
+
+    def new_batch_vector_search_builder(self):
+        raise NotImplementedError("IcebergTable does not support vector search.")

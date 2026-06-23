@@ -21,7 +21,7 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
@@ -165,16 +165,22 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                     rowCounter.add(1);
                 }
             } else {
-                GlobalIndexSingletonWriter singleWriter = (GlobalIndexSingletonWriter) indexWriter;
+                GlobalIndexSingleColumnWriter singleWriter =
+                        (GlobalIndexSingleColumnWriter) indexWriter;
                 InternalRow.FieldGetter getter =
                         InternalRow.createFieldGetter(
                                 indexField.type(), readType.getFieldIndex(indexField.name()));
-                rows.forEachRemaining(
-                        row -> {
-                            Object indexO = getter.getFieldOrNull(row);
-                            singleWriter.write(indexO);
-                            rowCounter.add(1);
-                        });
+                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+                while (rows.hasNext()) {
+                    InternalRow row = rows.next();
+                    long absRowId = row.getLong(rowIdIndex);
+                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
+                        continue;
+                    }
+                    Object indexO = getter.getFieldOrNull(row);
+                    singleWriter.write(indexO, absRowId - rowRange.from);
+                    rowCounter.add(1);
+                }
             }
             return indexWriter.finish();
         } finally {

@@ -42,6 +42,8 @@ public interface FileStoreCommit extends AutoCloseable {
 
     FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
 
+    FileStoreCommit withOperation(Snapshot.Operation operation);
+
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
 

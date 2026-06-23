@@ -25,11 +25,11 @@ import org.apache.spark.sql.connector.read.Scan
 class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
 
   override def build(): Scan = {
-    val (actualTable, vectorSearch, multiVectorSearch, fullTextSearch) = table match {
+    val (actualTable, vectorSearch, hybridSearch, fullTextSearch) = table match {
       case vst: org.apache.paimon.table.VectorSearchTable =>
         (vst.origin(), Option(vst.vectorSearch()), None, None)
-      case mvst: org.apache.paimon.table.MultiVectorSearchTable =>
-        (mvst.origin(), None, Option(mvst.multiVectorSearch()), None)
+      case hst: org.apache.paimon.table.HybridSearchTable =>
+        (hst.origin(), None, Option(hst.hybridSearch()), None)
       case ftst: org.apache.paimon.table.FullTextSearchTable =>
         (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
       case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
@@ -42,7 +42,7 @@ class PaimonScanBuilder(val table: InnerTable) extends PaimonBaseScanBuilder {
       pushedLimit,
       pushedTopN,
       vectorSearch,
-      multiVectorSearch,
+      hybridSearch,
       fullTextSearch)
   }
 }

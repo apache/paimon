@@ -19,15 +19,13 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.table.format.FormatDataSplit.FileMeta;
 import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,38 +34,33 @@ public class FormatDataSplitTest {
 
     @Test
     public void testSerializeAndDeserialize() throws IOException, ClassNotFoundException {
-        // Create test data
-        Path filePath = new Path("/test/path/file.parquet");
-        RowType rowType = RowType.builder().field("id", new IntType()).build();
-        long modificationTime = System.currentTimeMillis();
+        // A split packing one whole file and one offset range of another file.
+        FileMeta wholeFile = new FileMeta(new Path("/test/path/file1.parquet"), 1024L);
+        FileMeta rangeFile = new FileMeta(new Path("/test/path/file2.csv"), 2048L, 100L, 512L);
+        FormatDataSplit split = new FormatDataSplit(Arrays.asList(wholeFile, rangeFile), null);
 
-        // Create a predicate for testing
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-        Predicate predicate = builder.equal(0, 5);
-
-        // Create FormatDataSplit
-        FormatDataSplit split = new FormatDataSplit(filePath, 1024L, null);
-
-        // Test Java serialization
         byte[] serialized = InstantiationUtil.serializeObject(split);
         FormatDataSplit deserialized =
                 InstantiationUtil.deserializeObject(serialized, getClass().getClassLoader());
 
-        // Verify the deserialized object
-        assertThat(deserialized.filePath()).isEqualTo(split.filePath());
-        assertThat(deserialized.offset()).isEqualTo(split.offset());
-        assertThat(deserialized.fileSize()).isEqualTo(split.fileSize());
-        assertThat(deserialized.length()).isEqualTo(split.length());
+        assertThat(deserialized).isEqualTo(split);
+        assertThat(deserialized.files()).isEqualTo(split.files());
+        assertThat(deserialized.partition()).isEqualTo(split.partition());
+        assertThat(deserialized.fileCount()).isEqualTo(2);
+        // readSize: whole file -> fileSize (1024), range -> length (512).
+        assertThat(deserialized.totalSize()).isEqualTo(1024L + 512L);
 
-        split = new FormatDataSplit(filePath, 1024L, 100L, 512L, null);
+        FileMeta f0 = deserialized.files().get(0);
+        assertThat(f0.filePath()).isEqualTo(wholeFile.filePath());
+        assertThat(f0.fileSize()).isEqualTo(1024L);
+        assertThat(f0.offset()).isEqualTo(0L);
+        assertThat(f0.length()).isNull();
+        assertThat(f0.readSize()).isEqualTo(1024L);
 
-        serialized = InstantiationUtil.serializeObject(split);
-        deserialized = InstantiationUtil.deserializeObject(serialized, getClass().getClassLoader());
-
-        // Verify the deserialized object
-        assertThat(deserialized.filePath()).isEqualTo(split.filePath());
-        assertThat(deserialized.offset()).isEqualTo(split.offset());
-        assertThat(deserialized.fileSize()).isEqualTo(split.fileSize());
-        assertThat(deserialized.length()).isEqualTo(split.length());
+        FileMeta f1 = deserialized.files().get(1);
+        assertThat(f1.filePath()).isEqualTo(rangeFile.filePath());
+        assertThat(f1.offset()).isEqualTo(100L);
+        assertThat(f1.length()).isEqualTo(512L);
+        assertThat(f1.readSize()).isEqualTo(512L);
     }
 }

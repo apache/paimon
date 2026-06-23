@@ -37,6 +37,11 @@ public class TestFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
     }
 
     @Override
+    public boolean supportsFullTextSearch() {
+        return true;
+    }
+
+    @Override
     public GlobalIndexer create(DataField field, Options options) {
         return new TestFullTextGlobalIndexer(field.type(), options);
     }

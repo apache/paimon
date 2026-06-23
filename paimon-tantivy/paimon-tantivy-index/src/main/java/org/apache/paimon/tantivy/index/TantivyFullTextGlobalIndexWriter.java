@@ -20,7 +20,7 @@ package org.apache.paimon.tantivy.index;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.tantivy.TantivyIndexWriter;
@@ -48,7 +48,7 @@ import java.util.List;
  * <p>Text data is written to a local Tantivy index via JNI. On {@link #finish()}, the index
  * directory is packed into a single file and written to the global index file system.
  */
-public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
+public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "tantivy";
     private static final Logger LOG =
@@ -58,7 +58,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
     private final TantivyFullTextIndexOptions indexOptions;
     private File tempIndexDir;
     private TantivyIndexWriter writer;
-    private long rowId;
+    private long rowCount;
     private boolean closed;
 
     public TantivyFullTextGlobalIndexWriter(GlobalIndexFileWriter fileWriter) {
@@ -69,7 +69,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
             GlobalIndexFileWriter fileWriter, TantivyFullTextIndexOptions indexOptions) {
         this.fileWriter = fileWriter;
         this.indexOptions = indexOptions;
-        this.rowId = 0;
+        this.rowCount = 0;
         this.closed = false;
 
         try {
@@ -84,9 +84,9 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
     }
 
     @Override
-    public void write(Object fieldData) {
+    public void write(Object fieldData, long relativeRowId) {
         if (fieldData == null) {
-            rowId++;
+            rowCount++;
             return;
         }
 
@@ -100,14 +100,14 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
                     "Unsupported field type: " + fieldData.getClass().getName());
         }
 
-        writer.addDocument(rowId, text);
-        rowId++;
+        writer.addDocument(relativeRowId, text);
+        rowCount++;
     }
 
     @Override
     public List<ResultEntry> finish() {
         try {
-            if (rowId == 0) {
+            if (rowCount == 0) {
                 return Collections.emptyList();
             }
 
@@ -129,7 +129,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
     }
 
     private ResultEntry packIndex() throws IOException {
-        LOG.info("Packing Tantivy index: {} documents", rowId);
+        LOG.info("Packing Tantivy index for {} rows", rowCount);
 
         String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
         try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
@@ -170,8 +170,8 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
             out.flush();
         }
 
-        LOG.info("Tantivy index packed: {} documents", rowId);
-        return new ResultEntry(fileName, rowId, indexOptions.serialize());
+        LOG.info("Tantivy index packed for {} rows", rowCount);
+        return new ResultEntry(fileName, rowCount, indexOptions.serialize());
     }
 
     private static void writeInt(PositionOutputStream out, int value) throws IOException {

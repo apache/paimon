@@ -60,6 +60,7 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     private final String requiredOptionValue;
 
     private float[][] vectors;
+    private long[] rowIds;
     private int dimension;
     private int count;
 
@@ -123,15 +124,15 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
 
         for (int i = 0; i < count; i++) {
-            if (includeRowIds != null && !includeRowIds.contains(i)) {
+            if (includeRowIds != null && !includeRowIds.contains(rowIds[i])) {
                 continue;
             }
             float score = computeScore(queryVector, vectors[i]);
             if (topK.size() < effectiveK) {
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             } else if (score > topK.peek().score) {
                 topK.poll();
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             }
         }
 
@@ -206,8 +207,14 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
 
             // Read vectors
             vectors = new float[count][dimension];
+            rowIds = new long[count];
+            byte[] rowIdBytes = new byte[Long.BYTES];
             byte[] vectorBytes = new byte[dimension * Float.BYTES];
             for (int i = 0; i < count; i++) {
+                readFully(in, rowIdBytes);
+                ByteBuffer rowIdBuf = ByteBuffer.wrap(rowIdBytes);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
+                rowIds[i] = rowIdBuf.getLong();
                 readFully(in, vectorBytes);
                 ByteBuffer vectorBuf = ByteBuffer.wrap(vectorBytes);
                 vectorBuf.order(ByteOrder.LITTLE_ENDIAN);
@@ -236,6 +243,7 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         vectors = null;
+        rowIds = null;
     }
 
     // =================== unsupported predicate operations =====================

@@ -34,8 +34,8 @@ import org.apache.paimon.spark.catalog.FormatTableCatalog;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.spark.catalog.SupportV1Function;
 import org.apache.paimon.spark.catalog.SupportView;
+import org.apache.paimon.spark.catalog.functions.FunctionIdentifierConverter;
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
-import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.iceberg.IcebergTable;
@@ -56,7 +56,6 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
-import org.apache.spark.sql.catalyst.catalog.CatalogFunction;
 import org.apache.spark.sql.catalyst.catalog.PaimonV1FunctionRegistry;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.parser.extensions.UnResolvedPaimonV1Function;
@@ -749,18 +748,13 @@ public class SparkCatalog extends SparkBaseCatalog
 
     @Override
     public Function getFunction(FunctionIdentifier funcIdent) throws Exception {
-        return paimonCatalog().getFunction(V1FunctionConverter.fromFunctionIdentifier(funcIdent));
+        return paimonCatalog()
+                .getFunction(FunctionIdentifierConverter.toPaimonIdentifier(funcIdent));
     }
 
     @Override
-    public void createV1Function(CatalogFunction v1Function, boolean ignoreIfExists)
-            throws Exception {
-        Function paimonFunction = V1FunctionConverter.fromV1Function(v1Function);
-        paimonCatalog()
-                .createFunction(
-                        V1FunctionConverter.fromFunctionIdentifier(v1Function.identifier()),
-                        paimonFunction,
-                        ignoreIfExists);
+    public void createV1Function(Function function, boolean ignoreIfExists) throws Exception {
+        paimonCatalog().createFunction(function.identifier(), function, ignoreIfExists);
     }
 
     @Override
@@ -778,7 +772,7 @@ public class SparkCatalog extends SparkBaseCatalog
     public void dropV1Function(FunctionIdentifier funcIdent, boolean ifExists) throws Exception {
         v1FunctionRegistry().unregisterFunction(funcIdent);
         paimonCatalog()
-                .dropFunction(V1FunctionConverter.fromFunctionIdentifier(funcIdent), ifExists);
+                .dropFunction(FunctionIdentifierConverter.toPaimonIdentifier(funcIdent), ifExists);
     }
 
     // ======================= Tools methods ===============================

@@ -19,23 +19,25 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FullTextQuery;
 
 import java.io.Serializable;
 
 /** Builder to build full-text search. */
 public interface FullTextSearchBuilder extends Serializable {
 
+    /** Push partition filters. */
+    default FullTextSearchBuilder withPartitionFilter(PartitionPredicate partitionPredicate) {
+        throw new UnsupportedOperationException(
+                "This full-text search builder does not support partition filters.");
+    }
+
     /** The top k results to return. */
     FullTextSearchBuilder withLimit(int limit);
 
-    /** The text column to search. */
-    FullTextSearchBuilder withTextColumn(String name);
-
-    /** The query text to search. */
-    FullTextSearchBuilder withQueryText(String queryText);
-
-    /** The default query operator. Supported values are 'or' and 'and'. */
-    FullTextSearchBuilder withQueryOperator(String queryOperator);
+    /** The structured full-text query to search. */
+    FullTextSearchBuilder withQuery(FullTextQuery query);
 
     /** Create full-text scan to scan index files. */
     FullTextScan newFullTextScan();

@@ -740,6 +740,7 @@ class ConflictDetectionTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 }
