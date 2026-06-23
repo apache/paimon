@@ -180,9 +180,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                 || config.indexType() != FieldIndexConfig.IndexType.FULLTEXT) {
                             // This ES index carries the column, but not as a FULLTEXT field (a
                             // string column defaults to KEYWORD unless an analyzer is configured).
-                            // Full-text search is not serviceable here, so report "index can't
-                            // serve this" (Optional.empty -> raw scan) instead of letting the eslib
-                            // searcher throw on a non-FULLTEXT field.
+                            // Full-text search is index-only, so a non-FULLTEXT field yields an
+                            // empty result here rather than letting the eslib searcher throw.
                             return Optional.empty();
                         }
                         org.apache.paimon.predicate.FullTextQuery.Match match =
