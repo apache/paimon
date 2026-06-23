@@ -101,10 +101,7 @@ public class FullTextScanImpl implements FullTextScan {
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
 
-        // Group full-text index files by column and row range. A multi-column index (e.g. an ES
-        // hybrid index whose primary field is a vector and whose searchable text field is an extra
-        // field) serves a text column through either its primary indexFieldId or its extraFieldIds,
-        // and a single file may cover more than one searched text column.
+        // Group full-text index files by column and row range.
         Map<String, Map<Range, List<IndexFileMeta>>> byColumnAndRange = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());

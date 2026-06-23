@@ -213,6 +213,61 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
+    void arrayLongLabelsRoundTripAsMultiValueScalar(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.BIGINT()),
+                        new DataField(1, "labels", DataTypes.ARRAY(DataTypes.BIGINT())));
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-labels");
+        Files.createDirectories(archiveDir);
+
+        LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
+        ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
+        writer.write(0, GenericRow.of(100L, new GenericArray(new long[] {3L, 7L})));
+        writer.write(1, GenericRow.of(101L, new GenericArray(new long[] {5L})));
+        writer.write(2, GenericRow.of(102L, new GenericArray(new long[] {7L, 11L})));
+
+        List<ResultEntry> entries = writer.finish();
+        assertEquals(1, entries.size(), "one archive produced");
+        ResultEntry entry = entries.get(0);
+        assertEquals(3L, entry.rowCount(), "row count");
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+
+        FieldRef labelsRef = new FieldRef(1, "labels", DataTypes.ARRAY(DataTypes.BIGINT()));
+
+        Optional<GlobalIndexResult> hit7 = reader.visitEqual(labelsRef, 7L).join();
+        assertTrue(hit7.isPresent(), "labels term filter returns a result");
+        RoaringNavigableMap64 rows7 = hit7.get().results();
+        assertEquals(2, rows7.getIntCardinality(), "two rows contain label 7");
+        assertTrue(contains(rows7, 0L), "row 0 contains label 7");
+        assertTrue(contains(rows7, 2L), "row 2 contains label 7");
+
+        Optional<GlobalIndexResult> hitIn =
+                reader.visitIn(labelsRef, Arrays.asList(5L, 11L)).join();
+        assertTrue(hitIn.isPresent(), "labels IN filter returns a result");
+        RoaringNavigableMap64 rowsIn = hitIn.get().results();
+        assertEquals(2, rowsIn.getIntCardinality(), "two rows contain labels in (5, 11)");
+        assertTrue(contains(rowsIn, 1L), "row 1 contains label 5");
+        assertTrue(contains(rowsIn, 2L), "row 2 contains label 11");
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
     void nullValuesKeepDocIdRowIdAligned(@TempDir java.nio.file.Path tmp) throws IOException {
         // Single-column keyword index where row 3's value is NULL. The writer skips null and
         // registers

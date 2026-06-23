@@ -26,6 +26,7 @@ import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -159,7 +160,10 @@ public class ESIndexGlobalIndexWriter
                 break;
             case SCALAR:
             case DATE:
-                builder.addScalarField(field.name(), docId, fieldData, config.scalarType());
+                Object value = extractScalar(fieldData, field.type());
+                if (value != null) {
+                    builder.addScalarField(field.name(), docId, value, config.scalarType());
+                }
                 break;
             default:
                 break;
@@ -211,6 +215,8 @@ public class ESIndexGlobalIndexWriter
 
     private Object extractScalar(InternalRow row, int pos, DataType type) {
         switch (type.getTypeRoot()) {
+            case ARRAY:
+                return extractScalarArray(row.getArray(pos), (ArrayType) type);
             case INTEGER:
             case SMALLINT:
             case TINYINT:
@@ -236,6 +242,37 @@ public class ESIndexGlobalIndexWriter
                         .getMillisecond();
             default:
                 return row.getString(pos).toString();
+        }
+    }
+
+    private Object extractScalar(Object fieldData, DataType type) {
+        if (type instanceof ArrayType && fieldData instanceof InternalArray) {
+            return extractScalarArray((InternalArray) fieldData, (ArrayType) type);
+        }
+        return fieldData;
+    }
+
+    private Object extractScalarArray(InternalArray array, ArrayType type) {
+        switch (type.getElementType().getTypeRoot()) {
+            case TINYINT:
+                return array.toByteArray();
+            case SMALLINT:
+                return array.toShortArray();
+            case INTEGER:
+                return array.toIntArray();
+            case BIGINT:
+                return array.toLongArray();
+            case CHAR:
+            case VARCHAR:
+                String[] values = new String[array.size()];
+                for (int i = 0; i < array.size(); i++) {
+                    values[i] = array.isNullAt(i) ? null : array.getString(i).toString();
+                }
+                return values;
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported scalar array element type for es-index: "
+                                + type.getElementType());
         }
     }
 

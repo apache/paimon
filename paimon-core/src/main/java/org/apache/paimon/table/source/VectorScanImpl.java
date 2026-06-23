@@ -107,7 +107,12 @@ public class VectorScanImpl implements VectorScan {
             vectorIndexType = configuredVectorIndexType();
         }
 
-        // Group vector index files by (rowRangeStart, rowRangeEnd)
+        // Group vector index files by (rowRangeStart, rowRangeEnd). A file is treated as the vector
+        // index for this search only when the vector column is its PRIMARY field (indexFieldId);
+        // the canonical ES hybrid layout is vector-as-primary with text/scalar columns carried as
+        // extra fields. If the vector column were instead an extra field, no IndexVectorSearchSplit
+        // is produced here and the search falls back to a brute-force RawVectorSearchSplit (correct
+        // results, but the ANN index is bypassed).
         Map<Range, List<IndexFileMeta>> vectorByRange = new HashMap<>();
         List<IndexFileMeta> vectorIndexFiles = new ArrayList<>();
         for (IndexFileMeta indexFile : allIndexFiles) {

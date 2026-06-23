@@ -159,6 +159,9 @@ public class ESIndexOptions {
     }
 
     private static ScalarFieldType mapScalarType(DataType type) {
+        if (type instanceof ArrayType) {
+            return mapArrayScalarType((ArrayType) type);
+        }
         switch (type.getTypeRoot()) {
             case INTEGER:
             case SMALLINT:
@@ -172,6 +175,24 @@ public class ESIndexOptions {
                 return ScalarFieldType.DOUBLE;
             default:
                 return ScalarFieldType.KEYWORD;
+        }
+    }
+
+    private static ScalarFieldType mapArrayScalarType(ArrayType type) {
+        DataType elementType = type.getElementType();
+        switch (elementType.getTypeRoot()) {
+            case INTEGER:
+            case SMALLINT:
+            case TINYINT:
+                return ScalarFieldType.INT;
+            case BIGINT:
+                return ScalarFieldType.LONG;
+            case CHAR:
+            case VARCHAR:
+                return ScalarFieldType.KEYWORD;
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported scalar array element type for es-index: " + elementType);
         }
     }
 
