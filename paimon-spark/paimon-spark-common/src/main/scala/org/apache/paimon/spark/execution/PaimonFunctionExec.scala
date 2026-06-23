@@ -88,30 +88,72 @@ case class DescribePaimonV1FunctionCommand(
             s"File Resources: ${functionDefinition.fileResources().asScala.map(_.uri()).mkString(", ")}")
         }
       case sqlFunctionDefinition: FunctionDefinition.SQLFunctionDefinition =>
-        rows += Row(s"Function: ${function.fullName()}")
-        rows += Row("Type: SCALAR")
+        val buffer = new ArrayBuffer[(String, String)]
+        buffer += ("Function:" -> function.fullName())
+        buffer += ("Type:" -> "SCALAR")
         val inputParams = function.inputParams()
         if (inputParams.isPresent && !inputParams.get().isEmpty) {
-          val params = inputParams
-            .get()
-            .asScala
-            .map(field => s"${field.name()} ${field.`type`().asSQLString()}")
-            .mkString(", ")
-          rows += Row(s"Input: $params")
+          val params = formatInputParams(inputParams.get().asScala)
+          buffer += ("Input:" -> params.head)
+          params.tail.foreach(s => buffer += ("" -> s))
+        } else {
+          buffer += ("Input:" -> "()")
         }
         val returnParams = function.returnParams()
         if (returnParams.isPresent && !returnParams.get().isEmpty) {
-          rows += Row(s"Returns: ${returnParams.get().get(0).`type`().asSQLString()}")
+          buffer += ("Returns:" -> returnParams.get().get(0).`type`().asSQLString())
         }
         if (isExtended) {
-          Option(function.comment()).foreach(c => rows += Row(s"Comment: $c"))
-          rows += Row(s"Body: ${sqlFunctionDefinition.definition()}")
+          Option(function.comment()).foreach(c => buffer += ("Comment:" -> c))
+          buffer += ("Deterministic:" -> function.isDeterministic.toString)
+          val options = function.options()
+          Option(options.get("spark.sql-function.contains-sql"))
+            .map(_.toBoolean)
+            .foreach {
+              c =>
+                val dataAccess = if (c) "CONTAINS SQL" else "READS SQL DATA"
+                buffer += ("Data Access:" -> dataAccess)
+            }
+          val configs = options.asScala
+            .filter(_._1.startsWith("sqlConfig."))
+            .toSeq
+            .sortBy(_._1)
+            .map { case (k, v) => s"${k.stripPrefix("sqlConfig.")}=$v" }
+          if (configs.nonEmpty) {
+            buffer += ("Configs:" -> configs.head)
+            configs.tail.foreach(s => buffer += ("" -> s))
+          }
+          buffer += ("Body:" -> sqlFunctionDefinition.definition())
         }
+        val keys = tabulate(buffer.map(_._1).toSeq)
+        val values = buffer.map(_._2)
+        keys.zip(values).foreach { case (key, value) => rows += Row(s"$key $value") }
       case other =>
         throw new UnsupportedOperationException(s"Unsupported function definition $other")
     }
 
     rows.toSeq
+  }
+
+  private def tabulate(inputs: Seq[String]): Seq[String] = {
+    val maxLen = inputs.map(_.length).max
+    inputs.map(_.padTo(maxLen, ' '))
+  }
+
+  private def formatInputParams(
+      params: Iterable[org.apache.paimon.types.DataField]): Seq[String] = {
+    val fields = params.toSeq
+    val names = tabulate(fields.map(_.name()))
+    val types = tabulate(fields.map(_.`type`().asSQLString()))
+    val defaults = fields.map {
+      f => if (isExtended) Option(f.defaultValue()).map(d => s" DEFAULT $d").getOrElse("") else ""
+    }
+    val comments = fields.map {
+      f => if (isExtended) Option(f.description()).map(c => s" '$c'").getOrElse("") else ""
+    }
+    names.zip(types).zip(defaults).zip(comments).map {
+      case (((name, dataType), default), comment) => s"$name $dataType$default$comment"
+    }
   }
 
   override def simpleString(maxFields: Int): String = {
