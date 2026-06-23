@@ -23,6 +23,10 @@ import java.util.Map;
 /** Writer capability for adding format-specific file metadata before closing the file. */
 public interface SupportsWriterMetadata {
 
-    /** Adds raw metadata entries to the file footer. */
+    /**
+     * Adds raw metadata entries to the file footer.
+     *
+     * <p>This method must be called before {@link FormatWriter#close()}.
+     */
     void addMetadata(Map<String, byte[]> metadata);
 }

@@ -113,6 +113,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         ((SupportsWriterMetadata) writer).addMetadata(metadata);
         writer.addElement(GenericRow.of(1, BinaryString.fromString("one")));
         writer.close();
+        Assertions.assertThatThrownBy(() -> ((SupportsWriterMetadata) writer).addMetadata(metadata))
+                .isInstanceOf(IllegalStateException.class);
         out.close();
 
         try (ParquetFileReader reader =

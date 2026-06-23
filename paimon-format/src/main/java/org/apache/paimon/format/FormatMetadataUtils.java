@@ -21,7 +21,10 @@ package org.apache.paimon.format;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 
+import javax.annotation.Nullable;
+
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -43,15 +46,23 @@ public class FormatMetadataUtils {
         return encoded;
     }
 
+    /**
+     * Decodes base64-encoded metadata values. Values that are not valid base64 are returned as
+     * UTF-8 bytes.
+     */
     public static Map<String, byte[]> decodeMetadata(Map<String, String> metadata) {
         Map<String, byte[]> decoded = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : metadata.entrySet()) {
-            decoded.put(entry.getKey(), Base64.getDecoder().decode(entry.getValue()));
+            try {
+                decoded.put(entry.getKey(), Base64.getDecoder().decode(entry.getValue()));
+            } catch (IllegalArgumentException e) {
+                decoded.put(entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8));
+            }
         }
         return decoded;
     }
 
-    public static Optional<Schema> readArrowSchema(String encodedSchema) {
+    public static Optional<Schema> readArrowSchema(@Nullable String encodedSchema) {
         if (encodedSchema == null) {
             return Optional.empty();
         }

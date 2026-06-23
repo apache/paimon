@@ -59,6 +59,7 @@ import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** An orc {@link FormatReadWriteTest}. */
 public class OrcFormatReadWriteTest extends FormatReadWriteTest {
@@ -133,6 +134,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         ((SupportsWriterMetadata) writer).addMetadata(metadata);
         writer.addElement(GenericRow.of(1, org.apache.paimon.data.BinaryString.fromString("one")));
         writer.close();
+        assertThatThrownBy(() -> ((SupportsWriterMetadata) writer).addMetadata(metadata))
+                .isInstanceOf(IllegalStateException.class);
         out.close();
 
         try (org.apache.orc.Reader reader =

@@ -37,6 +37,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A {@link FormatWriter} implementation that writes data in ORC format. */
 public class OrcBulkWriter implements FormatWriter, SupportsWriterMetadata {
@@ -49,6 +50,7 @@ public class OrcBulkWriter implements FormatWriter, SupportsWriterMetadata {
 
     private long currentBatchMemoryUsage = 0;
     private final long memoryLimit;
+    private boolean closed = false;
 
     public OrcBulkWriter(
             Vectorizer<InternalRow> vectorizer,
@@ -67,6 +69,7 @@ public class OrcBulkWriter implements FormatWriter, SupportsWriterMetadata {
 
     @Override
     public void addMetadata(Map<String, byte[]> metadata) {
+        checkState(!closed, "Cannot add metadata after writer is closed.");
         for (Map.Entry<String, byte[]> entry : metadata.entrySet()) {
             this.metadata.put(
                     entry.getKey(), Arrays.copyOf(entry.getValue(), entry.getValue().length));
@@ -99,6 +102,7 @@ public class OrcBulkWriter implements FormatWriter, SupportsWriterMetadata {
                     ByteBuffer.wrap(entry.getValue().getBytes(StandardCharsets.UTF_8)));
         }
         writer.close();
+        this.closed = true;
     }
 
     @Override

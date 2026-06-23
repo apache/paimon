@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A simple {@link FormatWriter} implementation that wraps a {@link ParquetWriter}. */
 public class ParquetBulkWriter implements FormatWriter, SupportsWriterMetadata {
@@ -44,6 +45,8 @@ public class ParquetBulkWriter implements FormatWriter, SupportsWriterMetadata {
     @Nullable private ParquetMetadata footerMetadata;
 
     private final Map<String, byte[]> metadata;
+
+    private boolean closed = false;
 
     /**
      * Creates a new ParquetBulkWriter wrapping the given ParquetWriter.
@@ -62,6 +65,7 @@ public class ParquetBulkWriter implements FormatWriter, SupportsWriterMetadata {
 
     @Override
     public void addMetadata(Map<String, byte[]> metadata) {
+        checkState(!closed, "Cannot add metadata after writer is closed.");
         for (Map.Entry<String, byte[]> entry : metadata.entrySet()) {
             this.metadata.put(
                     entry.getKey(), Arrays.copyOf(entry.getValue(), entry.getValue().length));
@@ -77,6 +81,7 @@ public class ParquetBulkWriter implements FormatWriter, SupportsWriterMetadata {
     public void close() throws IOException {
         parquetWriter.close();
         this.footerMetadata = parquetWriter.getFooter();
+        this.closed = true;
     }
 
     @Override
