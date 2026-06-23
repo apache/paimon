@@ -162,17 +162,17 @@ public class SparkCatalogWithHiveTest {
             spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
             spark.sql("USE spark_catalog.test_db");
 
-            spark.sql("CREATE EXTERNAL TABLE external_table (a INT, bb INT, c STRING)");
+            spark.sql("CREATE EXTERNAL TABLE external_type_table (a INT, bb INT, c STRING)");
             assertThat(
-                            spark.sql("DESC FORMATTED external_table")
+                            spark.sql("DESC FORMATTED external_type_table")
                                     .filter("col_name = 'Type'")
                                     .head()
                                     .getString(1))
                     .isEqualTo("EXTERNAL");
 
-            spark.sql("CREATE TABLE managed_table (a INT)");
+            spark.sql("CREATE TABLE managed_type_table (a INT)");
             assertThat(
-                            spark.sql("DESC FORMATTED managed_table")
+                            spark.sql("DESC FORMATTED managed_type_table")
                                     .filter("col_name = 'Type'")
                                     .head()
                                     .getString(1))
