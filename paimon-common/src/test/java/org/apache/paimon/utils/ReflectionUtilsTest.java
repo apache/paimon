@@ -44,10 +44,7 @@ public class ReflectionUtilsTest {
 
     @Test
     public void testSetPrivateFieldValueUnknownFieldThrows() {
-        assertThatThrownBy(
-                        () ->
-                                ReflectionUtils.setPrivateFieldValue(
-                                        new Child(), "missing", "x"))
+        assertThatThrownBy(() -> ReflectionUtils.setPrivateFieldValue(new Child(), "missing", "x"))
                 .isInstanceOf(NoSuchFieldException.class);
     }
 

@@ -31,9 +31,7 @@ public class OSSFileIOTest {
     @Test
     public void testSseKmsOperationSwapTakesEffect() throws Exception {
         OSSClient ossClient =
-                (OSSClient)
-                        new OSSClientBuilder()
-                                .build("http://oss-cn-hangzhou.aliyuncs.com", "ak", "sk");
+                (OSSClient) new OSSClientBuilder().build("http://oss.example.com", "ak", "sk");
         try {
             OSSFileIO.swapSseKmsOperations(ossClient, "my-cmk-key-id");
 
