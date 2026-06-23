@@ -23,10 +23,13 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,19 +49,27 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
 
     public BatchVectorReadImpl(
             FileStoreTable table,
-            Predicate filter,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter,
             int limit,
             DataField vectorColumn,
             float[][] vectors,
-            Map<String, String> options) {
-        super(table, filter, limit, vectorColumn, options);
+            @Nullable Map<String, String> options) {
+        super(table, partitionFilter, filter, limit, vectorColumn, options);
         this.vectors = vectors;
     }
 
     @Override
-    public List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
+    public List<GlobalIndexResult> readBatch(VectorScan.Plan plan) {
+        return readBatch(plan.splits());
+    }
+
+    private List<GlobalIndexResult> readBatch(List<VectorSearchSplit> splits) {
         int n = vectors.length;
-        if (splits.isEmpty()) {
+        List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
+        List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
+        splitSearchSplits(splits, indexSplits, rawSplits);
+        if (indexSplits.isEmpty() && rawSplits.isEmpty()) {
             List<GlobalIndexResult> empty = new ArrayList<>(n);
             for (int i = 0; i < n; i++) {
                 empty.add(GlobalIndexResult.createEmpty());
@@ -66,9 +77,28 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
             return empty;
         }
 
-        RoaringNavigableMap64 preFilter = preFilter(splits).orElse(null);
+        GlobalIndexer globalIndexer =
+                indexSplits.isEmpty() ? null : createGlobalIndexer(indexSplits);
+        ScoredGlobalIndexResult[] indexedResults =
+                indexSplits.isEmpty()
+                        ? emptyScoredResults(n)
+                        : readIndexedBatch(indexSplits, globalIndexer);
 
-        GlobalIndexer globalIndexer = createGlobalIndexer(splits);
+        List<GlobalIndexResult> results = new ArrayList<>(n);
+        RoaringNavigableMap64 rawPreFilter = rawPreFilter(rawSplits);
+        for (int i = 0; i < n; i++) {
+            results.add(
+                    withRawSearch(
+                            indexedResults[i], rawSplits, globalIndexer, rawPreFilter, vectors[i]));
+        }
+        return results;
+    }
+
+    protected ScoredGlobalIndexResult[] readIndexedBatch(
+            List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
+        int n = vectors.length;
+        List<RoaringNavigableMap64> preFilters = preFilters(splits);
+
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
@@ -76,7 +106,8 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
 
         List<CompletableFuture<List<Optional<ScoredGlobalIndexResult>>>> futures =
                 new ArrayList<>(splits.size());
-        for (VectorSearchSplit split : splits) {
+        for (int i = 0; i < splits.size(); i++) {
+            IndexVectorSearchSplit split = splits.get(i);
             futures.add(
                     evalBatch(
                             globalIndexer,
@@ -85,7 +116,7 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vectors,
-                            preFilter,
+                            preFilters.isEmpty() ? null : preFilters.get(i),
                             executor));
         }
 
@@ -104,11 +135,6 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                 }
             }
         }
-
-        List<GlobalIndexResult> results = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            results.add(merged[i].topK(limit));
-        }
-        return results;
+        return merged;
     }
 }

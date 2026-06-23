@@ -124,7 +124,11 @@ class ManifestFileManager:
                 null_counts=key_dict['_NULL_COUNTS'],
             )
 
-            schema_fields = self.table.schema_manager.get_schema(file_dict['_SCHEMA_ID']).fields
+            schema_id = file_dict['_SCHEMA_ID']
+            if schema_id == self.table.table_schema.id:
+                schema_fields = self.table.table_schema.fields
+            else:
+                schema_fields = self.table.schema_manager.get_schema(schema_id).fields
             fields = self._get_value_stats_fields(file_dict, schema_fields)
             value_dict = dict(file_dict['_VALUE_STATS'])
             value_stats = SimpleStats(

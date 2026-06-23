@@ -70,6 +70,9 @@ public class SparkTypeUtils {
      */
     public static final String CURRENT_DEFAULT_COLUMN_METADATA_KEY = "CURRENT_DEFAULT";
 
+    // Spark SQL functions store DEFAULT in a different metadata key than table columns.
+    public static final String SQL_FUNCTION_DEFAULT_METADATA_KEY = "default";
+
     public static RowType toPartitionType(Table table) {
         int[] projections = table.rowType().getFieldIndices(table.partitionKeys());
         List<DataField> partitionTypes = new ArrayList<>();
@@ -294,6 +297,7 @@ public class SparkTypeUtils {
                 MetadataBuilder metadataBuilder = new MetadataBuilder();
                 if (field.defaultValue() != null) {
                     metadataBuilder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, field.defaultValue());
+                    metadataBuilder.putString(SQL_FUNCTION_DEFAULT_METADATA_KEY, field.defaultValue());
                 }
                 StructField structField =
                         DataTypes.createStructField(
@@ -380,6 +384,9 @@ public class SparkTypeUtils {
                 if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
                     defaultValue =
                             field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
+                } else if (field.metadata().contains(SQL_FUNCTION_DEFAULT_METADATA_KEY)) {
+                    defaultValue =
+                            field.metadata().getString(SQL_FUNCTION_DEFAULT_METADATA_KEY);
                 }
                 newFields.add(
                         new DataField(

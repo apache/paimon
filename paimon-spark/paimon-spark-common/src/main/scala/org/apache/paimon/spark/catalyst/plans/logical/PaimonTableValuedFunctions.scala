@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.globalindex.HybridSearchRanker
-import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, HybridSearchRoute, VectorSearch}
+import org.apache.paimon.predicate.{FullTextQuery, FullTextSearch, HybridSearch, HybridSearchRoute, VectorSearch}
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions._
 import org.apache.paimon.table.{DataTable, FullTextSearchTable, HybridSearchTable, InnerTable, VectorSearchTable}
@@ -455,8 +455,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
  * Usage: hybrid_search(table_name, vector_routes, full_text_routes, limit[, ranker])
  *   - table_name: the Paimon table to search
  *   - vector_routes: route config array with field, query_vector, limit, weight, and options fields
- *   - full_text_routes: route config array with field, query_text, query_operator, limit, weight,
- *     and options fields
+ *   - full_text_routes: route config array with query, limit, weight, and options fields
  *   - limit: the final number of ranked top results to return
  *   - ranker: optional ranker for combining results from multiple routes
  */
@@ -488,10 +487,12 @@ case class HybridSearchQuery(override val args: Seq[Expression])
       (extractVectorRoutes(argsWithoutTable.head, finalLimit) ++
         extractFullTextRoutes(argsWithoutTable(1), finalLimit)).map {
         route =>
-          val columnName = route.fieldName()
-          if (!innerTable.rowType().containsField(columnName)) {
-            throw new RuntimeException(
-              s"Column $columnName does not exist in table ${innerTable.name()}")
+          route.columns().asScala.foreach {
+            columnName =>
+              if (!innerTable.rowType().containsField(columnName)) {
+                throw new RuntimeException(
+                  s"Column $columnName does not exist in table ${innerTable.name()}")
+              }
           }
           route
       }.toList
@@ -582,9 +583,7 @@ case class HybridSearchQuery(override val args: Seq[Expression])
   private def extractConfiguredFullTextRoute(
       children: Seq[Expression],
       defaultLimit: Int): HybridSearchRoute = {
-    var columnName: Option[String] = None
-    var queryText: Option[String] = None
-    var queryOperator: Option[String] = None
+    var query: Option[String] = None
     var limit: Option[Int] = None
     var weight: Option[Float] = None
     var options = Map.empty[String, String]
@@ -592,12 +591,8 @@ case class HybridSearchQuery(override val args: Seq[Expression])
     children.grouped(2).foreach {
       case Seq(keyExpr, valueExpr) =>
         VectorSearchQuery(Seq.empty).extractString(keyExpr) match {
-          case "field" | "text_column" =>
-            columnName = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
-          case "query_text" =>
-            queryText = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
-          case "query_operator" =>
-            queryOperator = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
+          case "query" =>
+            query = Some(VectorSearchQuery(Seq.empty).extractString(valueExpr))
           case "limit" =>
             limit = Some(parsePositiveLimit(valueExpr.eval()))
           case "weight" =>
@@ -605,22 +600,16 @@ case class HybridSearchQuery(override val args: Seq[Expression])
           case "options" =>
             options = VectorSearchQuery(Seq.empty).extractOptions(valueExpr)
           case key =>
-            throw new IllegalArgumentException(s"Unsupported full-text route field '$key'. " +
-              "Supported fields are field, text_column, query_text, query_operator, limit, weight, and options.")
+            throw new IllegalArgumentException(
+              s"Unsupported full-text route field '$key'. " +
+                "Supported fields are query, limit, weight, and options.")
         }
       case other =>
         throw new RuntimeException(s"Invalid route config entries: $other")
     }
 
-    val routeColumn =
-      columnName.getOrElse(
-        throw new IllegalArgumentException("Full-text route must define field or text_column."))
     HybridSearchRoute.fullText(
-      routeColumn,
-      queryText.getOrElse(
-        throw new IllegalArgumentException(
-          s"Full-text route for column $routeColumn must define query_text.")),
-      queryOperator.getOrElse("or"),
+      query.getOrElse(throw new IllegalArgumentException("Full-text route must define query.")),
       limit.getOrElse(defaultLimit),
       weight.getOrElse(1.0f),
       options.asJava
@@ -648,14 +637,13 @@ case class HybridSearchQuery(override val args: Seq[Expression])
 /**
  * Plan for the [[FULL_TEXT_SEARCH]] table-valued function.
  *
- * Usage: full_text_search(table_name, column_name, query_text, limit[, query_operator])
+ * Usage: full_text_search(table_name, query_json, limit)
  *   - table_name: the Paimon table to search
- *   - column_name: the text column name
- *   - query_text: the query text string
+ *   - query_json: the LanceDB-style full-text query JSON string
  *   - limit: the number of top results to return
- *   - query_operator: optional query operator, supported values are 'or' and 'and'
  *
- * Example: SELECT * FROM full_text_search('T', 'content', 'hello world', 10, 'and')
+ * Example: SELECT * FROM full_text_search('T', '{"match":{"column":"content","terms":"hello"}}',
+ * 10)
  */
 case class FullTextSearchQuery(override val args: Seq[Expression])
   extends PaimonTableValueFunction(FULL_TEXT_SEARCH) {
@@ -668,27 +656,23 @@ case class FullTextSearchQuery(override val args: Seq[Expression])
   def createFullTextSearch(
       innerTable: InnerTable,
       argsWithoutTable: Seq[Expression]): FullTextSearch = {
-    if (argsWithoutTable.size != 3 && argsWithoutTable.size != 4) {
+    if (argsWithoutTable.size != 2) {
       throw new RuntimeException(
-        s"$FULL_TEXT_SEARCH needs three or four parameters after table_name: " +
-          s"column_name, query_text, limit[, query_operator]. " +
+        s"$FULL_TEXT_SEARCH needs two parameters after table_name: " +
+          s"query_json, limit. " +
           s"Got ${argsWithoutTable.size} parameters after table_name."
       )
     }
-    val columnName = argsWithoutTable.head.eval().toString
-    if (!innerTable.rowType().containsField(columnName)) {
-      throw new RuntimeException(
-        s"Column $columnName does not exist in table ${innerTable.name()}"
-      )
+    val query = FullTextQuery.fromJson(argsWithoutTable.head.eval().toString)
+    query.columns().asScala.foreach {
+      columnName =>
+        if (!innerTable.rowType().containsField(columnName)) {
+          throw new RuntimeException(
+            s"Column $columnName does not exist in table ${innerTable.name()}"
+          )
+        }
     }
-    val queryText = argsWithoutTable(1).eval().toString
-    val limit = parsePositiveLimit(argsWithoutTable(2).eval())
-    val queryOperator =
-      if (argsWithoutTable.size == 4) {
-        VectorSearchQuery(Seq.empty).extractString(argsWithoutTable(3))
-      } else {
-        "or"
-      }
-    new FullTextSearch(queryText, limit, columnName, queryOperator)
+    val limit = parsePositiveLimit(argsWithoutTable(1).eval())
+    new FullTextSearch(query, limit)
   }
 }

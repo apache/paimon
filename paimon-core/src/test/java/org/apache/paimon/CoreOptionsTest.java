@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link org.apache.paimon.CoreOptions}. */
 public class CoreOptionsTest {
@@ -155,5 +156,44 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, false);
         options = new CoreOptions(conf);
         assertThat(options.blobSplitByFileSize()).isTrue();
+    }
+
+    @Test
+    public void testMapStorageLayout() {
+        Options conf = new Options();
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.DEFAULT);
+        assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(256);
+
+        conf.setString("fields.metrics.map.storage-layout", "shared-shredding");
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "32");
+        options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
+        assertThat(options.mapSharedShreddingMaxColumns("metrics")).isEqualTo(32);
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.storage-layout", "Shared-Shredding");
+        options = new CoreOptions(conf);
+        assertThat(options.mapStorageLayout("metrics"))
+                .isEqualTo(CoreOptions.MapStorageLayout.SHARED_SHREDDING);
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.storage-layout", "invalid");
+        final CoreOptions invalidLayoutOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> invalidLayoutOptions.mapStorageLayout("metrics"))
+                .hasMessageContaining("invalid");
+
+        conf = new Options();
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "0");
+        final CoreOptions zeroMaxColumnsOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> zeroMaxColumnsOptions.mapSharedShreddingMaxColumns("metrics"))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+
+        conf.setString("fields.metrics.map.shared-shredding.max-columns", "-1");
+        final CoreOptions negativeMaxColumnsOptions = new CoreOptions(conf);
+        assertThatThrownBy(() -> negativeMaxColumnsOptions.mapSharedShreddingMaxColumns("metrics"))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
     }
 }

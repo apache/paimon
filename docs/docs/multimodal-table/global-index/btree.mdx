@@ -72,12 +72,15 @@ CALL sys.create_global_index(
 
 | Option | Default | Description |
 |---|---|---|
-| `btree-index.records-per-range` | `10000000` | Expected number of records per BTree index file. |
-| `btree-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building BTree indexes. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
 | `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
 | `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
 | `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
+
+The legacy `btree-index.records-per-range` and
+`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
 
 ## Query with BTree Index
 

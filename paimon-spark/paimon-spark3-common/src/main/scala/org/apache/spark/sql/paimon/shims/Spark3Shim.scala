@@ -324,6 +324,20 @@ class Spark3Shim extends SparkShim {
 
   override def toPaimonVariant(array: ArrayData, pos: Int): Variant =
     throw new UnsupportedOperationException()
+
+  // SQL UDFs (CREATE FUNCTION ... RETURN ...) are a Spark 4.0+ feature; no-op rule on Spark 3.
+  override def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan] =
+    new Rule[LogicalPlan] {
+      override def apply(plan: LogicalPlan): LogicalPlan = plan
+    }
+
+  override def resolvePaimonSQLFunction(
+      funcIdent: org.apache.spark.sql.catalyst.FunctionIdentifier,
+      function: org.apache.paimon.function.Function,
+      arguments: Seq[Expression],
+      parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
+    throw new UnsupportedOperationException(
+      "SQL user-defined functions (CREATE FUNCTION ... RETURN) require Spark 4.0 or later.")
 }
 
 object Spark3Shim {

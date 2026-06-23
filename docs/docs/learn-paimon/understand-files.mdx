@@ -367,7 +367,9 @@ Let's say all 4 snapshots in the above diagram are about to expire. The expire p
 
 3. Finally, it deletes the snapshots themselves and writes the earliest hint file.
 
-If any directories are left empty after the deletion process, they will be deleted as well.
+If any directories are left empty after the deletion process, they will be deleted as well,
+but only when `snapshot.clean-empty-directories` is enabled (default is `false`).
+By default, empty directories are kept on disk. See [Manage Snapshots](../maintenance/manage-snapshots#expire-snapshots).
 
 
 Let's say another snapshot, `snapshot-5` is created and snapshot expiration is triggered. `snapshot-1` to `snapshot-4` are  

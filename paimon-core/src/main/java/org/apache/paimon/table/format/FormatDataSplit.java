@@ -24,61 +24,44 @@ import org.apache.paimon.table.source.Split;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 
-/** {@link FormatDataSplit} for format table. */
+/**
+ * {@link Split} for format table. A split may contain multiple files packed by {@code
+ * source.split.target-size}, so a single reader task can read several files sequentially.
+ */
 public class FormatDataSplit implements Split {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
-    private final Path filePath;
-    private final long fileSize;
-    private final long offset;
-    // If null, means reading the whole file.
-    @Nullable private final Long length;
+    private final List<FileMeta> files;
     @Nullable private final BinaryRow partition;
 
-    public FormatDataSplit(
-            Path filePath,
-            long fileSize,
-            long offset,
-            @Nullable Long length,
-            @Nullable BinaryRow partition) {
-        this.filePath = filePath;
-        this.fileSize = fileSize;
-        this.offset = offset;
-        this.length = length;
+    public FormatDataSplit(List<FileMeta> files, @Nullable BinaryRow partition) {
+        this.files = files;
         this.partition = partition;
     }
 
-    public FormatDataSplit(Path filePath, long fileSize, @Nullable BinaryRow partition) {
-        this(filePath, fileSize, 0L, null, partition);
-    }
-
-    public Path filePath() {
-        return this.filePath;
-    }
-
-    public Path dataPath() {
-        return this.filePath;
-    }
-
-    public long fileSize() {
-        return this.fileSize;
-    }
-
-    public long offset() {
-        return offset;
+    public List<FileMeta> files() {
+        return files;
     }
 
     @Nullable
-    public Long length() {
-        return length;
-    }
-
     public BinaryRow partition() {
         return partition;
+    }
+
+    /** Total bytes to read for this split, i.e. the sum of {@link FileMeta#readSize()}. */
+    public long totalSize() {
+        return files.stream().mapToLong(FileMeta::readSize).sum();
+    }
+
+    /** Number of files (or file ranges) in this split. */
+    public int fileCount() {
+        return files.size();
     }
 
     @Override
@@ -100,15 +83,78 @@ public class FormatDataSplit implements Split {
             return false;
         }
         FormatDataSplit that = (FormatDataSplit) o;
-        return offset == that.offset
-                && fileSize == that.fileSize
-                && Objects.equals(length, that.length)
-                && Objects.equals(filePath, that.filePath)
-                && Objects.equals(partition, that.partition);
+        return Objects.equals(files, that.files) && Objects.equals(partition, that.partition);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(filePath, fileSize, offset, length, partition);
+        return Objects.hash(files, partition);
+    }
+
+    /**
+     * A single file (or one offset range of a splittable file) inside a {@link FormatDataSplit}.
+     */
+    public static class FileMeta implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Path filePath;
+        private final long fileSize;
+        private final long offset;
+        // If null, means reading the whole file.
+        @Nullable private final Long length;
+
+        public FileMeta(Path filePath, long fileSize, long offset, @Nullable Long length) {
+            this.filePath = filePath;
+            this.fileSize = fileSize;
+            this.offset = offset;
+            this.length = length;
+        }
+
+        public FileMeta(Path filePath, long fileSize) {
+            this(filePath, fileSize, 0L, null);
+        }
+
+        public Path filePath() {
+            return filePath;
+        }
+
+        public long fileSize() {
+            return fileSize;
+        }
+
+        public long offset() {
+            return offset;
+        }
+
+        @Nullable
+        public Long length() {
+            return length;
+        }
+
+        /** Bytes this segment actually reads: range length when sliced, otherwise whole file. */
+        public long readSize() {
+            return length != null ? length : fileSize;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FileMeta that = (FileMeta) o;
+            return fileSize == that.fileSize
+                    && offset == that.offset
+                    && Objects.equals(length, that.length)
+                    && Objects.equals(filePath, that.filePath);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(filePath, fileSize, offset, length);
+        }
     }
 }

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -114,7 +114,6 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         // Parse options
         Options userOptions = createUserOptions(table, options);
 
-        // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
         if (indexColumns.size() > 1) {
             // Fail fast before submitting the job: index types that do not support multi-column
@@ -134,15 +133,18 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
             }
         }
         try {
-            if ("btree".equals(indexType)) {
-                BTreeIndexTopoBuilder.buildIndexAndExecute(
+            if (SortedIndexTopoBuilder.supports(indexType)) {
+                SortedIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
                         indexColumns.get(0),
+                        indexType,
                         partitionPredicate,
                         userOptions);
                 return new String[] {
-                    "BTree global index created successfully for table: " + table.name()
+                    displayIndexType(indexType)
+                            + " global index created successfully for table: "
+                            + table.name()
                 };
             } else {
                 GenericIndexTopoBuilder.buildIndexAndExecute(
@@ -162,7 +164,9 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                     e);
         }
         return new String[] {
-            indexType + " global index created successfully for table: " + table.name()
+            displayIndexType(indexType)
+                    + " global index created successfully for table: "
+                    + table.name()
         };
     }
 
@@ -178,5 +182,15 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                         table.schema().logicalPartitionType(),
                         table.coreOptions().partitionDefaultName());
         return PartitionPredicate.fromPredicate(table.schema().logicalPartitionType(), predicate);
+    }
+
+    private static String displayIndexType(String indexType) {
+        if ("btree".equals(indexType)) {
+            return "BTree";
+        }
+        if ("bitmap".equals(indexType)) {
+            return "Bitmap";
+        }
+        return indexType;
     }
 }

@@ -19,20 +19,25 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testfulltext.TestFullTextGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -46,11 +51,17 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -93,9 +104,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Query "Paimon" - should match rows 0, 1, 3
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("Paimon")
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
                         .withLimit(3)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
@@ -116,6 +126,162 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchNonFastModesScanUnindexedData() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] indexedDocuments = {
+            "Apache Paimon is a lake format", "Paimon supports full-text search"
+        };
+        writeDocuments(table, indexedDocuments);
+        buildAndCommitIndex(table, indexedDocuments);
+        writeDocuments(
+                table,
+                new String[] {
+                    "Vector search is also supported", "Fresh Paimon documents should be searchable"
+                });
+
+        GlobalIndexResult fastResult =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Fresh", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+        assertThat(readIds(table, fastResult)).isEmpty();
+
+        for (String searchMode : Arrays.asList("full", "detail")) {
+            FileStoreTable nonFastModeTable =
+                    (FileStoreTable)
+                            table.copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(),
+                                            searchMode));
+            GlobalIndexResult result =
+                    nonFastModeTable
+                            .newFullTextSearchBuilder()
+                            .withQuery(FullTextQuery.match("Fresh", TEXT_FIELD_NAME))
+                            .withLimit(10)
+                            .executeLocal();
+
+            assertThat(readIds(nonFastModeTable, result)).containsExactly(1);
+        }
+    }
+
+    @Test
+    public void testFullTextSearchRawSearchRespectsPartitionFilter() throws Exception {
+        Identifier identifier = identifier("PartitionedTextTable");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        RowType partitionType = RowType.of(DataTypes.INT());
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        BinaryRow partition1 = serializer.toBinaryRow(GenericRow.of(1)).copy();
+
+        writePartitionedDocuments(
+                table, 1, new String[] {"indexed Paimon document", "another document"});
+        buildAndCommitIndexForColumn(
+                table,
+                TEXT_FIELD_NAME,
+                new String[] {"indexed Paimon document", "another document"},
+                partition1);
+        writePartitionedDocuments(table, 2, new String[] {"fresh Paimon document"});
+
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(partition1));
+        FileStoreTable fullModeTable =
+                (FileStoreTable)
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
+
+        GlobalIndexResult result =
+                fullModeTable
+                        .newFullTextSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withQuery(FullTextQuery.match("fresh", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(fullModeTable, result)).isEmpty();
+    }
+
+    @Test
+    public void testFullTextSearchRawSearchOverridesPartiallyIndexedRows() throws Exception {
+        FileStoreTable table = createMultiTextTable();
+        writeMultiTextDocuments(
+                table,
+                new String[][] {
+                    {"paimon title", "other body"},
+                    {"other title", "paimon body"},
+                    {"paimon title", "paimon body"}
+                });
+        buildAndCommitIndexForColumn(
+                table, "title", new String[] {"paimon title", "other title", "paimon title"});
+        buildAndCommitIndexForColumn(table, "body", new String[] {"other body", "paimon body"});
+
+        FileStoreTable fullModeTable =
+                (FileStoreTable)
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult)
+                        fullModeTable
+                                .newFullTextSearchBuilder()
+                                .withQuery(
+                                        FullTextQuery.multiMatch(
+                                                "paimon", Arrays.asList("title", "body")))
+                                .withLimit(10)
+                                .executeLocal();
+
+        assertThat(result.results()).contains(2L);
+        assertThat(result.scoreGetter().score(2L)).isEqualTo(2.0f);
+    }
+
+    @Test
+    public void testFullTextSearchRawSearchRemovesPartialIndexedRows() throws Exception {
+        FileStoreTable table = createMultiTextTable();
+        writeMultiTextDocuments(
+                table,
+                new String[][] {
+                    {"paimon title", "paimon body"},
+                    {"paimon title", "other body"}
+                });
+        buildAndCommitIndexForColumn(table, "title", new String[] {"paimon title", "paimon title"});
+        buildAndCommitIndexForColumn(table, "body", new String[] {"paimon body"});
+
+        FileStoreTable fullModeTable =
+                (FileStoreTable)
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
+        GlobalIndexResult result =
+                fullModeTable
+                        .newFullTextSearchBuilder()
+                        .withQuery(
+                                new FullTextQuery.BooleanQuery(
+                                        Collections.emptyList(),
+                                        Arrays.asList(
+                                                FullTextQuery.match("paimon", "title"),
+                                                FullTextQuery.match("paimon", "body")),
+                                        Collections.emptyList()))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(0L);
+    }
+
+    @Test
     public void testHybridSearchBuilderWithFullTextRoute() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -131,7 +297,10 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
         ScoredGlobalIndexResult result =
                 table.newHybridSearchBuilder()
-                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                        .addFullTextRoute(
+                                "{\"match\":{\"column\":\"content\",\"terms\":\"Paimon\"}}",
+                                3,
+                                1.0f)
                         .withLimit(3)
                         .executeLocal();
 
@@ -149,7 +318,11 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThatThrownBy(
                         () ->
                                 table.newHybridSearchBuilder()
-                                        .addFullTextRoute(TEXT_FIELD_NAME, "Paimon", 3, 1.0f)
+                                        .addFullTextRoute(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"Paimon\"}}",
+                                                3,
+                                                1.0f)
                                         .withFilter(idFilter)
                                         .withLimit(3)
                                         .routeBuilders())
@@ -175,9 +348,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Query "Paimon search" - row 2 matches both terms, rows 1 matches both, row 0 matches one
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("Paimon search")
+                        .withQuery(FullTextQuery.match("Paimon search", TEXT_FIELD_NAME))
                         .withLimit(2)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
@@ -196,6 +368,169 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testStructuredFullTextSearchPhraseAndBooleanQuery() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {
+            "Apache Paimon lake format",
+            "Paimon full-text search support",
+            "full-text search in Apache Paimon",
+            "Vector search capabilities",
+        };
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        GlobalIndexResult phraseResult =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.phrase("full-text search", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(table, phraseResult)).containsExactlyInAnyOrder(1, 2);
+
+        FullTextQuery booleanQuery =
+                new FullTextQuery.BooleanQuery(
+                        java.util.Collections.emptyList(),
+                        java.util.Arrays.asList(
+                                FullTextQuery.match("Paimon", TEXT_FIELD_NAME),
+                                FullTextQuery.match("search", TEXT_FIELD_NAME)),
+                        java.util.Collections.singletonList(
+                                FullTextQuery.match("Vector", TEXT_FIELD_NAME)));
+
+        GlobalIndexResult booleanResult =
+                table.newFullTextSearchBuilder()
+                        .withQuery(booleanQuery)
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(table, booleanResult)).containsExactlyInAnyOrder(1, 2);
+    }
+
+    @Test
+    public void testMultiMatchFullTextSearchAcrossColumns() throws Exception {
+        FileStoreTable table = createMultiTextTable();
+
+        writeMultiTextDocuments(
+                table,
+                new String[][] {
+                    {"paimon overview", "lake format"},
+                    {"vector overview", "paimon search"},
+                    {"engine notes", "streaming"},
+                    {"paimon vector", "paimon lake"}
+                });
+        buildAndCommitIndexForColumn(
+                table,
+                "title",
+                new String[] {
+                    "paimon overview", "vector overview", "engine notes", "paimon vector"
+                });
+        buildAndCommitIndexForColumn(
+                table,
+                "body",
+                new String[] {"lake format", "paimon search", "streaming", "paimon lake"});
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(
+                                FullTextQuery.multiMatch("paimon", Arrays.asList("title", "body")))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(table, result)).containsExactlyInAnyOrder(0, 1, 3);
+    }
+
+    @Test
+    public void testMultiMatchFullTextSearchAddsColumnScores() throws Exception {
+        FileStoreTable table = createMultiTextTable();
+
+        writeMultiTextDocuments(
+                table,
+                new String[][] {
+                    {"paimon", "paimon"},
+                    {"paimon", "engine"},
+                    {"engine", "paimon"},
+                });
+        buildAndCommitIndexForColumn(table, "title", new String[] {"paimon", "paimon", "engine"});
+        buildAndCommitIndexForColumn(table, "body", new String[] {"paimon", "engine", "paimon"});
+
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery(
+                                        FullTextQuery.multiMatch(
+                                                "paimon", Arrays.asList("title", "body")))
+                                .withLimit(10)
+                                .executeLocal();
+
+        assertThat(result.scoreGetter().score(0)).isEqualTo(2.0f);
+        assertThat(result.scoreGetter().score(1)).isEqualTo(1.0f);
+        assertThat(result.scoreGetter().score(2)).isEqualTo(1.0f);
+    }
+
+    @Test
+    public void testBooleanFullTextSearchAcrossColumns() throws Exception {
+        FileStoreTable table = createMultiTextTable();
+
+        writeMultiTextDocuments(
+                table,
+                new String[][] {
+                    {"paimon overview", "lake format"},
+                    {"paimon overview", "vector search"},
+                    {"spark overview", "lake format"},
+                    {"paimon internals", "lake vector"}
+                });
+        buildAndCommitIndexForColumn(
+                table,
+                "title",
+                new String[] {
+                    "paimon overview", "paimon overview", "spark overview", "paimon internals"
+                });
+        buildAndCommitIndexForColumn(
+                table,
+                "body",
+                new String[] {"lake format", "vector search", "lake format", "lake vector"});
+
+        FullTextQuery query =
+                new FullTextQuery.BooleanQuery(
+                        Collections.emptyList(),
+                        Arrays.asList(
+                                FullTextQuery.match("paimon", "title"),
+                                FullTextQuery.match("lake", "body")),
+                        Collections.singletonList(FullTextQuery.match("vector", "body")));
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder().withQuery(query).withLimit(10).executeLocal();
+
+        assertThat(readIds(table, result)).containsExactlyInAnyOrder(0);
+    }
+
+    @Test
+    public void testCompoundFullTextSearchUsesFullLeafCandidatesBeforeFinalTopK() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"paimon vector", "paimon", "paimon", "paimon", "paimon", "paimon"};
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        ScoredGlobalIndexResult result =
+                (ScoredGlobalIndexResult)
+                        table.newFullTextSearchBuilder()
+                                .withQuery(
+                                        FullTextQuery.boost(
+                                                FullTextQuery.match("paimon", TEXT_FIELD_NAME),
+                                                FullTextQuery.match("vector", TEXT_FIELD_NAME),
+                                                0.1f))
+                                .withLimit(3)
+                                .executeLocal();
+
+        assertThat(readIds(table, result)).doesNotContain(0);
+    }
+
+    @Test
     public void testFullTextSearchEmptyResult() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -206,9 +541,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("nonexistent")
+                        .withQuery(FullTextQuery.match("nonexistent", TEXT_FIELD_NAME))
                         .withLimit(1)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result.results().isEmpty()).isTrue();
@@ -230,9 +564,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Search with limit=5
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("keyword")
+                        .withQuery(FullTextQuery.match("keyword", TEXT_FIELD_NAME))
                         .withLimit(5)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         ReadBuilder readBuilder = table.newReadBuilder();
@@ -267,9 +600,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Query "Paimon" - results should span across both index files
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("Paimon")
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
                         .withLimit(4)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
@@ -289,6 +621,26 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchIgnoresOtherIndexTypesOnSameColumn() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon lake format", "vector search"};
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        buildAndCommitBTreeIndex(table, documents);
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(readIds(table, result)).containsExactly(0);
+    }
+
+    @Test
     public void testFullTextSearchNoMatchingDocuments() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -303,9 +655,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Query a term that doesn't exist in any document
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("nonexistent")
+                        .withQuery(FullTextQuery.match("nonexistent", TEXT_FIELD_NAME))
                         .withLimit(3)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result.results().isEmpty()).isTrue();
@@ -326,9 +677,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         // Query lowercase "paimon" should match all three (case-insensitive)
         GlobalIndexResult result =
                 table.newFullTextSearchBuilder()
-                        .withQueryText("paimon")
+                        .withQuery(FullTextQuery.match("paimon", TEXT_FIELD_NAME))
                         .withLimit(3)
-                        .withTextColumn(TEXT_FIELD_NAME)
                         .executeLocal();
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
@@ -344,6 +694,84 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids).contains(0, 1, 2);
     }
 
+    @Test
+    public void testFullTextSearchRequiresTextColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Arrays.asList(
+                        table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)));
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2);
+
+        FullTextScan.Plan plan = searchBuilder.newFullTextScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testFullTextSearchSplitSerialization() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "full-text search"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        FullTextScan.Plan plan =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2)
+                        .newFullTextScan()
+                        .scan();
+
+        assertThat(plan.splits()).hasSize(1);
+        IndexFullTextSearchSplit original = (IndexFullTextSearchSplit) plan.splits().get(0);
+
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bos)) {
+            out.writeObject(original);
+        }
+
+        IndexFullTextSearchSplit deserialized;
+        try (ObjectInputStream in =
+                new ObjectInputStream(new ByteArrayInputStream(bos.toByteArray()))) {
+            deserialized = (IndexFullTextSearchSplit) in.readObject();
+        }
+
+        assertThat(deserialized.columnName()).isEqualTo(original.columnName());
+        assertThat(deserialized.rowRangeStart()).isEqualTo(original.rowRangeStart());
+        assertThat(deserialized.rowRangeEnd()).isEqualTo(original.rowRangeEnd());
+        assertThat(deserialized.fullTextIndexFiles()).hasSize(original.fullTextIndexFiles().size());
+        for (int i = 0; i < original.fullTextIndexFiles().size(); i++) {
+            assertThat(deserialized.fullTextIndexFiles().get(i).fileName())
+                    .isEqualTo(original.fullTextIndexFiles().get(i).fileName());
+        }
+
+        RawFullTextSearchSplit rawOriginal =
+                new RawFullTextSearchSplit(Collections.singletonList(new Range(2, 3)));
+        bos = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bos)) {
+            out.writeObject(rawOriginal);
+        }
+
+        RawFullTextSearchSplit rawDeserialized;
+        try (ObjectInputStream in =
+                new ObjectInputStream(new ByteArrayInputStream(bos.toByteArray()))) {
+            rawDeserialized = (RawFullTextSearchSplit) in.readObject();
+        }
+
+        assertThat(rawDeserialized.rowRanges()).isEqualTo(rawOriginal.rowRanges());
+    }
+
     // ====================== Helper methods ======================
 
     private void writeDocuments(FileStoreTable table, String[] documents) throws Exception {
@@ -357,9 +785,108 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         }
     }
 
+    private void writePartitionedDocuments(FileStoreTable table, int partition, String[] documents)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < documents.length; i++) {
+                write.write(GenericRow.of(partition, i, BinaryString.fromString(documents[i])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
     private void buildAndCommitIndex(FileStoreTable table, String[] documents) throws Exception {
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)));
+    }
+
+    private void buildAndCommitIndexWithFields(
+            FileStoreTable table, String[] documents, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                                textField,
+                                options);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(documents[i], i);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        Range rowRange = new Range(0, documents.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexFields,
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private FileStoreTable createMultiTextTable() throws Exception {
+        Identifier identifier = identifier("MultiTextTable");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("title", DataTypes.STRING())
+                        .column("body", DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        return getTable(identifier);
+    }
+
+    private void writeMultiTextDocuments(FileStoreTable table, String[][] documents)
+            throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < documents.length; i++) {
+                write.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString(documents[i][0]),
+                                BinaryString.fromString(documents[i][1])));
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void buildAndCommitIndexForColumn(
+            FileStoreTable table, String columnName, String[] documents) throws Exception {
+        buildAndCommitIndexForColumn(table, columnName, documents, BinaryRow.EMPTY_ROW);
+    }
+
+    private void buildAndCommitIndexForColumn(
+            FileStoreTable table, String columnName, String[] documents, BinaryRow partition)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField textField = table.rowType().getField(columnName);
 
         GlobalIndexSingleColumnWriter writer =
                 (GlobalIndexSingleColumnWriter)
@@ -387,6 +914,40 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
                 new CommitMessageImpl(
+                        partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void buildAndCommitBTreeIndex(FileStoreTable table, String[] documents)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, BTreeGlobalIndexerFactory.IDENTIFIER, textField, options);
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(BinaryString.fromString(documents[i]), i);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        Range rowRange = new Range(0, documents.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        textField.id(),
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
                         BinaryRow.EMPTY_ROW,
                         0,
                         null,
@@ -395,6 +956,16 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
         }
+    }
+
+    private List<Integer> readIds(FileStoreTable table, GlobalIndexResult result) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        return ids;
     }
 
     private void buildAndCommitMultipleIndexFiles(FileStoreTable table, String[] documents)

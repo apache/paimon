@@ -395,7 +395,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
-                        null,
+                        snapshotId == Snapshot.FIRST_SNAPSHOT_ID ? null : (Long) (snapshotId - 1),
                         System.currentTimeMillis(),
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),

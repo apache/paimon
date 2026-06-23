@@ -18,37 +18,38 @@
 
 package org.apache.paimon.spark.execution
 
-import org.apache.paimon.function.FunctionDefinition
+import org.apache.paimon.function.{Function => PaimonFunction, FunctionDefinition}
 import org.apache.paimon.spark.SparkCatalog.FUNCTION_DEFINITION_NAME
 import org.apache.paimon.spark.catalog.SupportV1Function
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.FunctionIdentifier
-import org.apache.spark.sql.catalyst.catalog.CatalogFunction
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.types.StringType
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
+/** Create a Paimon v1 function (file or SQL) from an already-built Paimon [[PaimonFunction]]. */
 case class CreatePaimonV1FunctionCommand(
     catalog: SupportV1Function,
-    v1Function: CatalogFunction,
+    funcIdent: FunctionIdentifier,
+    function: PaimonFunction,
     ignoreIfExists: Boolean,
     replace: Boolean)
   extends PaimonLeafRunnableCommand {
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    // Note: for replace just drop then create ,this operation is non-atomic.
+    // replace = drop then create (non-atomic).
     if (replace) {
-      catalog.dropV1Function(v1Function.identifier, true)
+      catalog.dropV1Function(funcIdent, true)
     }
-    catalog.createV1Function(v1Function, ignoreIfExists)
+    catalog.createV1Function(function, ignoreIfExists)
     Nil
   }
 
   override def simpleString(maxFields: Int): String = {
-    s"CreatePaimonV1FunctionCommand: ${v1Function.identifier}"
+    s"CreatePaimonV1FunctionCommand: $funcIdent"
   }
 }
 
@@ -85,6 +86,26 @@ case class DescribePaimonV1FunctionCommand(
         if (isExtended) {
           rows += Row(
             s"File Resources: ${functionDefinition.fileResources().asScala.map(_.uri()).mkString(", ")}")
+        }
+      case sqlFunctionDefinition: FunctionDefinition.SQLFunctionDefinition =>
+        rows += Row(s"Function: ${function.fullName()}")
+        rows += Row("Type: SCALAR")
+        val inputParams = function.inputParams()
+        if (inputParams.isPresent && !inputParams.get().isEmpty) {
+          val params = inputParams
+            .get()
+            .asScala
+            .map(field => s"${field.name()} ${field.`type`().asSQLString()}")
+            .mkString(", ")
+          rows += Row(s"Input: $params")
+        }
+        val returnParams = function.returnParams()
+        if (returnParams.isPresent && !returnParams.get().isEmpty) {
+          rows += Row(s"Returns: ${returnParams.get().get(0).`type`().asSQLString()}")
+        }
+        if (isExtended) {
+          Option(function.comment()).foreach(c => rows += Row(s"Comment: $c"))
+          rows += Row(s"Body: ${sqlFunctionDefinition.definition()}")
         }
       case other =>
         throw new UnsupportedOperationException(s"Unsupported function definition $other")

@@ -76,10 +76,18 @@ CALL sys.create_global_index(
 );
 ```
 
+Bitmap indexes share the sorted index build path with BTree indexes. Use
+`sorted-index.records-per-range` to control the expected records per generated index
+file, and `sorted-index.build.max-parallelism` to cap Flink or Spark build
+parallelism. The legacy `btree-index.records-per-range` and
+`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
+
 ## Bitmap Options
 
 | Option | Default | Description |
 |---|---|---|
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `bitmap-index.dictionary-block-size` | `16 kb` | Target size of dictionary blocks in bitmap global index files. Smaller blocks reduce dictionary read amplification for high-cardinality columns; larger blocks reduce dictionary block index size. |
 | `bitmap-index.compression` | `none` | Compression algorithm for bitmap dictionary blocks and the dictionary block index. Supported values are the same block codecs as BTree index, such as `none`, `lz4`, `lzo`, and `zstd`. |
 | `bitmap-index.compression-level` | `1` | Compression level used by codecs that support levels, such as `zstd`. |

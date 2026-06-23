@@ -25,7 +25,10 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
@@ -119,6 +122,65 @@ class CodeGenUtilsTest {
         assertThat(ascending.compare(row1, row2)).isLessThan(0);
         assertThat(descending.compare(row1, row2)).isGreaterThan(0);
         assertThat(ascending.getClass()).isNotEqualTo(descending.getClass());
+    }
+
+    @Test
+    public void testFloatingPointComparatorMatchesTotalOrder() {
+        RecordComparator doubleComparator =
+                newRecordComparator(Arrays.asList(DOUBLE()), new int[] {0});
+        double[] doubles = {
+            Double.NEGATIVE_INFINITY, -1.0d, -0.0d, 0.0d, 1.0d, Double.POSITIVE_INFINITY, Double.NaN
+        };
+        for (double a : doubles) {
+            for (double b : doubles) {
+                assertThat(sign(doubleComparator.compare(GenericRow.of(a), GenericRow.of(b))))
+                        .as("compare(%s, %s)", a, b)
+                        .isEqualTo(sign(Double.compare(a, b)));
+            }
+        }
+
+        RecordComparator floatComparator =
+                newRecordComparator(Arrays.asList(FLOAT()), new int[] {0});
+        float[] floats = {
+            Float.NEGATIVE_INFINITY, -1.0f, -0.0f, 0.0f, 1.0f, Float.POSITIVE_INFINITY, Float.NaN
+        };
+        for (float a : floats) {
+            for (float b : floats) {
+                assertThat(sign(floatComparator.compare(GenericRow.of(a), GenericRow.of(b))))
+                        .as("compare(%s, %s)", a, b)
+                        .isEqualTo(sign(Float.compare(a, b)));
+            }
+        }
+    }
+
+    private static int sign(int value) {
+        return Integer.compare(value, 0);
+    }
+
+    @Test
+    public void sortByDoubleColumnWithNaNProducesTotalOrder() {
+        RecordComparator scoreComparator =
+                newRecordComparator(Arrays.asList(DOUBLE()), new int[] {0});
+
+        List<InternalRow> batch = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            batch.add(GenericRow.of((double) ((i % 11) - 5)));
+            if (i % 4 == 0) {
+                batch.add(GenericRow.of(Double.NaN));
+            }
+        }
+        batch.add(GenericRow.of(Double.NEGATIVE_INFINITY));
+        batch.add(GenericRow.of(Double.POSITIVE_INFINITY));
+
+        Collections.sort(batch, scoreComparator);
+
+        for (int i = 1; i < batch.size(); i++) {
+            double prev = batch.get(i - 1).getDouble(0);
+            double cur = batch.get(i).getDouble(0);
+            assertThat(Double.compare(prev, cur))
+                    .as("position %d (%s) sorted after position %d (%s)", i - 1, prev, i, cur)
+                    .isLessThanOrEqualTo(0);
+        }
     }
 
     @Test

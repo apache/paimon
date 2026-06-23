@@ -110,6 +110,44 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     }
   }
 
+  test("create bitmap global index") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      val values =
+        (0 until 10000).map(i => s"($i, 'name_$i')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql(
+            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap'," +
+              " options => 'sorted-index.records-per-range=1000')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+      val table = loadTable("T")
+      val bitmapEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "bitmap")
+        .map(_.indexFile())
+      assert(bitmapEntries.nonEmpty)
+      assert(bitmapEntries.map(_.rowCount()).sum == 10000L)
+      bitmapEntries.foreach(e => assert(e.globalIndexMeta() != null))
+    }
+  }
+
   test("create btree global index with multiple partitions") {
     withTable("T") {
       spark.sql("""

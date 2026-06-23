@@ -212,6 +212,109 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testMapStorageLayout() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(
+                                2, "codes", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING())));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")));
+
+        options.put("fields.metrics.map.storage-layout", "default");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")));
+
+        options.put("fields.nonexist.map.storage-layout", "shared-shredding");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("Field nonexist can not be found in table schema.");
+
+        options.remove("fields.nonexist.map.storage-layout");
+        options.put("fields.id.map.storage-layout", "default");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'id' is configured with map.storage-layout but its type is not MAP.");
+
+        options.remove("fields.id.map.storage-layout");
+        options.put("fields.codes.map.storage-layout", "shared-shredding");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "Column 'codes' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.");
+
+        options.remove("fields.codes.map.storage-layout");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        options.put("fields.metrics.map.shared-shredding.max-columns", "0");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+    }
+
+    @Test
     public void testChainTableAllowsNonDeduplicateMergeEngine() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");

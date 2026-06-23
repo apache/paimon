@@ -165,7 +165,11 @@ PyPaimon can query `jieba` indexes when the Python `jieba` package is installed.
 ### Search
 
 ```sql
-SELECT * FROM full_text_search('my_table', 'content', 'search query', 10);
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"match":{"column":"content","terms":"search query"}}',
+    10
+);
 ```
 
 ### Java API
@@ -174,9 +178,8 @@ SELECT * FROM full_text_search('my_table', 'content', 'search query', 10);
 Table table = catalog.getTable(identifier);
 
 GlobalIndexResult result = table.newFullTextSearchBuilder()
-        .withQueryText("search query")
+        .withQuery(FullTextQuery.match("search query", "content"))
         .withLimit(10)
-        .withTextColumn("content")
         .executeLocal();
 
 ReadBuilder readBuilder = table.newReadBuilder();

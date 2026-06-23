@@ -219,6 +219,76 @@ run_btree_index_test() {
     fi
 }
 
+run_btree_raw_fallback_test() {
+    echo -e "${YELLOW}=== Running BTree Raw Fallback Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testBtreeRawFallbackWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testBtreeRawFallbackWrite -pl paimon-core -am -q -DfailIfNoTests=false -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_btree_raw_fallback..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_btree_raw_fallback -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
+run_bitmap_index_test() {
+    echo -e "${YELLOW}=== Step 6b: Running Bitmap Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testBitmapIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testBitmapIndexWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    # Run the specific Python test method
+    echo "Running Python test for JavaPyReadWriteTest.test_read_bitmap_index_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_bitmap_index_table -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
+run_compressed_global_index_test() {
+    echo -e "${YELLOW}=== Step 6c: Running Compressed Global Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testCompressedGlobalIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testCompressedGlobalIndexWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_compressed_global_index_fallback_scan..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_compressed_global_index_fallback_scan -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 run_compressed_text_test() {
     echo -e "${YELLOW}=== Step 7: Running Compressed Text Test (Java Write, Python Read) ===${NC}"
 
@@ -428,6 +498,90 @@ run_lumina_vector_btree_test() {
     cd "$PAIMON_PYTHON_DIR"
     echo "Running Python test for JavaPyReadWriteTest.test_read_lumina_vector_with_btree_filter..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_lumina_vector_with_btree_filter -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
+ensure_paimon_vindex() {
+    if python -c "import paimon_vindex" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo "Installing Python paimon-vindex dependency..."
+    if python -m pip install 'paimon-vindex==0.1.0'; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
+    local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
+    rm -rf "$target_dir"
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.1.0'; then
+        export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
+        return 0
+    fi
+
+    if python -c "import numpy" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
+        rm -rf "$target_dir"
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.1.0'; then
+            export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
+            return 0
+        fi
+    fi
+
+    echo -e "${RED}✗ Failed to install paimon-vindex${NC}"
+    return 1
+}
+
+# Function to run paimon-vindex vector index test (Java write index, Python read and search)
+run_vindex_vector_test() {
+    echo -e "${YELLOW}=== Running paimon-vindex Vector Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testVindexVectorIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testVindexVectorIndexWrite -pl paimon-vector -am -q -DfailIfNoTests=false -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    if ! ensure_paimon_vindex; then
+        return 1
+    fi
+    echo "Running Python test for JavaPyReadWriteTest.test_read_vindex_vector_index..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_vindex_vector_index -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
+run_vindex_vector_raw_fallback_test() {
+    echo -e "${YELLOW}=== Running paimon-vindex Vector Raw Fallback Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testVindexVectorRawFallbackWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testVindexVectorRawFallbackWrite -pl paimon-vector -am -q -DfailIfNoTests=false -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    if ! ensure_paimon_vindex; then
+        return 1
+    fi
+    echo "Running Python test for JavaPyReadWriteTest.test_read_vindex_vector_raw_fallback..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_vindex_vector_raw_fallback -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
         return 0
     else
@@ -691,11 +845,16 @@ main() {
     local java_read_result=0
     local pk_dv_result=0
     local btree_index_result=0
+    local btree_raw_fallback_result=0
+    local bitmap_index_result=0
+    local compressed_global_index_result=0
     local compressed_text_result=0
     local vector_append_table_result=0
     local tantivy_fulltext_result=0
     local lumina_vector_result=0
     local lumina_vector_btree_result=0
+    local vindex_vector_result=0
+    local vindex_vector_raw_fallback_result=0
     local compact_conflict_result=0
     local blob_compact_conflict_result=0
     local blob_alter_compact_result=0
@@ -761,6 +920,26 @@ main() {
     # Run BTree index test (Java write, Python read)
     if ! run_btree_index_test; then
         btree_index_result=1
+    fi
+
+    echo ""
+
+    # Run BTree raw fallback test (Java write indexed + unindexed rows, Python read)
+    if ! run_btree_raw_fallback_test; then
+        btree_raw_fallback_result=1
+    fi
+
+    echo ""
+
+    # Run Bitmap index test (Java write, Python read)
+    if ! run_bitmap_index_test; then
+        bitmap_index_result=1
+    fi
+
+    echo ""
+
+    if ! run_compressed_global_index_test; then
+        compressed_global_index_result=1
     fi
 
     echo ""
@@ -837,6 +1016,25 @@ main() {
     # Run Lumina vector + BTree pre-filter test (Java write, Python read)
     if ! run_lumina_vector_btree_test; then
         lumina_vector_btree_result=1
+    fi
+
+    echo ""
+
+    # Run paimon-vindex vector index test (requires Python >= 3.9)
+    if [[ "$PYTHON_MINOR" -ge 9 ]]; then
+        if ! run_vindex_vector_test; then
+            vindex_vector_result=1
+        fi
+
+        echo ""
+
+        if ! run_vindex_vector_raw_fallback_test; then
+            vindex_vector_raw_fallback_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping paimon-vindex Vector Index Test (requires Python >= 3.9, current: $PYTHON_VERSION)${NC}"
+        vindex_vector_result=0
+        vindex_vector_raw_fallback_result=0
     fi
 
     echo ""
@@ -940,6 +1138,24 @@ main() {
         echo -e "${RED}✗ BTree Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $btree_raw_fallback_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ BTree Raw Fallback Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ BTree Raw Fallback Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $bitmap_index_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Bitmap Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Bitmap Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $compressed_global_index_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Compressed Global Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Compressed Global Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     if [[ $compressed_text_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Compressed Text Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -992,6 +1208,18 @@ main() {
         echo -e "${GREEN}✓ Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read): PASSED${NC}"
     else
         echo -e "${RED}✗ Lumina Vector + BTree Pre-Filter Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $vindex_vector_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ paimon-vindex Vector Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ paimon-vindex Vector Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
+    if [[ $vindex_vector_raw_fallback_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ paimon-vindex Vector Raw Fallback Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ paimon-vindex Vector Raw Fallback Test (Java Write, Python Read): FAILED${NC}"
     fi
 
     if [[ $compact_conflict_result -eq 0 ]]; then
@@ -1047,7 +1275,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

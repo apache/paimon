@@ -26,9 +26,12 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.ReflectionUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.oss.OSSClient;
+import com.aliyun.oss.OSSException;
 import com.aliyun.oss.common.comm.ServiceClient;
+import com.aliyun.oss.model.ObjectMetadata;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
@@ -36,9 +39,11 @@ import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystemStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -177,6 +182,40 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     new CacheKey(hadoopOptions, scheme, authority), key -> supplier.get());
         } else {
             return supplier.get();
+        }
+    }
+
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        URI uri = path.toUri();
+        String bucket = uri.getHost();
+        String objectKey = uri.getPath().substring(1);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(bytes.length);
+        metadata.setHeader("x-oss-forbid-overwrite", "true");
+
+        String sseAlgorithm =
+                hadoopOptions.getString("fs.oss.server-side-encryption-algorithm", "");
+        if (StringUtils.isNotEmpty(sseAlgorithm)) {
+            metadata.setServerSideEncryption(sseAlgorithm);
+        }
+
+        AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(path(path));
+        AliyunOSSFileSystemStore store = fs.getStore();
+        try {
+            OSSClient ossClient = ReflectionUtils.getPrivateFieldValue(store, "ossClient");
+            ossClient.putObject(bucket, objectKey, new ByteArrayInputStream(bytes), metadata);
+            return true;
+        } catch (OSSException e) {
+            if ("FileAlreadyExists".equals(e.getErrorCode())) {
+                LOG.warn("Failed to atomic write {}: object already exists", path);
+                return false;
+            }
+            throw new IOException("Failed to atomic write " + path, e);
+        } catch (Exception e) {
+            throw new IOException("Failed to atomic write " + path, e);
         }
     }
 
