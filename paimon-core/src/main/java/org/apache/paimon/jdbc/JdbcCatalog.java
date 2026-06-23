@@ -361,35 +361,33 @@ public class JdbcCatalog extends AbstractCatalog {
 
         getDatabase(identifier.getDatabaseName());
 
-        try {
-            getTable(identifier);
-            if (ignoreIfExists) {
-                return;
-            }
-            throw new TableAlreadyExistException(identifier);
-        } catch (TableNotExistException ignored) {
-        }
-
-        if (JdbcUtils.viewExists(
-                connections,
-                catalogKey,
-                identifier.getDatabaseName(),
-                identifier.getObjectName())) {
-            if (ignoreIfExists) {
-                return;
-            }
-            throw new TableAlreadyExistException(identifier);
-        }
-
         copyTableDefaultOptions(schema.options());
 
         TableType tableType = Options.fromMap(schema.options()).get(TYPE);
         switch (tableType) {
             case TABLE:
             case MATERIALIZED_TABLE:
-                createTableImpl(identifier, schema);
+                try {
+                    runWithLock(
+                            identifier,
+                            () -> {
+                                if (!validateTableNotExists(identifier, ignoreIfExists)) {
+                                    return null;
+                                }
+                                createTableImplWithLock(identifier, schema);
+                                return null;
+                            });
+                } catch (TableAlreadyExistException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            "Failed to create table " + identifier.getFullName(), e);
+                }
                 break;
             case FORMAT_TABLE:
+                if (!validateTableNotExists(identifier, ignoreIfExists)) {
+                    return;
+                }
                 createFormatTable(identifier, schema);
                 break;
             case OBJECT_TABLE:
@@ -444,10 +442,23 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
         try {
+            runWithLock(
+                    identifier,
+                    () -> {
+                        validateTableNotExists(identifier, false);
+                        createTableImplWithLock(identifier, schema);
+                        return null;
+                    });
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
+        }
+    }
+
+    private void createTableImplWithLock(Identifier identifier, Schema schema) {
+        try {
             // create table file
             SchemaManager schemaManager = getSchemaManager(identifier);
-            TableSchema tableSchema =
-                    runWithLock(identifier, () -> schemaManager.createTable(schema));
+            TableSchema tableSchema = schemaManager.createTable(schema);
             // Update schema metadata
             Path path = getTableLocation(identifier);
             if (JdbcUtils.insertTable(
@@ -478,6 +489,26 @@ public class JdbcCatalog extends AbstractCatalog {
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
+    }
+
+    private boolean validateTableNotExists(Identifier identifier, boolean ignoreIfExists)
+            throws TableAlreadyExistException {
+        if (JdbcUtils.tableExists(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName())
+                || JdbcUtils.viewExists(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return false;
+            }
+            throw new TableAlreadyExistException(identifier);
+        }
+        return true;
     }
 
     @Override
@@ -839,29 +870,6 @@ public class JdbcCatalog extends AbstractCatalog {
             throw e;
         }
 
-        if (JdbcUtils.tableExists(
-                connections,
-                catalogKey,
-                identifier.getDatabaseName(),
-                identifier.getObjectName())) {
-            if (ignoreIfExists) {
-                return;
-            }
-            throw new ViewAlreadyExistException(identifier);
-        }
-
-        // Check if view already exists
-        if (JdbcUtils.viewExists(
-                connections,
-                catalogKey,
-                identifier.getDatabaseName(),
-                identifier.getObjectName())) {
-            if (ignoreIfExists) {
-                return;
-            }
-            throw new ViewAlreadyExistException(identifier);
-        }
-
         // Serialize view schema to JSON
         ViewSchema viewSchema =
                 new ViewSchema(
@@ -874,18 +882,50 @@ public class JdbcCatalog extends AbstractCatalog {
 
         // Insert view
         try {
-            JdbcUtils.insertView(
-                    connections,
-                    catalogKey,
-                    identifier.getDatabaseName(),
-                    identifier.getObjectName(),
-                    viewSchemaJson);
+            runWithLock(
+                    identifier,
+                    () -> {
+                        if (!validateViewNotExists(identifier, ignoreIfExists)) {
+                            return null;
+                        }
+                        JdbcUtils.insertView(
+                                connections,
+                                catalogKey,
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName(),
+                                viewSchemaJson);
+                        return null;
+                    });
         } catch (RuntimeException e) {
             if (e.getMessage() != null && e.getMessage().contains("View already exists")) {
                 throw new ViewAlreadyExistException(identifier, e);
             }
             throw new RuntimeException("Failed to create view " + identifier.getFullName(), e);
+        } catch (ViewAlreadyExistException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create view " + identifier.getFullName(), e);
         }
+    }
+
+    private boolean validateViewNotExists(Identifier identifier, boolean ignoreIfExists)
+            throws ViewAlreadyExistException {
+        if (JdbcUtils.tableExists(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName())
+                || JdbcUtils.viewExists(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getObjectName())) {
+            if (ignoreIfExists) {
+                return false;
+            }
+            throw new ViewAlreadyExistException(identifier);
+        }
+        return true;
     }
 
     @Override
@@ -922,6 +962,10 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        if (CatalogUtils.isSystemDatabase(databaseName)) {
+            return Collections.emptyList();
+        }
+
         // Check if database exists
         if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
             throw new DatabaseNotExistException(databaseName);

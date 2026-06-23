@@ -844,6 +844,19 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListViewsFromSystemDatabase() throws Exception {
+        assertThat(catalog.listViews(Catalog.SYSTEM_DATABASE_NAME)).isEmpty();
+        assertThat(
+                        catalog.listViewsPaged(Catalog.SYSTEM_DATABASE_NAME, 10, null, null)
+                                .getElements())
+                .isEmpty();
+        assertThat(
+                        catalog.listViewDetailsPaged(Catalog.SYSTEM_DATABASE_NAME, 10, null, null)
+                                .getElements())
+                .isEmpty();
+    }
+
+    @Test
     public void testConcurrentCreateViewOnlyCreatesOneView() throws Exception {
         String databaseName = "concurrent_view_db";
         Identifier identifier = Identifier.create(databaseName, "same_view");
@@ -868,6 +881,49 @@ public class JdbcCatalogTest extends CatalogTestBase {
             assertThat(ImmutableList.of(first.get(), second.get()))
                     .containsExactlyInAnyOrder(true, false);
             assertThat(catalog.listViews(databaseName)).containsExactly("same_view");
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testConcurrentCreateTableAndViewCannotShareName() throws Exception {
+        String databaseName = "concurrent_table_view_db";
+        Identifier identifier = Identifier.create(databaseName, "same_name");
+        View view = createView(identifier);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        catalog.createDatabase(databaseName, false);
+        Callable<Boolean> createTable =
+                () -> {
+                    try {
+                        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+                        return true;
+                    } catch (Catalog.TableAlreadyExistException e) {
+                        return false;
+                    }
+                };
+        Callable<Boolean> createView =
+                () -> {
+                    try {
+                        catalog.createView(identifier, view, false);
+                        return true;
+                    } catch (Catalog.ViewAlreadyExistException e) {
+                        return false;
+                    }
+                };
+
+        try {
+            Future<Boolean> tableCreated = executor.submit(createTable);
+            Future<Boolean> viewCreated = executor.submit(createView);
+
+            assertThat(ImmutableList.of(tableCreated.get(), viewCreated.get()))
+                    .containsExactlyInAnyOrder(true, false);
+            assertThat(catalog.listTables(databaseName).contains(identifier.getObjectName()))
+                    .isNotEqualTo(
+                            catalog.listViews(databaseName).contains(identifier.getObjectName()));
         } catch (ExecutionException e) {
             throw new RuntimeException(e.getCause());
         } finally {
