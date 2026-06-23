@@ -245,6 +245,17 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test("Format table: csv with empty quote-character should fail") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.format-table.implementation" -> "paimon") {
+        val error = intercept[IllegalArgumentException] {
+          sql("CREATE TABLE t (f0 INT, f1 STRING) USING CSV OPTIONS ('csv.quote-character' '')")
+        }
+        assert(error.getMessage.contains("csv.quote-character must not be empty"))
+      }
+    }
+  }
+
   test("Format table: format table and spark table props recognize") {
     val paimonFormatTblProps =
       """
