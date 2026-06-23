@@ -1221,6 +1221,23 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
+    /** The strategy for partition expiration. */
+    public enum PartitionExpireStrategy {
+        VALUES_TIME("values-time"),
+        UPDATE_TIME("update-time");
+
+        private final String value;
+
+        PartitionExpireStrategy(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+    }
+
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
                     .stringType()
@@ -1265,6 +1282,20 @@ public class CoreOptions implements Serializable {
                             "The batch size of partition expiration. "
                                     + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
                                     + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
+
+    public static final ConfigOption<Boolean> COMPACTION_SKIP_EXPIRED_PARTITIONS =
+            key("compaction.skip-expired-partitions")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip compacting partitions that are already expired "
+                                    + "according to 'partition.expiration-time'. "
+                                    + "Only effective when 'partition.expiration-time' is set "
+                                    + "and 'partition.expiration-strategy' is 'values-time'. "
+                                    + "Note: even when this option is enabled, expired partitions "
+                                    + "may still be deleted during the compaction commit phase "
+                                    + "as a side effect of partition expiration triggered by "
+                                    + "committing the remaining active partitions.");
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
@@ -3595,6 +3626,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionExpireStrategy() {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
+    }
+
+    public boolean compactionSkipExpiredPartitions() {
+        return options.get(COMPACTION_SKIP_EXPIRED_PARTITIONS);
     }
 
     @Nullable
