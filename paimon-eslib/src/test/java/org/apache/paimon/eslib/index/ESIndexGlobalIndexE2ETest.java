@@ -177,19 +177,64 @@ class ESIndexGlobalIndexE2ETest {
                                         FullTextQuery.phrase("even document", "title"), 50)),
                 "Phrase full-text query must be rejected, not silently mis-evaluated");
 
-        // --- a Match with non-default parameters (operator=AND) is rejected: its text alone would
-        // run as the parser's default OR, silently widening the result set ---
-        org.junit.jupiter.api.Assertions.assertThrows(
-                UnsupportedOperationException.class,
-                () ->
-                        reader.visitFullTextSearch(
+        // --- operator is honoured: every doc has "document", only 10 have "even" ---
+        // default OR("even document") matches all 20; AND("even document") matches only the 10
+        // even docs that contain both tokens.
+        Optional<ScoredGlobalIndexResult> orFt =
+                reader.visitFullTextSearch(
+                                new FullTextSearch(
+                                        FullTextQuery.match("even document", "title"), 50))
+                        .join();
+        assertEquals(
+                20,
+                orFt.get().results().getIntCardinality(),
+                "OR match on 'even document' hits every doc (all contain 'document')");
+        Optional<ScoredGlobalIndexResult> andFt =
+                reader.visitFullTextSearch(
                                 new FullTextSearch(
                                         FullTextQuery.match(
                                                 "even document",
                                                 "title",
                                                 FullTextQuery.Operator.AND),
-                                        50)),
-                "Non-default Match (operator=AND) must be rejected, not silently mis-evaluated");
+                                        50))
+                        .join();
+        assertEquals(
+                10,
+                andFt.get().results().getIntCardinality(),
+                "AND match on 'even document' hits only docs with both tokens");
+
+        // --- fuzziness is honoured: "evon" is one edit from "even" ---
+        Optional<ScoredGlobalIndexResult> exactTypo =
+                reader.visitFullTextSearch(
+                                new FullTextSearch(
+                                        new FullTextQuery.Match(
+                                                "evon",
+                                                "title",
+                                                1.0f,
+                                                0,
+                                                50,
+                                                FullTextQuery.Operator.OR,
+                                                0),
+                                        50))
+                        .join();
+        assertTrue(exactTypo.isEmpty(), "exact 'evon' matches nothing");
+        Optional<ScoredGlobalIndexResult> fuzzyTypo =
+                reader.visitFullTextSearch(
+                                new FullTextSearch(
+                                        new FullTextQuery.Match(
+                                                "evon",
+                                                "title",
+                                                1.0f,
+                                                1,
+                                                50,
+                                                FullTextQuery.Operator.OR,
+                                                0),
+                                        50))
+                        .join();
+        assertEquals(
+                10,
+                fuzzyTypo.get().results().getIntCardinality(),
+                "fuzzy 'evon'~1 matches the 10 'even' docs");
 
         // --- ordinary SQL predicates on a FULLTEXT field are disabled (analyzed tokens != raw
         // value); they must return empty so the engine falls back to raw scan instead of pruning

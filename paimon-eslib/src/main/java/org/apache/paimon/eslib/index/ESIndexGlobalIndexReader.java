@@ -33,6 +33,7 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.elasticsearch.eslib.api.ArchiveDataProvider;
 import org.elasticsearch.eslib.api.ESIndexSearcher;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
+import org.elasticsearch.eslib.api.model.FullTextParams;
 import org.elasticsearch.eslib.api.model.IndexFilter;
 import org.elasticsearch.eslib.api.model.ScalarPredicate;
 import org.elasticsearch.eslib.api.model.SearchResult;
@@ -174,10 +175,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                     try {
                         ensureLoaded();
                         String fieldName = fullTextSearch.fieldName();
-                        String queryText = matchQueryText(fullTextSearch);
+                        org.apache.paimon.predicate.FullTextQuery.Match match =
+                                requireMatch(fullTextSearch);
                         int topK = fullTextSearch.limit();
 
-                        SearchResult result = searcher.fullTextSearch(fieldName, queryText, topK);
+                        SearchResult result =
+                                searcher.fullTextSearch(
+                                        fieldName, match.query(), topK, toFullTextParams(match));
                         return toScoredResult(result);
                     } catch (IOException e) {
                         throw new RuntimeException("Full-text search failed", e);
@@ -186,57 +190,42 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Extracts the plain query text from a default {@link
-     * org.apache.paimon.predicate.FullTextQuery.Match}.
-     *
-     * <p>The eslib searcher only accepts a single plain-text query per field ({@code
-     * fullTextSearch(field, text, topK)}) — classic Lucene QueryParser, default-OR, no boost or
-     * fuzziness. So only a Match with default parameters can be translated faithfully:
-     *
-     * <ul>
-     *   <li>Structured queries (Phrase, Boolean, Boost, MultiMatch, ...) are rejected rather than
-     *       serialized to JSON and fed to the text parser, which would silently search for the
-     *       literal JSON tokens.
-     *   <li>A Match with non-default parameters is also rejected, because passing only its text
-     *       would silently drop them: {@code operator=AND} would run as the parser's default OR
-     *       (result set too large), and {@code boost}/{@code fuzziness}/{@code
-     *       maxExpansions}/{@code prefixLength} would have no effect (wrong scoring / matching).
-     *       Wiring these parameters into eslib/Lucene is tracked as follow-up work.
-     * </ul>
+     * Returns the {@link org.apache.paimon.predicate.FullTextQuery.Match} of {@code
+     * fullTextSearch}, rejecting structured queries. Only {@code Match} maps onto the eslib
+     * single-field full-text API; Phrase/Boolean/Boost/MultiMatch are rejected rather than
+     * serialized to JSON and fed to the text parser, which would silently search for the literal
+     * JSON tokens.
      */
-    private static String matchQueryText(FullTextSearch fullTextSearch) {
+    private static org.apache.paimon.predicate.FullTextQuery.Match requireMatch(
+            FullTextSearch fullTextSearch) {
         org.apache.paimon.predicate.FullTextQuery ftq = fullTextSearch.query();
-        if (!(ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match)) {
-            throw new UnsupportedOperationException(
-                    "ES global index full-text search currently supports only Match queries; got "
-                            + ftq.getClass().getSimpleName()
-                            + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are"
-                            + " not yet implemented for the es-index backend.");
+        if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match) {
+            return (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
         }
-        org.apache.paimon.predicate.FullTextQuery.Match match =
-                (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
-        boolean defaultFuzziness = match.fuzziness() == null || match.fuzziness() == 0;
-        if (match.operator() != org.apache.paimon.predicate.FullTextQuery.Operator.OR
-                || match.boost() != 1.0f
-                || !defaultFuzziness
-                || match.maxExpansions() != 50
-                || match.prefixLength() != 0) {
-            throw new UnsupportedOperationException(
-                    "ES global index full-text search supports only a default Match query"
-                            + " (operator=OR, boost=1.0, no fuzziness, maxExpansions=50,"
-                            + " prefixLength=0); got operator="
-                            + match.operator()
-                            + ", boost="
-                            + match.boost()
-                            + ", fuzziness="
-                            + match.fuzziness()
-                            + ", maxExpansions="
-                            + match.maxExpansions()
-                            + ", prefixLength="
-                            + match.prefixLength()
-                            + ". These parameters are not yet wired into the es-index backend.");
-        }
-        return match.query();
+        throw new UnsupportedOperationException(
+                "ES global index full-text search currently supports only Match queries; got "
+                        + ftq.getClass().getSimpleName()
+                        + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are"
+                        + " not yet implemented for the es-index backend.");
+    }
+
+    /**
+     * Maps a paimon {@link org.apache.paimon.predicate.FullTextQuery.Match} onto eslib {@link
+     * FullTextParams} so operator / boost / fuzziness / maxExpansions / prefixLength are honoured
+     * by the underlying Lucene query (rather than silently dropped).
+     */
+    private static FullTextParams toFullTextParams(
+            org.apache.paimon.predicate.FullTextQuery.Match match) {
+        FullTextParams.Operator operator =
+                match.operator() == org.apache.paimon.predicate.FullTextQuery.Operator.AND
+                        ? FullTextParams.Operator.AND
+                        : FullTextParams.Operator.OR;
+        return new FullTextParams(
+                operator,
+                match.boost(),
+                match.fuzziness(),
+                match.maxExpansions(),
+                match.prefixLength());
     }
 
     /**
