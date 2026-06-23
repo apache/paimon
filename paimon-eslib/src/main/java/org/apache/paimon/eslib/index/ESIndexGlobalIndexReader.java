@@ -54,6 +54,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * ES multi-index reader using ESLib. Supports vector search, full-text search, and scalar filtering
  * via Lucene-based indexes stored in archive format.
@@ -62,6 +64,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private static final Logger LOG = LoggerFactory.getLogger(ESIndexGlobalIndexReader.class);
     private static final String DEBUG_PROPERTY = "paimon.eslib.debug";
+    private static final String HNSW_NUM_CANDIDATES_OPTION = "hnsw.num_candidates";
+    private static final String HNSW_EF_SEARCH_OPTION = "hnsw.ef_search";
+    private static final String NUM_CANDIDATES_OPTION = "num_candidates";
     private static final int DEFAULT_SAMPLE_LIMIT = 20;
 
     private final GlobalIndexFileReader fileReader;
@@ -90,6 +95,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             List<DataField> fields,
             ESIndexOptions indexOptions,
             ExecutorService searchExecutor) {
+        checkArgument(files.size() == 1, "Expected exactly one ES index file per shard");
         this.fileReader = fileReader;
         this.files = files;
         this.fields = fields;
@@ -108,6 +114,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         ensureLoaded();
                         float[] queryVector = vectorSearch.vector();
                         int topK = vectorSearch.limit();
+                        int searchTopK = vectorSearchTopK(vectorSearch);
                         String fieldName = vectorSearch.fieldName();
 
                         long[] candidateIds = null;
@@ -118,9 +125,10 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
                         if (debugEnabled()) {
                             LOG.info(
-                                    "PAIMON_ESLIB_VECTOR_SEARCH_BEGIN field={} topK={} queryDim={} querySample={} includeCount={} includeSample={} loaded={} indexFiles={} fields={}",
+                                    "PAIMON_ESLIB_VECTOR_SEARCH_BEGIN field={} topK={} searchTopK={} queryDim={} querySample={} includeCount={} includeSample={} loaded={} indexFiles={} fields={}",
                                     fieldName,
                                     topK,
+                                    searchTopK,
                                     queryVector == null ? -1 : queryVector.length,
                                     sample(queryVector, DEFAULT_SAMPLE_LIMIT),
                                     candidateIds == null ? -1 : candidateIds.length,
@@ -131,12 +139,14 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         }
 
                         SearchResult result =
-                                searcher.vectorSearch(fieldName, queryVector, topK, candidateIds);
+                                searcher.vectorSearch(
+                                        fieldName, queryVector, searchTopK, candidateIds);
                         if (debugEnabled()) {
                             LOG.info(
-                                    "PAIMON_ESLIB_VECTOR_SEARCH_RESULT field={} topK={} resultCount={} ids={} scores={}",
+                                    "PAIMON_ESLIB_VECTOR_SEARCH_RESULT field={} topK={} searchTopK={} resultCount={} ids={} scores={}",
                                     fieldName,
                                     topK,
+                                    searchTopK,
                                     result == null ? 0 : result.count,
                                     result == null
                                             ? "[]"
@@ -201,6 +211,32 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         return CompletableFuture.completedFuture(body.get());
     }
 
+    static int vectorSearchTopK(VectorSearch vectorSearch) {
+        int limit = vectorSearch.limit();
+        Map<String, String> options = vectorSearch.options();
+        int candidates = positiveIntOption(options, HNSW_NUM_CANDIDATES_OPTION);
+        if (candidates <= 0) {
+            candidates = positiveIntOption(options, NUM_CANDIDATES_OPTION);
+        }
+        if (candidates <= 0) {
+            candidates = positiveIntOption(options, HNSW_EF_SEARCH_OPTION);
+        }
+        return candidates <= 0 ? limit : Math.max(limit, candidates);
+    }
+
+    private static int positiveIntOption(Map<String, String> options, String key) {
+        String value = options.get(key);
+        if (value == null || value.trim().isEmpty()) {
+            return -1;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 ? parsed : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
     private Optional<ScoredGlobalIndexResult> toScoredResult(SearchResult result) {
         if (result == null || result.count == 0) {
             return Optional.empty();
@@ -241,6 +277,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 throw new IOException("No index files to load");
             }
 
+            long loadStartNanos = System.nanoTime();
             GlobalIndexIOMeta meta = files.get(0);
             byte[] metaBytes = meta.metadata();
             Map<String, long[]> fileOffsets = parseFileOffsets(metaBytes);
@@ -264,6 +301,14 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             searcher.load(
                     dataProvider, fileOffsets, indexOptions.getFieldConfigs(), searchExecutor);
             loaded = true;
+            if (debugEnabled()) {
+                LOG.info(
+                        "PAIMON_ESLIB_READER_LOADED files={} firstFile={} elapsedMs={} searcher={}",
+                        files.size(),
+                        meta.filePath(),
+                        (System.nanoTime() - loadStartNanos) / 1_000_000L,
+                        searcher == null ? "null" : searcher.getClass().getName());
+            }
         }
     }
 
@@ -444,14 +489,36 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     private Optional<GlobalIndexResult> executeFilter(String fieldName, IndexFilter filter) {
         try {
             ensureLoaded();
+            if (debugEnabled()) {
+                FieldIndexConfig config = indexOptions.getConfig(fieldName);
+                LOG.info(
+                        "PAIMON_ESLIB_FILTER_BEGIN field={} filter={} config={} fields={}",
+                        fieldName,
+                        filterSummary(filter),
+                        config == null ? "null" : config.indexType() + "/" + config.scalarType(),
+                        fieldsSample());
+            }
             long[] ids = searcher.filter(fieldName, filter);
-            if (ids == null || ids.length == 0) {
-                return Optional.empty();
+            if (debugEnabled()) {
+                LOG.info(
+                        "PAIMON_ESLIB_FILTER_RESULT field={} filter={} resultCount={} ids={}",
+                        fieldName,
+                        filterSummary(filter),
+                        ids == null ? 0 : ids.length,
+                        sample(ids, DEFAULT_SAMPLE_LIMIT));
             }
             RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
-            for (long id : ids) {
-                bitmap.add(id);
+            if (ids != null) {
+                for (long id : ids) {
+                    bitmap.add(id);
+                }
             }
+            // The field IS indexed (dispatchFilter returned empty() already when it is not), so a
+            // zero-hit result is a genuine "0 rows match" — return an empty bitmap so the index
+            // prunes
+            // everything. Returning Optional.empty() here would mean "index can't evaluate" and
+            // force a
+            // raw-scan fallback (wrong semantics + loses the index's selectivity).
             return Optional.of(GlobalIndexResult.create(bitmap));
         } catch (IOException e) {
             throw new RuntimeException("Filter failed on field: " + fieldName, e);
@@ -464,6 +531,25 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             return Optional.empty();
         }
         return executeFilter(fieldRef.name(), filter);
+    }
+
+    private static String filterSummary(IndexFilter filter) {
+        if (filter == null) {
+            return "null";
+        }
+        switch (filter.filterType()) {
+            case TEXT:
+                IndexFilter.TextFilter text = (IndexFilter.TextFilter) filter;
+                return "TEXT/" + text.op() + "/" + text.value();
+            case SCALAR:
+                return "SCALAR/" + ((IndexFilter.ScalarFilter) filter).predicate().op();
+            case EXISTS:
+                return "EXISTS/" + ((IndexFilter.ExistsFilter) filter).mustExist();
+            case GEO:
+                return "GEO";
+            default:
+                return filter.filterType().name();
+        }
     }
 
     // =================== scalar / keyword comparison visitors =====================
@@ -598,7 +684,12 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-        return async(() -> dispatchFilter(fieldRef, IndexFilter.notExists()));
+        // The writer SKIPS null values (they are never added as Lucene docs), so the index has no
+        // record of null rows and cannot evaluate IS NULL via notExists() — doing so would wrongly
+        // return "no null rows" and silently drop them. Return empty() = "index can't evaluate" so
+        // the
+        // engine falls back to a raw scan for this predicate (correct results).
+        return async(Optional::empty);
     }
 
     // =================== helpers =====================

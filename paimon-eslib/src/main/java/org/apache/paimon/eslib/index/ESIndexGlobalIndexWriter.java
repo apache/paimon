@@ -28,12 +28,12 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VectorType;
 
 import org.elasticsearch.eslib.api.ESIndexBuilder;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -50,8 +50,6 @@ import java.util.List;
  */
 public class ESIndexGlobalIndexWriter
         implements GlobalIndexSingleColumnWriter, GlobalIndexMultiColumnWriter {
-
-    private static final Logger LOG = LoggerFactory.getLogger(ESIndexGlobalIndexWriter.class);
 
     private static final String FILE_NAME_PREFIX = "es-index";
 
@@ -73,30 +71,20 @@ public class ESIndexGlobalIndexWriter
 
     @Override
     public void write(Object fieldData, long relativeRowId) {
-        if (fieldData == null) {
-            return;
-        }
         try {
             // Use the builder-supplied shard-relative row id as the Lucene docId (read side maps
-            // _ROW_ID = rangeFrom + docId); track docCount so finish() reports a non-empty
-            // rowCount.
+            // _ROW_ID = rangeFrom + docId); count every row so finish() reports the true rowCount.
             long docId = relativeRowId;
             docCount++;
             DataField field = fields.get(0);
-            FieldIndexConfig config = indexOptions.getConfig(field.name());
-            if (config == null) {
+            FieldIndexConfig config = field == null ? null : indexOptions.getConfig(field.name());
+            if (fieldData == null || config == null) {
+                // Null value (or unindexed field): explicitly occupy this row's slot with an empty
+                // doc so docId<->rowId stays dense; the absent field marks it null.
+                // flushPendingDocs
+                // is the back-stop.
+                builder.addNullDoc(docId);
                 return;
-            }
-            // [DIAG] dump first 5 fieldData values to verify input is non-empty / correctly shaped
-            if (docId < 5) {
-                LOG.info(
-                        "[eslib-writer.write(Object)] docId={}, field={}, indexType={}, "
-                                + "fieldData.class={}, sample={}",
-                        docId,
-                        field.name(),
-                        config.indexType(),
-                        fieldData.getClass().getName(),
-                        sampleFieldData(fieldData));
             }
             writeSingleField(fieldData, field, config, docId);
         } catch (IOException e) {
@@ -110,15 +98,16 @@ public class ESIndexGlobalIndexWriter
     }
 
     public void writeRow(long rowId, InternalRow row) {
-        if (row == null) {
-            return;
-        }
         try {
             // Use the shard-relative rowId supplied by the builder as the Lucene docId; the read
-            // side reconstructs the absolute id as `_ROW_ID = rangeFrom + docId`.
+            // side reconstructs the absolute id as `_ROW_ID = rangeFrom + docId`. Count every row.
             long docId = rowId;
-            // Track the row count so finish() knows the archive is non-empty and reports rowCount.
             docCount++;
+            if (row == null) {
+                builder.addNullDoc(docId);
+                return;
+            }
+            boolean wroteAny = false;
             for (int i = 0; i < fields.size(); i++) {
                 if (row.isNullAt(i)) {
                     continue;
@@ -129,39 +118,18 @@ public class ESIndexGlobalIndexWriter
                     continue;
                 }
                 writeField(row, i, field, config, docId);
+                wroteAny = true;
+            }
+            if (!wroteAny) {
+                // Every indexed field is null for this row: explicitly occupy its slot with an
+                // empty
+                // doc so docId<->rowId stays dense (incl. trailing all-null rows). flushPendingDocs
+                // is the back-stop.
+                builder.addNullDoc(docId);
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to write document to ES index", e);
         }
-    }
-
-    /** Pretty-print a fieldData sample for diagnostics (vectors -> first 3 elements + length). */
-    private static String sampleFieldData(Object fieldData) {
-        if (fieldData == null) {
-            return "null";
-        }
-        if (fieldData instanceof InternalArray) {
-            float[] f = ((InternalArray) fieldData).toFloatArray();
-            return "InternalArray(len="
-                    + f.length
-                    + ", first3="
-                    + (f.length >= 3
-                            ? "[" + f[0] + "," + f[1] + "," + f[2] + "]"
-                            : java.util.Arrays.toString(f))
-                    + ")";
-        }
-        if (fieldData instanceof InternalVector) {
-            float[] f = ((InternalVector) fieldData).toFloatArray();
-            return "InternalVector(len="
-                    + f.length
-                    + ", first3="
-                    + (f.length >= 3
-                            ? "[" + f[0] + "," + f[1] + "," + f[2] + "]"
-                            : java.util.Arrays.toString(f))
-                    + ")";
-        }
-        String s = fieldData.toString();
-        return s.length() > 200 ? s.substring(0, 200) + "...(truncated " + s.length() + ")" : s;
     }
 
     private void writeSingleField(
@@ -256,6 +224,16 @@ public class ESIndexGlobalIndexWriter
             case CHAR:
             case VARCHAR:
                 return row.getString(pos).toString();
+            case DATE:
+                // DATE is stored as an int day-count; TIME as an int millis-of-day.
+            case TIME_WITHOUT_TIME_ZONE:
+                return row.getInt(pos);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return row.getTimestamp(pos, ((TimestampType) type).getPrecision())
+                        .getMillisecond();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return row.getTimestamp(pos, ((LocalZonedTimestampType) type).getPrecision())
+                        .getMillisecond();
             default:
                 return row.getString(pos).toString();
         }
@@ -267,9 +245,7 @@ public class ESIndexGlobalIndexWriter
             return Collections.emptyList();
         }
         try {
-            long t0 = System.currentTimeMillis();
             builder.build();
-            long buildMs = System.currentTimeMillis() - t0;
             Path outputDir = builder.getOutputDir();
 
             // Snapshot the file list ONCE so the archive layout and the offset table in meta agree
@@ -279,31 +255,6 @@ public class ESIndexGlobalIndexWriter
                 segFiles = new java.io.File[0];
             }
 
-            // === DIAGNOSTIC: dump the on-disk Lucene segment files produced by builder.build(),
-            // BEFORE archiving. If totalBytes is tiny (~17KB), the bug is upstream (Lucene write
-            // path produced empty files despite addVector being called); if it's large (~100MB+
-            // for 1M × 768-dim DiskBBQ) but the archived .index file still ends up small, the bug
-            // is in packDirectory/upload below.
-            long totalBytes = 0;
-            StringBuilder inventory = new StringBuilder();
-            for (java.io.File f : segFiles) {
-                totalBytes += f.length();
-                inventory
-                        .append("\n    ")
-                        .append(String.format("%14d", f.length()))
-                        .append("  ")
-                        .append(f.getName());
-            }
-            LOG.info(
-                    "[eslib-writer.finish] docCount={}, builder.build() took {}ms, outputDir={}, "
-                            + "segment files={}, totalBytes={}:{}",
-                    docCount,
-                    buildMs,
-                    outputDir,
-                    segFiles.length,
-                    totalBytes,
-                    inventory.toString());
-
             byte[] meta = buildMeta(segFiles);
 
             String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
@@ -311,17 +262,10 @@ public class ESIndexGlobalIndexWriter
             // archive in memory. For real DiskBBQ output (1M × 768-dim vectors ≈ 3 GB per shard)
             // a ByteArrayOutputStream-backed approach hits both heap and DirectByteBuffer limits
             // (java.nio.Bits.reserveMemory OOM at Files.readAllBytes).
-            long archiveBytesWritten;
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
-                archiveBytesWritten = packDirectoryStream(segFiles, out);
+                packDirectoryStream(segFiles, out);
                 out.flush();
             }
-            LOG.info(
-                    "[eslib-writer.finish] archive uploaded: name={}, archiveBytes.length={}, "
-                            + "meta.length={}",
-                    fileName,
-                    archiveBytesWritten,
-                    meta == null ? -1 : meta.length);
 
             builder.close();
             deleteDirectory(outputDir);

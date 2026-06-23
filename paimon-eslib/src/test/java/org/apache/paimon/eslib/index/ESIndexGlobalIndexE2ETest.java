@@ -202,6 +202,61 @@ class ESIndexGlobalIndexE2ETest {
         }
     }
 
+    @Test
+    void nullValuesKeepDocIdRowIdAligned(@TempDir java.nio.file.Path tmp) throws IOException {
+        // Single-column keyword index where row 3's value is NULL. The writer skips null and
+        // registers
+        // an empty doc for that slot (addNullDoc), with flushPendingDocs as the back-stop; both
+        // stamp
+        // _ROW_ID=docId so the null gap is occupied. This guards docId<->rowId alignment: an exact
+        // term lookup must resolve to the row's OWN id. A regression in padding / _ROW_ID stamping
+        // would shift every row after the gap by one (e.g. "row7" would come back as rowId 6).
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        // No analyzer on "k" -> KEYWORD (exact-term) index.
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-null");
+        Files.createDirectories(archiveDir);
+        LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
+        ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
+
+        int n = 10;
+        int nullRow = 3;
+        for (int i = 0; i < n; i++) {
+            writer.write(i == nullRow ? null : BinaryString.fromString("row" + i), i);
+        }
+        List<ResultEntry> entries = writer.finish();
+        assertEquals(1, entries.size(), "one archive produced");
+        ResultEntry entry = entries.get(0);
+        assertEquals((long) n, entry.rowCount(), "row count includes the null row");
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+
+        FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+        for (int i = 0; i < n; i++) {
+            if (i == nullRow) {
+                continue;
+            }
+            Optional<GlobalIndexResult> r = reader.visitEqual(kRef, "row" + i).join();
+            assertTrue(r.isPresent(), "term lookup returns for row" + i);
+            RoaringNavigableMap64 rows = r.get().results();
+            assertEquals(1, rows.getIntCardinality(), "exactly one match for row" + i);
+            assertTrue(contains(rows, (long) i), "term 'row" + i + "' must map to rowId " + i);
+        }
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /**
      * Verifies the DiskBBQ vector codec write path through {@link ESIndexGlobalIndexWriter}.
      *

@@ -18,7 +18,11 @@
 
 package org.apache.paimon.eslib.index;
 
+import org.apache.paimon.predicate.VectorSearch;
+
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -36,5 +40,41 @@ class ESIndexGlobalIndexReaderDebugTest {
         assertEquals(
                 "[0.1, 0.2, 0.3, ...(+1)]",
                 ESIndexGlobalIndexReader.sample(new float[] {0.1f, 0.2f, 0.3f, 0.4f}, 4, 3));
+    }
+
+    @Test
+    void resolvesVectorSearchTopKFromOptions() {
+        assertEquals(
+                1000,
+                ESIndexGlobalIndexReader.vectorSearchTopK(
+                        new VectorSearch(
+                                new float[] {1.0f},
+                                10,
+                                "embedding",
+                                Map.of("hnsw.num_candidates", "1000"))));
+        assertEquals(
+                64,
+                ESIndexGlobalIndexReader.vectorSearchTopK(
+                        new VectorSearch(
+                                new float[] {1.0f},
+                                10,
+                                "embedding",
+                                Map.of("hnsw.ef_search", "64"))));
+        assertEquals(
+                10,
+                ESIndexGlobalIndexReader.vectorSearchTopK(
+                        new VectorSearch(
+                                new float[] {1.0f},
+                                10,
+                                "embedding",
+                                Map.of("hnsw.num_candidates", "5"))));
+        assertEquals(
+                10,
+                ESIndexGlobalIndexReader.vectorSearchTopK(
+                        new VectorSearch(
+                                new float[] {1.0f},
+                                10,
+                                "embedding",
+                                Map.of("hnsw.num_candidates", "bad"))));
     }
 }

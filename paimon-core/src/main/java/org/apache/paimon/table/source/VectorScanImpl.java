@@ -102,6 +102,19 @@ public class VectorScanImpl implements VectorScan {
                 indexFileHandler.scan(snapshot, indexFileFilter).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
+        debug(
+                "PAIMON_VECTOR_SCAN_BEGIN table=%s vectorField=%s/%d filter=%s filterFieldIds=%s allIndexFiles=%d",
+                table.location(),
+                vectorColumn.name(),
+                vectorColumn.id(),
+                filter,
+                filterFieldIds,
+                allIndexFiles.size());
+        if (debugEnabled()) {
+            for (IndexFileMeta indexFile : allIndexFiles) {
+                debug("PAIMON_VECTOR_SCAN_INDEX %s", indexSummary(indexFile));
+            }
+        }
         String vectorIndexType = vectorIndexType(allIndexFiles);
         if (vectorIndexType == null) {
             vectorIndexType = configuredVectorIndexType();
@@ -130,12 +143,19 @@ public class VectorScanImpl implements VectorScan {
                                     f -> {
                                         GlobalIndexMeta globalIndex =
                                                 checkNotNull(f.globalIndexMeta());
-                                        if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
+                                        if (!canServeScalarFilter(globalIndex)) {
                                             return false;
                                         }
                                         return range.hasIntersection(globalIndex.rowRange());
                                     })
                             .collect(Collectors.toList());
+            debug(
+                    "PAIMON_VECTOR_SCAN_SPLIT range=%d-%d vectorFiles=%d scalarFiles=%d scalar=%s",
+                    range.from,
+                    range.to,
+                    vectorFiles.size(),
+                    scalarFiles.size(),
+                    indexSummaries(scalarFiles));
             splits.add(new IndexVectorSearchSplit(range.from, range.to, vectorFiles, scalarFiles));
         }
 
@@ -156,6 +176,9 @@ public class VectorScanImpl implements VectorScan {
                             true);
         }
         if (!rawRowRanges.isEmpty()) {
+            debug(
+                    "PAIMON_VECTOR_SCAN_RAW rawRanges=%s scalarFiles=%d",
+                    rawRowRanges, scalarIndexFiles(allIndexFiles, rawRowRanges).size());
             splits.add(
                     new RawVectorSearchSplit(
                             rawRowRanges,
@@ -180,7 +203,7 @@ public class VectorScanImpl implements VectorScan {
                 .filter(
                         f -> {
                             GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            return !isPrimaryColumn(globalIndex, vectorColumn.id());
+                            return canServeScalarFilter(globalIndex);
                         })
                 .collect(Collectors.toList());
     }
@@ -191,12 +214,21 @@ public class VectorScanImpl implements VectorScan {
                 .filter(
                         f -> {
                             GlobalIndexMeta globalIndex = checkNotNull(f.globalIndexMeta());
-                            if (isPrimaryColumn(globalIndex, vectorColumn.id())) {
+                            if (!canServeScalarFilter(globalIndex)) {
                                 return false;
                             }
                             return hasIntersection(rowRanges, globalIndex.rowRange());
                         })
                 .collect(Collectors.toList());
+    }
+
+    private boolean canServeScalarFilter(GlobalIndexMeta meta) {
+        return !isPrimaryColumn(meta, vectorColumn.id()) || hasExtraFields(meta);
+    }
+
+    private static boolean hasExtraFields(GlobalIndexMeta meta) {
+        int[] extraFieldIds = meta.extraFieldIds();
+        return extraFieldIds != null && extraFieldIds.length > 0;
     }
 
     private static boolean hasIntersection(List<Range> ranges, Range range) {
@@ -272,5 +304,34 @@ public class VectorScanImpl implements VectorScan {
             }
         }
         return false;
+    }
+
+    private static boolean debugEnabled() {
+        return Boolean.getBoolean("paimon.eslib.debug");
+    }
+
+    private static void debug(String format, Object... args) {
+        if (debugEnabled()) {
+            System.err.println(String.format(format, args));
+        }
+    }
+
+    private static String indexSummaries(List<IndexFileMeta> indexFiles) {
+        return indexFiles.stream()
+                .map(VectorScanImpl::indexSummary)
+                .collect(Collectors.joining(";"));
+    }
+
+    private static String indexSummary(IndexFileMeta indexFile) {
+        GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+        return String.format(
+                "%s type=%s field=%d extras=%s range=%d-%d rowCount=%d",
+                indexFile.fileName(),
+                indexFile.indexType(),
+                meta.indexFieldId(),
+                java.util.Arrays.toString(meta.extraFieldIds()),
+                meta.rowRangeStart(),
+                meta.rowRangeEnd(),
+                indexFile.rowCount());
     }
 }

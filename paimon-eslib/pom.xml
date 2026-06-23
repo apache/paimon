@@ -45,12 +45,8 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-        <!-- ESLib dependencies -->
-        <dependency>
-            <groupId>io.github.paimon.eslib</groupId>
-            <artifactId>eslib-api</artifactId>
-            <version>1.0.0</version>
-        </dependency>
+        <!-- ESLib dependencies. eslib-core bundles the api + api.model classes (eslib-api was merged
+             into eslib-core), so no separate eslib-api artifact is needed. -->
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-core</artifactId>
@@ -131,7 +127,6 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>io.github.paimon.eslib:eslib-api</include>
                                     <include>io.github.paimon.eslib:eslib-core</include>
                                     <include>org.apache.lucene:*</include>
                                 </includes>

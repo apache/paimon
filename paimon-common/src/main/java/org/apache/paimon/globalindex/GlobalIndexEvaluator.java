@@ -20,6 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
@@ -33,9 +34,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -125,7 +128,8 @@ public class GlobalIndexEvaluator implements Closeable {
 
     private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
             CompoundPredicate predicate) {
-        List<Predicate> children = flattenChildren(predicate);
+        List<Predicate> children =
+                pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
         List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
                 new ArrayList<>(children.size());
         for (Predicate child : children) {
@@ -190,6 +194,42 @@ public class GlobalIndexEvaluator implements Closeable {
             result.add(child);
         }
         return result;
+    }
+
+    private List<Predicate> pruneRedundantIsNotNullForAnd(
+            List<Predicate> children, CompoundPredicate predicate) {
+        if (predicate.function() instanceof Or) {
+            return children;
+        }
+
+        Set<String> constrainedFields = new HashSet<>();
+        for (Predicate child : children) {
+            if (!(child instanceof LeafPredicate) || isIsNotNull(child)) {
+                continue;
+            }
+            Optional<FieldRef> fieldRef = ((LeafPredicate) child).fieldRefOptional();
+            fieldRef.ifPresent(ref -> constrainedFields.add(ref.name()));
+        }
+        if (constrainedFields.isEmpty()) {
+            return children;
+        }
+
+        List<Predicate> pruned = new ArrayList<>(children.size());
+        for (Predicate child : children) {
+            if (isIsNotNull(child)) {
+                Optional<FieldRef> fieldRef = ((LeafPredicate) child).fieldRefOptional();
+                if (fieldRef.isPresent() && constrainedFields.contains(fieldRef.get().name())) {
+                    continue;
+                }
+            }
+            pruned.add(child);
+        }
+        return pruned;
+    }
+
+    private boolean isIsNotNull(Predicate predicate) {
+        return predicate instanceof LeafPredicate
+                && ((LeafPredicate) predicate).function() instanceof IsNotNull;
     }
 
     @Override
