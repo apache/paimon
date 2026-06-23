@@ -177,6 +177,20 @@ class ESIndexGlobalIndexE2ETest {
                                         FullTextQuery.phrase("even document", "title"), 50)),
                 "Phrase full-text query must be rejected, not silently mis-evaluated");
 
+        // --- a Match with non-default parameters (operator=AND) is rejected: its text alone would
+        // run as the parser's default OR, silently widening the result set ---
+        org.junit.jupiter.api.Assertions.assertThrows(
+                UnsupportedOperationException.class,
+                () ->
+                        reader.visitFullTextSearch(
+                                new FullTextSearch(
+                                        FullTextQuery.match(
+                                                "even document",
+                                                "title",
+                                                FullTextQuery.Operator.AND),
+                                        50)),
+                "Non-default Match (operator=AND) must be rejected, not silently mis-evaluated");
+
         // --- ordinary SQL predicates on a FULLTEXT field are disabled (analyzed tokens != raw
         // value); they must return empty so the engine falls back to raw scan instead of pruning
         // rows with a wrong bitmap ---

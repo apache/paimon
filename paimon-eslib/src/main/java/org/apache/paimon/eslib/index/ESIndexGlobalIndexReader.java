@@ -186,25 +186,57 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Extracts the plain query text from a {@link org.apache.paimon.predicate.FullTextQuery.Match}.
+     * Extracts the plain query text from a default {@link
+     * org.apache.paimon.predicate.FullTextQuery.Match}.
      *
      * <p>The eslib searcher only accepts a single plain-text query per field ({@code
-     * fullTextSearch(field, text, topK)}), so only {@code Match} can be translated faithfully.
-     * Structured queries (Phrase, Boolean, Boost, MultiMatch, ...) are rejected explicitly rather
-     * than serialized to JSON and fed to the text parser, which would silently search for the
-     * literal JSON tokens and return wrong results. Supporting them requires a real
-     * structured-query translation, tracked as follow-up work.
+     * fullTextSearch(field, text, topK)}) — classic Lucene QueryParser, default-OR, no boost or
+     * fuzziness. So only a Match with default parameters can be translated faithfully:
+     *
+     * <ul>
+     *   <li>Structured queries (Phrase, Boolean, Boost, MultiMatch, ...) are rejected rather than
+     *       serialized to JSON and fed to the text parser, which would silently search for the
+     *       literal JSON tokens.
+     *   <li>A Match with non-default parameters is also rejected, because passing only its text
+     *       would silently drop them: {@code operator=AND} would run as the parser's default OR
+     *       (result set too large), and {@code boost}/{@code fuzziness}/{@code
+     *       maxExpansions}/{@code prefixLength} would have no effect (wrong scoring / matching).
+     *       Wiring these parameters into eslib/Lucene is tracked as follow-up work.
+     * </ul>
      */
     private static String matchQueryText(FullTextSearch fullTextSearch) {
         org.apache.paimon.predicate.FullTextQuery ftq = fullTextSearch.query();
-        if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match) {
-            return ((org.apache.paimon.predicate.FullTextQuery.Match) ftq).query();
+        if (!(ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match)) {
+            throw new UnsupportedOperationException(
+                    "ES global index full-text search currently supports only Match queries; got "
+                            + ftq.getClass().getSimpleName()
+                            + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are"
+                            + " not yet implemented for the es-index backend.");
         }
-        throw new UnsupportedOperationException(
-                "ES global index full-text search currently supports only Match queries; got "
-                        + ftq.getClass().getSimpleName()
-                        + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are not"
-                        + " yet implemented for the es-index backend.");
+        org.apache.paimon.predicate.FullTextQuery.Match match =
+                (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
+        boolean defaultFuzziness = match.fuzziness() == null || match.fuzziness() == 0;
+        if (match.operator() != org.apache.paimon.predicate.FullTextQuery.Operator.OR
+                || match.boost() != 1.0f
+                || !defaultFuzziness
+                || match.maxExpansions() != 50
+                || match.prefixLength() != 0) {
+            throw new UnsupportedOperationException(
+                    "ES global index full-text search supports only a default Match query"
+                            + " (operator=OR, boost=1.0, no fuzziness, maxExpansions=50,"
+                            + " prefixLength=0); got operator="
+                            + match.operator()
+                            + ", boost="
+                            + match.boost()
+                            + ", fuzziness="
+                            + match.fuzziness()
+                            + ", maxExpansions="
+                            + match.maxExpansions()
+                            + ", prefixLength="
+                            + match.prefixLength()
+                            + ". These parameters are not yet wired into the es-index backend.");
+        }
+        return match.query();
     }
 
     /**
