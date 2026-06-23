@@ -84,6 +84,77 @@ def parse_duration(text: str) -> int:
     return result_ms_int
 
 
+# Unit label -> nanoseconds. Mirrors the aliases accepted by ``parse_duration``
+# (and Java ``TimeUtils.parseDuration``); a bare number with no unit is treated
+# as milliseconds, matching ``parse_duration``.
+_UNIT_TO_NANOS = {
+    'ns': 1, 'nano': 1, 'nanosecond': 1, 'nanoseconds': 1,
+    'µs': 1_000, 'micro': 1_000, 'microsecond': 1_000, 'microseconds': 1_000,
+    'ms': 1_000_000, 'milli': 1_000_000, 'millisecond': 1_000_000, 'milliseconds': 1_000_000,
+    's': 1_000_000_000, 'sec': 1_000_000_000, 'second': 1_000_000_000, 'seconds': 1_000_000_000,
+    'm': 60_000_000_000, 'min': 60_000_000_000, 'minute': 60_000_000_000, 'minutes': 60_000_000_000,
+    'h': 3_600_000_000_000, 'hour': 3_600_000_000_000, 'hours': 3_600_000_000_000,
+    'd': 86_400_000_000_000, 'day': 86_400_000_000_000, 'days': 86_400_000_000_000,
+}
+
+
+def parse_duration_nanos(text: str) -> int:
+    """Parse a duration string to an integer nanosecond count.
+
+    This is the full-precision integer counterpart of :func:`parse_duration`
+    (which returns rounded milliseconds): it accepts the same unit aliases and
+    the same "bare number means milliseconds" convention, but keeps sub-millisecond
+    units exactly (``"1ns"`` -> ``1``, ``"500micro"`` -> ``500_000``) instead of
+    rounding them to zero. Use it where sub-millisecond precision must not be
+    silently dropped. ``parse_duration`` is intentionally left untouched so its
+    millisecond contract (relied on by option parsing) does not change.
+    """
+    if text is None:
+        raise ValueError("text cannot be None")
+
+    trimmed = text.strip().lower()
+    if not trimmed:
+        raise ValueError("argument is an empty- or whitespace-only string")
+
+    pos = 0
+    while pos < len(trimmed) and trimmed[pos].isdigit():
+        pos += 1
+
+    number_str = trimmed[:pos]
+    unit_str = trimmed[pos:].strip()
+
+    if not number_str:
+        raise ValueError("text does not start with a number")
+
+    try:
+        value = int(number_str)
+    except ValueError:
+        raise ValueError(
+            f"The value '{number_str}' cannot be re represented as 64bit number (numeric overflow)."
+        )
+
+    if not unit_str:
+        nanos_per_unit = 1_000_000  # bare number is milliseconds
+    elif unit_str in _UNIT_TO_NANOS:
+        nanos_per_unit = _UNIT_TO_NANOS[unit_str]
+    else:
+        supported_units = (
+            'DAYS: (d | day | days), '
+            'HOURS: (h | hour | hours), '
+            'MINUTES: (m | min | minute | minutes), '
+            'SECONDS: (s | sec | second | seconds), '
+            'MILLISECONDS: (ms | milli | millisecond | milliseconds), '
+            'MICROSECONDS: (µs | micro | microsecond | microseconds), '
+            'NANOSECONDS: (ns | nano | nanosecond | nanoseconds)'
+        )
+        raise ValueError(
+            f"Time interval unit label '{unit_str}' does not match any of the recognized units: "
+            f"{supported_units}"
+        )
+
+    return value * nanos_per_unit
+
+
 # ---------------------------------------------------------------------------
 # Codecs for Java temporal types as serialized by Jackson's JavaTimeModule.
 #

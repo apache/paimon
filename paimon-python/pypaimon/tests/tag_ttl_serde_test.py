@@ -34,6 +34,7 @@ from pypaimon.common.time_utils import (
     json_seconds_to_duration,
     local_datetime_to_json_array,
     local_datetime_to_millis,
+    parse_duration_nanos,
 )
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag import Tag
@@ -112,6 +113,31 @@ class TemporalCodecTest(unittest.TestCase):
     def test_local_datetime_to_millis(self):
         dt = datetime(1970, 1, 1, 0, 0, 1)
         self.assertEqual(1000, local_datetime_to_millis(dt))
+
+    def test_parse_duration_nanos_keeps_full_precision(self):
+        # Unlike parse_duration (rounded milliseconds), the nanos variant keeps
+        # sub-millisecond units exactly instead of rounding them to zero.
+        self.assertEqual(1, parse_duration_nanos("1ns"))
+        self.assertEqual(1_000, parse_duration_nanos("1micro"))
+        self.assertEqual(500_000, parse_duration_nanos("500micro"))
+        self.assertEqual(1_000_000, parse_duration_nanos("1ms"))
+        self.assertEqual(1_000_000_000, parse_duration_nanos("1s"))
+        self.assertEqual(86_400_000_000_000, parse_duration_nanos("1d"))
+        # A bare number means milliseconds, matching parse_duration.
+        self.assertEqual(5_000_000, parse_duration_nanos("5"))
+
+    def test_parse_duration_nanos_rejects_unknown_unit(self):
+        with self.assertRaises(ValueError):
+            parse_duration_nanos("1x")
+
+    def test_sub_millisecond_retention_round_trips(self):
+        # 500 microseconds is representable and must survive serialization at
+        # microsecond precision (0.0005s / PT0.0005S), not collapse to zero.
+        td = timedelta(microseconds=parse_duration_nanos("500micro") // 1000)
+        self.assertEqual(timedelta(microseconds=500), td)
+        self.assertEqual(0.0005, duration_to_json_seconds(td))
+        self.assertEqual(td, json_seconds_to_duration(0.0005))
+        self.assertEqual("PT0.0005S", duration_to_iso8601(td))
 
 
 class TagSerdeTest(unittest.TestCase):

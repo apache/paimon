@@ -138,6 +138,28 @@ class FileSystemCatalogTagCRUDTest(unittest.TestCase):
         self.assertEqual(len(content["tagCreateTime"]), 7)
         self.assertEqual(content["tagTimeRetained"], 86400.0)
 
+    def test_create_tag_with_sub_millisecond_time_retained_preserved(self):
+        # A sub-millisecond but microsecond-representable retention must be kept
+        # (500us -> 0.0005s / PT0.0005S), not rounded to a zero-TTL tag.
+        self.catalog.create_tag(self.identifier, "t1", time_retained="500micro")
+        table = self.catalog.get_table(self.identifier)
+        tag_path = table.tag_manager().tag_path("t1")
+        content = json.loads(table.file_io.read_file_utf8(tag_path))
+        self.assertEqual(content["tagTimeRetained"], 0.0005)
+        response = self.catalog.get_tag(self.identifier, "t1")
+        self.assertEqual(response.tag_time_retained, "PT0.0005S")
+
+    def test_create_tag_with_sub_microsecond_time_retained_rejected(self):
+        # A retention finer than a microsecond cannot be represented by Python's
+        # timedelta; it must raise instead of silently writing a zero-TTL tag,
+        # and no tag file should be left behind.
+        for retained in ("1ns", "999ns"):
+            with self.assertRaises(ValueError):
+                self.catalog.create_tag(
+                    self.identifier, "t1", time_retained=retained)
+            with self.assertRaises(TagNotExistException):
+                self.catalog.get_tag(self.identifier, "t1")
+
     def test_create_tag_table_not_exists(self):
         with self.assertRaises(TableNotExistException):
             self.catalog.create_tag(

@@ -22,7 +22,7 @@ from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
-from pypaimon.common.time_utils import parse_duration
+from pypaimon.common.time_utils import parse_duration_nanos
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.tag.tag import Tag
 
@@ -184,7 +184,18 @@ class TagManager:
         # stays readable by older readers. Only write the richer Tag JSON when a
         # retention (and thus a create-time) is present.
         if time_retained is not None:
-            retained = timedelta(milliseconds=parse_duration(time_retained))
+            # parse_duration_nanos keeps sub-millisecond units exactly. Python's
+            # timedelta is microsecond-resolution, so reject sub-microsecond
+            # retentions (e.g. "1ns") instead of silently writing a zero-TTL tag.
+            nanos = parse_duration_nanos(time_retained)
+            micros, sub_micro = divmod(nanos, 1000)
+            if sub_micro:
+                raise ValueError(
+                    f"time_retained '{time_retained}' specifies sub-microsecond "
+                    f"precision, which pypaimon cannot represent (Python timedelta "
+                    f"resolution is microseconds). Use a value of at least 1 microsecond."
+                )
+            retained = timedelta(microseconds=micros)
             tag = Tag.from_snapshot_and_tag_ttl(snapshot, retained, datetime.now())
             content = JSON.to_json(tag)
         else:
