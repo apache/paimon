@@ -248,13 +248,33 @@ def duration_to_iso8601(td: timedelta) -> str:
 
 
 def local_datetime_to_millis(dt: datetime) -> int:
-    """Convert a naive ``LocalDateTime`` to epoch millis (treated as UTC).
+    """Convert a naive ``LocalDateTime`` to epoch millis, treating it as UTC.
 
-    The tag create-time is timezone-less (Java ``LocalDateTime``); interpreting
-    it as UTC keeps the millis self-consistent with the ``$tags`` system table,
-    whose ``create_time`` mirrors Java ``Timestamp.fromLocalDateTime`` (also
-    zone-less wall-clock arithmetic). Uses integer math with floored
-    sub-millisecond truncation (matching Java ``Instant.toEpochMilli``), so it
-    is exact and correct for pre-epoch instants too.
+    This is the zone-less / wall-clock conversion: it mirrors Java
+    ``Timestamp.fromLocalDateTime`` and feeds the ``$tags`` system table's
+    ``create_time`` (a ``TIMESTAMP`` column, which is itself zone-less), so the
+    result does NOT depend on the host's time zone. For the REST
+    ``GetTagResponse`` epoch-millis ``Long`` use
+    :func:`local_datetime_to_system_zone_millis` instead. Uses integer math with
+    floored sub-millisecond truncation (matching Java ``Instant.toEpochMilli``),
+    so it is exact and correct for pre-epoch instants too.
     """
     return calendar.timegm(dt.timetuple()) * 1000 + dt.microsecond // 1000
+
+
+def local_datetime_to_system_zone_millis(dt: datetime) -> int:
+    """Convert a naive ``LocalDateTime`` to epoch millis in the host's default
+    time zone.
+
+    Mirrors Java ``LocalDateTime.atZone(ZoneId.systemDefault()).toInstant()
+    .toEpochMilli()`` -- the conversion the REST ``GetTagResponse`` applies to
+    ``tagCreateTime`` (see ``RESTFileSystemCatalog#getTag``). Unlike
+    :func:`local_datetime_to_millis` (zone-less / UTC, used by the ``$tags``
+    Timestamp column), the result depends on the host's local time zone, so the
+    two intentionally differ on non-UTC hosts -- exactly as the two Java paths do.
+    """
+    # A naive datetime.timestamp() interprets dt in the system local zone (via
+    # mktime). Take whole seconds first to avoid float rounding, then floor the
+    # sub-second part to millis to match Instant.toEpochMilli().
+    epoch_seconds = int(dt.replace(microsecond=0).timestamp())
+    return epoch_seconds * 1000 + dt.microsecond // 1000

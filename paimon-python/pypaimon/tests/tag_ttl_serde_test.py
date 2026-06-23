@@ -23,8 +23,10 @@ interoperable across the Java and Python SDKs.
 """
 
 import json
+import os
+import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pypaimon.common.json_util import JSON
 from pypaimon.common.time_utils import (
@@ -34,6 +36,7 @@ from pypaimon.common.time_utils import (
     json_seconds_to_duration,
     local_datetime_to_json_array,
     local_datetime_to_millis,
+    local_datetime_to_system_zone_millis,
     parse_duration_nanos,
 )
 from pypaimon.snapshot.snapshot import Snapshot
@@ -113,6 +116,48 @@ class TemporalCodecTest(unittest.TestCase):
     def test_local_datetime_to_millis(self):
         dt = datetime(1970, 1, 1, 0, 0, 1)
         self.assertEqual(1000, local_datetime_to_millis(dt))
+
+    @staticmethod
+    def _run_in_tz(tz_name, fn):
+        """Run ``fn`` with the process TZ forced to ``tz_name`` and restored."""
+        prev = os.environ.get("TZ")
+        os.environ["TZ"] = tz_name
+        time.tzset()
+        try:
+            return fn()
+        finally:
+            if prev is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = prev
+            time.tzset()
+
+    @unittest.skipUnless(hasattr(time, "tzset"), "requires time.tzset (POSIX)")
+    def test_system_zone_millis_follows_host_timezone(self):
+        # A timezone-less create-time (Java LocalDateTime, made with the local
+        # now()). The REST GetTagResponse interprets it in the host's default
+        # zone, so the same wall-clock yields different epoch millis per TZ.
+        dt = datetime(2024, 1, 1, 12, 0, 0)  # DST-free in Asia/Shanghai (UTC+8)
+
+        sh = self._run_in_tz(
+            "Asia/Shanghai", lambda: local_datetime_to_system_zone_millis(dt))
+        utc = self._run_in_tz(
+            "UTC", lambda: local_datetime_to_system_zone_millis(dt))
+
+        # Expected values derived from tz-aware references (not hard-coded).
+        expected_sh = int(datetime(
+            2024, 1, 1, 12, tzinfo=timezone(timedelta(hours=8))).timestamp() * 1000)
+        expected_utc = int(datetime(
+            2024, 1, 1, 12, tzinfo=timezone.utc).timestamp() * 1000)
+        self.assertEqual(expected_sh, sh)
+        self.assertEqual(expected_utc, utc)
+        # Shanghai noon is 8h earlier in absolute time than UTC noon.
+        self.assertEqual(8 * 3600 * 1000, utc - sh)
+
+        # The zone-less $tags conversion must stay fixed regardless of host TZ.
+        zoneless = self._run_in_tz(
+            "Asia/Shanghai", lambda: local_datetime_to_millis(dt))
+        self.assertEqual(expected_utc, zoneless)
 
     def test_parse_duration_nanos_keeps_full_precision(self):
         # Unlike parse_duration (rounded milliseconds), the nanos variant keeps

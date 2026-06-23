@@ -37,7 +37,7 @@ from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.time_utils import duration_to_iso8601, local_datetime_to_millis
+from pypaimon.common.time_utils import duration_to_iso8601, local_datetime_to_system_zone_millis
 from pypaimon.filesystem.caching_file_io import CachingFileIO
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
@@ -453,17 +453,20 @@ class FileSystemCatalog(Catalog):
             raise TagNotExistException(tag_name)
         # Surface tag_create_time as epoch millis and tag_time_retained as an
         # ISO-8601 duration string (types match the Java REST GetTagResponse
-        # Long / String). The millis treat the timezone-less create-time as UTC
-        # (consistent with the ``$tags`` system table); note Java's REST server
-        # converts using the system default zone, so the numeric value can
-        # differ on non-UTC hosts. Both are None for tags created without a
-        # retention (plain-snapshot tag files).
+        # Long / String). The create-time is converted with the host's system
+        # default time zone, mirroring the Java REST path
+        # (RESTFileSystemCatalog#getTag uses
+        # tagCreateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()).
+        # This intentionally differs from the ``$tags`` system table, which is a
+        # zone-less Timestamp; both follow their respective Java conversions.
+        # Both fields are None for tags created without a retention
+        # (plain-snapshot tag files).
         return GetTagResponse(
             tag_name=tag_name,
             snapshot=tag.trim_to_snapshot(),
             tag_create_time=(
                 None if tag.tag_create_time is None
-                else local_datetime_to_millis(tag.tag_create_time)
+                else local_datetime_to_system_zone_millis(tag.tag_create_time)
             ),
             tag_time_retained=(
                 None if tag.tag_time_retained is None
