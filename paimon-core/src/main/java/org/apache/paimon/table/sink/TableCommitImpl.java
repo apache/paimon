@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.Path;
@@ -171,6 +172,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl withOperation(Snapshot.Operation operation) {
+        commit.withOperation(operation);
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
@@ -185,11 +192,13 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void truncateTable() {
         checkCommitted();
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
         commit.truncateTable(COMMIT_IDENTIFIER);
     }
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
         commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
     }
 

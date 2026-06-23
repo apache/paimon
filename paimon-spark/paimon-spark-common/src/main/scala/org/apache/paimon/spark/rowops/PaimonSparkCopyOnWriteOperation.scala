@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.rowops
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonBaseScanBuilder
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH_COLUMN, ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
@@ -52,6 +53,7 @@ class PaimonSparkCopyOnWriteOperation(table: FileStoreTable, info: RowLevelOpera
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     val options = Options.fromMap(info.options)
     val builder = new PaimonV2WriteBuilder(table, info.schema(), options)
+    builder.withOperationType(Snapshot.Operation.valueOf(command().toString))
     assert(copyOnWriteScan.isDefined)
     builder.overwriteFiles(copyOnWriteScan.get)
   }

@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
 import org.apache.paimon.spark.catalyst.analysis.Spark3ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark3SqlExtensionsParser
@@ -195,8 +196,15 @@ class Spark3Shim extends SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation]): BatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
 
   override def createFormatTableBatchWrite(
       table: FormatTable,

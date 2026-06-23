@@ -18,7 +18,9 @@
 
 package org.apache.spark.sql.execution.shim
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
+import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
@@ -62,7 +64,11 @@ case class PaimonReplaceTableAsSelectStrategy(spark: SparkSession)
       val (tableOptions, writeOptions) =
         splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
-      val writeOpts = new CaseInsensitiveStringMap(writeOptions.asJava)
+      val operation =
+        if (orCreate) Snapshot.Operation.CREATE_OR_REPLACE_TABLE_AS_SELECT
+        else Snapshot.Operation.REPLACE_TABLE_AS_SELECT
+      val writeOpts = new CaseInsensitiveStringMap(
+        (writeOptions + (PaimonWriteOptions.OPERATION_OPTION -> operation.name())).asJava)
       val pinnedQuery =
         pinSnapshotInQuery(catalog, ident, analyzedQuery.get)
       if (canAtomicReplace(catalog, ident, qualifiedSpec, parts)) {

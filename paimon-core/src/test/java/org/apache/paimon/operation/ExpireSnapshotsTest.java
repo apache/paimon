@@ -420,6 +420,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
