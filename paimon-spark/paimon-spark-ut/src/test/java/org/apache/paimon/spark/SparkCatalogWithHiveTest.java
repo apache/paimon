@@ -159,8 +159,8 @@ public class SparkCatalogWithHiveTest {
     @Test
     public void testDescribeExternalAndManagedTableType() throws IOException {
         try (SparkSession spark = createSessionBuilder().getOrCreate()) {
-            spark.sql("CREATE DATABASE IF NOT EXISTS test_db");
-            spark.sql("USE spark_catalog.test_db");
+            spark.sql("CREATE DATABASE IF NOT EXISTS type_test_db");
+            spark.sql("USE spark_catalog.type_test_db");
 
             spark.sql("CREATE EXTERNAL TABLE external_type_table (a INT, bb INT, c STRING)");
             assertThat(
