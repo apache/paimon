@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
@@ -27,7 +28,6 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.slf4j.Logger;
@@ -231,7 +231,7 @@ public class PartitionMarkDoneTrigger {
         private final boolean isRestored;
         private final ListState<List<String>> pendingPartitionsState;
 
-        public PartitionMarkDoneTriggerState(boolean isRestored, OperatorStateStore stateStore)
+        public PartitionMarkDoneTriggerState(boolean isRestored, StateStore stateStore)
                 throws Exception {
             this.isRestored = isRestored;
             this.pendingPartitionsState = stateStore.getListState(PENDING_PARTITIONS_STATE_DESC);
@@ -256,8 +256,7 @@ public class PartitionMarkDoneTrigger {
     }
 
     public static PartitionMarkDoneTrigger create(
-            CoreOptions coreOptions, boolean isRestored, OperatorStateStore stateStore)
-            throws Exception {
+            CoreOptions coreOptions, boolean isRestored, StateStore stateStore) throws Exception {
         Options options = coreOptions.toConfiguration();
         return new PartitionMarkDoneTrigger(
                 new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(isRestored, stateStore),
