@@ -236,6 +236,16 @@ class ESIndexGlobalIndexE2ETest {
                 fuzzyTypo.get().results().getIntCardinality(),
                 "fuzzy 'evon'~1 matches the 10 'even' docs");
 
+        // --- full-text search on a non-FULLTEXT field of this index (category is KEYWORD) must
+        // return empty, not throw: the ES index carries the column but cannot serve full-text on
+        // it, so the engine should fall back to raw scan ---
+        assertTrue(
+                reader.visitFullTextSearch(
+                                new FullTextSearch(FullTextQuery.match("even", "category"), 50))
+                        .join()
+                        .isEmpty(),
+                "full-text search on a KEYWORD field must return empty, not throw");
+
         // --- ordinary SQL predicates on a FULLTEXT field are disabled (analyzed tokens != raw
         // value); they must return empty so the engine falls back to raw scan instead of pruning
         // rows with a wrong bitmap ---
