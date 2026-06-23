@@ -179,12 +179,11 @@ public class ChainTableUtilsTest {
 
     @Test
     public void testGeneratePartitionValues() {
+
         LinkedHashMap<String, String> partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 12, 0, 0),
-                        Arrays.asList("dt", "hour"),
-                        "$dt $hour:00:00",
-                        "yyyyMMdd HH:mm:ss");
+                new ChainPartitionPatternResolver(
+                                Arrays.asList("dt", "hour"), "$dt $hour:00:00", "yyyyMMdd HH:mm:ss")
+                        .calPartValues(LocalDateTime.of(2023, 1, 1, 12, 0, 0));
         assertEquals(
                 new LinkedHashMap<String, String>() {
                     {
@@ -195,11 +194,8 @@ public class ChainTableUtilsTest {
                 partitionValues);
 
         partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 0, 0, 0),
-                        Arrays.asList("dt"),
-                        "$dt",
-                        "yyyyMMdd");
+                new ChainPartitionPatternResolver(Arrays.asList("dt"), "$dt", "yyyyMMdd")
+                        .calPartValues(LocalDateTime.of(2023, 1, 1, 0, 0, 0));
         assertEquals(
                 new LinkedHashMap<String, String>() {
                     {
@@ -784,12 +780,12 @@ public class ChainTableUtilsTest {
         RecordComparator chainComparator = (a, b) -> a.getString(1).compareTo(b.getString(1));
 
         Options opts = new Options();
-        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt $hour_minute:00");
-        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd HH:mm:ss");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour_minute");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmm");
         CoreOptions options = new CoreOptions(opts);
 
-        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "10:10"));
-        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "10:15"));
+        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "1010"));
+        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "1015"));
 
         List<BinaryRow> deltas =
                 ChainTableUtils.getDeltaPartitionsWithProjector(
@@ -800,11 +796,11 @@ public class ChainTableUtilsTest {
             assertThat(getString(delta, 0)).isEqualTo("CN");
             assertThat(getString(delta, 1)).isEqualTo("20260609");
         }
-        assertThat(getString(deltas.get(0), 2)).isEqualTo("10:11");
-        assertThat(getString(deltas.get(1), 2)).isEqualTo("10:12");
-        assertThat(getString(deltas.get(2), 2)).isEqualTo("10:13");
-        assertThat(getString(deltas.get(3), 2)).isEqualTo("10:14");
-        assertThat(getString(deltas.get(4), 2)).isEqualTo("10:15");
+        assertThat(getString(deltas.get(0), 2)).isEqualTo("1011");
+        assertThat(getString(deltas.get(1), 2)).isEqualTo("1012");
+        assertThat(getString(deltas.get(2), 2)).isEqualTo("1013");
+        assertThat(getString(deltas.get(3), 2)).isEqualTo("1014");
+        assertThat(getString(deltas.get(4), 2)).isEqualTo("1015");
     }
 
     @Test
@@ -824,8 +820,8 @@ public class ChainTableUtilsTest {
         RecordComparator chainComparator = (a, b) -> a.getString(2).compareTo(b.getString(2));
 
         Options opts = new Options();
-        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt $hour:$minute:00");
-        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd HH:mm:ss");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour$minute00");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmmss");
         CoreOptions options = new CoreOptions(opts);
 
         BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "10", "10"));
