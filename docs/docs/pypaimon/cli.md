@@ -785,3 +785,57 @@ SQL statements end with `;` and can span multiple lines. The continuation prompt
 | `exit` / `quit` | Exit the REPL |
 
 For more details on SQL syntax and the Python API, see [SQL Query](./sql).
+
+## Branch Commands
+
+Manage branches on a table. Branches are independent lines of a table that can be created from the current state or from a tag, and later fast-forwarded back into main.
+
+```shell
+paimon branch <create|list|delete|rename|fast-forward> mydb.users ...
+```
+
+### Branch Create
+
+```shell
+# Create a branch from the current state
+paimon branch create mydb.users b1
+
+# Create a branch from an existing tag
+paimon branch create mydb.users b1 --tag v1
+```
+
+Options:
+- `--tag, -t`: Create the branch from this tag (default: current state)
+
+### Branch List
+
+```shell
+# List all branches
+paimon branch list mydb.users
+
+# JSON output
+paimon branch list mydb.users --format json
+```
+
+Options:
+- `--format, -f`: Output format, `table` (default) or `json`
+
+### Branch Delete
+
+```shell
+paimon branch delete mydb.users b1
+```
+
+### Branch Rename
+
+```shell
+paimon branch rename mydb.users b1 b2
+```
+
+### Branch Fast-Forward
+
+Fast-forward the main branch to the given branch (main adopts the branch's snapshots).
+
+```shell
+paimon branch fast-forward mydb.users b1
+```
