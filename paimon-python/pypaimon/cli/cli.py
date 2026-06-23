@@ -129,6 +129,10 @@ def main():
     from pypaimon.cli.cli_branch import add_branch_subcommands
     add_branch_subcommands(subparsers)
 
+    # Tag commands
+    from pypaimon.cli.cli_tag import add_tag_subcommands
+    add_tag_subcommands(subparsers)
+
     args = parser.parse_args()
     
     if args.command is None:

@@ -17,8 +17,8 @@
 
 """Tag commands for the Paimon CLI.
 
-Adds the ``table tag {create,list,delete,get}`` subcommands, mirroring the
-nested structure of ``table alter``. All operations go through the Catalog
+Adds the top-level ``tag {create,list,delete,get}`` subcommands (alongside
+``table`` / ``db`` / ``catalog``). All operations go through the Catalog
 layer so they get typed exceptions and work for both filesystem and REST
 catalogs.
 """
@@ -54,7 +54,7 @@ def _open_catalog(args):
 
 
 def cmd_tag_create(args):
-    """Execute ``table tag create``."""
+    """Execute ``tag create``."""
     catalog, identifier = _open_catalog(args)
     try:
         catalog.create_tag(
@@ -78,7 +78,7 @@ def cmd_tag_create(args):
 
 
 def cmd_tag_delete(args):
-    """Execute ``table tag delete``."""
+    """Execute ``tag delete``."""
     catalog, identifier = _open_catalog(args)
     try:
         catalog.delete_tag(identifier, args.tag_name)
@@ -97,7 +97,7 @@ def cmd_tag_delete(args):
 
 
 def cmd_tag_list(args):
-    """Execute ``table tag list``."""
+    """Execute ``tag list``."""
     catalog, identifier = _open_catalog(args)
     try:
         paged = catalog.list_tags_paged(identifier, tag_name_prefix=args.prefix)
@@ -126,7 +126,7 @@ def cmd_tag_list(args):
 
 
 def cmd_tag_get(args):
-    """Execute ``table tag get``."""
+    """Execute ``tag get``."""
     catalog, identifier = _open_catalog(args)
     try:
         response = catalog.get_tag(identifier, args.tag_name)
@@ -160,9 +160,9 @@ def cmd_tag_get(args):
         print("  Time Retained: {}".format(response.tag_time_retained))
 
 
-def add_tag_subcommands(table_subparsers):
-    """Register the ``table tag <command>`` subcommands."""
-    tag_parser = table_subparsers.add_parser(
+def add_tag_subcommands(subparsers):
+    """Register the top-level ``tag <command>`` subcommands."""
+    tag_parser = subparsers.add_parser(
         'tag', help='Tag operations on a table')
     tag_subparsers = tag_parser.add_subparsers(
         dest='tag_command', help='Tag commands')

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Integration tests for the ``table tag`` CLI subcommands."""
+"""Integration tests for the top-level ``tag`` CLI subcommands."""
 
 import json
 import os
@@ -78,37 +78,37 @@ class CliTagTest(unittest.TestCase):
     # -- create + list -------------------------------------------------------
 
     def test_create_then_list(self):
-        out, _, code = self._run('table', 'tag', 'create', 'db.t', 'v1')
+        out, _, code = self._run('tag', 'create', 'db.t', 'v1')
         self.assertEqual(0, code)
         self.assertIn("created", out)
 
-        out, _, code = self._run('table', 'tag', 'list', 'db.t')
+        out, _, code = self._run('tag', 'list', 'db.t')
         self.assertEqual(0, code)
         self.assertIn("v1", out)
 
     def test_list_empty(self):
-        out, _, code = self._run('table', 'tag', 'list', 'db.t')
+        out, _, code = self._run('tag', 'list', 'db.t')
         self.assertEqual(0, code)
         self.assertIn("No tags found.", out)
 
     def test_list_json_empty(self):
         out, _, code = self._run(
-            'table', 'tag', 'list', 'db.t', '--format', 'json')
+            'tag', 'list', 'db.t', '--format', 'json')
         self.assertEqual(0, code)
         self.assertEqual([], json.loads(out))
 
     def test_list_json(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1')
-        self._run('table', 'tag', 'create', 'db.t', 'v2')
-        out, _, code = self._run('table', 'tag', 'list', 'db.t', '--format', 'json')
+        self._run('tag', 'create', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v2')
+        out, _, code = self._run('tag', 'list', 'db.t', '--format', 'json')
         self.assertEqual(0, code)
         self.assertEqual({"v1", "v2"}, set(json.loads(out)))
 
     def test_list_prefix(self):
-        self._run('table', 'tag', 'create', 'db.t', 'prod_v1')
-        self._run('table', 'tag', 'create', 'db.t', 'dev_v1')
+        self._run('tag', 'create', 'db.t', 'prod_v1')
+        self._run('tag', 'create', 'db.t', 'dev_v1')
         out, _, code = self._run(
-            'table', 'tag', 'list', 'db.t', '--prefix', 'prod_', '-f', 'json')
+            'tag', 'list', 'db.t', '--prefix', 'prod_', '-f', 'json')
         self.assertEqual(0, code)
         self.assertEqual(["prod_v1"], json.loads(out))
 
@@ -116,64 +116,64 @@ class CliTagTest(unittest.TestCase):
 
     def test_create_with_snapshot_id(self):
         out, _, code = self._run(
-            'table', 'tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
+            'tag', 'create', 'db.t', 'v1', '--snapshot-id', '1')
         self.assertEqual(0, code)
-        out, _, _ = self._run('table', 'tag', 'get', 'db.t', 'v1')
+        out, _, _ = self._run('tag', 'get', 'db.t', 'v1')
         self.assertIn("Snapshot ID: 1", out)
 
     def test_create_duplicate_raises(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1')
-        out, err, code = self._run('table', 'tag', 'create', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v1')
+        out, err, code = self._run('tag', 'create', 'db.t', 'v1')
         self.assertEqual(1, code)
         self.assertIn("already exists", err)
 
     def test_create_duplicate_ignore_if_exists(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v1')
         _, _, code = self._run(
-            'table', 'tag', 'create', 'db.t', 'v1', '--ignore-if-exists')
+            'tag', 'create', 'db.t', 'v1', '--ignore-if-exists')
         self.assertEqual(0, code)
 
     # -- get -----------------------------------------------------------------
 
     def test_get_table_format(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1', '--snapshot-id', '2')
-        out, _, code = self._run('table', 'tag', 'get', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v1', '--snapshot-id', '2')
+        out, _, code = self._run('tag', 'get', 'db.t', 'v1')
         self.assertEqual(0, code)
         self.assertIn("Tag: v1", out)
         self.assertIn("Snapshot ID: 2", out)
 
     def test_get_json_format(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v1')
         out, _, code = self._run(
-            'table', 'tag', 'get', 'db.t', 'v1', '--format', 'json')
+            'tag', 'get', 'db.t', 'v1', '--format', 'json')
         self.assertEqual(0, code)
         parsed = json.loads(out)
         self.assertEqual("v1", parsed["tagName"])
 
     def test_get_not_exists(self):
-        _, err, code = self._run('table', 'tag', 'get', 'db.t', 'absent')
+        _, err, code = self._run('tag', 'get', 'db.t', 'absent')
         self.assertEqual(1, code)
         self.assertIn("does not exist", err)
 
     # -- delete --------------------------------------------------------------
 
     def test_delete(self):
-        self._run('table', 'tag', 'create', 'db.t', 'v1')
-        out, _, code = self._run('table', 'tag', 'delete', 'db.t', 'v1')
+        self._run('tag', 'create', 'db.t', 'v1')
+        out, _, code = self._run('tag', 'delete', 'db.t', 'v1')
         self.assertEqual(0, code)
         self.assertIn("deleted", out)
-        out, _, _ = self._run('table', 'tag', 'list', 'db.t')
+        out, _, _ = self._run('tag', 'list', 'db.t')
         self.assertNotIn("v1", out)
 
     def test_delete_not_exists(self):
-        _, err, code = self._run('table', 'tag', 'delete', 'db.t', 'absent')
+        _, err, code = self._run('tag', 'delete', 'db.t', 'absent')
         self.assertEqual(1, code)
         self.assertIn("does not exist", err)
 
     # -- bad input -----------------------------------------------------------
 
     def test_invalid_identifier(self):
-        _, err, code = self._run('table', 'tag', 'create', 'nodot', 'v1')
+        _, err, code = self._run('tag', 'create', 'nodot', 'v1')
         self.assertEqual(1, code)
         self.assertIn("Invalid table identifier", err)
 
