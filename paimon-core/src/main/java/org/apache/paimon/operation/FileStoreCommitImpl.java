@@ -1269,8 +1269,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     /**
      * Computes the index file changes between the previous latest snapshot and the restore target,
-     * mirroring how the data delta files are derived: entries that only exist in the previous latest
-     * are marked as {@link FileKind#DELETE}, entries that only exist in the target are kept as ADD.
+     * mirroring how the data delta files are derived: entries that only exist in the previous
+     * latest are marked as {@link FileKind#DELETE}, entries that only exist in the target are kept
+     * as ADD.
      */
     private List<IndexManifestEntry> restoreIndexChanges(Snapshot latest, Snapshot target) {
         Set<IndexManifestEntry> latestIndexEntries = readIndexEntries(latest.indexManifest());
