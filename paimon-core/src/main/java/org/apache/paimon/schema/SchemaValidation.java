@@ -1164,13 +1164,12 @@ public class SchemaValidation {
 
     private static void validateManifestSort(TableSchema schema, CoreOptions options) {
         if (options.manifestSortEnabled()) {
-            if (options.dataEvolutionEnabled()) {
-                return;
+            if (!options.dataEvolutionEnabled()) {
+                checkArgument(
+                        !schema.partitionKeys().isEmpty(),
+                        "Cannot enable '%s' for non-partition table.",
+                        CoreOptions.MANIFEST_SORT_ENABLED.key());
             }
-            checkArgument(
-                    !schema.partitionKeys().isEmpty(),
-                    "Cannot enable '%s' for non-partition table.",
-                    CoreOptions.MANIFEST_SORT_ENABLED.key());
             String sortPartitionField = options.manifestSortPartitionField();
             if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
                 checkArgument(
