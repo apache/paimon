@@ -83,35 +83,18 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
 
     protected ScoredGlobalIndexResult readIndexed(
             List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
-        long start = System.currentTimeMillis();
-        debug("PAIMON_VECTOR_READ_INDEXED_BEGIN splits=%d", splits.size());
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
-        debug(
-                "PAIMON_VECTOR_READ_PREFILTER_DONE splits=%d preFilters=%d elapsedMs=%d",
-                splits.size(), preFilters.size(), System.currentTimeMillis() - start);
 
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
         ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
-        debug(
-                "PAIMON_VECTOR_READ_EXECUTOR parallelism=%d executor=%s elapsedMs=%d",
-                parallelism, executor, System.currentTimeMillis() - start);
 
         List<CompletableFuture<Optional<ScoredGlobalIndexResult>>> futures =
                 new ArrayList<>(splits.size());
         for (int i = 0; i < splits.size(); i++) {
             IndexVectorSearchSplit split = splits.get(i);
-            RoaringNavigableMap64 include = preFilters.isEmpty() ? null : preFilters.get(i);
-            debug(
-                    "PAIMON_VECTOR_READ_SUBMIT_BEGIN index=%d range=%d-%d vectorFiles=%d include=%d elapsedMs=%d",
-                    i,
-                    split.rowRangeStart(),
-                    split.rowRangeEnd(),
-                    split.vectorIndexFiles().size(),
-                    include == null ? -1 : include.getLongCardinality(),
-                    System.currentTimeMillis() - start);
-            CompletableFuture<Optional<ScoredGlobalIndexResult>> future =
+            futures.add(
                     eval(
                             globalIndexer,
                             indexPathFactory,
@@ -119,29 +102,15 @@ public class VectorReadImpl extends AbstractVectorRead implements VectorRead {
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vector,
-                            include,
-                            executor);
-            futures.add(future);
-            debug(
-                    "PAIMON_VECTOR_READ_SUBMIT_DONE index=%d futures=%d elapsedMs=%d",
-                    i, futures.size(), System.currentTimeMillis() - start);
+                            preFilters.isEmpty() ? null : preFilters.get(i),
+                            executor));
         }
 
-        debug(
-                "PAIMON_VECTOR_READ_WAIT_BEGIN futures=%d elapsedMs=%d",
-                futures.size(), System.currentTimeMillis() - start);
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        debug(
-                "PAIMON_VECTOR_READ_WAIT_DONE futures=%d elapsedMs=%d",
-                futures.size(), System.currentTimeMillis() - start);
 
         ScoredGlobalIndexResult merged = ScoredGlobalIndexResult.createEmpty();
-        for (int i = 0; i < futures.size(); i++) {
-            CompletableFuture<Optional<ScoredGlobalIndexResult>> future = futures.get(i);
+        for (CompletableFuture<Optional<ScoredGlobalIndexResult>> future : futures) {
             Optional<ScoredGlobalIndexResult> splitResult = future.join();
-            debug(
-                    "PAIMON_VECTOR_READ_MERGE index=%d present=%s elapsedMs=%d",
-                    i, splitResult.isPresent(), System.currentTimeMillis() - start);
             if (splitResult.isPresent()) {
                 merged = merged.or(splitResult.get());
             }

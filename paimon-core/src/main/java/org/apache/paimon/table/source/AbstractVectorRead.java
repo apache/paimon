@@ -124,31 +124,15 @@ public abstract class AbstractVectorRead implements Serializable {
             return Collections.emptyList();
         }
 
-        debug(
-                "PAIMON_VECTOR_PREFILTER_BEGIN table=%s vectorField=%s/%d filter=%s splits=%d",
-                table.location(), vectorColumn.name(), vectorColumn.id(), filter, splits.size());
         Set<IndexFileMeta> scalarIndexFiles =
                 new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
-        for (int i = 0; i < splits.size(); i++) {
-            IndexVectorSearchSplit split = splits.get(i);
+        for (IndexVectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
-            debug(
-                    "PAIMON_VECTOR_PREFILTER_SPLIT index=%d range=%d-%d vectorFiles=%d scalarFiles=%d scalar=%s",
-                    i,
-                    split.rowRangeStart(),
-                    split.rowRangeEnd(),
-                    split.vectorIndexFiles().size(),
-                    split.scalarIndexFiles().size(),
-                    indexSummaries(split.scalarIndexFiles()));
         }
-        debug(
-                "PAIMON_VECTOR_PREFILTER_SCALAR_FILES unique=%d scalar=%s",
-                scalarIndexFiles.size(), indexSummaries(scalarIndexFiles));
 
         Optional<GlobalIndexScanner> optionalScanner =
                 GlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
-            debug("PAIMON_VECTOR_PREFILTER_NO_SCANNER splits=%d", splits.size());
             return emptyPreFilters(splits.size());
         }
 
@@ -156,34 +140,21 @@ public abstract class AbstractVectorRead implements Serializable {
         try (GlobalIndexScanner scanner = optionalScanner.get()) {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (!result.isPresent()) {
-                debug("PAIMON_VECTOR_PREFILTER_NO_RESULT filter=%s", filter);
                 return emptyPreFilters(splits.size());
             }
             matchedRows = result.get().results();
-            debug(
-                    "PAIMON_VECTOR_PREFILTER_MATCHED count=%d sample=%s",
-                    matchedRows.getLongCardinality(), sampleRows(matchedRows, 20));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
-        for (int i = 0; i < splits.size(); i++) {
-            IndexVectorSearchSplit split = splits.get(i);
+        for (IndexVectorSearchSplit split : splits) {
             Range splitRange = new Range(split.rowRangeStart(), split.rowRangeEnd());
             RoaringNavigableMap64 splitRows = bitmapOf(splitRange);
 
             RoaringNavigableMap64 include = new RoaringNavigableMap64();
             include.or(matchedRows);
             include.and(splitRows);
-            debug(
-                    "PAIMON_VECTOR_PREFILTER_INCLUDE index=%d range=%d-%d splitRows=%d include=%d sample=%s",
-                    i,
-                    split.rowRangeStart(),
-                    split.rowRangeEnd(),
-                    splitRows.getLongCardinality(),
-                    include.getLongCardinality(),
-                    sampleRows(include, 20));
             includeRowIds.add(include);
         }
         return includeRowIds;
@@ -248,56 +219,19 @@ public abstract class AbstractVectorRead implements Serializable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        long start = System.currentTimeMillis();
-        debug(
-                "PAIMON_VECTOR_EVAL_BEGIN range=%d-%d vectorFiles=%d include=%d executor=%s",
-                rowRangeStart,
-                rowRangeEnd,
-                vectorIndexFiles.size(),
-                includeRowIds == null ? -1 : includeRowIds.getLongCardinality(),
-                executor);
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        debug(
-                "PAIMON_VECTOR_EVAL_IOMETA range=%d-%d files=%d elapsedMs=%d",
-                rowRangeStart,
-                rowRangeEnd,
-                indexIOMetaList.size(),
-                System.currentTimeMillis() - start);
         @SuppressWarnings("resource")
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
-        debug(
-                "PAIMON_VECTOR_EVAL_READER_CREATED range=%d-%d elapsedMs=%d",
-                rowRangeStart, rowRangeEnd, System.currentTimeMillis() - start);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, limit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        debug(
-                "PAIMON_VECTOR_EVAL_VISIT_BEGIN range=%d-%d include=%d elapsedMs=%d",
-                rowRangeStart,
-                rowRangeEnd,
-                includeRowIds == null ? -1 : includeRowIds.getLongCardinality(),
-                System.currentTimeMillis() - start);
-        CompletableFuture<Optional<ScoredGlobalIndexResult>> future =
-                new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                        .visitVectorSearch(vectorSearch);
-        debug(
-                "PAIMON_VECTOR_EVAL_VISIT_RETURNED range=%d-%d elapsedMs=%d",
-                rowRangeStart, rowRangeEnd, System.currentTimeMillis() - start);
-        return future.whenComplete(
-                (r, t) -> {
-                    debug(
-                            "PAIMON_VECTOR_EVAL_DONE range=%d-%d present=%s error=%s elapsedMs=%d",
-                            rowRangeStart,
-                            rowRangeEnd,
-                            r != null && r.isPresent(),
-                            t == null ? "null" : t.getClass().getName() + ":" + t.getMessage(),
-                            System.currentTimeMillis() - start);
-                    IOUtils.closeQuietly(reader);
-                });
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                .visitVectorSearch(vectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
     protected CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> evalBatch(
@@ -313,67 +247,19 @@ public abstract class AbstractVectorRead implements Serializable {
             return CompletableFuture.completedFuture(emptyOptionalResults(vectors.length));
         }
 
-        long start = System.currentTimeMillis();
-        debug(
-                "PAIMON_VECTOR_EVAL_BATCH_BEGIN range=%d-%d vectorFiles=%d queries=%d include=%d executor=%s",
-                rowRangeStart,
-                rowRangeEnd,
-                vectorIndexFiles.size(),
-                vectors.length,
-                includeRowIds == null ? -1 : includeRowIds.getLongCardinality(),
-                executor);
         List<GlobalIndexIOMeta> indexIOMetaList =
                 buildIOMetaList(indexPathFactory, vectorIndexFiles);
-        debug(
-                "PAIMON_VECTOR_EVAL_BATCH_IOMETA range=%d-%d files=%d elapsedMs=%d",
-                rowRangeStart,
-                rowRangeEnd,
-                indexIOMetaList.size(),
-                System.currentTimeMillis() - start);
         @SuppressWarnings("resource")
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
-        debug(
-                "PAIMON_VECTOR_EVAL_BATCH_READER_CREATED range=%d-%d elapsedMs=%d",
-                rowRangeStart, rowRangeEnd, System.currentTimeMillis() - start);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, limit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
-        debug(
-                "PAIMON_VECTOR_EVAL_BATCH_VISIT_BEGIN range=%d-%d include=%d elapsedMs=%d",
-                rowRangeStart,
-                rowRangeEnd,
-                includeRowIds == null ? -1 : includeRowIds.getLongCardinality(),
-                System.currentTimeMillis() - start);
-        CompletableFuture<List<Optional<ScoredGlobalIndexResult>>> future =
-                new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
-                        .visitBatchVectorSearch(batchVectorSearch);
-        debug(
-                "PAIMON_VECTOR_EVAL_BATCH_VISIT_RETURNED range=%d-%d elapsedMs=%d",
-                rowRangeStart, rowRangeEnd, System.currentTimeMillis() - start);
-        return future.whenComplete(
-                (r, t) -> {
-                    int results = r == null ? -1 : r.size();
-                    int present = 0;
-                    if (r != null) {
-                        for (Optional<ScoredGlobalIndexResult> result : r) {
-                            if (result.isPresent()) {
-                                present++;
-                            }
-                        }
-                    }
-                    debug(
-                            "PAIMON_VECTOR_EVAL_BATCH_DONE range=%d-%d results=%d present=%d error=%s elapsedMs=%d",
-                            rowRangeStart,
-                            rowRangeEnd,
-                            results,
-                            present,
-                            t == null ? "null" : t.getClass().getName() + ":" + t.getMessage(),
-                            System.currentTimeMillis() - start);
-                    IOUtils.closeQuietly(reader);
-                });
+        return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
+                .visitBatchVectorSearch(batchVectorSearch)
+                .whenComplete((r, t) -> IOUtils.closeQuietly(reader));
     }
 
     protected ScoredGlobalIndexResult withRawSearch(
@@ -667,47 +553,5 @@ public abstract class AbstractVectorRead implements Serializable {
             results.add(Optional.empty());
         }
         return results;
-    }
-
-    private static boolean debugEnabled() {
-        return Boolean.getBoolean("paimon.eslib.debug");
-    }
-
-    protected static void debug(String format, Object... args) {
-        if (debugEnabled()) {
-            System.err.println(String.format(format, args));
-        }
-    }
-
-    private static String indexSummaries(Iterable<IndexFileMeta> indexFiles) {
-        List<String> summaries = new ArrayList<>();
-        for (IndexFileMeta indexFile : indexFiles) {
-            summaries.add(indexSummary(indexFile));
-        }
-        return String.join(";", summaries);
-    }
-
-    private static String indexSummary(IndexFileMeta indexFile) {
-        GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-        return String.format(
-                "%s type=%s field=%d extras=%s range=%d-%d rowCount=%d",
-                indexFile.fileName(),
-                indexFile.indexType(),
-                meta.indexFieldId(),
-                java.util.Arrays.toString(meta.extraFieldIds()),
-                meta.rowRangeStart(),
-                meta.rowRangeEnd(),
-                indexFile.rowCount());
-    }
-
-    private static String sampleRows(RoaringNavigableMap64 rows, int limit) {
-        List<Long> sample = new ArrayList<>();
-        for (Long row : rows) {
-            if (sample.size() >= limit) {
-                break;
-            }
-            sample.add(row);
-        }
-        return sample.toString();
     }
 }
