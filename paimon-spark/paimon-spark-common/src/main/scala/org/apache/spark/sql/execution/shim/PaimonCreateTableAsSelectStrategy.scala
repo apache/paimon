@@ -18,8 +18,10 @@
 
 package org.apache.spark.sql.execution.shim
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.FormatTableCatalog
+import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
@@ -66,8 +68,10 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
         parts,
         query,
         qualifiedSpec,
-        writeOptions,
-        ifNotExists) :: Nil
+        writeOptions +
+          (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT.name()),
+        ifNotExists
+      ) :: Nil
     case _ => Nil
   }
 }

@@ -31,6 +31,7 @@ import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.CommandResultExec
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.execution.metric.SQLMetric
+import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
 
 class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
@@ -130,7 +131,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql("CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
       val df = sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
       val metrics = commandMetrics(df)
-      val executionMetrics = lastExecutionMetrics
+      val executionMetrics = commandExecutionMetrics(metrics)
 
       assert(executionMetrics(metrics("addedTableFiles").id) == "2")
       assert(executionMetrics(metrics("insertedRecords").id) == "2")
@@ -143,7 +144,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql("CREATE TABLE T (id INT, pt INT) PARTITIONED BY (pt)")
       val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id FROM range(1, 10)")
       val metrics = commandMetrics(df)
-      val executionMetrics = lastExecutionMetrics
+      val executionMetrics = commandExecutionMetrics(metrics)
 
       assert(executionMetrics(metrics("addedTableFiles").id) == "9")
       assert(executionMetrics(metrics("insertedRecords").id) == "9")
@@ -156,7 +157,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql("CREATE TABLE T (id INT, v INT) TBLPROPERTIES ('bucket'='3', 'bucket-key'='id')")
       val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 100)")
       val metrics = commandMetrics(df)
-      val executionMetrics = lastExecutionMetrics
+      val executionMetrics = commandExecutionMetrics(metrics)
       assert(executionMetrics(metrics("addedTableFiles").id) == "3")
       assert(executionMetrics(metrics("bucketsWritten").id) == "3")
     }
@@ -169,7 +170,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       val df =
         sql(s"INSERT OVERWRITE T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 100)")
       val metrics = commandMetrics(df)
-      val executionMetrics = lastExecutionMetrics
+      val executionMetrics = commandExecutionMetrics(metrics)
       assert(executionMetrics(metrics("addedTableFiles").id) == "1")
       assert(executionMetrics(metrics("insertedRecords").id) == "100")
     }
@@ -181,13 +182,13 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 10)")
       val df = sql("DELETE FROM T WHERE id < 3")
       val metrics = commandMetrics(df)
-      val executionMetrics = lastExecutionMetrics
+      val executionMetrics = commandExecutionMetrics(metrics)
       assert(executionMetrics(metrics("addedTableFiles").id) == "1")
       assert(executionMetrics(metrics("deletedTableFiles").id) == "1")
 
       val df1 = sql("DELETE FROM T WHERE id > 0")
       val metrics1 = commandMetrics(df1)
-      val executionMetrics1 = lastExecutionMetrics
+      val executionMetrics1 = commandExecutionMetrics(metrics1)
       assert(executionMetrics1(metrics1("addedTableFiles").id) == "0")
       assert(executionMetrics1(metrics1("deletedTableFiles").id) == "1")
     }
@@ -201,9 +202,22 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
   }
 
-  def lastExecutionMetrics: Map[Long, String] = {
+  def commandExecutionMetrics(metrics: Map[String, SQLMetric]): Map[Long, String] = {
+    Utils.waitUntilEventEmpty(spark)
+    val metricIds = metrics.values.map(_.id).toSet
     val statusStore = spark.sharedState.statusStore
-    val lastExecId = statusStore.executionsList().last.executionId
-    statusStore.executionMetrics(lastExecId)
+    statusStore
+      .executionsList()
+      .reverse
+      .find {
+        execution =>
+          val executionMetricIds = execution.metrics.map(_.accumulatorId).toSet
+          metricIds.subsetOf(executionMetricIds)
+      }
+      .map(execution => statusStore.executionMetrics(execution.executionId))
+      .getOrElse {
+        val ids = metricIds.toSeq.sorted.mkString(", ")
+        throw new AssertionError(s"Cannot find execution metrics for command metric ids: $ids")
+      }
   }
 }

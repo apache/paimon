@@ -90,6 +90,11 @@ public class CoreOptions implements Serializable {
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
 
+    public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
+
+    public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
+            "map.shared-shredding.max-columns";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -837,6 +842,14 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
+
+    public static final ConfigOption<SequenceNumberInitMode> WRITE_SEQUENCE_NUMBER_INIT_MODE =
+            key("write.sequence-number-init-mode")
+                    .enumType(SequenceNumberInitMode.class)
+                    .defaultValue(SequenceNumberInitMode.SCAN)
+                    .withDescription(
+                            "Specify how to initialize the next sequence number for primary key "
+                                    + "table writers.");
 
     public static final ConfigOption<Duration> COMMIT_TIMEOUT =
             key("commit.timeout")
@@ -2535,6 +2548,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether to enable global index for scan.");
 
+    public static final ConfigOption<GlobalIndexSearchMode> GLOBAL_INDEX_SEARCH_MODE =
+            key("global-index.search-mode")
+                    .enumType(GlobalIndexSearchMode.class)
+                    .defaultValue(GlobalIndexSearchMode.FAST)
+                    .withDescription(
+                            "Search mode for global index queries. "
+                                    + "Supported values are 'fast', 'full', and 'detail'.");
+
     public static final ConfigOption<Integer> GLOBAL_INDEX_THREAD_NUM =
             key("global-index.thread-num")
                     .intType()
@@ -3244,6 +3265,10 @@ public class CoreOptions implements Serializable {
 
     public boolean commitForceCompact() {
         return options.get(COMMIT_FORCE_COMPACT);
+    }
+
+    public SequenceNumberInitMode writeSequenceNumberInitMode() {
+        return options.get(WRITE_SEQUENCE_NUMBER_INIT_MODE);
     }
 
     public long commitTimeout() {
@@ -4037,6 +4062,10 @@ public class CoreOptions implements Serializable {
         return options.get(GLOBAL_INDEX_ENABLED);
     }
 
+    public GlobalIndexSearchMode globalIndexSearchMode() {
+        return options.get(GLOBAL_INDEX_SEARCH_MODE);
+    }
+
     public Integer globalIndexThreadNum() {
         return options.get(GLOBAL_INDEX_THREAD_NUM);
     }
@@ -4217,6 +4246,34 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         SortOrder(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies how to initialize the next sequence number for primary key table writers. */
+    public enum SequenceNumberInitMode implements DescribedEnum {
+        SCAN("scan", "initialize by scanning existing file metadata."),
+
+        SNAPSHOT(
+                "snapshot",
+                "initialize from the maximum sequence number recorded in snapshot properties, "
+                        + "which can avoid scanning existing file metadata in write-only mode.");
+
+        private final String value;
+        private final String description;
+
+        SequenceNumberInitMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
@@ -4795,6 +4852,59 @@ public class CoreOptions implements Serializable {
                         .noDefaultValue());
     }
 
+    public MapStorageLayout mapStorageLayout(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MAP_STORAGE_LAYOUT)
+                        .enumType(MapStorageLayout.class)
+                        .defaultValue(MapStorageLayout.DEFAULT));
+    }
+
+    public int mapSharedShreddingMaxColumns(String fieldName) {
+        int maxColumns =
+                options.get(
+                        key(FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_MAX_COLUMNS)
+                                .intType()
+                                .defaultValue(256));
+        checkArgument(maxColumns > 0, "options %s must > 0", MAP_SHARED_SHREDDING_MAX_COLUMNS);
+        return maxColumns;
+    }
+
+    /** MAP storage layout. */
+    public enum MapStorageLayout implements DescribedEnum {
+        DEFAULT(
+                "default",
+                "Store MAP columns with the normal key-value array layout. This is the compatible "
+                        + "layout used when no field-level MAP layout option is configured."),
+        SHARED_SHREDDING(
+                "shared-shredding",
+                "Store MAP<STRING, T> columns as a physical row with reusable value columns, a "
+                        + "field mapping, and an overflow map. This layout is intended for maps "
+                        + "whose string keys repeat across rows and can benefit from more columnar "
+                        + "storage.");
+
+        private final String value;
+        private final String description;
+
+        MapStorageLayout(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
     /**
      * Action to take when an UPDATE (e.g. via MERGE INTO) modifies columns that are covered by a
      * global index.
@@ -4805,5 +4915,36 @@ public class CoreOptions implements Serializable {
 
         /** Drop all global index entries for the whole partitions affected by the update. */
         DROP_PARTITION_INDEX
+    }
+
+    /** Search mode for global index queries. */
+    public enum GlobalIndexSearchMode implements DescribedEnum {
+        FAST("fast", "Only search indexed data."),
+        FULL(
+                "full",
+                "Use snapshot next row id and global index coverage to detect missing row ids, "
+                        + "and scan raw data only when a gap exists."),
+        DETAIL(
+                "detail",
+                "Scan data files to find exact unindexed rows. "
+                        + "This can handle index invalidation caused by updates or rewrites.");
+
+        private final String value;
+        private final String description;
+
+        GlobalIndexSearchMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }

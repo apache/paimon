@@ -149,7 +149,7 @@ public class SparkMultimodalITCase {
                         .collectAsList();
         assertThat(rows).hasSize(5);
         String vectorSearchSql =
-                "select gid, sid,  embs, __paimon_vector_search_score "
+                "select gid, sid,  embs, __paimon_search_score "
                         + "from vector_search('my_db1.vector_test', 'embs', array(1.0f, 2.0f, 3.0f, 4.0f), 5) "
                         + "where date = '20260420'";
         Dataset<Row> df = spark.sql(vectorSearchSql);

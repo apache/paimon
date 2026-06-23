@@ -81,6 +81,16 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         if d.resolved =>
       PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
       d
+
+    case r: ReplaceColumns if r.resolved && isPaimonTable(r.table) =>
+      // Spark rewrites REPLACE COLUMNS into a batch that drops every existing column and re-adds
+      // the new set. Re-adding columns assigns brand-new field ids while existing data files keep
+      // the old ids, so same-named columns are read back as null, silently corrupting data. Reject
+      // it here, before the change batch reaches the catalog where it is indistinguishable from an
+      // ordinary drop+add.
+      throw new UnsupportedOperationException(
+        "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. " +
+          "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, and ADD COLUMN instead.")
   }
 
   private def writeOptions(v2WriteCommand: V2WriteCommand): Map[String, String] = {

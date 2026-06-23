@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.stats.Statistics;
@@ -71,4 +72,9 @@ public interface BatchTableCommit extends TableCommit {
 
     /** Compact the manifest entries. Generates a snapshot with {@link CommitKind#COMPACT}. */
     void compactManifests();
+
+    /** Set the logical operation type (e.g. WRITE, DELETE, MERGE) recorded in the snapshot. */
+    default BatchTableCommit withOperation(Snapshot.Operation operation) {
+        return this;
+    }
 }

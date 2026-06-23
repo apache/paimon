@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.catalyst.Compatibility
@@ -55,7 +56,8 @@ abstract class PaimonBatchWriteBase(
     val writeSchema: StructType,
     val dataSchema: StructType,
     val overwritePartitions: Option[Map[String, String]],
-    val copyOnWriteScan: Option[PaimonCopyOnWriteScan])
+    val copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[Snapshot.Operation] = None)
   extends WriteHelper
   with Serializable {
 
@@ -114,6 +116,9 @@ abstract class PaimonBatchWriteBase(
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
+    val operation = operationType.getOrElse(
+      if (overwritePartitions.isDefined) Snapshot.Operation.OVERWRITE else Snapshot.Operation.WRITE)
+    batchTableCommit.withOperation(operation)
     val addCommitMessage = WriteTaskResult.merge(messages)
     val deletedCommitMessage = copyOnWriteScan match {
       case Some(scan) => buildDeletedCommitMessage(scan.scannedFiles)

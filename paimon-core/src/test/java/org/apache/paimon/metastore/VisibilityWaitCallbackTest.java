@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.Schema;
@@ -97,8 +97,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
             buildIndex(getTableDefault(), true);
             writeFuture.get(10, TimeUnit.SECONDS);
 
-            BTreeGlobalIndexBuilder builder =
-                    new BTreeGlobalIndexBuilder(getTableDefault()).withIndexField("f1");
+            SortedGlobalIndexBuilder builder =
+                    new SortedGlobalIndexBuilder(getTableDefault(), "btree").withIndexField("f1");
             assertThat(builder.incrementalScan()).isNotPresent();
         } finally {
             executor.shutdownNow();
@@ -159,7 +159,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
     }
 
     private void buildIndex(FileStoreTable table, boolean incremental) throws Exception {
-        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("f1");
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree").withIndexField("f1");
         Optional<Pair<RowRangeIndex, List<DataSplit>>> scan =
                 incremental ? builder.incrementalScan() : builder.scan();
         assertThat(scan).isPresent();
@@ -175,8 +176,8 @@ public class VisibilityWaitCallbackTest extends TableTestBase {
     }
 
     private void buildPartitionIndex(FileStoreTable table, String partition) throws Exception {
-        BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table)
+        SortedGlobalIndexBuilder builder =
+                new SortedGlobalIndexBuilder(table, "btree")
                         .withIndexField("f1")
                         .withPartitionPredicate(partitionPredicate(table, partition));
         Optional<Pair<RowRangeIndex, List<DataSplit>>> scan = builder.scan();

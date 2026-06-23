@@ -25,9 +25,11 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -46,9 +48,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -150,7 +153,7 @@ public class LuminaVectorGlobalIndexTest {
                     new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            testVectors.forEach(writer::write);
+            writeVectors(writer, testVectors);
 
             List<ResultEntry> results = writer.finish();
             List<GlobalIndexIOMeta> metas = toIOMetas(results, metricIndexPath);
@@ -185,7 +188,7 @@ public class LuminaVectorGlobalIndexTest {
 
             int numVectors = 10;
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            testVectors.forEach(writer::write);
+            writeVectors(writer, testVectors);
 
             List<ResultEntry> results = writer.finish();
             List<GlobalIndexIOMeta> metas = toIOMetas(results, dimIndexPath);
@@ -216,7 +219,7 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         float[] wrongDimVector = new float[32];
-        assertThatThrownBy(() -> writer.write(wrongDimVector))
+        assertThatThrownBy(() -> writer.write(wrongDimVector, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dimension mismatch");
     }
@@ -236,7 +239,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -299,7 +302,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -366,7 +369,7 @@ public class LuminaVectorGlobalIndexTest {
 
         int numVectors = 350;
         List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-        testVectors.forEach(writer::write);
+        writeVectors(writer, testVectors);
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -417,7 +420,7 @@ public class LuminaVectorGlobalIndexTest {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, writeIndexOptions);
-        Arrays.stream(vectors).forEach(writer::write);
+        writeVectors(writer, vectors);
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
 
@@ -467,8 +470,8 @@ public class LuminaVectorGlobalIndexTest {
                 new LuminaVectorGlobalIndexWriter(fileWriter, vecFieldType, indexOptions);
 
         // Write using BinaryVector (InternalVector)
-        for (float[] vec : vectors) {
-            writer.write(BinaryVector.fromPrimitiveArray(vec));
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(BinaryVector.fromPrimitiveArray(vectors[i]), i);
         }
 
         List<ResultEntry> results = writer.finish();
@@ -507,8 +510,8 @@ public class LuminaVectorGlobalIndexTest {
                     new float[] {0.0f, 1.0f},
                     new float[] {0.7f, 0.7f}
                 };
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
 
         List<ResultEntry> results = writer.finish();
@@ -548,12 +551,12 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(vectors[0]); // row 0
-        writer.write(null); // row 1 - null
-        writer.write(vectors[1]); // row 2
-        writer.write(null); // row 3 - null
-        writer.write(null); // row 4 - null
-        writer.write(vectors[2]); // row 5
+        writer.write(vectors[0], 0); // row 0
+        writer.write(null, 1); // row 1 - null
+        writer.write(vectors[1], 2); // row 2
+        writer.write(null, 3); // row 3 - null
+        writer.write(null, 4); // row 4 - null
+        writer.write(vectors[2], 5); // row 5
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -591,9 +594,9 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(null);
-        writer.write(null);
-        writer.write(null);
+        writer.write(null, 0);
+        writer.write(null, 1);
+        writer.write(null, 2);
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).isEmpty();
@@ -618,12 +621,12 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(vectors[0]); // row 0
-        writer.write(null); // row 1 - null
-        writer.write(vectors[1]); // row 2
-        writer.write(vectors[2]); // row 3
-        writer.write(null); // row 4 - null
-        writer.write(vectors[3]); // row 5
+        writer.write(vectors[0], 0); // row 0
+        writer.write(null, 1); // row 1 - null
+        writer.write(vectors[1], 2); // row 2
+        writer.write(vectors[2], 3); // row 3
+        writer.write(null, 4); // row 4 - null
+        writer.write(vectors[3], 5); // row 5
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
@@ -659,8 +662,8 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(null); // row 0 - null
-        writer.write(new float[] {1.0f, 0.0f}); // row 1
+        writer.write(null, 0); // row 0 - null
+        writer.write(new float[] {1.0f, 0.0f}, 1); // row 1
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -689,8 +692,8 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(new float[] {1.0f, 0.0f}); // row 0
-        writer.write(null); // row 1 - null
+        writer.write(new float[] {1.0f, 0.0f}, 0); // row 0
+        writer.write(null, 1); // row 1 - null
 
         List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(1);
@@ -719,7 +722,7 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}))
+        assertThatThrownBy(() -> writer.write(new float[] {1.0f, Float.NaN}, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=0")
                 .hasMessageContaining("index=1")
@@ -736,18 +739,218 @@ public class LuminaVectorGlobalIndexTest {
         LuminaVectorGlobalIndexWriter writer =
                 new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        writer.write(null); // row 0 - null, advances logicalRowId
-        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}))
+        writer.write(null, 0); // row 0 - null
+        assertThatThrownBy(() -> writer.write(new float[] {Float.POSITIVE_INFINITY, 0.0f}, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=1")
                 .hasMessageContaining("index=0")
                 .hasMessageContaining("Infinity");
 
-        assertThatThrownBy(() -> writer.write(new float[] {0.0f, Float.NEGATIVE_INFINITY}))
+        assertThatThrownBy(() -> writer.write(new float[] {0.0f, Float.NEGATIVE_INFINITY}, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("rowId=1")
                 .hasMessageContaining("index=1")
                 .hasMessageContaining("-Infinity");
+    }
+
+    @Test
+    public void testBatchVectorSearch() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.98f, 0.05f},
+                    new float[] {0.0f, 1.0f},
+                    new float[] {0.05f, 0.98f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        writeVectors(writer, vectors);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(
+                        fileReader, metas, vectorType, indexOptions, executor)) {
+            float[][] queryVectors =
+                    new float[][] {
+                        new float[] {1.0f, 0.0f},
+                        new float[] {0.0f, 1.0f},
+                        new float[] {0.7f, 0.7f}
+                    };
+            BatchVectorSearch batchSearch = new BatchVectorSearch(queryVectors, 2, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            assertThat(batchResults).hasSize(3);
+
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().contains(0L)).isTrue();
+            assertThat(batchResults.get(0).get().results().contains(3L)).isTrue();
+
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().contains(4L)).isTrue();
+            assertThat(batchResults.get(1).get().results().contains(5L)).isTrue();
+
+            assertThat(batchResults.get(2)).isPresent();
+            assertThat(batchResults.get(2).get().results().getLongCardinality()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    public void testBatchVectorSearchWithFilter() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.1f, 0.95f},
+                    new float[] {0.0f, 1.0f},
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        writeVectors(writer, vectors);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(
+                        fileReader, metas, vectorType, indexOptions, executor)) {
+            float[][] queryVectors =
+                    new float[][] {new float[] {1.0f, 0.0f}, new float[] {0.0f, 1.0f}};
+
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(1L);
+            filter.add(2L);
+
+            BatchVectorSearch batchSearch =
+                    new BatchVectorSearch(queryVectors, 2, fieldName).withIncludeRowIds(filter);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            assertThat(batchResults).hasSize(2);
+
+            assertThat(batchResults.get(0)).isPresent();
+            assertThat(batchResults.get(0).get().results().contains(1L)).isTrue();
+
+            assertThat(batchResults.get(1)).isPresent();
+            assertThat(batchResults.get(1).get().results().contains(2L)).isTrue();
+        }
+    }
+
+    @Test
+    public void testBatchConsistentWithSingle() throws IOException {
+        int dimension = 32;
+        int numVectors = 100;
+        Options options = createDefaultOptions(dimension);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        writeVectors(writer, testVectors);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(
+                        fileReader, metas, vectorType, indexOptions, executor)) {
+            float[][] queryVectors =
+                    new float[][] {testVectors.get(10), testVectors.get(50), testVectors.get(90)};
+            int limit = 5;
+
+            BatchVectorSearch batchSearch = new BatchVectorSearch(queryVectors, limit, fieldName);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            for (int i = 0; i < queryVectors.length; i++) {
+                VectorSearch singleSearch = new VectorSearch(queryVectors[i], limit, fieldName);
+                Optional<ScoredGlobalIndexResult> singleResult =
+                        reader.visitVectorSearch(singleSearch).join();
+
+                assertThat(batchResults.get(i).isPresent()).isEqualTo(singleResult.isPresent());
+                if (singleResult.isPresent()) {
+                    assertThat(batchResults.get(i).get().results().getIntCardinality())
+                            .isEqualTo(singleResult.get().results().getIntCardinality());
+                    for (long rowId : singleResult.get().results()) {
+                        assertThat(batchResults.get(i).get().results().contains(rowId)).isTrue();
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testBatchVectorSearchAppliesQueryOptions() throws IOException {
+        int dimension = 32;
+        int numVectors = 100;
+        Options options = createDefaultOptions(dimension);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        writeVectors(writer, testVectors);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(
+                        fileReader, metas, vectorType, indexOptions, executor)) {
+            float[][] queryVectors =
+                    new float[][] {testVectors.get(10), testVectors.get(50), testVectors.get(90)};
+            int limit = 20;
+
+            // A query option must reach the native batch call as it does for single search;
+            // if the batch path dropped it, this batch-vs-single equality would break.
+            Map<String, String> queryOptions =
+                    Collections.singletonMap("diskann.search.list_size", "1");
+
+            BatchVectorSearch batchSearch =
+                    new BatchVectorSearch(queryVectors, limit, fieldName, queryOptions);
+            List<Optional<ScoredGlobalIndexResult>> batchResults =
+                    reader.visitBatchVectorSearch(batchSearch).join();
+
+            for (int i = 0; i < queryVectors.length; i++) {
+                VectorSearch singleSearch =
+                        new VectorSearch(queryVectors[i], limit, fieldName, queryOptions);
+                Optional<ScoredGlobalIndexResult> singleResult =
+                        reader.visitVectorSearch(singleSearch).join();
+
+                assertThat(batchResults.get(i).isPresent()).isEqualTo(singleResult.isPresent());
+                if (singleResult.isPresent()) {
+                    assertThat(batchResults.get(i).get().results().getIntCardinality())
+                            .isEqualTo(singleResult.get().results().getIntCardinality());
+                    for (long rowId : singleResult.get().results()) {
+                        assertThat(batchResults.get(i).get().results().contains(rowId)).isTrue();
+                    }
+                }
+            }
+        }
     }
 
     private Options createDefaultOptions(int dimension) {
@@ -755,6 +958,18 @@ public class LuminaVectorGlobalIndexTest {
         options.setInteger(LuminaVectorIndexOptions.DIMENSION.key(), dimension);
         options.setString(LuminaVectorIndexOptions.DISTANCE_METRIC.key(), "l2");
         return options;
+    }
+
+    private void writeVectors(LuminaVectorGlobalIndexWriter writer, List<float[]> vectors) {
+        for (int i = 0; i < vectors.size(); i++) {
+            writer.write(vectors.get(i), i);
+        }
+    }
+
+    private void writeVectors(LuminaVectorGlobalIndexWriter writer, float[][] vectors) {
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
+        }
     }
 
     private List<float[]> generateRandomVectors(int count, int dimension) {

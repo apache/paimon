@@ -130,7 +130,7 @@ public class LuminaVectorIndexOptions {
     /**
      * Resolves per-field Lumina options for {@code fieldName} into an effective {@link Options}.
      *
-     * <p>Following the convention shared with {@code paimon-vector-index} (PR #8239), a field-level
+     * <p>Following the convention shared with {@code paimon-vector} (PR #8239), a field-level
      * option is written {@code fields.<fieldName>.<option>} — <b>without</b> the {@code lumina.}
      * index-type prefix — and overrides the column-agnostic {@code lumina.<option>} for that field
      * only. For example {@code fields.embed.distance.metric} overrides {@code
@@ -139,7 +139,7 @@ public class LuminaVectorIndexOptions {
      *
      * <p>Only recognized Lumina options (the keys in {@code FIELD_OVERRIDABLE_KEYS}) are accepted;
      * any other {@code fields.<fieldName>.*} key (e.g. a merge/aggregation option) is left
-     * untouched, mirroring how {@code paimon-vector-index} ignores keys it does not recognize.
+     * untouched, mirroring how {@code paimon-vector} ignores keys it does not recognize.
      *
      * <p>Each recognized field option is flattened back to its plain {@code lumina.*} form, so the
      * rest of this class still sees only {@code lumina.*} keys and the metadata produced from these

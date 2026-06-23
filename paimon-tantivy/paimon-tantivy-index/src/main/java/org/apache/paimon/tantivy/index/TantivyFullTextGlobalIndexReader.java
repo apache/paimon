@@ -94,10 +94,8 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                     try {
                         ensureLoaded();
                         SearchResult result =
-                                borrowed.searcher.search(
-                                        fullTextSearch.queryText(),
-                                        fullTextSearch.limit(),
-                                        fullTextSearch.queryOperator());
+                                borrowed.searcher.searchJson(
+                                        fullTextSearch.queryJson(), fullTextSearch.limit());
                         return Optional.of(toScoredResult(result));
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to search Tantivy full-text index", e);

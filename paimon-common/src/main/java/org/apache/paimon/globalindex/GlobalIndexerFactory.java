@@ -29,6 +29,10 @@ public interface GlobalIndexerFactory {
 
     String identifier();
 
+    default boolean supportsFullTextSearch() {
+        return false;
+    }
+
     GlobalIndexer create(DataField indexField, Options options);
 
     /**

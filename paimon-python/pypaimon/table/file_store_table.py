@@ -429,6 +429,16 @@ class FileStoreTable(Table):
             VectorSearchBuilderImpl
         return VectorSearchBuilderImpl(self)
 
+    def new_hybrid_search_builder(self) -> 'HybridSearchBuilder':
+        from pypaimon.table.source.hybrid_search_builder import \
+            HybridSearchBuilderImpl
+        return HybridSearchBuilderImpl(self)
+
+    def new_batch_vector_search_builder(self) -> 'BatchVectorSearchBuilder':
+        from pypaimon.table.source.batch_vector_search_builder import \
+            BatchVectorSearchBuilderImpl
+        return BatchVectorSearchBuilderImpl(self)
+
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:

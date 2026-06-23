@@ -154,8 +154,8 @@ class TableUpdate:
 
         For each row in the input Arrow table:
 
-        * If a row with the same composite ``upsert_keys`` value already
-          exists → update that row in-place.
+        * If one or more rows with the same composite ``upsert_keys`` value
+          already exist → update all of them in-place.
         * Otherwise → append as a new row.
 
         The public method lives on the concrete subclasses so each can

@@ -31,6 +31,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.schema.ConversionPatterns;
@@ -159,13 +160,13 @@ public class ParquetSchemaConverter {
                                 name, localZonedTimestampType.getPrecision(), repetition, true)
                         .withId(fieldId);
             case ARRAY:
-                ArrayType arrayType = (ArrayType) type;
+            case VECTOR:
+                DataType listElementType =
+                        type instanceof ArrayType
+                                ? ((ArrayType) type).getElementType()
+                                : ((VectorType) type).getElementType();
                 Type elementParquetType =
-                        convertToParquetType(
-                                        LIST_ELEMENT_NAME,
-                                        arrayType.getElementType(),
-                                        fieldId,
-                                        depth + 1)
+                        convertToParquetType(LIST_ELEMENT_NAME, listElementType, fieldId, depth + 1)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
