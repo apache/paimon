@@ -104,8 +104,9 @@ public class HybridSearchRoute implements Serializable {
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
-        if (weight <= 0) {
-            throw new IllegalArgumentException("Weight must be positive, got: " + weight);
+        if (!Float.isFinite(weight) || weight <= 0) {
+            throw new IllegalArgumentException(
+                    "Weight must be finite and positive, got: " + weight);
         }
         this.routeType = routeType;
         this.fieldName = fieldName;

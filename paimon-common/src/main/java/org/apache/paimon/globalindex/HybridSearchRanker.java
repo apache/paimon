@@ -182,6 +182,14 @@ public class HybridSearchRanker {
         return weights[index];
     }
 
+    private static float checkWeight(float weight) {
+        if (!Float.isFinite(weight) || weight <= 0) {
+            throw new IllegalArgumentException(
+                    "Weight must be finite and positive, got: " + weight);
+        }
+        return weight;
+    }
+
     /** Weighted result from one search route. */
     public static class WeightedResult implements Serializable {
 
@@ -192,7 +200,7 @@ public class HybridSearchRanker {
 
         public WeightedResult(ScoredGlobalIndexResult result, float weight) {
             this.result = result;
-            this.weight = weight;
+            this.weight = checkWeight(weight);
         }
 
         public ScoredGlobalIndexResult result() {

@@ -19,6 +19,7 @@
 HybridSearchRankerTest so the weighted_score ranker stays consistent across
 languages (per-route min-max normalization before weighting)."""
 
+import math
 import unittest
 
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -80,6 +81,21 @@ class HybridSearchRankerTest(unittest.TestCase):
 
         # Rank-based fusion respects the 5x vector weight: rowId 1 wins.
         self.assertGreater(getter(1), getter(2))
+
+    def test_route_rejects_non_finite_weight(self):
+        for weight in (math.nan, math.inf, -math.inf):
+            with self.subTest(weight=weight):
+                with self.assertRaisesRegex(
+                        ValueError, "Weight must be finite and positive"):
+                    HybridSearchRoute.vector_route(
+                        "f", [1.0], 10, weight=weight)
+
+        with self.assertRaisesRegex(
+                ValueError, "Weight must be finite and positive"):
+            HybridSearchRoute.full_text_route(
+                '{"match":{"column":"content","terms":"paimon lake"}}',
+                10,
+                weight=math.inf)
 
 
 if __name__ == "__main__":

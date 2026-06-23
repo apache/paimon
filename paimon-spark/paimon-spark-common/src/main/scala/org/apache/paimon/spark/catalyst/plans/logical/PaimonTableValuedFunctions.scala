@@ -626,8 +626,11 @@ case class HybridSearchQuery(override val args: Seq[Expression])
       case u: UTF8String => u.toString.toFloat
       case other => throw new RuntimeException(s"Invalid $name type: ${other.getClass.getName}")
     }
-    if (parsed <= 0) {
-      throw new IllegalArgumentException(s"$name must be positive, but got: $parsed")
+    if (!java.lang.Float.isFinite(parsed) || parsed <= 0) {
+      if (name == "weight") {
+        throw new IllegalArgumentException(s"Weight must be finite and positive, got: $parsed")
+      }
+      throw new IllegalArgumentException(s"$name must be finite and positive, but got: $parsed")
     }
     parsed
   }
