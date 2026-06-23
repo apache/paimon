@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 /** Tests for {@link HybridSearchRanker}. */
@@ -124,6 +125,36 @@ public class HybridSearchRankerTest {
         assertThat(ranked.scoreGetter().score(1L)).isCloseTo(2.0f, within(0.000001f));
         assertThat(ranked.scoreGetter().score(2L)).isCloseTo(2.0f, within(0.000001f));
         assertThat(ranked.scoreGetter().score(3L)).isCloseTo(2.0f, within(0.000001f));
+    }
+
+    @Test
+    public void testRejectNonFiniteWeights() {
+        ScoredGlobalIndexResult result = result(new long[] {1}, new float[] {1.0f});
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRanker.rrf(
+                                        Collections.singletonList(result),
+                                        new float[] {Float.NaN},
+                                        1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRanker.weightedScore(
+                                        Collections.singletonList(result),
+                                        new float[] {Float.POSITIVE_INFINITY},
+                                        1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                new HybridSearchRanker.WeightedResult(
+                                        result, Float.NEGATIVE_INFINITY))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
     }
 
     private ScoredGlobalIndexResult result(long[] rowIds, float[] scores) {

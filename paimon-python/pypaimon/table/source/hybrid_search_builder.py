@@ -18,6 +18,7 @@
 """Builder to build hybrid search."""
 
 import heapq
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -77,8 +78,9 @@ class HybridSearchRoute:
                 "Query cannot be None for full-text route")
         if self.limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self.limit)
-        if self.weight <= 0:
-            raise ValueError("Weight must be positive, got: %s" % self.weight)
+        if not math.isfinite(self.weight) or self.weight <= 0:
+            raise ValueError(
+                "Weight must be finite and positive, got: %s" % self.weight)
         self.options = dict(self.options or {})
         if self.route_type == self.FULL_TEXT:
             _check_full_text_options(self.options)

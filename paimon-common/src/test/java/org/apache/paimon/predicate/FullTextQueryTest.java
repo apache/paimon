@@ -199,4 +199,41 @@ public class FullTextQueryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Full-text hybrid route options are not supported yet");
     }
+
+    @Test
+    public void testHybridRouteRejectsNonFiniteWeight() {
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.vector(
+                                        "embedding",
+                                        new float[] {1.0f},
+                                        10,
+                                        Float.NaN,
+                                        Collections.emptyMap()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.vector(
+                                        "embedding",
+                                        new float[] {1.0f},
+                                        10,
+                                        Float.POSITIVE_INFINITY,
+                                        Collections.emptyMap()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.builder()
+                                        .query(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"paimon lake\"}}")
+                                        .limit(10)
+                                        .weight(Float.NEGATIVE_INFINITY)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+    }
 }
