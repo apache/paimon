@@ -40,6 +40,7 @@ public interface ParquetBuilder<T> extends Serializable {
     default ParquetWriter<T> createWriter(
             OutputFile out, String compression, Supplier<Map<String, byte[]>> metadataSupplier)
             throws IOException {
-        return createWriter(out, compression);
+        throw new UnsupportedOperationException(
+                "This ParquetBuilder does not support writer metadata.");
     }
 }

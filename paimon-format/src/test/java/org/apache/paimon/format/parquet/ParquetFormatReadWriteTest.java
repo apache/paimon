@@ -29,6 +29,7 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.SupportsReaderArrowSchema;
 import org.apache.paimon.format.SupportsWriterMetadata;
+import org.apache.paimon.format.parquet.writer.ParquetBuilder;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
@@ -41,10 +42,12 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.io.OutputFile;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -139,6 +142,27 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             Assertions.assertThat(readArrowSchema).hasValue(arrowSchema);
             Assertions.assertThat(FormatMetadataUtils.readFieldMetadata(readArrowSchema.get()))
                     .containsEntry("name", fieldMetadata);
+        }
+    }
+
+    @Test
+    public void testUnsupportedMetadataBuilderFailsExplicitly() throws Exception {
+        ParquetBuilder<InternalRow> unsupportedMetadataBuilder =
+                new ParquetBuilder<InternalRow>() {
+                    @Override
+                    public ParquetWriter<InternalRow> createWriter(
+                            OutputFile out, String compression) {
+                        throw new AssertionError("Two-argument createWriter should not be called.");
+                    }
+                };
+        ParquetWriterFactory factory = new ParquetWriterFactory(unsupportedMetadataBuilder);
+        PositionOutputStream out = fileIO.newOutputStream(file, false);
+        try {
+            Assertions.assertThatThrownBy(() -> factory.create(out, "zstd"))
+                    .isInstanceOf(UnsupportedOperationException.class)
+                    .hasMessageContaining("does not support writer metadata");
+        } finally {
+            out.close();
         }
     }
 
