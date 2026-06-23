@@ -24,6 +24,7 @@ pandas>=1.5,<3; python_version >= "3.9"
 polars>=1,<2; python_version=="3.8"
 polars>=1.32,<2; python_version>="3.9"
 pyarrow>=16,<20
+# BitMap64 is required by RoaringBitmap64 and is available since pyroaring 1.0.0.
 pyroaring>=1.0.0
 readerwriterlock>=1,<2
 requests>=2.21.0,<3
