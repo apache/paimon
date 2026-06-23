@@ -125,6 +125,10 @@ def main():
     from pypaimon.cli.cli_sql import add_sql_subcommand
     add_sql_subcommand(subparsers)
 
+    # Branch commands
+    from pypaimon.cli.cli_branch import add_branch_subcommands
+    add_branch_subcommands(subparsers)
+
     args = parser.parse_args()
     
     if args.command is None:
