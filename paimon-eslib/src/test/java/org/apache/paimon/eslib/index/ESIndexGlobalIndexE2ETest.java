@@ -257,6 +257,57 @@ class ESIndexGlobalIndexE2ETest {
         }
     }
 
+    @Test
+    void isNullReturnsNullRowsViaIndex(@TempDir java.nio.file.Path tmp) throws IOException {
+        // Rows 3 and 7 have a NULL value. addNullDoc writes an empty doc (field absent) for them,
+        // so
+        // IS NULL must be index-evaluable (present, NOT Optional.empty()) and return exactly {3,7};
+        // IS NOT NULL returns the other 8.
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-isnull");
+        Files.createDirectories(archiveDir);
+        LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
+        ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
+
+        int n = 10;
+        Set<Integer> nullRows = new HashSet<>(Arrays.asList(3, 7));
+        for (int i = 0; i < n; i++) {
+            writer.write(nullRows.contains(i) ? null : BinaryString.fromString("row" + i), i);
+        }
+        List<ResultEntry> entries = writer.finish();
+        ResultEntry entry = entries.get(0);
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+
+        FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+
+        Optional<GlobalIndexResult> isNull = reader.visitIsNull(kRef).join();
+        assertTrue(isNull.isPresent(), "IS NULL is index-evaluable (not a raw-scan fallback)");
+        RoaringNavigableMap64 nullHits = isNull.get().results();
+        assertEquals(2, nullHits.getIntCardinality(), "two null rows");
+        assertTrue(contains(nullHits, 3L) && contains(nullHits, 7L), "rows 3 and 7 are null");
+
+        Optional<GlobalIndexResult> isNotNull = reader.visitIsNotNull(kRef).join();
+        assertTrue(isNotNull.isPresent(), "IS NOT NULL is index-evaluable");
+        RoaringNavigableMap64 nn = isNotNull.get().results();
+        assertEquals(8, nn.getIntCardinality(), "eight non-null rows");
+        assertTrue(!contains(nn, 3L) && !contains(nn, 7L), "null rows excluded from IS NOT NULL");
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /**
      * Verifies the DiskBBQ vector codec write path through {@link ESIndexGlobalIndexWriter}.
      *

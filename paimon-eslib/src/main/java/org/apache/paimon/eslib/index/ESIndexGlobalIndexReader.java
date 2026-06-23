@@ -684,12 +684,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-        // The writer SKIPS null values (they are never added as Lucene docs), so the index has no
-        // record of null rows and cannot evaluate IS NULL via notExists() — doing so would wrongly
-        // return "no null rows" and silently drop them. Return empty() = "index can't evaluate" so
-        // the
-        // engine falls back to a raw scan for this predicate (correct results).
-        return async(Optional::empty);
+        // The writer registers an empty doc for every null row (addNullDoc / flushPendingDocs
+        // padding), with the field absent. So notExists() = MUST_NOT FieldExistsQuery matches
+        // exactly
+        // those rows and IS NULL is index-evaluable (no raw-scan fallback needed).
+        return async(() -> dispatchFilter(fieldRef, IndexFilter.notExists()));
     }
 
     // =================== helpers =====================
