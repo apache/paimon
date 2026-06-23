@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.table.FileStoreTable;
@@ -155,6 +156,31 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
         // snapshot keeps the larger of the previous latest and the target nextRowId.
         Snapshot restored = table.snapshot(4);
         assertThat(restored.nextRowId()).isEqualTo(latestNextRowId);
+    }
+
+    @Test
+    public void testRestoreTriggersCommitCallback() throws Exception {
+        sql(
+                "CREATE TABLE T (id INT, name STRING) WITH ("
+                        + "'metadata.iceberg.storage' = 'table-location')");
+
+        FileStoreTable table = paimonTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        commitRow(table, 1, "a");
+        commitRow(table, 2, "b");
+        commitRow(table, 3, "c");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+                .containsExactly(Row.of(3L, 1L, 4L));
+        assertEquals(4, snapshotManager.latestSnapshotId());
+
+        // The restore must trigger the commit callbacks like a regular commit, so external views
+        // stay in sync with the restored state. With Iceberg compatibility enabled, that means
+        // Iceberg metadata is generated for the restore snapshot.
+        Path icebergMetadata = new Path(table.location(), "metadata/v4.metadata.json");
+        assertTrue(table.fileIO().exists(icebergMetadata));
     }
 
     private void assertRestoreDelta(

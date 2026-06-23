@@ -1246,7 +1246,55 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.properties(),
                         nextRowId);
 
-        return commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+        boolean success =
+                commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+        if (success) {
+            // Like a regular commit, notify the commit callbacks so external views stay in sync
+            // with the restored state (e.g. Iceberg compatibility metadata and chain-table
+            // overwrite handling). The restore is an overwrite from the previous latest to the
+            // target, so the delta files and index changes describe the transition the callbacks
+            // need.
+            List<IndexManifestEntry> indexChanges = restoreIndexChanges(latest, targetSnapshot);
+            CommitCallback.Context context =
+                    new CommitCallback.Context(
+                            SimpleFileEntry.from(new ArrayList<>(latestEntries.values())),
+                            deltaFiles,
+                            indexChanges,
+                            newSnapshot,
+                            newSnapshot.commitIdentifier());
+            commitCallbacks.forEach(callback -> callback.call(context));
+        }
+        return success;
+    }
+
+    /**
+     * Computes the index file changes between the previous latest snapshot and the restore target,
+     * mirroring how the data delta files are derived: entries that only exist in the previous latest
+     * are marked as {@link FileKind#DELETE}, entries that only exist in the target are kept as ADD.
+     */
+    private List<IndexManifestEntry> restoreIndexChanges(Snapshot latest, Snapshot target) {
+        Set<IndexManifestEntry> latestIndexEntries = readIndexEntries(latest.indexManifest());
+        Set<IndexManifestEntry> targetIndexEntries = readIndexEntries(target.indexManifest());
+
+        List<IndexManifestEntry> indexChanges = new ArrayList<>();
+        for (IndexManifestEntry entry : latestIndexEntries) {
+            if (!targetIndexEntries.contains(entry)) {
+                indexChanges.add(entry.toDeleteEntry());
+            }
+        }
+        for (IndexManifestEntry entry : targetIndexEntries) {
+            if (!latestIndexEntries.contains(entry)) {
+                indexChanges.add(entry);
+            }
+        }
+        return indexChanges;
+    }
+
+    private Set<IndexManifestEntry> readIndexEntries(@Nullable String indexManifest) {
+        if (indexManifest == null) {
+            return Collections.emptySet();
+        }
+        return new HashSet<>(indexManifestFile.read(indexManifest));
     }
 
     @Nullable
