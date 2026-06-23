@@ -101,6 +101,39 @@ class MapSharedShreddingRowConverterTest {
     }
 
     @Test
+    void testBasicMapWithNullValue() {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
+        MapSharedShreddingRowConverter converter =
+                new MapSharedShreddingRowConverter(logicalType, columns("metrics", 2));
+
+        InternalRow row = converter.convert(GenericRow.of(stringKeyMap("a", null, "b", 20L)));
+        InternalRow metrics = row.getRow(0, 4);
+
+        // Target physical row:
+        // metrics = [__field_mapping=[a, b], __col_0=null, __col_1=20,
+        //            __overflow=null]
+        assertThat(metrics.getArray(0).toIntArray()).containsExactly(0, 1);
+        assertThat(metrics.isNullAt(1)).isTrue();
+        assertThat(metrics.getLong(2)).isEqualTo(20L);
+        assertThat(metrics.isNullAt(3)).isTrue();
+        assertThat(converter.buildFieldMeta("metrics"))
+                .isEqualTo(
+                        new MapSharedShreddingFieldMeta(
+                                nameToId("a", 0, "b", 1),
+                                fieldToColumns(
+                                        0, Collections.singletonList(0),
+                                        1, Collections.singletonList(1)),
+                                new TreeSet<Integer>(),
+                                2,
+                                2));
+    }
+
+    @Test
     void testOverflowWhenExceedK() {
         RowType logicalType =
                 DataTypes.ROW(

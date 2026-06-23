@@ -121,10 +121,11 @@ public class MapSharedShreddingRowConverter {
 
         MapSharedShreddingColumnAllocator.RowAllocation allocation =
                 context.allocator.allocateRow(fieldIds);
+        int[] colToField = allocation.colToField();
         GenericRow physicalStruct = new GenericRow(context.numColumns + 2);
-        physicalStruct.setField(0, new GenericArray(allocation.colToField()));
+        physicalStruct.setField(0, new GenericArray(colToField));
         for (int i = 0; i < context.numColumns; i++) {
-            int fieldId = allocation.colToField()[i];
+            int fieldId = colToField[i];
             if (fieldId == -1) {
                 physicalStruct.setField(1 + i, null);
             } else {

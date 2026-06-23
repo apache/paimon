@@ -103,7 +103,7 @@ public class MapSharedShreddingColumnAllocator {
         }
 
         public int[] colToField() {
-            return colToField;
+            return colToField.clone();
         }
 
         public List<Integer> overflowFields() {
