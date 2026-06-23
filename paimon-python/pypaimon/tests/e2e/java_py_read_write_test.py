@@ -25,6 +25,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.globalindex.full_text_query import MatchQuery
 from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 from pypaimon.schema.data_types import VectorType
 from pypaimon.schema.schema import Schema
@@ -447,6 +448,27 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_partial_append_does_not_trigger_index_action()
         if sys.version_info[:2] >= (3, 7):
             self._test_index_manifest_inherited_after_write()
+
+    def test_read_btree_raw_fallback(self):
+        table = self.catalog.get_table('default.test_btree_raw_fallback')
+        fast_builder = table.new_read_builder()
+        fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
+        fast_builder.with_filter(fast_predicate)
+        fast_result = fast_builder.new_read().to_arrow(
+            fast_builder.new_scan().plan().splits())
+        self.assertEqual(0, fast_result.num_rows)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        read_builder = full_table.new_read_builder()
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().equal('k', 'k4'))
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'k': ['k4'],
+            'v': ['v4'],
+        })
+        self.assertEqual(expected, actual)
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -1030,8 +1052,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Use FullTextSearchBuilder to search
         builder = table.new_full_text_search_builder()
-        builder.with_text_column('content')
-        builder.with_query_text('paimon')
+        builder.with_query(MatchQuery('paimon', 'content'))
         builder.with_limit(10)
 
         result = builder.execute_local()
@@ -1053,8 +1074,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "tantivy" - only row 1
         builder2 = table.new_full_text_search_builder()
-        builder2.with_text_column('content')
-        builder2.with_query_text('tantivy')
+        builder2.with_query(MatchQuery('tantivy', 'content'))
         builder2.with_limit(10)
 
         result2 = builder2.execute_local()
@@ -1072,8 +1092,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for "full-text search" - rows 1, 3
         builder3 = table.new_full_text_search_builder()
-        builder3.with_text_column('content')
-        builder3.with_query_text('full-text search')
+        builder3.with_query(MatchQuery('full-text search', 'content'))
         builder3.with_limit(10)
 
         result3 = builder3.execute_local()
@@ -1096,8 +1115,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
         ngram_builder = ngram_table.new_full_text_search_builder()
-        ngram_builder.with_text_column('content')
-        ngram_builder.with_query_text('中文')
+        ngram_builder.with_query(MatchQuery('中文', 'content'))
         ngram_builder.with_limit(10)
 
         ngram_result = ngram_builder.execute_local()
@@ -1115,8 +1133,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
 
         fragment_builder = ngram_table.new_full_text_search_builder()
-        fragment_builder.with_text_column('content')
-        fragment_builder.with_query_text('片段')
+        fragment_builder.with_query(MatchQuery('片段', 'content'))
         fragment_builder.with_limit(10)
 
         fragment_result = fragment_builder.execute_local()
@@ -1125,9 +1142,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(fragment_row_ids, [4])
 
         ngram_and_builder = ngram_table.new_full_text_search_builder()
-        ngram_and_builder.with_text_column('content')
-        ngram_and_builder.with_query_text('中文 片段')
-        ngram_and_builder.with_query_operator('and')
+        ngram_and_builder.with_query(MatchQuery('中文 片段', 'content', operator='and'))
         ngram_and_builder.with_limit(10)
 
         ngram_and_result = ngram_and_builder.execute_local()
@@ -1137,8 +1152,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
         simple_builder = simple_table.new_full_text_search_builder()
-        simple_builder.with_text_column('content')
-        simple_builder.with_query_text('running')
+        simple_builder.with_query(MatchQuery('running', 'content'))
         simple_builder.with_limit(10)
 
         simple_result = simple_builder.execute_local()
@@ -1150,8 +1164,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Search for Chinese words using the jieba tokenizer metadata written by Java.
         jieba_builder = jieba_table.new_full_text_search_builder()
-        jieba_builder.with_text_column('content')
-        jieba_builder.with_query_text('售货员')
+        jieba_builder.with_query(MatchQuery('售货员', 'content'))
         jieba_builder.with_limit(10)
 
         jieba_result = jieba_builder.execute_local()
@@ -1169,8 +1182,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ['张华在百货公司当售货员'])
 
         jieba_phrase_builder = jieba_table.new_full_text_search_builder()
-        jieba_phrase_builder.with_text_column('content')
-        jieba_phrase_builder.with_query_text('自然')
+        jieba_phrase_builder.with_query(MatchQuery('自然', 'content'))
         jieba_phrase_builder.with_limit(10)
 
         jieba_phrase_result = jieba_phrase_builder.execute_local()
@@ -1179,9 +1191,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(jieba_phrase_row_ids, [3])
 
         jieba_and_builder = jieba_table.new_full_text_search_builder()
-        jieba_and_builder.with_text_column('content')
-        jieba_and_builder.with_query_text('中文 自然')
-        jieba_and_builder.with_query_operator('and')
+        jieba_and_builder.with_query(MatchQuery('中文 自然', 'content', operator='and'))
         jieba_and_builder.with_limit(10)
 
         jieba_and_result = jieba_and_builder.execute_local()
@@ -1252,6 +1262,47 @@ class JavaPyReadWriteTest(unittest.TestCase):
         ids = pa_table.column('id').to_pylist()
         print(f"paimon-vindex vector search matched rows: ids={ids}")
         self.assertIn(0, ids)
+
+    def test_read_vindex_vector_raw_fallback(self):
+        """Test raw fallback for a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table(
+            'default.test_vindex_vector_raw_fallback')
+        fast_result = (table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        fast_ids = sorted(list(fast_result.results()))
+        print(
+            "paimon-vindex fast-mode vector search matched rows: "
+            f"ids={fast_ids}")
+        self.assertNotIn(3, fast_ids)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        full_result = (full_table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        row_ids = sorted(list(full_result.results()))
+        print(
+            "paimon-vindex full-mode vector search matched rows: "
+            f"ids={row_ids}")
+        self.assertEqual([3], row_ids)
+
+        read_builder = full_table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(full_result)
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(scan.plan().splits())
+        self.assertEqual(pa_table.num_rows, 1)
+        self.assertEqual([3], pa_table.column('id').to_pylist())
 
     def test_read_lumina_vector_with_btree_filter(self):
         """Vector search + btree scalar pre-filter, using a table that Java

@@ -452,6 +452,16 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
+    protected boolean tableExists(Identifier identifier) {
+        return JdbcUtils.tableExists(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName())
+                || super.tableExists(identifier);
+    }
+
+    @Override
     public boolean caseSensitive() {
         return false;
     }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.{PaimonRelation, PaimonUpdateAction}
 import org.apache.paimon.spark.schema.{PaimonMetadataColumn, SparkSystemColumns}
@@ -78,7 +79,7 @@ case class MergeIntoPaimonTable(
     } else {
       performMergeForNonPkTable(sparkSession)
     }
-    writer.commit(commitMessages)
+    writer.commit(commitMessages, Snapshot.Operation.MERGE)
     Seq.empty[Row]
   }
 

@@ -21,7 +21,7 @@ package org.apache.paimon.globalindex.testvector;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -32,12 +32,13 @@ import org.apache.paimon.types.FloatType;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * A test-only {@link GlobalIndexer} for vector similarity search. Uses brute-force linear scan for
- * ANN queries. No native library dependency required.
+ * A test-only {@link VectorGlobalIndexer} for vector similarity search. Uses brute-force linear
+ * scan for ANN queries. No native library dependency required.
  *
  * <p>Supported distance metrics (configured via option {@code test.vector.metric}):
  *
@@ -47,7 +48,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *   <li>{@code inner_product} - Inner product similarity (directly used as score)
  * </ul>
  */
-public class TestVectorGlobalIndexer implements GlobalIndexer {
+public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
 
     /** Option key for vector dimension. */
     public static final String OPT_DIMENSION = "test.vector.dimension";
@@ -58,6 +59,8 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
     public static final String OPT_REQUIRED_OPTION_KEY = "test.vector.required-option.key";
 
     public static final String OPT_REQUIRED_OPTION_VALUE = "test.vector.required-option.value";
+
+    private static final AtomicInteger METRIC_CALLS = new AtomicInteger();
 
     private final DataType fieldType;
     private final int dimension;
@@ -96,7 +99,17 @@ public class TestVectorGlobalIndexer implements GlobalIndexer {
         return dimension;
     }
 
+    @Override
     public String metric() {
+        METRIC_CALLS.incrementAndGet();
         return metric;
+    }
+
+    public static void resetMetricCalls() {
+        METRIC_CALLS.set(0);
+    }
+
+    public static int metricCalls() {
+        return METRIC_CALLS.get();
     }
 }

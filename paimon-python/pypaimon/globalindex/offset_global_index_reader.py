@@ -48,6 +48,17 @@ class OffsetGlobalIndexReader(GlobalIndexReader):
             self._wrapped.visit_vector_search(
                 vector_search.offset_range(self._offset, self._to)))
 
+    def visit_batch_vector_search(
+            self, batch_vector_search) -> 'Future[List[Optional[GlobalIndexResult]]]':
+        source = self._wrapped.visit_batch_vector_search(
+            batch_vector_search.offset_range(self._offset, self._to))
+
+        def transform(results):
+            return [r.offset(self._offset) if r is not None else None
+                    for r in results]
+
+        return _map_future(source, transform)
+
     def visit_full_text_search(self, full_text_search) -> 'Future[Optional[GlobalIndexResult]]':
         return self._apply_offset_future(
             self._wrapped.visit_full_text_search(full_text_search))

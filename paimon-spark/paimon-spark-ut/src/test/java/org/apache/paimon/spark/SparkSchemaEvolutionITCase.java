@@ -249,6 +249,23 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testReplaceColumnsUnsupported() {
+        createTable("testReplaceColumnsUnsupported");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE testReplaceColumnsUnsupported REPLACE COLUMNS "
+                                                + "(a BIGINT, bb STRING, c STRING)"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. "
+                                        + "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, "
+                                        + "and ADD COLUMN instead."));
+    }
+
+    @Test
     public void testDropPartitionKey() {
         spark.sql(
                 "CREATE TABLE testDropPartitionKey (\n"

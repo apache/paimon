@@ -41,6 +41,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -71,14 +73,16 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "partitions",
                         type = @DataTypeHint("STRING"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String indexColumn,
             String indexType,
-            String partitions)
+            @Nullable String partitions,
+            @Nullable Boolean dryRun)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -141,6 +145,21 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 indexTypeLower,
                 columnsDesc,
                 table.name());
+
+        // Dry run: report what would be dropped without committing any change.
+        if (dryRun != null && dryRun) {
+            return new String[] {
+                "Dry run: "
+                        + waitToDelete.size()
+                        + " "
+                        + indexTypeLower
+                        + " global index files would be dropped for columns '"
+                        + columnsDesc
+                        + "' on table '"
+                        + table.name()
+                        + "'"
+            };
+        }
 
         if (waitToDelete.isEmpty()) {
             return new String[] {

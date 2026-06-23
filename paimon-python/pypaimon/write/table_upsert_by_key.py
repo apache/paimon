@@ -37,8 +37,8 @@ class TableUpsertByKey:
     Table upsert by one or more user-specified key columns for append-only tables.
 
     For each row in the input Arrow table:
-    - If a row with the same upsert_keys composite value already exists → update that row
-      (in-place rewrite).
+    - If one or more rows with the same upsert_keys composite value already exist →
+      update all of them (in-place rewrite).
     - If no matching row exists → append as a new row.
 
     All upsert_keys must be columns present in both the input data and the table schema.
@@ -168,9 +168,10 @@ class TableUpsertByKey:
             partition_data, input_key_tuples, partition_spec,
         )
 
-        # 3. Scan partition once, keeping only key → _ROW_ID pairs that
-        #    appear in the input (memory ∝ |input|, not |partition|).
-        key_to_row_id = self._build_key_to_row_id_map(
+        # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
+        #    appear in the input (memory ∝ matched existing rows, not the
+        #    whole partition).
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
 
@@ -178,18 +179,26 @@ class TableUpsertByKey:
         matched_indices: List[int] = []
         new_indices: List[int] = []
         for i, key_tuple in enumerate(input_key_tuples):
-            (matched_indices if key_tuple in key_to_row_id else new_indices).append(i)
+            (matched_indices if key_tuple in key_to_row_ids else new_indices).append(i)
 
         logger.info(
             "Upserting partition %s: %d matched, %d new",
             partition_spec, len(matched_indices), len(new_indices),
         )
+        total_updates = sum(
+            len(key_to_row_ids[input_key_tuples[i]]) for i in matched_indices)
+        if total_updates > len(matched_indices):
+            logger.info(
+                "Upsert fan-out in partition %s: %d input rows expand to "
+                "%d row updates", partition_spec,
+                len(matched_indices), total_updates,
+            )
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
             commit_messages.extend(self._do_updates(
                 partition_data, matched_indices,
-                input_key_tuples, key_to_row_id, update_cols,
+                input_key_tuples, key_to_row_ids, update_cols,
             ))
         if new_indices:
             commit_messages.extend(self._do_appends(partition_data, new_indices))
@@ -274,14 +283,14 @@ class TableUpsertByKey:
         # that partition columns can be stripped first.  The same non-partition
         # key may legally appear in different partitions.
 
-    def _build_key_to_row_id_map(
+    def _build_key_to_row_ids_map(
             self,
             match_keys: List[str],
             partition_spec: Optional[Dict[str, Any]],
             input_key_set: set,
-    ) -> Dict[_KeyTuple, int]:
+    ) -> Dict[_KeyTuple, List[int]]:
         """
-        Scan the partition in batches and collect key → _ROW_ID only for
+        Scan the partition in batches and collect key → [_ROW_ID, ...] for
         rows whose composite key is in *input_key_set*.
 
         The partition spec (if any) is pushed down as an ``and`` of per-key
@@ -322,7 +331,7 @@ class TableUpsertByKey:
         )
 
         # Stream batches and filter against input_key_set on-the-fly
-        key_to_row_id: Dict[_KeyTuple, int] = {}
+        key_to_row_ids: Dict[_KeyTuple, List[int]] = {}
         row_id_col = SpecialFields.ROW_ID.name
         for batch in table_read.to_arrow_batch_reader(splits):
             batch_key_cols = [batch.column(k).to_pylist() for k in match_keys]
@@ -330,27 +339,28 @@ class TableUpsertByKey:
             for j, row_id in enumerate(batch_row_ids):
                 key_tuple = tuple(col[j] for col in batch_key_cols)
                 if key_tuple in input_key_set:
-                    key_to_row_id[key_tuple] = row_id
+                    key_to_row_ids.setdefault(key_tuple, []).append(row_id)
 
-        return key_to_row_id
+        return key_to_row_ids
 
     def _do_updates(
             self,
             data: pa.Table,
             matched_indices: List[int],
             input_key_tuples: List[_KeyTuple],
-            key_to_row_id: Dict[_KeyTuple, int],
+            key_to_row_ids: Dict[_KeyTuple, List[int]],
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
-        """Update matched rows by rewriting them in-place via
-        :class:`TableUpdateByRowId`."""
-        matched_data = data.take(matched_indices)
-        row_id_array = pa.array(
-            [key_to_row_id[input_key_tuples[i]] for i in matched_indices],
-            type=pa.int64(),
-        )
-        update_data = matched_data.append_column(
-            SpecialFields.ROW_ID.name, row_id_array,
+        """Update matched rows in-place via :class:`TableUpdateByRowId`."""
+        expanded_input_indices: List[int] = []
+        row_ids: List[int] = []
+        for i in matched_indices:
+            for row_id in key_to_row_ids[input_key_tuples[i]]:
+                expanded_input_indices.append(i)
+                row_ids.append(row_id)
+
+        update_data = data.take(expanded_input_indices).append_column(
+            SpecialFields.ROW_ID.name, pa.array(row_ids, type=pa.int64()),
         )
 
         cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)

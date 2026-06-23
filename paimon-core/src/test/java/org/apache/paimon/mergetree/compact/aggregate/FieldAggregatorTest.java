@@ -831,6 +831,95 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldNestedAppendAggWithCountLimitOnFirstInputArray() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Collections.emptyList(),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(null, array(row(0, 1, "B"), null, row(0, 1, "b"), row(0, 1, "C")));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimitWithoutSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B")));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D")));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitOnFirstInputArrayWithoutSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(
+                                null,
+                                array(
+                                        row(0, 1, "B"),
+                                        row(1, 2, "C"),
+                                        row(2, 3, "D"),
+                                        row(0, 1, "B_updated")));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated"), row(1, 2, "C")));
+    }
+
+    @Test
     public void testFieldNestedUpdateAggWithSequenceField() {
         DataType elementRowType =
                 DataTypes.ROW(
@@ -1076,10 +1165,84 @@ public class FieldAggregatorTest {
                         Arrays.asList(row(0, 1, "B_updated", 2), row(1, 2, "C", 3)));
     }
 
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitUpdatesExistingKeyAtLimit() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        Collections.singletonList("seq"),
+                        2);
+
+        InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
+
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(2, 3, "D", 5)));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggWithCountLimitOnFirstInputArrayWithSequence() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()),
+                        DataTypes.FIELD(3, "seq", DataTypes.INT()));
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        Collections.singletonList("seq"),
+                        2);
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+        InternalArray accumulator =
+                (InternalArray)
+                        agg.agg(
+                                null,
+                                array(
+                                        row(0, 1, "B", 1),
+                                        row(1, 2, "C", 3),
+                                        row(2, 3, "D", 5),
+                                        row(0, 1, "B_updated", 4)));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(
+                        Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
+    }
+
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
         return IntStream.range(0, array.size())
                 .mapToObj(i -> elementGetter.getElementOrNull(array, i))
                 .collect(Collectors.toList());
+    }
+
+    private GenericArray array(InternalRow... rows) {
+        return new GenericArray(rows);
     }
 
     private GenericArray singletonArray(InternalRow row) {

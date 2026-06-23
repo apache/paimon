@@ -20,8 +20,10 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MapStorageLayout;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.TableType;
+import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexerFactory;
@@ -69,6 +71,7 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
+import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
@@ -355,6 +358,8 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+
+        validateMapStorageLayout(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -602,6 +607,52 @@ public class SchemaValidation {
         }
 
         createMergeFunctionFactory(schema);
+    }
+
+    private static void validateMapStorageLayout(TableSchema schema, CoreOptions options) {
+        String layoutSuffix = "." + MAP_STORAGE_LAYOUT;
+        Map<String, DataField> fieldMap = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            fieldMap.put(field.name(), field);
+        }
+
+        for (String key : options.toMap().keySet()) {
+            if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
+                continue;
+            }
+
+            String fieldName =
+                    key.substring(
+                            (FIELDS_PREFIX + ".").length(), key.length() - layoutSuffix.length());
+            DataField field = fieldMap.get(fieldName);
+            if (field == null) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout but does not exist in table schema.",
+                                fieldName));
+            }
+
+            DataType fieldType = field.type();
+            if (!(fieldType instanceof MapType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout but its type is not MAP.",
+                                fieldName));
+            }
+
+            MapStorageLayout layout = options.mapStorageLayout(fieldName);
+            if (layout != MapStorageLayout.SHARED_SHREDDING) {
+                continue;
+            }
+
+            if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Column '%s' is configured with map.storage-layout=shared-shredding but its type is not MAP<STRING, T>.",
+                                fieldName));
+            }
+            options.mapSharedShreddingMaxColumns(fieldName);
+        }
     }
 
     private static void validateFileIndex(TableSchema schema) {

@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -85,6 +86,27 @@ public class JdbcCatalogTest extends CatalogTestBase {
     @Override // ignore for lock error
     @Test
     public void testGetTable() throws Exception {}
+
+    @Test
+    public void testDropTableWhenTablePathMissing() throws Exception {
+        String databaseName = "test_db";
+        String tableName = "new_table";
+        catalog.createDatabase(databaseName, false);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        JdbcCatalog jdbcCatalog = (JdbcCatalog) catalog;
+        Path path = jdbcCatalog.getTableLocation(identifier);
+        jdbcCatalog.fileIO().deleteDirectoryQuietly(path);
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("There is no paimon table in " + path);
+        assertThat(jdbcCatalog.listTables(databaseName)).contains(tableName);
+
+        jdbcCatalog.dropTable(identifier, false);
+        assertThat(jdbcCatalog.listTables(databaseName)).doesNotContain(tableName);
+    }
 
     @Test
     public void testAcquireLockFail() throws SQLException, InterruptedException {

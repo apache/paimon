@@ -90,6 +90,11 @@ public class CoreOptions implements Serializable {
 
     public static final String MERGE_MAP_TS_FIELD = "ts-field";
 
+    public static final String MAP_STORAGE_LAYOUT = "map.storage-layout";
+
+    public static final String MAP_SHARED_SHREDDING_MAX_COLUMNS =
+            "map.shared-shredding.max-columns";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -1216,6 +1221,23 @@ public class CoreOptions implements Serializable {
                             "Whether only overwrite dynamic partition when overwriting a partitioned table with "
                                     + "dynamic partition columns. Works only when the table has partition keys.");
 
+    /** The strategy for partition expiration. */
+    public enum PartitionExpireStrategy {
+        VALUES_TIME("values-time"),
+        UPDATE_TIME("update-time");
+
+        private final String value;
+
+        PartitionExpireStrategy(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+    }
+
     public static final ConfigOption<String> PARTITION_EXPIRATION_STRATEGY =
             key("partition.expiration-strategy")
                     .stringType()
@@ -1260,6 +1282,20 @@ public class CoreOptions implements Serializable {
                             "The batch size of partition expiration. "
                                     + "By default, all partitions to be expired will be expired together, which may cause a risk of out-of-memory. "
                                     + "Use this parameter to divide partition expiration process and mitigate memory pressure.");
+
+    public static final ConfigOption<Boolean> COMPACTION_SKIP_EXPIRED_PARTITIONS =
+            key("compaction.skip-expired-partitions")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to skip compacting partitions that are already expired "
+                                    + "according to 'partition.expiration-time'. "
+                                    + "Only effective when 'partition.expiration-time' is set "
+                                    + "and 'partition.expiration-strategy' is 'values-time'. "
+                                    + "Note: even when this option is enabled, expired partitions "
+                                    + "may still be deleted during the compaction commit phase "
+                                    + "as a side effect of partition expiration triggered by "
+                                    + "committing the remaining active partitions.");
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
             key("partition.timestamp-formatter")
@@ -3592,6 +3628,10 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_EXPIRATION_STRATEGY);
     }
 
+    public boolean compactionSkipExpiredPartitions() {
+        return options.get(COMPACTION_SKIP_EXPIRED_PARTITIONS);
+    }
+
     @Nullable
     public String dataFileExternalPaths() {
         return options.get(DATA_FILE_EXTERNAL_PATHS);
@@ -4845,6 +4885,59 @@ public class CoreOptions implements Serializable {
                 key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
                         .stringType()
                         .noDefaultValue());
+    }
+
+    public MapStorageLayout mapStorageLayout(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MAP_STORAGE_LAYOUT)
+                        .enumType(MapStorageLayout.class)
+                        .defaultValue(MapStorageLayout.DEFAULT));
+    }
+
+    public int mapSharedShreddingMaxColumns(String fieldName) {
+        int maxColumns =
+                options.get(
+                        key(FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_MAX_COLUMNS)
+                                .intType()
+                                .defaultValue(256));
+        checkArgument(maxColumns > 0, "options %s must > 0", MAP_SHARED_SHREDDING_MAX_COLUMNS);
+        return maxColumns;
+    }
+
+    /** MAP storage layout. */
+    public enum MapStorageLayout implements DescribedEnum {
+        DEFAULT(
+                "default",
+                "Store MAP columns with the normal key-value array layout. This is the compatible "
+                        + "layout used when no field-level MAP layout option is configured."),
+        SHARED_SHREDDING(
+                "shared-shredding",
+                "Store MAP<STRING, T> columns as a physical row with reusable value columns, a "
+                        + "field mapping, and an overflow map. This layout is intended for maps "
+                        + "whose string keys repeat across rows and can benefit from more columnar "
+                        + "storage.");
+
+        private final String value;
+        private final String description;
+
+        MapStorageLayout(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 
     /**

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -26,21 +25,18 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -72,43 +68,33 @@ public class GlobalIndexScanner implements Closeable {
     private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
-    private final Map<Integer, List<Range>> coverageByField;
+    private final GlobalIndexCoverage coverage;
     private final FileStoreTable table;
-    private final Snapshot snapshot;
-    private final PartitionPredicate partitionFilter;
 
     private GlobalIndexScanner(
             FileStoreTable table,
-            Snapshot snapshot,
-            PartitionPredicate partitionFilter,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionFilter,
             Options options,
             RowType rowType,
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
             Collection<IndexFileMeta> indexFiles) {
         this.table = table;
-        this.snapshot = snapshot;
-        this.partitionFilter = partitionFilter;
         this.options = options;
         this.rowType = rowType;
         this.executor =
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
+        this.coverage = new GlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
-        this.coverageByField = new HashMap<>();
         for (IndexFileMeta indexFile : indexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             String indexType = indexFile.indexType();
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             int indexFieldId = meta.indexFieldId();
-            coverageByField.computeIfAbsent(indexFieldId, k -> new ArrayList<>()).add(range);
-            if (meta.extraFieldIds() != null) {
-                for (int extra : meta.extraFieldIds()) {
-                    coverageByField.computeIfAbsent(extra, k -> new ArrayList<>()).add(range);
-                }
-            }
             List<Integer> fieldIds = meta.getIndexedFieldIds();
             IndexMetaFileGroup group = indexMetas.get(indexFieldId);
             if (group == null) {
@@ -194,14 +180,21 @@ public class GlobalIndexScanner implements Closeable {
 
     public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
+        return create(table, null, indexFiles);
+    }
+
+    public static Optional<GlobalIndexScanner> create(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            Collection<IndexFileMeta> indexFiles) {
         if (indexFiles.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(
                 new GlobalIndexScanner(
-                        null,
-                        null,
-                        null,
+                        table,
+                        tryTravelOrLatest(table),
+                        partitionFilter,
                         table.coreOptions().toConfiguration(),
                         table.rowType(),
                         table.fileIO(),
@@ -210,8 +203,10 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public static Optional<GlobalIndexScanner> create(
-            FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
-        Snapshot snapshot = tryTravelOrLatest(table);
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter) {
+        @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
                 table.store().newIndexFileHandler()
                         .scan(snapshot, indexFileFilter(table, partitionFilter, filter)).stream()
@@ -233,7 +228,9 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     private static Filter<IndexManifestEntry> indexFileFilter(
-            FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionFilter,
+            @Nullable Predicate filter) {
         if (filter == null) {
             return entry -> false;
         }
@@ -265,78 +262,15 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        Optional<GlobalIndexResult> result = globalIndexEvaluator.evaluate(predicate);
-        return result.map(indexedResultRows -> withUnindexedRows(predicate, indexedResultRows));
+        return globalIndexEvaluator.evaluate(predicate);
     }
 
-    private GlobalIndexResult withUnindexedRows(
-            Predicate predicate, GlobalIndexResult indexedResultRows) {
-        if (indexedResultRows instanceof ScoredGlobalIndexResult
-                || table == null
-                || table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.FAST) {
-            return indexedResultRows;
-        }
-
+    public GlobalIndexResult unindexedRows(Predicate predicate) {
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        rows.or(indexedResultRows.results());
-        for (Range range : unindexedRanges(predicate)) {
+        for (Range range : coverage.unindexedRanges(rowType, predicate)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
-    }
-
-    private List<Range> indexedRanges(Predicate predicate) {
-        List<Range> ranges = null;
-        for (Integer fieldId : collectFieldIds(rowType, predicate)) {
-            List<Range> fieldRanges = coverageByField.get(fieldId);
-            if (fieldRanges == null || fieldRanges.isEmpty()) {
-                return Collections.emptyList();
-            }
-            fieldRanges = Range.sortAndMergeOverlap(fieldRanges, true);
-            ranges = ranges == null ? fieldRanges : Range.and(ranges, fieldRanges);
-        }
-        return ranges == null ? Collections.emptyList() : Range.sortAndMergeOverlap(ranges, true);
-    }
-
-    private List<Range> unindexedRanges(Predicate predicate) {
-        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
-            return Collections.emptyList();
-        }
-
-        List<Range> dataRanges;
-        if (table.coreOptions().globalIndexSearchMode() == GlobalIndexSearchMode.DETAIL) {
-            dataRanges = dataRangesByDataFiles();
-        } else {
-            dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
-        }
-
-        List<Range> predicateIndexedRanges =
-                Range.sortAndMergeOverlap(indexedRanges(predicate), true);
-        List<Range> unindexedRanges = new ArrayList<>();
-        for (Range dataRange : Range.sortAndMergeOverlap(dataRanges, true)) {
-            unindexedRanges.addAll(dataRange.exclude(predicateIndexedRanges));
-        }
-        return Range.sortAndMergeOverlap(unindexedRanges, true);
-    }
-
-    private List<Range> dataRangesByDataFiles() {
-        SnapshotReader snapshotReader =
-                table.newSnapshotReader()
-                        .withPartitionFilter(partitionFilter)
-                        .withMode(ScanMode.ALL)
-                        .withSnapshot(snapshot);
-        List<Range> dataRanges = new ArrayList<>();
-        for (Split split : snapshotReader.read().splits()) {
-            if (!(split instanceof DataSplit)) {
-                continue;
-            }
-            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
-                if (file.firstRowId() != null) {
-                    dataRanges.add(file.nonNullRowIdRange());
-                }
-            }
-        }
-        return dataRanges;
     }
 
     private Collection<GlobalIndexReader> createReaders(

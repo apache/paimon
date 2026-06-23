@@ -85,17 +85,22 @@ public interface ScoredGlobalIndexResult extends GlobalIndexResult {
         }
 
         ScoreGetter scoreGetter = scoreGetter();
-        // Min-heap by score: the head is the smallest score so we can evict it when a
-        // higher-scored row arrives. This gives O(n log k) instead of O(n log n).
-        PriorityQueue<long[]> minHeap =
-                new PriorityQueue<>(
-                        k + 1, Comparator.comparingDouble(a -> Float.intBitsToFloat((int) a[1])));
+        // Min-heap whose ordering matches the global index ranking semantics (score desc,
+        // rowId asc): the head is the weakest candidate currently kept, i.e. the lowest
+        // score and, among ties, the largest rowId. A new row replaces the head only when
+        // it is strictly stronger, so the retained set equals a full "score desc, rowId asc"
+        // sort truncated to k, while keeping O(n log k) instead of O(n log n).
+        // entry: [rowId, rawScoreBits]
+        Comparator<long[]> weakestFirst =
+                Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
+                        .thenComparing(Comparator.comparingLong((long[] a) -> a[0]).reversed());
+        PriorityQueue<long[]> minHeap = new PriorityQueue<>(k + 1, weakestFirst);
         for (long rowId : rowIds) {
             float score = scoreGetter.score(rowId);
             long[] entry = new long[] {rowId, Float.floatToRawIntBits(score)};
             if (minHeap.size() < k) {
                 minHeap.offer(entry);
-            } else if (score > Float.intBitsToFloat((int) minHeap.peek()[1])) {
+            } else if (weakestFirst.compare(entry, minHeap.peek()) > 0) {
                 minHeap.poll();
                 minHeap.offer(entry);
             }

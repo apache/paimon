@@ -163,6 +163,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
     private long lastCommittedSnapshotId = -1L;
+    @Nullable private Snapshot.Operation operation;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -248,6 +249,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
         this.conflictDetection.setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit withOperation(Snapshot.Operation operation) {
+        this.operation = operation;
         return this;
     }
 
@@ -1107,7 +1114,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             statsFileName,
                             // if empty properties, just set to null
                             properties.isEmpty() ? null : properties,
-                            nextRowIdStart);
+                            nextRowIdStart,
+                            operation);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             commitCleaner.cleanUpReuseTmpManifests(
@@ -1261,7 +1269,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.statistics(),
                         // if empty properties, just set to null
                         latest.properties(),
-                        nextRowId);
+                        nextRowId,
+                        null);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }
@@ -1340,7 +1349,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latestSnapshot.watermark(),
                         latestSnapshot.statistics(),
                         latestSnapshot.properties(),
-                        latestSnapshot.nextRowId());
+                        latestSnapshot.nextRowId(),
+                        null);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
     }

@@ -69,6 +69,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_STATISTICS = "statistics";
     protected static final String FIELD_PROPERTIES = "properties";
     protected static final String FIELD_NEXT_ROW_ID = "nextRowId";
+    protected static final String FIELD_OPERATION = "operation";
 
     // version of snapshot
     @JsonProperty(FIELD_VERSION)
@@ -181,6 +182,11 @@ public class Snapshot implements Serializable {
     @Nullable
     protected final Long nextRowId;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_OPERATION)
+    @Nullable
+    protected final Operation operation;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -203,6 +209,52 @@ public class Snapshot implements Serializable {
             @Nullable Map<String, String> properties,
             @Nullable Long nextRowId) {
         this(
+                id,
+                schemaId,
+                baseManifestList,
+                baseManifestListSize,
+                deltaManifestList,
+                deltaManifestListSize,
+                changelogManifestList,
+                changelogManifestListSize,
+                indexManifest,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark,
+                statistics,
+                properties,
+                nextRowId,
+                null);
+    }
+
+    public Snapshot(
+            long id,
+            long schemaId,
+            String baseManifestList,
+            @Nullable Long baseManifestListSize,
+            String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
+            @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
+            @Nullable String indexManifest,
+            String commitUser,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            long totalRecordCount,
+            long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark,
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId,
+            @Nullable Operation operation) {
+        this(
                 CURRENT_VERSION,
                 id,
                 schemaId,
@@ -223,7 +275,55 @@ public class Snapshot implements Serializable {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                operation);
+    }
+
+    public Snapshot(
+            int version,
+            long id,
+            long schemaId,
+            String baseManifestList,
+            @Nullable Long baseManifestListSize,
+            String deltaManifestList,
+            @Nullable Long deltaManifestListSize,
+            @Nullable String changelogManifestList,
+            @Nullable Long changelogManifestListSize,
+            @Nullable String indexManifest,
+            String commitUser,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            long totalRecordCount,
+            long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark,
+            @Nullable String statistics,
+            @Nullable Map<String, String> properties,
+            @Nullable Long nextRowId) {
+        this(
+                version,
+                id,
+                schemaId,
+                baseManifestList,
+                baseManifestListSize,
+                deltaManifestList,
+                deltaManifestListSize,
+                changelogManifestList,
+                changelogManifestListSize,
+                indexManifest,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark,
+                statistics,
+                properties,
+                nextRowId,
+                null);
     }
 
     @JsonCreator
@@ -249,7 +349,8 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) @Nullable Map<String, String> properties,
-            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId) {
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_OPERATION) @Nullable Operation operation) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -271,6 +372,7 @@ public class Snapshot implements Serializable {
         this.statistics = statistics;
         this.properties = properties;
         this.nextRowId = nextRowId;
+        this.operation = operation;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -388,6 +490,12 @@ public class Snapshot implements Serializable {
         return nextRowId;
     }
 
+    @JsonGetter(FIELD_OPERATION)
+    @Nullable
+    public Operation operation() {
+        return operation;
+    }
+
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -415,7 +523,8 @@ public class Snapshot implements Serializable {
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                operation);
     }
 
     @Override
@@ -447,7 +556,8 @@ public class Snapshot implements Serializable {
                 && Objects.equals(watermark, that.watermark)
                 && Objects.equals(statistics, that.statistics)
                 && Objects.equals(properties, that.properties)
-                && Objects.equals(nextRowId, that.nextRowId);
+                && Objects.equals(nextRowId, that.nextRowId)
+                && operation == that.operation;
     }
 
     /** Type of changes in this snapshot. */
@@ -467,6 +577,19 @@ public class Snapshot implements Serializable {
 
         /** Collect statistics. */
         ANALYZE
+    }
+
+    /** Logical operation type that produced this snapshot. */
+    public enum Operation {
+        WRITE,
+        OVERWRITE,
+        DELETE,
+        TRUNCATE,
+        UPDATE,
+        MERGE,
+        CREATE_TABLE_AS_SELECT,
+        REPLACE_TABLE_AS_SELECT,
+        CREATE_OR_REPLACE_TABLE_AS_SELECT
     }
 
     // =================== Utils for reading =========================

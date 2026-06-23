@@ -121,6 +121,11 @@ public class TantivySearcher implements AutoCloseable {
         return searchIndex(searcherPtr, queryString, limit, queryOperator);
     }
 
+    public SearchResult searchJson(String queryJson, int limit) {
+        checkNotClosed();
+        return searchIndexJson(searcherPtr, queryJson, limit);
+    }
+
     @Override
     public void close() {
         if (!closed) {
@@ -177,6 +182,8 @@ public class TantivySearcher implements AutoCloseable {
 
     static native SearchResult searchIndex(
             long searcherPtr, String queryString, int limit, String queryOperator);
+
+    static native SearchResult searchIndexJson(long searcherPtr, String queryJson, int limit);
 
     static native void freeSearcher(long searcherPtr);
 

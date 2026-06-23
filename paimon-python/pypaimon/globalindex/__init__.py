@@ -18,6 +18,17 @@
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.vector_search import VectorSearch
+from pypaimon.globalindex.full_text_query import (
+    BooleanQuery,
+    BoostQuery,
+    FullTextOperator,
+    FullTextQuery,
+    FullTextQueryType,
+    MatchQuery,
+    MultiMatchQuery,
+    Occur,
+    PhraseQuery,
+)
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.vector_search_result import (
     ScoredGlobalIndexResult,
@@ -40,7 +51,16 @@ __all__ = [
     'GlobalIndexReader',
     'FieldRef',
     'VectorSearch',
+    'BooleanQuery',
+    'BoostQuery',
+    'FullTextOperator',
+    'FullTextQuery',
+    'FullTextQueryType',
     'FullTextSearch',
+    'MatchQuery',
+    'MultiMatchQuery',
+    'Occur',
+    'PhraseQuery',
     'ScoredGlobalIndexResult',
     'DictBasedScoredIndexResult',
     'ScoreGetter',

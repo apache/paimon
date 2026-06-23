@@ -58,6 +58,18 @@ class GlobalIndexReader(ABC):
     def visit_vector_search(self, vector_search: 'VectorSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Vector search not supported by this reader")
 
+    def visit_batch_vector_search(
+            self, batch_vector_search: 'BatchVectorSearch'
+    ) -> 'Future[List[Optional[GlobalIndexResult]]]':
+        """Default: fan out to single-vector search; result ``i`` maps to ``vectors[i]``.
+
+        Blocks per future (fine while readers return completed futures); an
+        async reader should override.
+        """
+        singles = [self.visit_vector_search(batch_vector_search.for_index(i))
+                   for i in range(batch_vector_search.vector_count)]
+        return _completed_future([f.result() for f in singles])
+
     def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> 'Future[Optional[GlobalIndexResult]]':
         raise NotImplementedError("Full-text search not supported by this reader")
 

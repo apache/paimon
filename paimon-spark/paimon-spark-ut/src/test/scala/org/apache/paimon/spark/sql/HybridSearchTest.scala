@@ -195,9 +195,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                |      'options', map())),
                |  array(
                |    named_struct(
-               |      'field', 'content',
-               |      'query_text', 'paimon',
-               |      'query_operator', 'or',
+               |      'query', '{"match":{"column":"content","terms":"paimon"}}',
                |      'limit', 2,
                |      'weight', 1.0f,
                |      'options', map())),
@@ -244,9 +242,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                |  array(),
                |  array(
                |    named_struct(
-               |      'field', 'content',
-               |      'query_text', 'paimon search',
-               |      'query_operator', 'or',
+               |      'query', '{"match":{"column":"content","terms":"paimon search"}}',
                |      'limit', 1,
                |      'weight', 1.0f,
                |      'options', map())),
@@ -290,9 +286,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                  |  array(),
                  |  array(
                  |    named_struct(
-                 |      'field', 'content',
-                 |      'query_text', 'paimon',
-                 |      'query_operator', 'or',
+                 |      'query', '{"match":{"column":"content","terms":"paimon"}}',
                  |      'limit', 1,
                  |      'weight', 1.0f,
                  |      'options', map())),

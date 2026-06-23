@@ -18,13 +18,16 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
+import org.apache.paimon.function.{Function => PaimonFunction}
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -127,7 +130,8 @@ trait SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation]): BatchWrite
 
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
@@ -238,4 +242,19 @@ trait SparkShim {
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType
+
+  // SQL UDFs (`CREATE FUNCTION ... RETURN ...`) are Spark 4.0+; the spark3 shim no-ops these.
+
+  /** Parser-stage rule rewriting a Paimon-catalog `CreateUserDefinedFunction` into a create command. */
+  def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan]
+
+  /**
+   * Resolve a Paimon SQL function reference into a Spark `SQLFunctionExpression` (Spark inlines
+   * it).
+   */
+  def resolvePaimonSQLFunction(
+      funcIdent: FunctionIdentifier,
+      function: PaimonFunction,
+      arguments: Seq[Expression],
+      parser: ParserInterface): Expression
 }

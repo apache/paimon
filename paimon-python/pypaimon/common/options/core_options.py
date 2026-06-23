@@ -90,6 +90,12 @@ class GlobalIndexColumnUpdateAction(str, Enum):
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
 
 
+class GlobalIndexSearchMode(str, Enum):
+    FAST = "fast"
+    FULL = "full"
+    DETAIL = "detail"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -618,6 +624,16 @@ class CoreOptions:
         .with_description("Whether to enable global index for scan.")
     )
 
+    GLOBAL_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("global-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description(
+            "Search mode for global index queries. "
+            "Supported values are 'fast', 'full', and 'detail'."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -1108,6 +1124,9 @@ class CoreOptions:
 
     def global_index_enabled(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)
+
+    def global_index_search_mode(self):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)

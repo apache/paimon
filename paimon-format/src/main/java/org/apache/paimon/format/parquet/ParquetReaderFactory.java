@@ -35,6 +35,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -225,7 +226,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         clipParquetType(mapType.getKeyType(), keyValueType.getLeft()),
                         clipParquetType(mapType.getValueType(), keyValueType.getRight()));
             case ARRAY:
-                ArrayType arrayType = (ArrayType) readType;
+            case VECTOR:
+                DataType elementReadType =
+                        readType instanceof ArrayType
+                                ? ((ArrayType) readType).getElementType()
+                                : ((VectorType) readType).getElementType();
                 GroupType arrayGroup = (GroupType) parquetType;
                 int listSubFields = arrayGroup.getFieldCount();
                 Preconditions.checkArgument(
@@ -236,8 +241,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 // https://impala.apache.org/docs/build/html/topics/impala_parquet_array_resolution.html.
                 int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
                 Type elementType =
-                        clipParquetType(
-                                arrayType.getElementType(), parquetListElementType(arrayGroup));
+                        clipParquetType(elementReadType, parquetListElementType(arrayGroup));
 
                 if (level == 3) {
                     // In case that the name in middle level is not "list".

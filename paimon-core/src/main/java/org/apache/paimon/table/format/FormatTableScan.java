@@ -49,6 +49,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
@@ -57,7 +58,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,6 +81,7 @@ public class FormatTableScan implements InnerTableScan {
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private final Integer limit;
     private final long targetSplitSize;
+    private final long openFileCost;
     private final FormatTable.Format format;
 
     public FormatTableScan(
@@ -89,6 +93,7 @@ public class FormatTableScan implements InnerTableScan {
         this.partitionFilter = partitionFilter;
         this.limit = limit;
         this.targetSplitSize = coreOptions.splitTargetSize();
+        this.openFileCost = coreOptions.splitOpenFileCost();
         this.format = table.format();
     }
 
@@ -267,37 +272,44 @@ public class FormatTableScan implements InnerTableScan {
 
     private List<Split> createSplits(FileIO fileIO, Path path, BinaryRow partition)
             throws IOException {
-        List<Split> splits = new ArrayList<>();
+        List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
         FileStatus[] files = fileIO.listFiles(path, true);
+        Arrays.sort(files, Comparator.comparing(file -> file.getPath().toString()));
         for (FileStatus file : files) {
             if (isDataFileName(file.getPath().getName())) {
-                List<FormatDataSplit> fileSplits = tryToSplitLargeFile(file, partition);
-                splits.addAll(fileSplits);
+                segments.addAll(toSegments(file));
             }
+        }
+
+        List<Split> splits = new ArrayList<>();
+        for (List<FormatDataSplit.FileMeta> bin :
+                BinPacking.packForOrdered(
+                        segments,
+                        file -> Math.max(file.readSize(), openFileCost),
+                        targetSplitSize)) {
+            splits.add(new FormatDataSplit(bin, partition));
         }
         return splits;
     }
 
-    private List<FormatDataSplit> tryToSplitLargeFile(FileStatus file, BinaryRow partition) {
+    private List<FormatDataSplit.FileMeta> toSegments(FileStatus file) {
         if (!preferToSplitFile(file)) {
             return Collections.singletonList(
-                    new FormatDataSplit(file.getPath(), file.getLen(), partition));
+                    new FormatDataSplit.FileMeta(file.getPath(), file.getLen()));
         }
-        List<FormatDataSplit> splits = new ArrayList<>();
+        List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
         long remainingBytes = file.getLen();
         long currentStart = 0;
 
         while (remainingBytes > 0) {
             long splitSize = Math.min(targetSplitSize, remainingBytes);
-
-            FormatDataSplit split =
-                    new FormatDataSplit(
-                            file.getPath(), file.getLen(), currentStart, splitSize, partition);
-            splits.add(split);
+            segments.add(
+                    new FormatDataSplit.FileMeta(
+                            file.getPath(), file.getLen(), currentStart, splitSize));
             currentStart += splitSize;
             remainingBytes -= splitSize;
         }
-        return splits;
+        return segments;
     }
 
     private boolean preferToSplitFile(FileStatus file) {
