@@ -648,7 +648,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                 fieldRef,
                                 IndexFilter.text(
                                         IndexFilter.TextFilter.TextOp.WILDCARD,
-                                        "*" + str(literal))));
+                                        "*" + escapeWildcardLiteral(str(literal)))));
     }
 
     @Override
@@ -660,19 +660,66 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                                 fieldRef,
                                 IndexFilter.text(
                                         IndexFilter.TextFilter.TextOp.WILDCARD,
-                                        "*" + str(literal) + "*")));
+                                        "*" + escapeWildcardLiteral(str(literal)) + "*")));
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
         return async(
-                () -> {
-                    String pattern = str(literal).replace('%', '*').replace('_', '?');
-                    return dispatchFilter(
-                            fieldRef,
-                            IndexFilter.text(IndexFilter.TextFilter.TextOp.WILDCARD, pattern));
-                });
+                () ->
+                        dispatchFilter(
+                                fieldRef,
+                                IndexFilter.text(
+                                        IndexFilter.TextFilter.TextOp.WILDCARD,
+                                        sqlLikeToWildcard(str(literal)))));
+    }
+
+    /**
+     * Escape the Lucene {@link org.apache.lucene.search.WildcardQuery} metacharacters ({@code *},
+     * {@code ?} and the escape char {@code \}) in a literal so it is matched verbatim. StartsWith /
+     * EndsWith / Contains literals carry no wildcards, so any such character in them is data and
+     * must not be reinterpreted as a wildcard.
+     */
+    private static String escapeWildcardLiteral(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 4);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '*' || c == '?' || c == '\\') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Translate a SQL LIKE pattern into a Lucene wildcard pattern. paimon evaluates LIKE with no
+     * escape character ({@code Like -> sqlToRegexLike(pattern, null)}), so {@code %} and {@code _}
+     * are the only wildcards; {@code *}, {@code ?} and {@code \} are ordinary characters in SQL and
+     * are therefore escaped for Lucene rather than passed through as wildcards.
+     */
+    private static String sqlLikeToWildcard(String sql) {
+        StringBuilder sb = new StringBuilder(sql.length() + 4);
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            switch (c) {
+                case '%':
+                    sb.append('*');
+                    break;
+                case '_':
+                    sb.append('?');
+                    break;
+                case '*':
+                case '?':
+                case '\\':
+                    sb.append('\\').append(c);
+                    break;
+                default:
+                    sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     // =================== null checks =====================

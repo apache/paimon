@@ -20,8 +20,13 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.IsNaN;
 import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.LeafBinaryFunction;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafNAryFunction;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
@@ -202,9 +207,13 @@ public class GlobalIndexEvaluator implements Closeable {
             return children;
         }
 
+        // Only a null-rejecting sibling makes "f IS NOT NULL" redundant. A predicate such as
+        // "f IS NULL" must NOT count here: pruning IS NOT NULL from "f IS NULL AND f IS NOT NULL"
+        // would turn the empty result into the set of null rows. So we whitelist explicitly
+        // null-rejecting predicates instead of treating every non-IsNotNull leaf as constraining.
         Set<String> constrainedFields = new HashSet<>();
         for (Predicate child : children) {
-            if (!(child instanceof LeafPredicate) || isIsNotNull(child)) {
+            if (!isNullRejecting(child)) {
                 continue;
             }
             Optional<FieldRef> fieldRef = ((LeafPredicate) child).fieldRefOptional();
@@ -230,6 +239,24 @@ public class GlobalIndexEvaluator implements Closeable {
     private boolean isIsNotNull(Predicate predicate) {
         return predicate instanceof LeafPredicate
                 && ((LeafPredicate) predicate).function() instanceof IsNotNull;
+    }
+
+    /**
+     * A predicate is null-rejecting when it cannot match a row whose tested field is null. Under
+     * SQL three-valued logic every comparison/match predicate (=, &lt;&gt;, &lt;, &gt;, IN, NOT IN,
+     * BETWEEN, LIKE, ...) and IS NaN reject null; only IS NULL accepts it (and IS NOT NULL is the
+     * predicate we are deciding whether to prune). We whitelist by arity base class so future
+     * comparison functions are covered automatically without re-introducing the IS NULL hazard.
+     */
+    private boolean isNullRejecting(Predicate predicate) {
+        if (!(predicate instanceof LeafPredicate)) {
+            return false;
+        }
+        LeafFunction function = ((LeafPredicate) predicate).function();
+        return function instanceof LeafBinaryFunction
+                || function instanceof LeafNAryFunction
+                || function instanceof LeafTernaryFunction
+                || function instanceof IsNaN;
     }
 
     @Override

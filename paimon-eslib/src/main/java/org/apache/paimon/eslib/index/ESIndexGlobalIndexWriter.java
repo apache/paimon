@@ -241,10 +241,14 @@ public class ESIndexGlobalIndexWriter
 
     @Override
     public List<ResultEntry> finish() {
-        if (docCount == 0) {
-            return Collections.emptyList();
-        }
         try {
+            if (docCount == 0) {
+                // Nothing was indexed, but the builder already eagerly created a temp directory and
+                // an open Lucene IndexWriter in its constructor; the finally block below releases
+                // them. GlobalIndexWriter has no separate close(), so finish() must do the cleanup.
+                return Collections.emptyList();
+            }
+
             builder.build();
             Path outputDir = builder.getOutputDir();
 
@@ -267,13 +271,24 @@ public class ESIndexGlobalIndexWriter
                 out.flush();
             }
 
-            builder.close();
-            deleteDirectory(outputDir);
-
             return Collections.singletonList(new ResultEntry(fileName, docCount, meta));
         } catch (IOException e) {
             throw new RuntimeException("Failed to finish ES index build", e);
+        } finally {
+            // Best-effort: close the builder (Lucene IndexWriter + Directory) and remove the temp
+            // directory on every path — empty shard, success, or mid-build failure.
+            closeBuilderQuietly();
         }
+    }
+
+    private void closeBuilderQuietly() {
+        try {
+            builder.close();
+        } catch (IOException ignored) {
+            // The archive (if any) is already fully streamed to the output file; a failure to
+            // close the now-redundant builder must not mask the build result.
+        }
+        deleteDirectory(builder.getOutputDir());
     }
 
     /**

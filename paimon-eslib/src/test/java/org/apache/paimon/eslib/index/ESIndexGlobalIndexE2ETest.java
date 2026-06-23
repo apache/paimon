@@ -258,6 +258,60 @@ class ESIndexGlobalIndexE2ETest {
     }
 
     @Test
+    void likeTreatsStarAsLiteralButPercentAndUnderscoreAsWildcards(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        // SQL LIKE has no default escape char (paimon: Like -> sqlToRegexLike(pattern, null)), so
+        // '%' / '_' are the only wildcards while '*' / '?' are ordinary characters. The reader must
+        // escape '*' for Lucene's WildcardQuery: "a*c" must match ONLY the literal "a*c", not the
+        // wildcard a<anything>c. The naive replace('%','*').replace('_','?') would have matched all
+        // three rows for "a*c".
+        List<DataField> fields = Arrays.asList(new DataField(0, "k", DataTypes.STRING()));
+        // No analyzer on "k" -> KEYWORD (exact-term) index; WildcardQuery matches the whole term.
+        ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(new HashMap<>()));
+
+        java.nio.file.Path archiveDir = tmp.resolve("archive-like");
+        Files.createDirectories(archiveDir);
+        LocalDirWriter fileWriter = new LocalDirWriter(archiveDir);
+        ESIndexGlobalIndexWriter writer = new ESIndexGlobalIndexWriter(fileWriter, fields, options);
+
+        // row0="abc", row1="a*c" (literal star), row2="axc"
+        writer.write(BinaryString.fromString("abc"), 0);
+        writer.write(BinaryString.fromString("a*c"), 1);
+        writer.write(BinaryString.fromString("axc"), 2);
+        List<ResultEntry> entries = writer.finish();
+        ResultEntry entry = entries.get(0);
+
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(archiveDir.resolve(entry.fileName()).toString());
+        long fileSize = Files.size(archiveDir.resolve(entry.fileName()));
+        GlobalIndexIOMeta ioMeta = new GlobalIndexIOMeta(filePath, fileSize, entry.meta());
+        ESIndexGlobalIndexReader reader =
+                new ESIndexGlobalIndexReader(
+                        new LocalFileReader(), List.of(ioMeta), fields, options);
+
+        FieldRef kRef = new FieldRef(0, "k", DataTypes.STRING());
+
+        // LIKE 'a*c': '*' is literal -> only the exact "a*c" (row 1).
+        RoaringNavigableMap64 starHits = reader.visitLike(kRef, "a*c").join().get().results();
+        assertEquals(1, starHits.getIntCardinality(), "LIKE 'a*c' matches only the literal star");
+        assertTrue(contains(starHits, 1L), "LIKE 'a*c' matches row1 \"a*c\"");
+
+        // LIKE 'a_c': '_' = exactly one char -> all three 3-char a?c values.
+        RoaringNavigableMap64 underHits = reader.visitLike(kRef, "a_c").join().get().results();
+        assertEquals(3, underHits.getIntCardinality(), "LIKE 'a_c' matches all a?c rows");
+
+        // LIKE 'a%c': '%' = any -> all three.
+        RoaringNavigableMap64 pctHits = reader.visitLike(kRef, "a%c").join().get().results();
+        assertEquals(3, pctHits.getIntCardinality(), "LIKE 'a%c' matches all a*c rows");
+
+        try {
+            reader.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
     void isNullReturnsNullRowsViaIndex(@TempDir java.nio.file.Path tmp) throws IOException {
         // Rows 3 and 7 have a NULL value. addNullDoc writes an empty doc (field absent) for them,
         // so
