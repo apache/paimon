@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FullTextQuery}. */
 public class FullTextQueryTest {
@@ -171,5 +172,31 @@ public class FullTextQueryTest {
                 .isEqualTo(
                         "{\"match_phrase\":{\"column\":\"content\",\"terms\":\"paimon lake\","
                                 + "\"slop\":1}}");
+    }
+
+    @Test
+    public void testHybridFullTextRouteRejectsOptions() {
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.fullText(
+                                        "{\"match\":{\"column\":\"content\","
+                                                + "\"terms\":\"paimon lake\"}}",
+                                        10,
+                                        1.0f,
+                                        Collections.singletonMap("some.option", "x")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Full-text hybrid route options are not supported yet");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.builder()
+                                        .query(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"paimon lake\"}}")
+                                        .limit(10)
+                                        .option("some.option", "x")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Full-text hybrid route options are not supported yet");
     }
 }

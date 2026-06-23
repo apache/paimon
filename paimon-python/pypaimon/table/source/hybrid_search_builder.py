@@ -35,6 +35,12 @@ WEIGHTED_SCORE_RANKER = "weighted_score"
 _RRF_K = 60.0
 
 
+def _check_full_text_options(options: Dict[str, str]):
+    if options:
+        raise ValueError(
+            "Full-text hybrid route options are not supported yet.")
+
+
 def _normalize_ranker(ranker: Optional[str]) -> str:
     if ranker is None or not ranker.strip():
         return RRF_RANKER
@@ -74,6 +80,8 @@ class HybridSearchRoute:
         if self.weight <= 0:
             raise ValueError("Weight must be positive, got: %s" % self.weight)
         self.options = dict(self.options or {})
+        if self.route_type == self.FULL_TEXT:
+            _check_full_text_options(self.options)
 
     @classmethod
     def vector_route(
@@ -99,6 +107,7 @@ class HybridSearchRoute:
             limit: int,
             weight: float = 1.0,
             options: Optional[Dict[str, str]] = None) -> 'HybridSearchRoute':
+        _check_full_text_options(options or {})
         query = FullTextQuery.from_json(query_json)
         return cls(
             route_type=cls.FULL_TEXT,

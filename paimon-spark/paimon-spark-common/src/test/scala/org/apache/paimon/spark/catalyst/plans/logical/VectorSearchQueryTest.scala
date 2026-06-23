@@ -133,6 +133,29 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).weight() == 1.5f)
   }
 
+  test("reject hybrid full-text route with non-empty options") {
+    val exception = intercept[IllegalArgumentException] {
+      HybridSearchQuery(Seq.empty).createHybridSearch(
+        innerTable,
+        Seq(
+          CreateArray(Seq.empty),
+          CreateArray(
+            Seq(
+              CreateNamedStruct(Seq(
+                Literal("query"),
+                Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+                Literal("options"),
+                CreateMap(Seq(Literal("some.option"), Literal("x")))
+              ))
+            )),
+          Literal(5)
+        )
+      )
+    }
+
+    assert(exception.getMessage.contains("Full-text hybrid route options are not supported yet"))
+  }
+
   test("create full-text search") {
     val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
       innerTable,
