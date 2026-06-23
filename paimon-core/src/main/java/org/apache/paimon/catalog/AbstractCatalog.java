@@ -390,7 +390,7 @@ public abstract class AbstractCatalog implements Catalog {
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
     }
 
-    private List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {
+    protected List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {
         if (schemas == null) {
             return Collections.emptyList();
         }

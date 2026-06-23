@@ -1084,6 +1084,44 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotBranch(identifier, "dropTable");
+        checkNotSystemTable(identifier, "dropTable");
+
+        try {
+            getHmsTable(identifier);
+        } catch (TableNotExistException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
+
+        Set<Path> externalPaths = new HashSet<>();
+        try {
+            org.apache.paimon.table.Table table = getTable(identifier);
+            if (table instanceof FileStoreTable) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                List<Path> schemaExternalPaths =
+                        getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
+                externalPaths.addAll(schemaExternalPaths);
+                List<String> branches = fileStoreTable.branchManager().branches();
+                for (String branch : branches) {
+                    SchemaManager schemaManager =
+                            fileStoreTable.schemaManager().copyWithBranch(branch);
+                    externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
+                }
+            }
+        } catch (TableNotExistException e) {
+            // Filesystem data may have been deleted but HMS metadata still exists.
+            // Proceed with drop to clean up the orphaned HMS record.
+        }
+
+        dropTableImpl(identifier, new ArrayList<>(externalPaths));
+    }
+
+    @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
         try {
             boolean tableExists =

@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -551,6 +552,21 @@ public class HiveCatalogTest extends CatalogTestBase {
                                 catalog.alterPartitions(
                                         Identifier.create(databaseName, "non_existing_table"),
                                         Collections.singletonList(partition)));
+    }
+
+    @Test
+    public void testDropTableWhenFilesystemDeleted() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "table_to_drop");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        Path tablePath = ((HiveCatalog) catalog).getTableLocation(identifier);
+        ((HiveCatalog) catalog).fileIO().deleteDirectoryQuietly(tablePath);
+
+        catalog.dropTable(identifier, false);
+
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
     }
 
     @Override
