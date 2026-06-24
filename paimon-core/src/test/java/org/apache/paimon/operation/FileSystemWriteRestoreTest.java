@@ -32,6 +32,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataType;
@@ -46,6 +47,7 @@ import java.util.Collections;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests for {@link FileSystemWriteRestore}, covering the {@code totalBuckets} resolution logic for
@@ -116,6 +118,40 @@ public class FileSystemWriteRestoreTest {
 
         assertThat(restored.totalBuckets()).isEqualTo(8);
         assertThat(restored.dataFiles()).isNullOrEmpty();
+    }
+
+    @Test
+    public void testWriteRejectsBucketOutsidePartitionLayout() throws Exception {
+        // Partition 1 is created with 2 buckets.
+        FileStoreTable table = createPartitionedPkTable(2);
+        commitOneRow(table, /* pt */ 1, /* k */ 1);
+
+        // Simulate a rescale: the table default is raised to 8 buckets, but partition 1
+        // still only has 2 buckets. writeOnly=false so the writer scans previous files and
+        // runs the per-partition bucket-layout check in AbstractFileStoreWrite.
+        FileStoreTable rescaledTable = withBucket(table, 8);
+
+        // Writing an out-of-range bucket (>= the partition's 2 buckets) into an empty bucket of
+        // partition 1 must be rejected, even though the bucket id is valid for the 8-bucket
+        // default.
+        // This is the bucket that PartitionBucketMapping recovery would otherwise silently accept.
+        // write(row, bucket) routes the row (partition pt=1) to the explicitly given bucket.
+        try (InnerTableWrite write = rescaledTable.newWrite(UUID.randomUUID().toString())) {
+            assertThatThrownBy(() -> write.write(GenericRow.of(1, 1, 1L), /* bucket */ 6))
+                    .hasMessageContaining("only has 2 buckets")
+                    .hasMessageContaining("table default: 8");
+        }
+
+        // Writing an in-range bucket (< the partition's 2 buckets) into an empty bucket of the same
+        // partition is accepted: per-partition bucket counts are still honored.
+        int emptyBucket = findEmptyBucket(rescaledTable, 1, /* totalBuckets */ 2);
+        String user = UUID.randomUUID().toString();
+        long id = rescaledTable.snapshotManager().latestSnapshotId();
+        try (InnerTableWrite write = rescaledTable.newWrite(user);
+                StreamTableCommit commit = rescaledTable.newCommit(user)) {
+            write.write(GenericRow.of(1, 2, 2L), emptyBucket);
+            commit.commit(id, write.prepareCommit(true, id));
+        }
     }
 
     @Test
