@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
@@ -89,6 +90,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1215,6 +1217,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        // Include data files whose deletion vector changed between the previous latest and the
+        // target while the data file itself stayed the same. A DV-only delete/update does not
+        // rewrite the data file, so the identifier diff above misses it and leaves an empty data
+        // delta that streaming overwrite readers would skip. Re-emitting such files as
+        // DELETE(latest) + ADD(target) makes the restore transition visible. The physical row count
+        // is unchanged, so the pair nets to zero in the delta record count, consistent with the
+        // unchanged totalRecordCount.
+        addDeletionVectorOnlyChanges(
+                latest, targetSnapshot, latestEntries, targetEntries, deltaFiles);
+
         Pair<String, Long> baseManifestList =
                 manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
@@ -1306,6 +1318,124 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return Collections.emptySet();
         }
         return new HashSet<>(indexManifestFile.read(indexManifest));
+    }
+
+    /**
+     * Adds, to {@code deltaFiles}, data files whose deletion vector differs between the previous
+     * latest and the target snapshot but whose data file itself is unchanged (i.e. a DV-only
+     * delete/update). Such files are present in both snapshots, so the data-file identifier diff
+     * does not emit them; without this, a DV-only restore produces an empty data delta that
+     * streaming overwrite readers skip. They are re-emitted as DELETE(latest) + ADD(target).
+     */
+    private void addDeletionVectorOnlyChanges(
+            Snapshot latest,
+            Snapshot target,
+            Map<FileEntry.Identifier, ManifestEntry> latestEntries,
+            Map<FileEntry.Identifier, ManifestEntry> targetEntries,
+            List<ManifestEntry> deltaFiles) {
+        Map<DeletionVectorKey, DeletionVectorMeta> latestDvs =
+                readDeletionVectors(latest.indexManifest());
+        Map<DeletionVectorKey, DeletionVectorMeta> targetDvs =
+                readDeletionVectors(target.indexManifest());
+        if (latestDvs.isEmpty() && targetDvs.isEmpty()) {
+            return;
+        }
+
+        Map<DeletionVectorKey, ManifestEntry> latestByFile =
+                indexByDataFile(latestEntries.values());
+        Map<DeletionVectorKey, ManifestEntry> targetByFile =
+                indexByDataFile(targetEntries.values());
+
+        Set<DeletionVectorKey> keys = new HashSet<>(latestDvs.keySet());
+        keys.addAll(targetDvs.keySet());
+        for (DeletionVectorKey key : keys) {
+            if (Objects.equals(latestDvs.get(key), targetDvs.get(key))) {
+                continue;
+            }
+            ManifestEntry latestEntry = latestByFile.get(key);
+            ManifestEntry targetEntry = targetByFile.get(key);
+            // Only handle DV-only changes here: the data file must be present in both snapshots. A
+            // file added/removed across the restore is already in deltaFiles via the identifier
+            // diff.
+            if (latestEntry != null && targetEntry != null) {
+                deltaFiles.add(toDeltaEntry(FileKind.DELETE, latestEntry));
+                deltaFiles.add(toDeltaEntry(FileKind.ADD, targetEntry));
+            }
+        }
+    }
+
+    private Map<DeletionVectorKey, DeletionVectorMeta> readDeletionVectors(
+            @Nullable String indexManifest) {
+        if (indexManifest == null) {
+            return Collections.emptyMap();
+        }
+        Map<DeletionVectorKey, DeletionVectorMeta> result = new HashMap<>();
+        for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
+            if (entry.kind() != FileKind.ADD
+                    || !DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
+                continue;
+            }
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+            if (dvRanges == null) {
+                continue;
+            }
+            for (DeletionVectorMeta meta : dvRanges.values()) {
+                result.put(
+                        new DeletionVectorKey(
+                                entry.partition(), entry.bucket(), meta.dataFileName()),
+                        meta);
+            }
+        }
+        return result;
+    }
+
+    private static Map<DeletionVectorKey, ManifestEntry> indexByDataFile(
+            Collection<ManifestEntry> entries) {
+        Map<DeletionVectorKey, ManifestEntry> result = new HashMap<>();
+        for (ManifestEntry entry : entries) {
+            result.put(
+                    new DeletionVectorKey(
+                            entry.partition(), entry.bucket(), entry.file().fileName()),
+                    entry);
+        }
+        return result;
+    }
+
+    private static ManifestEntry toDeltaEntry(FileKind kind, ManifestEntry entry) {
+        return ManifestEntry.create(
+                kind, entry.partition(), entry.bucket(), entry.totalBuckets(), entry.file());
+    }
+
+    /** Identifies a data file (partition, bucket, file name) for deletion-vector comparison. */
+    private static class DeletionVectorKey {
+        private final BinaryRow partition;
+        private final int bucket;
+        private final String dataFileName;
+
+        DeletionVectorKey(BinaryRow partition, int bucket, String dataFileName) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.dataFileName = dataFileName;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            DeletionVectorKey that = (DeletionVectorKey) o;
+            return bucket == that.bucket
+                    && Objects.equals(partition, that.partition)
+                    && Objects.equals(dataFileName, that.dataFileName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, dataFileName);
+        }
     }
 
     @Nullable

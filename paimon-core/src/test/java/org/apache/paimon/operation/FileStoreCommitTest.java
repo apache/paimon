@@ -39,6 +39,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
@@ -887,6 +888,37 @@ public class FileStoreCommitTest {
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+    }
+
+    @Test
+    public void testRestoreIncludesDeletionVectorOnlyChanges() throws Exception {
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data files f1, f2, no deletion vectors
+        store.commit(store.writeDataFiles(partition, 0, Arrays.asList("f1", "f2")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2: DV-only change — add a deletion vector for f1, data files unchanged
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+
+        // restore back to snapshot 1
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.restoreAsLatest(target)).isTrue();
+        }
+
+        // f1's deletion vector changed even though the data file is unchanged, so the restore delta
+        // must re-emit f1 as DELETE + ADD instead of being empty. An empty data delta would let
+        // streaming overwrite readers skip the restore entirely.
+        Snapshot restored = store.snapshotManager().latestSnapshot();
+        ManifestList manifestList = store.manifestListFactory().create();
+        List<ManifestFileMeta> deltaManifests = manifestList.readDeltaManifests(restored);
+        long added = deltaManifests.stream().mapToLong(ManifestFileMeta::numAddedFiles).sum();
+        long deleted = deltaManifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
+        assertThat(added).isEqualTo(1);
+        assertThat(deleted).isEqualTo(1);
     }
 
     @Test
