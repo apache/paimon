@@ -1246,18 +1246,28 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.properties(),
                         nextRowId);
 
+        // The restore is an overwrite from the previous latest to the target, so the base files,
+        // delta files and index changes describe the transition the callbacks need. These are
+        // shared by the pre- and post-commit callbacks below.
+        List<SimpleFileEntry> baseFiles =
+                SimpleFileEntry.from(new ArrayList<>(latestEntries.values()));
+        List<IndexManifestEntry> indexChanges = restoreIndexChanges(latest, targetSnapshot);
+
+        // Like a regular commit, run the pre-commit callbacks before the snapshot becomes visible.
+        // They may veto the restore by throwing (e.g. a chain-table snapshot branch rejects a
+        // pure-DELETE overwrite that would drop a snapshot partition still anchoring delta
+        // partitions), in which case the restore snapshot is never created.
+        commitPreCallbacks.forEach(
+                callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+
         boolean success =
                 commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
         if (success) {
-            // Like a regular commit, notify the commit callbacks so external views stay in sync
-            // with the restored state (e.g. Iceberg compatibility metadata and chain-table
-            // overwrite handling). The restore is an overwrite from the previous latest to the
-            // target, so the delta files and index changes describe the transition the callbacks
-            // need.
-            List<IndexManifestEntry> indexChanges = restoreIndexChanges(latest, targetSnapshot);
+            // Notify the post-commit callbacks so external views stay in sync with the restored
+            // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
             CommitCallback.Context context =
                     new CommitCallback.Context(
-                            SimpleFileEntry.from(new ArrayList<>(latestEntries.values())),
+                            baseFiles,
                             deltaFiles,
                             indexChanges,
                             newSnapshot,
