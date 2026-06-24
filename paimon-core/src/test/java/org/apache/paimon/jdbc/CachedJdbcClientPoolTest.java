@@ -104,6 +104,70 @@ public class CachedJdbcClientPoolTest {
     }
 
     @Test
+    void testDifferentCredentialsReturnsDifferentPool() {
+        String uri = sqliteUri();
+        Options options1 = createOptions(uri, "my-catalog");
+        options1.set("jdbc.user", "user1");
+        options1.set("jdbc.password", "pass1");
+
+        Options options2 = createOptions(uri, "my-catalog");
+        options2.set("jdbc.user", "user2");
+        options2.set("jdbc.password", "pass2");
+
+        CachedJdbcClientPool cache1 = new CachedJdbcClientPool(options1, options1.toMap());
+        CachedJdbcClientPool cache2 = new CachedJdbcClientPool(options2, options2.toMap());
+
+        assertThat(cache1.get()).isNotSameAs(cache2.get());
+    }
+
+    @Test
+    void testSameCredentialsReturnsSamePool() {
+        String uri = sqliteUri();
+        Options options1 = createOptions(uri, "my-catalog");
+        options1.set("jdbc.user", "user1");
+        options1.set("jdbc.password", "pass1");
+
+        Options options2 = createOptions(uri, "my-catalog");
+        options2.set("jdbc.user", "user1");
+        options2.set("jdbc.password", "pass1");
+
+        CachedJdbcClientPool cache1 = new CachedJdbcClientPool(options1, options1.toMap());
+        CachedJdbcClientPool cache2 = new CachedJdbcClientPool(options2, options2.toMap());
+
+        assertThat(cache1.get()).isSameAs(cache2.get());
+    }
+
+    @Test
+    void testDifferentJdbcPropertyReturnsDifferentPool() {
+        String uri = sqliteUri();
+        Options options1 = createOptions(uri, "my-catalog");
+        options1.set("jdbc.useSSL", "true");
+
+        Options options2 = createOptions(uri, "my-catalog");
+        options2.set("jdbc.useSSL", "false");
+
+        CachedJdbcClientPool cache1 = new CachedJdbcClientPool(options1, options1.toMap());
+        CachedJdbcClientPool cache2 = new CachedJdbcClientPool(options2, options2.toMap());
+
+        assertThat(cache1.get()).isNotSameAs(cache2.get());
+    }
+
+    @Test
+    void testDifferentPoolSizeReturnsDifferentPool() {
+        String uri = sqliteUri();
+        Options options1 = createOptions(uri, "my-catalog");
+        options1.set(CatalogOptions.CLIENT_POOL_SIZE, 2);
+
+        Options options2 = createOptions(uri, "my-catalog");
+        options2.set(CatalogOptions.CLIENT_POOL_SIZE, 5);
+
+        CachedJdbcClientPool cache1 = new CachedJdbcClientPool(options1, options1.toMap());
+        CachedJdbcClientPool cache2 = new CachedJdbcClientPool(options2, options2.toMap());
+
+        assertThat(cache1.get()).isNotSameAs(cache2.get());
+    }
+
+    @Test
     void testResetCacheClearsAllPools() {
         Options options = createOptions(sqliteUri(), "test-catalog");
         CachedJdbcClientPool cache = new CachedJdbcClientPool(options, options.toMap());

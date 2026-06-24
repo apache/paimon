@@ -23,6 +23,8 @@ import org.apache.paimon.options.Options;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Properties;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -34,8 +36,9 @@ import static org.apache.paimon.options.CatalogOptions.URI;
  * same JVM. This prevents each Flink operator from creating its own connection pool when using the
  * JDBC catalog.
  *
- * <p>The cache is keyed by JDBC URI and catalog key. Pools live for the lifetime of the JVM and are
- * closed via a shutdown hook.
+ * <p>The cache is keyed by JDBC URI, catalog key, pool size, and JDBC connection properties
+ * (credentials, driver settings). Pools live for the lifetime of the JVM and are closed via a
+ * shutdown hook.
  */
 public class CachedJdbcClientPool {
 
@@ -64,7 +67,9 @@ public class CachedJdbcClientPool {
         this.dbUrl = options.get(URI);
         this.poolSize = options.get(CLIENT_POOL_SIZE);
         this.props = props;
-        this.key = Key.of(dbUrl, options.get(JdbcCatalogOptions.CATALOG_KEY));
+        Properties jdbcProps =
+                JdbcUtils.extractJdbcConfiguration(props, JdbcCatalog.PROPERTY_PREFIX);
+        this.key = Key.of(dbUrl, options.get(JdbcCatalogOptions.CATALOG_KEY), poolSize, jdbcProps);
     }
 
     /** Returns the shared {@link JdbcClientPool} for this cache key, creating one if needed. */
@@ -88,14 +93,22 @@ public class CachedJdbcClientPool {
     static class Key {
         private final String uri;
         private final String catalogKey;
+        private final int poolSize;
+        private final Map<String, String> jdbcProperties;
 
-        private Key(String uri, String catalogKey) {
+        private Key(String uri, String catalogKey, int poolSize, Properties jdbcProps) {
             this.uri = uri;
             this.catalogKey = catalogKey;
+            this.poolSize = poolSize;
+            TreeMap<String, String> sorted = new TreeMap<>();
+            for (String name : jdbcProps.stringPropertyNames()) {
+                sorted.put(name, jdbcProps.getProperty(name));
+            }
+            this.jdbcProperties = sorted;
         }
 
-        static Key of(String uri, String catalogKey) {
-            return new Key(uri, catalogKey);
+        static Key of(String uri, String catalogKey, int poolSize, Properties jdbcProps) {
+            return new Key(uri, catalogKey, poolSize, jdbcProps);
         }
 
         @Override
@@ -107,12 +120,15 @@ public class CachedJdbcClientPool {
                 return false;
             }
             Key that = (Key) o;
-            return Objects.equals(uri, that.uri) && Objects.equals(catalogKey, that.catalogKey);
+            return poolSize == that.poolSize
+                    && Objects.equals(uri, that.uri)
+                    && Objects.equals(catalogKey, that.catalogKey)
+                    && Objects.equals(jdbcProperties, that.jdbcProperties);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(uri, catalogKey);
+            return Objects.hash(uri, catalogKey, poolSize, jdbcProperties);
         }
     }
 }
