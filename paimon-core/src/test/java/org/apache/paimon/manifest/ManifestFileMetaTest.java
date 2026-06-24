@@ -960,6 +960,51 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    @Test
+    public void testManifestSortWithSpillableExternalSortBuffer() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 4; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int i = 0; i < 80; i++) {
+                int partition = manifest % 2 == 0 ? 79 - i : i;
+                entries.add(
+                        makeEntry(
+                                true,
+                                String.format(
+                                        "spill-manifest-%02d-entry-%03d-payload-padding-%040d",
+                                        manifest, i, i),
+                                partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+        testOptions.set("local-sort.max-num-file-handles", "2");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+        for (ManifestFileMeta meta : merged) {
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within a manifest should be sorted after spill")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+    }
+
     /**
      * Test that sort rewrite correctly eliminates DELETE entries and their corresponding ADD
      * entries. The key condition is that totalDeltaFileSize must reach manifestFullCompactionSize
@@ -1021,6 +1066,10 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         Options testOptions = new Options();
         testOptions.set("manifest-sort.enabled", "true");
         testOptions.set("manifest.full-compaction-threshold-size", "10B");
+        testOptions.set("manifest-sort.max-rewrite-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+        testOptions.set("local-sort.max-num-file-handles", "2");
 
         List<ManifestFileMeta> merged =
                 ManifestFileMerger.merge(
