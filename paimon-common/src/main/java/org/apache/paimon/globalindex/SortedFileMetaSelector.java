@@ -276,7 +276,7 @@ public class SortedFileMetaSelector implements FunctionVisitor<Optional<List<Glo
                 .collect(Collectors.toList());
     }
 
-    protected static byte[] prefixUpperBound(byte[] prefix) {
+    public static byte[] prefixUpperBound(byte[] prefix) {
         for (int i = prefix.length - 1; i >= 0; i--) {
             int unsignedByte = prefix[i] & 0xFF;
             if (unsignedByte != 0xFF) {
