@@ -19,8 +19,12 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ManifestFileMerger;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -117,6 +122,38 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .collect(Collectors.toList()));
     }
 
+    @Test
+    public void testDataEvolutionManifestSortByRowId() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(makeManifest(makeRowIdEntry("row20", 20, 5, 0), makeRowIdEntry("row0", 0, 5, 0)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry("row10-seq1", 10, 5, 1),
+                        makeRowIdEntry("row10-seq3", 10, 5, 3)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("row-tracking.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        List<String> outputFileNames = new ArrayList<>();
+        for (ManifestFileMeta meta : merged) {
+            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+                outputFileNames.add(entry.file().fileName());
+            }
+        }
+        assertThat(outputFileNames).containsExactly("row0", "row10-seq3", "row10-seq1", "row20");
+    }
+
     @Override
     public ManifestFile getManifestFile() {
         return manifestFile;
@@ -125,5 +162,35 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
     @Override
     public RowType getPartitionType() {
         return noPartitionType;
+    }
+
+    private ManifestEntry makeRowIdEntry(
+            String fileName, long firstRowId, long rowCount, long sequenceNumber) {
+        return ManifestEntry.create(
+                FileKind.ADD,
+                BinaryRow.EMPTY_ROW,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        rowCount,
+                        BinaryRow.EMPTY_ROW,
+                        BinaryRow.EMPTY_ROW,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        sequenceNumber,
+                        sequenceNumber,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        firstRowId,
+                        Collections.singletonList("f0")));
     }
 }

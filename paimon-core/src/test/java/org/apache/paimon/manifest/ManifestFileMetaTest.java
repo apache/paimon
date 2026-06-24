@@ -1064,6 +1064,128 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    @Test
+    public void testDataEvolutionManifestSortByPartitionAndRowId() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "A-row30", 0, 30, 5),
+                        makeRowIdEntry(true, "A-row10-seq3", 3, 10, 5, 3)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "B-row20", 1, 20, 5),
+                        makeRowIdEntry(true, "B-row0", 2, 0, 5)));
+        input.add(makeManifest(makeRowIdEntry(true, "C-row10-seq5", 3, 10, 5, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        List<ManifestEntry> outputEntries = new ArrayList<>();
+        for (ManifestFileMeta meta : merged) {
+            outputEntries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("A-row30", "B-row20", "B-row0", "C-row10-seq5", "A-row10-seq3");
+
+        for (int i = 1; i < outputEntries.size(); i++) {
+            int previousPartition = outputEntries.get(i - 1).partition().getInt(0);
+            int currentPartition = outputEntries.get(i).partition().getInt(0);
+            long previousRowId = outputEntries.get(i - 1).file().nonNullFirstRowId();
+            long currentRowId = outputEntries.get(i).file().nonNullFirstRowId();
+            assertThat(currentPartition)
+                    .as("Data evolution manifest entries should be sorted by partition first")
+                    .isGreaterThanOrEqualTo(previousPartition);
+            if (currentPartition == previousPartition) {
+                assertThat(currentRowId)
+                        .as("Data evolution manifest entries should be sorted by RowID")
+                        .isGreaterThanOrEqualTo(previousRowId);
+            }
+        }
+    }
+
+    @Test
+    public void testDataEvolutionManifestSortFallsBackToPartitionWhenRowIdStatsMissing() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p2-row0", 2, 0, 5)));
+        input.add(makeManifest(makeEntry(true, "legacy-p0", 0)));
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p1-row10", 1, 10, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        assertThat(
+                        readEntries(merged).stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("legacy-p0", "rowid-p1-row10", "rowid-p2-row0");
+    }
+
+    @Test
+    public void testDataEvolutionMinorManifestSortPreservesUnmatchedDeleteEntries() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(true, "survivor-row30", 0, 30, 5, 1)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(false, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(false, "old-row10", 0, 10, 5, 1),
+                        makeRowIdEntry(true, "new-row20", 0, 20, 5, 2)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        List<ManifestEntry> outputEntries = readEntries(merged);
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+
+        assertThat(
+                        FileEntry.mergeEntries(outputEntries).stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+    }
+
     /**
      * Test manifest sort with a multi-field partition type.
      *
@@ -1497,5 +1619,59 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         null));
+    }
+
+    /** Create a ManifestEntry with row ID metadata for data evolution manifest sort tests. */
+    private ManifestEntry makeRowIdEntry(
+            boolean isAdd, String fileName, int partition, long firstRowId, long rowCount) {
+        return makeRowIdEntry(isAdd, fileName, partition, firstRowId, rowCount, 0);
+    }
+
+    private ManifestEntry makeRowIdEntry(
+            boolean isAdd,
+            String fileName,
+            int partition,
+            long firstRowId,
+            long rowCount,
+            long sequenceNumber) {
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, partition);
+        writer.complete();
+
+        return ManifestEntry.create(
+                isAdd ? FileKind.ADD : FileKind.DELETE,
+                binaryRow,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        rowCount,
+                        binaryRow,
+                        binaryRow,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        sequenceNumber,
+                        sequenceNumber,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        firstRowId,
+                        Collections.singletonList("f0")));
+    }
+
+    private List<ManifestEntry> readEntries(List<ManifestFileMeta> manifestMetas) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestMetas) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+        return entries;
     }
 }
