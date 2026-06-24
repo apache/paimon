@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -155,7 +156,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T1 WHERE a = 1")).containsExactly(Row.of(1, "66", "77"));
     }
 
-    private Map<String, DeletionVector> deletionVectors(FileStoreTable table, Snapshot snapshot) {
+    private Map<DeletionFileKey, DeletionVector> deletionVectors(
+            FileStoreTable table, Snapshot snapshot) {
         assertThat(snapshot.indexManifest()).isNotNull();
         List<IndexManifestEntry> indexManifestEntries =
                 table.indexManifestFileReader().read(snapshot.indexManifest());

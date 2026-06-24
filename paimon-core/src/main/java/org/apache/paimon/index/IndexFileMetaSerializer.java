@@ -22,13 +22,18 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
-import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
@@ -51,14 +56,17 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta());
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = record.dvRanges();
+
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
                 record.fileSize(),
                 record.rowCount(),
-                dvMetasToRowArrayData(record.dvRanges()),
+                metasToRowArrayData(dvRanges, DeletionFileKey.Type.FILE_NAME),
                 fromString(record.externalPath()),
-                globalIndexRow);
+                globalIndexRow,
+                metasToRowArrayData(dvRanges, DeletionFileKey.Type.ROW_RANGE));
     }
 
     @Override
@@ -81,46 +89,91 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
-                row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
+                readDvRanges(row),
                 row.isNullAt(5) ? null : row.getString(5).toString(),
                 globalIndexMeta);
     }
 
-    public static InternalArray dvMetasToRowArrayData(
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges) {
-        if (dvRanges == null) {
+    // ----------------------- Write methods -------------------------------
+
+    /**
+     * Serialize the dvMetas to an GenericArray. Note that we set an invalid marker row to
+     * fileNameDv field if current rowRangeDv is not empty. This fast-fail path can prevent older
+     * sdk silently reading deleted records for data evolution tables.
+     */
+    public static InternalArray metasToRowArrayData(
+            Map<DeletionFileKey, DeletionVectorMeta> dvMetas, DeletionFileKey.Type type) {
+        if (dvMetas == null || dvMetas.isEmpty()) {
             return null;
         }
-        return dvMetasToRowArrayData(dvRanges.values());
+
+        List<GenericRow> rows;
+
+        if (DeletionFileKey.checkType(dvMetas.keySet()) != type) {
+            if (type == DeletionFileKey.Type.FILE_NAME) {
+                // If dvRanges are row-range keyed, set a legacy marker row
+                rows = Collections.singletonList(DeletionVectorMeta.newLegacyMarkerRow());
+            } else {
+                return null;
+            }
+        } else {
+            rows =
+                    dvMetas.values().stream()
+                            .map(DeletionVectorMeta::toRow)
+                            .collect(Collectors.toList());
+        }
+
+        return new GenericArray(rows.toArray(new GenericRow[0]));
     }
 
-    public static InternalArray dvMetasToRowArrayData(Collection<DeletionVectorMeta> dvMetas) {
-        return new GenericArray(
-                dvMetas.stream()
-                        .map(
-                                dvMeta ->
-                                        GenericRow.of(
-                                                fromString(dvMeta.dataFileName()),
-                                                dvMeta.offset(),
-                                                dvMeta.length(),
-                                                dvMeta.cardinality()))
-                        .toArray(GenericRow[]::new));
-    }
+    // ------------------------ Read methods -------------------------------
 
-    public static LinkedHashMap<String, DeletionVectorMeta> rowArrayDataToDvMetas(
+    public static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> rowArrayDataToFileNameDvMetas(
             InternalArray arrayData) {
-        LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>(arrayData.size());
+        return rowArrayDataToDvMetas(
+                arrayData,
+                DeletionFileKey.Type.FILE_NAME,
+                DeletionVectorMeta.SCHEMA.getFieldCount());
+    }
+
+    public static LinkedHashMap<DeletionFileKey, DeletionVectorMeta>
+            rowArrayDataToRowIdRangeDvMetas(InternalArray arrayData) {
+        return rowArrayDataToDvMetas(
+                arrayData,
+                DeletionFileKey.Type.ROW_RANGE,
+                DeletionVectorMeta.ROW_ID_RANGE_SCHEMA.getFieldCount());
+    }
+
+    private static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> rowArrayDataToDvMetas(
+            InternalArray arrayData, DeletionFileKey.Type keyType, int fieldCount) {
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
+                new LinkedHashMap<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
-            InternalRow row = arrayData.getRow(i, DeletionVectorMeta.SCHEMA.getFieldCount());
-            String dataFileName = row.getString(0).toString();
-            dvMetas.put(
-                    dataFileName,
-                    new DeletionVectorMeta(
-                            dataFileName,
-                            row.getInt(1),
-                            row.getInt(2),
-                            row.isNullAt(3) ? null : row.getLong(3)));
+            if (arrayData.isNullAt(i)) {
+                continue;
+            }
+            DeletionVectorMeta dvMeta =
+                    DeletionVectorMeta.fromRow(keyType, arrayData.getRow(i, fieldCount));
+            dvMetas.put(dvMeta.key(), dvMeta);
         }
         return dvMetas;
+    }
+
+    private static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> readDvRanges(
+            InternalRow row) {
+        boolean hasFileNameDvRanges =
+                !row.isNullAt(4) && !DeletionVectorMeta.isLegacyMarker(row.getArray(4));
+        boolean hasRowRangeDvRanges = row.getFieldCount() > 7 && !row.isNullAt(7);
+        checkState(
+                !(hasFileNameDvRanges && hasRowRangeDvRanges),
+                "File-name deletion vector ranges and row-range deletion vector ranges should not"
+                        + " be both non-null.");
+        if (hasFileNameDvRanges) {
+            return rowArrayDataToFileNameDvMetas(row.getArray(4));
+        } else if (hasRowRangeDvRanges) {
+            return rowArrayDataToRowIdRangeDvMetas(row.getArray(7));
+        } else {
+            return null;
+        }
     }
 }

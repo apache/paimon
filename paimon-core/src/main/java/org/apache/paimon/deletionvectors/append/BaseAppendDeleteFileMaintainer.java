@@ -21,6 +21,7 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -55,7 +56,11 @@ public interface BaseAppendDeleteFileMaintainer {
 
     int getBucket();
 
-    void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector);
+    void notifyNewDeletionVector(DeletionFileKey key, DeletionVector deletionVector);
+
+    default void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
+        notifyNewDeletionVector(DeletionFileKey.ofFileName(dataFile), deletionVector);
+    }
 
     List<IndexManifestEntry> persist();
 
@@ -80,13 +85,15 @@ public interface BaseAppendDeleteFileMaintainer {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX).stream()
                         .filter(e -> e.partition().equals(partition))
                         .collect(Collectors.toList());
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> deletionFiles = new HashMap<>();
         for (IndexManifestEntry file : manifestEntries) {
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas = file.indexFile().dvRanges();
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
+                    file.indexFile().dvRanges();
             checkNotNull(dvMetas);
-            for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+            for (Map.Entry<DeletionFileKey, DeletionVectorMeta> entry : dvMetas.entrySet()) {
+                DeletionVectorMeta dvMeta = entry.getValue();
                 deletionFiles.put(
-                        dvMeta.dataFileName(),
+                        entry.getKey(),
                         new DeletionFile(
                                 indexFileHandler.filePath(file).toString(),
                                 dvMeta.offset(),

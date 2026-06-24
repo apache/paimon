@@ -24,6 +24,7 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
@@ -229,7 +230,7 @@ public class TableIndexesTable implements ReadonlyTable {
                 IndexManifestEntry indexManifestEntry,
                 CastExecutor<InternalRow, BinaryString> partitionCastExecutor,
                 RowType logicalRowType) {
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas =
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
                     indexManifestEntry.indexFile().dvRanges();
             GlobalIndexMeta globalMeta = indexManifestEntry.indexFile().globalIndexMeta();
             String indexFieldName = null;
@@ -256,7 +257,8 @@ public class TableIndexesTable implements ReadonlyTable {
                     indexManifestEntry.indexFile().rowCount(),
                     dvMetas == null
                             ? null
-                            : IndexFileMetaSerializer.dvMetasToRowArrayData(dvMetas.values()),
+                            : IndexFileMetaSerializer.metasToRowArrayData(
+                                    dvMetas, DeletionFileKey.Type.FILE_NAME),
                     globalMeta != null ? globalMeta.rowRangeStart() : null,
                     globalMeta != null ? globalMeta.rowRangeEnd() : null,
                     globalMeta != null ? globalMeta.indexFieldId() : null,

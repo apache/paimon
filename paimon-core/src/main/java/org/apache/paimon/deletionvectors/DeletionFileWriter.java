@@ -38,7 +38,7 @@ public class DeletionFileWriter implements Closeable {
     private final Path path;
     private final boolean isExternalPath;
     private final DataOutputStream out;
-    private final LinkedHashMap<String, DeletionVectorMeta> dvMetas;
+    private final LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas;
 
     public DeletionFileWriter(IndexPathFactory pathFactory, FileIO fileIO) throws IOException {
         this.path = pathFactory.newPath();
@@ -53,6 +53,10 @@ public class DeletionFileWriter implements Closeable {
     }
 
     public void write(String key, DeletionVector deletionVector) throws IOException {
+        write(DeletionFileKey.ofFileName(key), deletionVector);
+    }
+
+    public void write(DeletionFileKey key, DeletionVector deletionVector) throws IOException {
         int start = out.size();
         int length = deletionVector.serializeTo(out);
         dvMetas.put(

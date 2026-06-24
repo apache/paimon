@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -166,7 +167,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         -1,
                         Collections.emptyMap());
 
-        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        Optional<DeletionVector> deletionVector =
+                dvFactory.create(DeletionFileKey.ofFileName(file.fileName()));
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             fileRecordReader =
                     new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());

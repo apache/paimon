@@ -70,19 +70,22 @@ public class DeletionVectorsIndexFile extends IndexFile {
      *     value is the corresponding DeletionVector object.
      * @throws UncheckedIOException If an I/O error occurs while reading from the file.
      */
-    public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
-        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas = fileMeta.dvRanges();
+    public Map<DeletionFileKey, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> deletionVectorMetas =
+                fileMeta.dvRanges();
         checkNotNull(deletionVectorMetas);
 
-        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+        Map<DeletionFileKey, DeletionVector> deletionVectors = new HashMap<>();
         Path filePath = pathFactory.toPath(fileMeta);
         try (SeekableInputStream inputStream = fileIO.newInputStream(filePath)) {
             checkVersion(inputStream);
             DataInputStream dataInputStream = new DataInputStream(inputStream);
-            for (DeletionVectorMeta deletionVectorMeta : deletionVectorMetas.values()) {
+            for (Map.Entry<DeletionFileKey, DeletionVectorMeta> entry :
+                    deletionVectorMetas.entrySet()) {
+                DeletionVectorMeta deletionVectorMeta = entry.getValue();
                 inputStream.seek(deletionVectorMeta.offset());
                 deletionVectors.put(
-                        deletionVectorMeta.dataFileName(),
+                        entry.getKey(),
                         DeletionVector.read(dataInputStream, (long) deletionVectorMeta.length()));
             }
         } catch (Exception e) {
@@ -96,16 +99,17 @@ public class DeletionVectorsIndexFile extends IndexFile {
         return deletionVectors;
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(List<IndexFileMeta> indexFiles) {
-        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+    public Map<DeletionFileKey, DeletionVector> readAllDeletionVectors(
+            List<IndexFileMeta> indexFiles) {
+        Map<DeletionFileKey, DeletionVector> deletionVectors = new HashMap<>();
         indexFiles.forEach(indexFile -> deletionVectors.putAll(readAllDeletionVectors(indexFile)));
         return deletionVectors;
     }
 
     /** Reads deletion vectors from a list of DeletionFile which belong to a same index file. */
-    public Map<String, DeletionVector> readDeletionVector(
-            Map<String, DeletionFile> dataFileToDeletionFiles) {
-        Map<String, DeletionVector> deletionVectors = new HashMap<>();
+    public Map<DeletionFileKey, DeletionVector> readDeletionVector(
+            Map<DeletionFileKey, DeletionFile> dataFileToDeletionFiles) {
+        Map<DeletionFileKey, DeletionVector> deletionVectors = new HashMap<>();
         if (dataFileToDeletionFiles.isEmpty()) {
             return deletionVectors;
         }
@@ -113,13 +117,13 @@ public class DeletionVectorsIndexFile extends IndexFile {
         String indexFile = dataFileToDeletionFiles.values().stream().findAny().get().path();
         try (SeekableInputStream inputStream = fileIO.newInputStream(new Path(indexFile))) {
             checkVersion(inputStream);
-            for (String dataFile : dataFileToDeletionFiles.keySet()) {
-                DeletionFile deletionFile = dataFileToDeletionFiles.get(dataFile);
+            for (DeletionFileKey key : dataFileToDeletionFiles.keySet()) {
+                DeletionFile deletionFile = dataFileToDeletionFiles.get(key);
                 checkArgument(deletionFile.path().equals(indexFile));
                 inputStream.seek(deletionFile.offset());
                 DataInputStream dataInputStream = new DataInputStream(inputStream);
                 deletionVectors.put(
-                        dataFile, DeletionVector.read(dataInputStream, deletionFile.length()));
+                        key, DeletionVector.read(dataInputStream, deletionFile.length()));
             }
         } catch (Exception e) {
             throw new RuntimeException("Unable to read deletion vector from file: " + indexFile, e);
@@ -140,7 +144,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         }
     }
 
-    public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) {
+    public IndexFileMeta writeSingleFile(Map<DeletionFileKey, DeletionVector> input) {
         try {
             return createWriter().writeSingleFile(input);
         } catch (IOException e) {
@@ -148,7 +152,7 @@ public class DeletionVectorsIndexFile extends IndexFile {
         }
     }
 
-    public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input) {
+    public List<IndexFileMeta> writeWithRolling(Map<DeletionFileKey, DeletionVector> input) {
         try {
             return createWriter().writeWithRolling(input);
         } catch (IOException e) {

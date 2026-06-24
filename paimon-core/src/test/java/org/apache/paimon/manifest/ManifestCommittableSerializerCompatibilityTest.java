@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -94,9 +95,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null,
                         globalIndexMeta);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta devIndexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -193,9 +196,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null,
                         globalIndexMeta);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta devIndexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -284,9 +289,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, null, null, null);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta devIndexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -370,9 +377,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("asdf", "qwer", "zxcv"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -454,9 +463,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
-        dvMetas.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvMetas.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas = new LinkedHashMap<>();
+        dvMetas.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvMetas.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvMetas, null);
@@ -533,9 +544,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -611,9 +624,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -686,9 +701,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -761,9 +778,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, 5L));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"), new DeletionVectorMeta("dv_key1", 1, 2, 3L));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"), new DeletionVectorMeta("dv_key2", 3, 4, 5L));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -835,9 +854,13 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"),
+                new DeletionVectorMeta("dv_key1", 1, 2, null));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"),
+                new DeletionVectorMeta("dv_key2", 3, 4, null));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -910,9 +933,13 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"),
+                new DeletionVectorMeta("dv_key1", 1, 2, null));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"),
+                new DeletionVectorMeta("dv_key2", 3, 4, null));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);
@@ -985,9 +1012,13 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         null);
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
-        dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, null));
-        dvRanges.put("dv_key2", new DeletionVectorMeta("dv_key2", 3, 4, null));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key1"),
+                new DeletionVectorMeta("dv_key1", 1, 2, null));
+        dvRanges.put(
+                DeletionFileKey.ofFileName("dv_key2"),
+                new DeletionVectorMeta("dv_key2", 3, 4, null));
         IndexFileMeta indexFile =
                 new IndexFileMeta(
                         "my_index_type", "my_index_file", 1024 * 100, 1002, dvRanges, null);

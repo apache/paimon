@@ -21,7 +21,9 @@ package org.apache.paimon.deletionvectors.append;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.FileNameKey;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
@@ -42,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AppendDeletionFileMaintainerTest {
@@ -58,16 +61,17 @@ class AppendDeletionFileMaintainerTest {
         Map<String, List<Integer>> dvs = new HashMap<>();
         dvs.put("f1", Arrays.asList(1, 3, 5));
         dvs.put("f2", Arrays.asList(2, 4, 6));
-        CommitMessageImpl commitMessage1 = store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, 0, dvs);
+        CommitMessageImpl commitMessage1 =
+                store.writeDVIndexFiles(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET, dvs);
         CommitMessageImpl commitMessage2 =
                 store.writeDVIndexFiles(
                         BinaryRow.EMPTY_ROW,
-                        1,
+                        UNAWARE_BUCKET,
                         Collections.singletonMap("f3", Arrays.asList(1, 2, 3)));
         store.commit(commitMessage1, commitMessage2);
 
         IndexPathFactory indexPathFactory =
-                store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0);
+                store.pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, UNAWARE_BUCKET);
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         dataFileToDeletionFiles.putAll(
                 createDeletionFileMapFromIndexFileMetas(
@@ -91,6 +95,7 @@ class AppendDeletionFileMaintainerTest {
         res = dvIFMaintainer.writeUnchangedDeletionVector();
         assertThat(res.size()).isEqualTo(1);
         assertThat(res.get(0).kind()).isEqualTo(FileKind.DELETE);
+        assertThat(res.get(0).bucket()).isEqualTo(UNAWARE_BUCKET);
 
         // the dv of f1 and f2 are in one index file, and the dv of f1 is updated.
         // the dv of f2 need to be rewritten, and this index file should be marked as REMOVE.
@@ -100,11 +105,20 @@ class AppendDeletionFileMaintainerTest {
         assertThat(res.size()).isEqualTo(3);
         IndexManifestEntry entry =
                 res.stream().filter(file -> file.kind() == FileKind.ADD).findAny().get();
-        assertThat(entry.indexFile().dvRanges().containsKey("f2")).isTrue();
+        assertThat(entry.indexFile().dvRanges().containsKey(DeletionFileKey.ofFileName("f2")))
+                .isTrue();
+        assertThat(res).allSatisfy(file -> assertThat(file.bucket()).isEqualTo(UNAWARE_BUCKET));
         entry =
                 res.stream()
                         .filter(file -> file.kind() == FileKind.DELETE)
-                        .filter(file -> file.bucket() == 0)
+                        .filter(
+                                file ->
+                                        file.indexFile()
+                                                .equals(
+                                                        commitMessage1
+                                                                .newFilesIncrement()
+                                                                .newIndexFiles()
+                                                                .get(0)))
                         .findAny()
                         .get();
         assertThat(entry.indexFile())
@@ -112,7 +126,14 @@ class AppendDeletionFileMaintainerTest {
         entry =
                 res.stream()
                         .filter(file -> file.kind() == FileKind.DELETE)
-                        .filter(file -> file.bucket() == 1)
+                        .filter(
+                                file ->
+                                        file.indexFile()
+                                                .equals(
+                                                        commitMessage2
+                                                                .newFilesIncrement()
+                                                                .newIndexFiles()
+                                                                .get(0)))
                         .findAny()
                         .get();
         assertThat(entry.indexFile())
@@ -123,10 +144,13 @@ class AppendDeletionFileMaintainerTest {
             IndexPathFactory indexPathFactory, List<IndexFileMeta> fileMetas) {
         Map<String, DeletionFile> dataFileToDeletionFiles = new HashMap<>();
         for (IndexFileMeta indexFileMeta : fileMetas) {
-            for (Map.Entry<String, DeletionVectorMeta> dvMeta :
+            for (Map.Entry<DeletionFileKey, DeletionVectorMeta> dvMeta :
                     indexFileMeta.dvRanges().entrySet()) {
+                if (!(dvMeta.getKey() instanceof FileNameKey)) {
+                    continue;
+                }
                 dataFileToDeletionFiles.put(
-                        dvMeta.getKey(),
+                        ((FileNameKey) dvMeta.getKey()).fileName(),
                         new DeletionFile(
                                 indexPathFactory.toPath(indexFileMeta).toString(),
                                 dvMeta.getValue().offset(),

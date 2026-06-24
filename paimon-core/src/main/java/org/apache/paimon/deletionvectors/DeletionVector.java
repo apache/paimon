@@ -146,7 +146,7 @@ public interface DeletionVector extends DeletionVectorJudger {
     }
 
     static Factory emptyFactory() {
-        return fileName -> Optional.empty();
+        return key -> Optional.empty();
     }
 
     static Factory factory(@Nullable BucketedDvMaintainer dvMaintainer) {
@@ -191,6 +191,6 @@ public interface DeletionVector extends DeletionVectorJudger {
 
     /** Interface to create {@link DeletionVector}. */
     interface Factory {
-        Optional<DeletionVector> create(String fileName) throws IOException;
+        Optional<DeletionVector> create(DeletionFileKey key) throws IOException;
     }
 }

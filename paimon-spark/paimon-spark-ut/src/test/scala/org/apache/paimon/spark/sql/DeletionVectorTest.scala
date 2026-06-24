@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.deletionvectors.{BucketedDvMaintainer, BucketedDvMaintainerTest, DeletionVector}
+import org.apache.paimon.deletionvectors.{BucketedDvMaintainer, BucketedDvMaintainerTest, DeletionVector, FileNameKey}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.read.PaimonSplitScan
@@ -753,6 +753,7 @@ class DeletionVectorTest extends PaimonSparkTestBase with AdaptiveSparkPlanHelpe
           )
           .deletionVectors()
           .asScala
+          .map { case (key: FileNameKey, dv) => key.fileName() -> dv }
     }.toMap
   }
 

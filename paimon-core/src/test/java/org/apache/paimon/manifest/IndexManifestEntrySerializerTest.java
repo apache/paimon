@@ -18,13 +18,20 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.Range;
+
+import org.junit.jupiter.api.Test;
 
 import java.util.Random;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
+import static org.apache.paimon.index.IndexFileMetaSerializerTest.rowIdRangeDeletionVectorIndexFile;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IndexManifestEntrySerializer}. */
 public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<IndexManifestEntry> {
@@ -46,5 +53,21 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                 row(rnd.nextInt()),
                 rnd.nextInt(),
                 randomIndexFile());
+    }
+
+    @Test
+    public void testRowIdRangeDeletionVectorsRoundTrip() {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        IndexManifestEntry entry =
+                new IndexManifestEntry(
+                        FileKind.ADD, row(1), 2, rowIdRangeDeletionVectorIndexFile());
+
+        IndexManifestEntry actual = serializer.fromRow(serializer.toRow(entry));
+        IndexFileMeta actualIndexFile = actual.indexFile();
+
+        assertThat(serializer.getVersion()).isEqualTo(1);
+        assertThat(actual).isEqualTo(entry);
+        assertThat(actualIndexFile.dvRanges())
+                .containsOnlyKeys(DeletionFileKey.ofRange(new Range(10, 19)));
     }
 }

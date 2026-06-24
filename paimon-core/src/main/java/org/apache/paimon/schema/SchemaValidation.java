@@ -890,9 +890,6 @@ public class SchemaValidation {
                     rowTrackingEnabled,
                     "Data evolution config must enabled with row-tracking.enabled");
             checkArgument(
-                    !options.deletionVectorsEnabled(),
-                    "Data evolution config must disabled with deletion-vectors.enabled");
-            checkArgument(
                     !options.clusteringIncrementalEnabled(),
                     "Data evolution config must disabled with clustering.incremental");
         }

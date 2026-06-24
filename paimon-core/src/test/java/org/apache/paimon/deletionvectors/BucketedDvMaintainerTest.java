@@ -88,13 +88,13 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvMaintainer.deletionVectorOf("f3")).isEmpty();
         IndexFileMeta file = dvMaintainer.writeDeletionVectorsIndex().get();
 
-        Map<String, DeletionVector> deletionVectors =
+        Map<DeletionFileKey, DeletionVector> deletionVectors =
                 fileHandler.readAllDeletionVectors(partition, 0, Collections.singletonList(file));
-        assertThat(deletionVectors.get("f1").isDeleted(1)).isTrue();
-        assertThat(deletionVectors.get("f1").isDeleted(2)).isFalse();
-        assertThat(deletionVectors.get("f2").isDeleted(1)).isFalse();
-        assertThat(deletionVectors.get("f2").isDeleted(2)).isTrue();
-        assertThat(deletionVectors.containsKey("f3")).isFalse();
+        assertThat(deletionVectors.get(DeletionFileKey.ofFileName("f1")).isDeleted(1)).isTrue();
+        assertThat(deletionVectors.get(DeletionFileKey.ofFileName("f1")).isDeleted(2)).isFalse();
+        assertThat(deletionVectors.get(DeletionFileKey.ofFileName("f2")).isDeleted(1)).isFalse();
+        assertThat(deletionVectors.get(DeletionFileKey.ofFileName("f2")).isDeleted(2)).isTrue();
+        assertThat(deletionVectors.containsKey(DeletionFileKey.ofFileName("f3"))).isFalse();
     }
 
     @ParameterizedTest
@@ -246,12 +246,12 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(dvMaintainer2.bitmap64()).isEqualTo(!bitmap64);
 
         // verify two kinds of dv can exist in the same dv maintainer
-        Map<String, DeletionVector> dvs = dvMaintainer2.deletionVectors();
+        Map<DeletionFileKey, DeletionVector> dvs = dvMaintainer2.deletionVectors();
         assertThat(dvs.size()).isEqualTo(3);
-        assertThat(dvs.get("f1").getCardinality()).isEqualTo(3);
-        assertThat(dvs.get("f2"))
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f1")).getCardinality()).isEqualTo(3);
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")))
                 .isInstanceOf(bitmap64 ? Bitmap64DeletionVector.class : BitmapDeletionVector.class);
-        assertThat(dvs.get("f3"))
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f3")))
                 .isInstanceOf(bitmap64 ? BitmapDeletionVector.class : Bitmap64DeletionVector.class);
 
         file = dvMaintainer2.writeDeletionVectorsIndex().get();
@@ -271,16 +271,16 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
         commit2.commit(Collections.singletonList(commitMessage2));
 
         // test read dv index file which contains two kinds of dv
-        Map<String, DeletionVector> readDvs =
+        Map<DeletionFileKey, DeletionVector> readDvs =
                 fileHandler.readAllDeletionVectors(
                         partition,
                         0,
                         fileHandler.scan(
                                 table.latestSnapshot().get(), "DELETION_VECTORS", partition, 0));
         assertThat(readDvs.size()).isEqualTo(3);
-        assertThat(dvs.get("f1").getCardinality()).isEqualTo(3);
-        assertThat(dvs.get("f2").getCardinality()).isEqualTo(2);
-        assertThat(dvs.get("f3").getCardinality()).isEqualTo(2);
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f1")).getCardinality()).isEqualTo(3);
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")).getCardinality()).isEqualTo(2);
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f3")).getCardinality()).isEqualTo(2);
     }
 
     private DeletionVector createDeletionVector(boolean bitmap64) {
@@ -307,7 +307,7 @@ public class BucketedDvMaintainerTest extends PrimaryKeyTableTestBase {
                         : handler.scanEntries(snapshot, DELETION_VECTORS_INDEX, partition).stream()
                                 .map(IndexManifestEntry::indexFile)
                                 .collect(Collectors.toList());
-        Map<String, DeletionVector> deletionVectors =
+        Map<DeletionFileKey, DeletionVector> deletionVectors =
                 new HashMap<>(handler.readAllDeletionVectors(partition, 0, indexFiles));
         return factory.create(partition, 0, deletionVectors);
     }

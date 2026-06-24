@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.deletionvectors.DeletionFileKey
 import org.apache.paimon.io.DataFileMeta
 import org.apache.paimon.spark.PaimonImplicits
 import org.apache.paimon.table.source.{DataSplit, DeletionFile}
@@ -59,7 +60,7 @@ object SparkDataFileMeta {
           dataSplit.bucket,
           totalBuckets,
           file,
-          dvFactory.create(file.fileName()))
+          dvFactory.create(DeletionFileKey.ofFileName(file.fileName())))
     }
   }.toSeq
 

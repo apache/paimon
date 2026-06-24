@@ -23,6 +23,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.FileNameKey;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.Path;
@@ -1309,10 +1311,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return Collections.emptyList();
         }
         for (IndexManifestEntry entry : newIndexes) {
-            LinkedHashMap<String, DeletionVectorMeta> dvMetas = entry.indexFile().dvRanges();
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
+                    entry.indexFile().dvRanges();
             Path bucketPath = fileStorePathFactory.bucketPath(entry.partition(), entry.bucket());
             if (dvMetas != null) {
-                for (DeletionVectorMeta dvMeta : dvMetas.values()) {
+                for (Map.Entry<DeletionFileKey, DeletionVectorMeta> dvEntry : dvMetas.entrySet()) {
+                    if (!(dvEntry.getKey() instanceof FileNameKey)) {
+                        continue;
+                    }
+                    DeletionVectorMeta dvMeta = dvEntry.getValue();
+                    String dataFileName = ((FileNameKey) dvEntry.getKey()).fileName();
 
                     // Iceberg will check the cardinality between deserialized dv and iceberg
                     // deletion file, so if deletionFile.cardinality() is null, we should stop
@@ -1321,7 +1329,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             dvMeta.cardinality() != null,
                             "cardinality in DeletionVector is null, stop generate dv for iceberg. "
                                     + "dataFile path is {}, indexFile path is {}",
-                            new Path(bucketPath, dvMeta.dataFileName()),
+                            new Path(bucketPath, dataFileName),
                             indexFileHandler.filePath(entry).toString());
 
                     IcebergDataFileMeta deleteFileMeta =
@@ -1332,7 +1340,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                     entry.partition(),
                                     dvMeta.cardinality(),
                                     entry.indexFile().fileSize(),
-                                    new Path(bucketPath, dvMeta.dataFileName()).toString(),
+                                    new Path(bucketPath, dataFileName).toString(),
                                     (long) dvMeta.offset(),
                                     (long) dvMeta.length());
 

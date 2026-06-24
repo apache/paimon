@@ -27,6 +27,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.FileNameKey;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -456,7 +458,11 @@ class ClusteringTableTest {
         Set<String> dvReferencedFiles = new HashSet<>();
         for (IndexManifestEntry indexEntry :
                 table.indexManifestFileReader().read(snapshot.indexManifest())) {
-            dvReferencedFiles.addAll(indexEntry.indexFile().dvRanges().keySet());
+            for (DeletionFileKey key : indexEntry.indexFile().dvRanges().keySet()) {
+                if (key instanceof FileNameKey) {
+                    dvReferencedFiles.add(((FileNameKey) key).fileName());
+                }
+            }
         }
 
         // Every DV-referenced file must be an active data file

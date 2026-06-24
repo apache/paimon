@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -163,7 +164,10 @@ public class IndexFileHandlerTest {
         assertThat(scanned).containsOnlyKeys(Pair.of(BinaryRow.EMPTY_ROW, 1));
         assertThat(scanned.get(Pair.of(BinaryRow.EMPTY_ROW, 1)))
                 .extracting(IndexFileMeta::dvRanges)
-                .allSatisfy(dvRanges -> assertThat(dvRanges).containsOnlyKeys("f1"));
+                .allSatisfy(
+                        dvRanges ->
+                                assertThat(dvRanges)
+                                        .containsOnlyKeys(DeletionFileKey.ofFileName("f1")));
 
         assertThat(
                         indexFileHandler.scanBuckets(

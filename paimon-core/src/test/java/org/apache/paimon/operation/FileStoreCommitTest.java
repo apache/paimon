@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -928,11 +929,11 @@ public class FileStoreCommitTest {
         // assert 1
         assertThat(store.scanDVIndexFiles(partition, 0).size()).isEqualTo(2);
         BucketedDvMaintainer maintainer = store.createOrRestoreDVMaintainer(partition, 0);
-        Map<String, DeletionVector> dvs = maintainer.deletionVectors();
+        Map<DeletionFileKey, DeletionVector> dvs = maintainer.deletionVectors();
         assertThat(dvs.size()).isEqualTo(2);
-        assertThat(dvs.get("f2").isDeleted(2)).isTrue();
-        assertThat(dvs.get("f2").isDeleted(3)).isFalse();
-        assertThat(dvs.get("f2").isDeleted(4)).isTrue();
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")).isDeleted(2)).isTrue();
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")).isDeleted(3)).isFalse();
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")).isDeleted(4)).isTrue();
 
         // commit 2
         List<IndexFileMeta> deleted =
@@ -949,8 +950,8 @@ public class FileStoreCommitTest {
         maintainer = store.createOrRestoreDVMaintainer(partition, 0);
         dvs = maintainer.deletionVectors();
         assertThat(dvs.size()).isEqualTo(2);
-        assertThat(dvs.get("f1").isDeleted(3)).isTrue();
-        assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f1")).isDeleted(3)).isTrue();
+        assertThat(dvs.get(DeletionFileKey.ofFileName("f2")).isDeleted(3)).isTrue();
     }
 
     @Test

@@ -18,12 +18,23 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.Range;
 
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Random;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link org.apache.paimon.index.IndexFileMetaSerializer}. */
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
@@ -61,13 +72,13 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
 
     public static IndexFileMeta randomDeletionVectorIndexFile() {
         Random rnd = new Random();
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
         dvRanges.put(
-                "my_file_name1",
+                DeletionFileKey.ofFileName("my_file_name1"),
                 new DeletionVectorMeta(
                         "my_file_name1", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
         dvRanges.put(
-                "my_file_name2",
+                DeletionFileKey.ofFileName("my_file_name2"),
                 new DeletionVectorMeta(
                         "my_file_name2", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
         return new IndexFileMeta(
@@ -77,5 +88,59 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 rnd.nextInt(),
                 dvRanges,
                 null);
+    }
+
+    public static IndexFileMeta rowIdRangeDeletionVectorIndexFile() {
+        DeletionFileKey rowIdRangeKey = DeletionFileKey.ofRange(new Range(10, 19));
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(rowIdRangeKey, new DeletionVectorMeta(rowIdRangeKey, 4, 5, 6L));
+        return new IndexFileMeta(
+                DeletionVectorsIndexFile.DELETION_VECTORS_INDEX,
+                "deletion_vectors_index_file_name",
+                100,
+                9,
+                dvRanges,
+                null);
+    }
+
+    @Test
+    public void testRowIdRangeDeletionVectorsRoundTrip() {
+        IndexFileMeta indexFile = rowIdRangeDeletionVectorIndexFile();
+
+        IndexFileMeta actual = serializer().fromRow(serializer().toRow(indexFile));
+
+        assertThat(actual).isEqualTo(indexFile);
+        assertThat(actual.dvRanges()).containsOnlyKeys(DeletionFileKey.ofRange(new Range(10, 19)));
+    }
+
+    @Test
+    public void testRowIdRangeDeletionVectorsSerializeRoundTrip() throws IOException {
+        IndexFileMeta indexFile = rowIdRangeDeletionVectorIndexFile();
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        DataOutputSerializer out = new DataOutputSerializer(128);
+
+        serializer.serialize(indexFile, out);
+        IndexFileMeta actual =
+                serializer.deserialize(new DataInputDeserializer(out.getCopyOfBuffer()));
+
+        assertThat(actual).isEqualTo(indexFile);
+    }
+
+    @Test
+    public void testRowIdRangeDeletionVectorsLegacyMarker() {
+        IndexFileMeta indexFile = rowIdRangeDeletionVectorIndexFile();
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+
+        InternalRow row = serializer.toRow(indexFile);
+
+        assertThat(serializer.fromRow(row)).isEqualTo(indexFile);
+        assertThat(DeletionVectorMeta.isLegacyMarker(row.getArray(4))).isTrue();
+        assertThat(row.isNullAt(7)).isFalse();
+        // ensure that old path will fast-fail
+        assertThatThrownBy(
+                        () ->
+                                IndexFileMetaSerializer.rowArrayDataToFileNameDvMetas(
+                                        row.getArray(4)))
+                .isInstanceOf(NullPointerException.class);
     }
 }

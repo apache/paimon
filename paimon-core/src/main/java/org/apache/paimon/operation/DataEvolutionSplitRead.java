@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DataEvolutionApplyDvReader;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -82,8 +83,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A union {@link SplitRead} to read multiple inner files to merge columns, note that this class
- * does not support filtering push down and deletion vectors, as they can interfere with the process
- * of merging columns.
+ * does not support filtering push down, as it can interfere with the process of merging columns.
  *
  * <p>TODO: Optimize implementation of this class.
  */
@@ -155,6 +155,19 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     private RecordReader<InternalRow> createReader(
+            DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
+        DataEvolutionApplyDvReader.Info dvInfo =
+                DataEvolutionApplyDvReader.readInfo(
+                        fileIO, readRowType, dataSplit.dataEvolutionDeletionFiles().orElse(null));
+        RecordReader<InternalRow> reader =
+                createReaderWithoutDeletionVector(dataSplit, rowRanges, dvInfo.actualReadType);
+        if (!dvInfo.hasDeletionVectors()) {
+            return reader;
+        }
+        return new DataEvolutionApplyDvReader(reader, dvInfo);
+    }
+
+    private RecordReader<InternalRow> createReaderWithoutDeletionVector(
             DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
         List<DataFileMeta> files = dataSplit.dataFiles();
         BinaryRow partition = dataSplit.partition();

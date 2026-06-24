@@ -61,7 +61,11 @@ public class IndexManifestEntry {
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(8, "_EXTERNAL_PATH", newStringType(true)),
-                            new DataField(9, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
+                            new DataField(9, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA),
+                            new DataField(
+                                    10,
+                                    "_DELETION_VECTOR_ROW_ID_RANGES",
+                                    new ArrayType(true, DeletionVectorMeta.ROW_ID_RANGE_SCHEMA))));
 
     private final FileKind kind;
     private final BinaryRow partition;

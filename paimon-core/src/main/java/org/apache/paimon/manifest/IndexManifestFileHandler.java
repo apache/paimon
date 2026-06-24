@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -121,10 +122,11 @@ public class IndexManifestFileHandler {
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
             Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
-            Set<String> dvDataFiles = new HashSet<>();
+            Set<DeletionFileKey> dvDataFiles = new HashSet<>();
             for (IndexManifestEntry entry : prevIndexFiles) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
-                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges =
+                        entry.indexFile().dvRanges();
                 if (dvRanges != null) {
                     dvDataFiles.addAll(dvRanges.keySet());
                 }
@@ -132,14 +134,15 @@ public class IndexManifestFileHandler {
 
             for (IndexManifestEntry entry : newIndexFiles) {
                 String fileName = entry.indexFile().fileName();
-                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges =
+                        entry.indexFile().dvRanges();
                 if (entry.kind() == FileKind.ADD) {
                     checkState(
                             !indexEntries.containsKey(fileName),
                             "Trying to add file %s which is already added.",
                             fileName);
                     if (dvRanges != null) {
-                        for (String dataFile : dvRanges.keySet()) {
+                        for (DeletionFileKey dataFile : dvRanges.keySet()) {
                             checkState(
                                     !dvDataFiles.contains(dataFile),
                                     "Trying to add dv for data file %s which is already added.",
@@ -154,7 +157,7 @@ public class IndexManifestFileHandler {
                             "Trying to delete file %s which is not exists.",
                             fileName);
                     if (dvRanges != null) {
-                        for (String dataFile : dvRanges.keySet()) {
+                        for (DeletionFileKey dataFile : dvRanges.keySet()) {
                             checkState(
                                     dvDataFiles.contains(dataFile),
                                     "Trying to delete dv for data file %s which is not exists.",

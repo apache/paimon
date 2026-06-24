@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -182,7 +183,7 @@ public class DeletionFile implements Serializable {
     }
 
     static Factory emptyFactory() {
-        return fileName -> Optional.empty();
+        return key -> Optional.empty();
     }
 
     public static Factory factory(
@@ -190,21 +191,22 @@ public class DeletionFile implements Serializable {
         if (deletionFiles == null) {
             return emptyFactory();
         }
-        Map<String, DeletionFile> fileToDeletion = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> fileToDeletion = new HashMap<>();
         for (int i = 0; i < files.size(); i++) {
             DeletionFile deletionFile = deletionFiles.get(i);
             if (deletionFile != null) {
-                fileToDeletion.put(files.get(i).fileName(), deletionFile);
+                fileToDeletion.put(
+                        DeletionFileKey.ofFileName(files.get(i).fileName()), deletionFile);
             }
         }
-        return fileName -> {
-            DeletionFile deletionFile = fileToDeletion.get(fileName);
+        return key -> {
+            DeletionFile deletionFile = fileToDeletion.get(key);
             return Optional.ofNullable(deletionFile);
         };
     }
 
     /** Interface to create {@link DeletionFile}. */
     public interface Factory {
-        Optional<DeletionFile> create(String fileName) throws IOException;
+        Optional<DeletionFile> create(DeletionFileKey key) throws IOException;
     }
 }

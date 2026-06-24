@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexResult;
@@ -179,7 +180,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = new HashMap<>();
         for (DataFileMeta file : files) {
-            dvFactories.put(file.fileName(), () -> dvFactory.create(file.fileName()).orElse(null));
+            dvFactories.put(
+                    file.fileName(),
+                    () ->
+                            dvFactory
+                                    .create(DeletionFileKey.ofFileName(file.fileName()))
+                                    .orElse(null));
         }
         return createReader(partition, bucket, files, dvFactories);
     }

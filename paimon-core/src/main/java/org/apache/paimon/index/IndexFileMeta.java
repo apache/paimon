@@ -19,6 +19,7 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -54,7 +55,11 @@ public class IndexFileMeta {
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
                             new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
-                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
+                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA),
+                            new DataField(
+                                    7,
+                                    "_DELETION_VECTOR_ROW_ID_RANGES",
+                                    new ArrayType(true, DeletionVectorMeta.ROW_ID_RANGE_SCHEMA))));
 
     private final String indexType;
     private final String fileName;
@@ -67,7 +72,7 @@ public class IndexFileMeta {
      * Metadata only used by {@link DeletionVectorsIndexFile}, use LinkedHashMap to ensure that the
      * order of DeletionVectorMetas and the written DeletionVectors is consistent.
      */
-    private final @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges;
+    private final @Nullable LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges;
 
     private final @Nullable String externalPath;
 
@@ -76,7 +81,7 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath) {
         this(indexType, fileName, fileSize, rowCount, dvRanges, externalPath, null);
     }
@@ -86,7 +91,7 @@ public class IndexFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges,
+            @Nullable LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges,
             @Nullable String externalPath,
             @Nullable GlobalIndexMeta globalIndexMeta) {
         this.indexType = indexType;
@@ -129,7 +134,7 @@ public class IndexFileMeta {
         return rowCount;
     }
 
-    public @Nullable LinkedHashMap<String, DeletionVectorMeta> dvRanges() {
+    public @Nullable LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges() {
         return dvRanges;
     }
 

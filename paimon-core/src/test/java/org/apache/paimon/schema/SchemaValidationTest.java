@@ -859,6 +859,31 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testDataEvolutionCoexistsWithDeletionVectors() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()));
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put("deletion-vectors.enabled", "true");
+        options.put(BUCKET.key(), String.valueOf(-1));
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                singletonList("f0"),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testBucketAppendBackwardCompatibility() {
         List<DataField> fields =
                 Arrays.asList(

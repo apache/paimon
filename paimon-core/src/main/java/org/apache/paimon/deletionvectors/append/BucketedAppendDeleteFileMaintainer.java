@@ -20,6 +20,7 @@ package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
@@ -52,8 +53,8 @@ public class BucketedAppendDeleteFileMaintainer implements BaseAppendDeleteFileM
     }
 
     @Override
-    public void notifyNewDeletionVector(String dataFile, DeletionVector deletionVector) {
-        maintainer.mergeNewDeletion(dataFile, deletionVector);
+    public void notifyNewDeletionVector(DeletionFileKey key, DeletionVector deletionVector) {
+        maintainer.mergeNewDeletion(key, deletionVector);
     }
 
     @Override

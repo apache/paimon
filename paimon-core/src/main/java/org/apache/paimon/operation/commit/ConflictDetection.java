@@ -22,6 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.FileNameKey;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -682,13 +684,19 @@ public class ConflictDetection {
             // Should not attach DELETE type dv index for base file.
             if (!indexManifestEntry.kind().equals(FileKind.DELETE)) {
                 IndexFileMeta indexFile = indexManifestEntry.indexFile();
-                LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+                LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
                 if (dvRanges != null) {
-                    for (DeletionVectorMeta value : dvRanges.values()) {
+                    for (Map.Entry<DeletionFileKey, DeletionVectorMeta> entry :
+                            dvRanges.entrySet()) {
+                        // todo: check DV range consistency for Data-Evolution tables
+                        if (!(entry.getKey() instanceof FileNameKey)) {
+                            continue;
+                        }
+                        String dataFileName = ((FileNameKey) entry.getKey()).fileName();
                         checkState(
-                                !fileNameToDVFileName.containsKey(value.dataFileName()),
+                                !fileNameToDVFileName.containsKey(dataFileName),
                                 "One file should correspond to only one dv entry.");
-                        fileNameToDVFileName.put(value.dataFileName(), indexFile.fileName());
+                        fileNameToDVFileName.put(dataFileName, indexFile.fileName());
                     }
                 }
             }
@@ -718,12 +726,16 @@ public class ConflictDetection {
         // create a new one.
         Map<String, List<IndexManifestEntry>> fileNameToDVEntry = new HashMap<>();
         for (IndexManifestEntry deltaIndexEntry : deltaIndexEntries) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges =
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges =
                     deltaIndexEntry.indexFile().dvRanges();
             if (dvRanges != null) {
-                for (DeletionVectorMeta meta : dvRanges.values()) {
-                    fileNameToDVEntry.putIfAbsent(meta.dataFileName(), new ArrayList<>());
-                    fileNameToDVEntry.get(meta.dataFileName()).add(deltaIndexEntry);
+                for (DeletionFileKey key : dvRanges.keySet()) {
+                    if (!(key instanceof FileNameKey)) {
+                        continue;
+                    }
+                    String dataFileName = ((FileNameKey) key).fileName();
+                    fileNameToDVEntry.putIfAbsent(dataFileName, new ArrayList<>());
+                    fileNameToDVEntry.get(dataFileName).add(deltaIndexEntry);
                 }
             }
         }

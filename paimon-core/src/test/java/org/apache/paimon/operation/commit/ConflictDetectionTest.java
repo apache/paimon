@@ -20,6 +20,7 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -321,9 +322,9 @@ class ConflictDetectionTest {
 
     private IndexManifestEntry createDvIndexEntry(
             String fileName, FileKind kind, List<String> fileNames) {
-        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
         for (String name : fileNames) {
-            dvRanges.put(name, new DeletionVectorMeta(name, 1, 1, 1L));
+            dvRanges.put(DeletionFileKey.ofFileName(name), new DeletionVectorMeta(name, 1, 1, 1L));
         }
         return new IndexManifestEntry(
                 kind,

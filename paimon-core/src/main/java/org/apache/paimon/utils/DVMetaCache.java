@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.source.DeletionFile;
 
@@ -51,14 +52,18 @@ public class DVMetaCache {
     }
 
     @Nullable
-    public Map<String, DeletionFile> read(Path manifestPath, BinaryRow partition, int bucket) {
+    public Map<DeletionFileKey, DeletionFile> read(
+            Path manifestPath, BinaryRow partition, int bucket) {
         DVMetaCacheKey cacheKey = new DVMetaCacheKey(manifestPath, partition, bucket);
         DVMetaCacheValue cacheValue = this.cache.getIfPresent(cacheKey);
         return cacheValue == null ? null : cacheValue.get();
     }
 
     public void put(
-            Path path, BinaryRow partition, int bucket, Map<String, DeletionFile> dvFilesMap) {
+            Path path,
+            BinaryRow partition,
+            int bucket,
+            Map<DeletionFileKey, DeletionFile> dvFilesMap) {
         DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
         this.cache.put(key, DVMetaCacheValue.eager(dvFilesMap));
     }
@@ -68,7 +73,7 @@ public class DVMetaCache {
             BinaryRow partition,
             int bucket,
             int valueNumber,
-            Supplier<Map<String, DeletionFile>> dvFilesSupplier) {
+            Supplier<Map<DeletionFileKey, DeletionFile>> dvFilesSupplier) {
         DVMetaCacheKey key = new DVMetaCacheKey(path, partition, bucket);
         this.cache.put(key, DVMetaCacheValue.lazy(valueNumber, dvFilesSupplier));
     }
@@ -84,13 +89,14 @@ public class DVMetaCache {
             this.deletionFilesField = deletionFilesField;
         }
 
-        private static DVMetaCacheValue eager(Map<String, DeletionFile> deletionFiles) {
+        private static DVMetaCacheValue eager(Map<DeletionFileKey, DeletionFile> deletionFiles) {
             return new DVMetaCacheValue(
                     deletionFiles.size() + 1, new ExistingDeletionFilesField(deletionFiles));
         }
 
         private static DVMetaCacheValue lazy(
-                int valueNumber, Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
+                int valueNumber,
+                Supplier<Map<DeletionFileKey, DeletionFile>> deletionFilesSupplier) {
             return new DVMetaCacheValue(
                     valueNumber + 1, new LazyDeletionFilesField(deletionFilesSupplier));
         }
@@ -99,40 +105,41 @@ public class DVMetaCache {
             return weight;
         }
 
-        private Map<String, DeletionFile> get() {
+        private Map<DeletionFileKey, DeletionFile> get() {
             return deletionFilesField.get();
         }
     }
 
     private interface DeletionFilesField {
 
-        Map<String, DeletionFile> get();
+        Map<DeletionFileKey, DeletionFile> get();
     }
 
     private static final class ExistingDeletionFilesField implements DeletionFilesField {
 
-        private final Map<String, DeletionFile> deletionFiles;
+        private final Map<DeletionFileKey, DeletionFile> deletionFiles;
 
-        private ExistingDeletionFilesField(Map<String, DeletionFile> deletionFiles) {
+        private ExistingDeletionFilesField(Map<DeletionFileKey, DeletionFile> deletionFiles) {
             this.deletionFiles = deletionFiles;
         }
 
         @Override
-        public Map<String, DeletionFile> get() {
+        public Map<DeletionFileKey, DeletionFile> get() {
             return deletionFiles;
         }
     }
 
     private static final class LazyDeletionFilesField implements DeletionFilesField {
 
-        private final LazyField<Map<String, DeletionFile>> deletionFiles;
+        private final LazyField<Map<DeletionFileKey, DeletionFile>> deletionFiles;
 
-        private LazyDeletionFilesField(Supplier<Map<String, DeletionFile>> deletionFilesSupplier) {
+        private LazyDeletionFilesField(
+                Supplier<Map<DeletionFileKey, DeletionFile>> deletionFilesSupplier) {
             this.deletionFiles = new LazyField<>(deletionFilesSupplier);
         }
 
         @Override
-        public synchronized Map<String, DeletionFile> get() {
+        public synchronized Map<DeletionFileKey, DeletionFile> get() {
             return deletionFiles.get();
         }
     }

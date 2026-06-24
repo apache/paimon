@@ -18,9 +18,11 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -31,9 +33,9 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 
-import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Serializer for {@link IndexFileMeta} with 1.2 version. */
@@ -81,5 +83,24 @@ public class IndexFileMetaV2Deserializer implements Serializable {
 
     public IndexFileMeta deserialize(DataInputView in) throws IOException {
         return fromRow(rowSerializer.deserialize(in));
+    }
+
+    public static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> rowArrayDataToDvMetas(
+            InternalArray arrayData) {
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
+                new LinkedHashMap<>(arrayData.size());
+        for (int i = 0; i < arrayData.size(); i++) {
+            InternalRow row = arrayData.getRow(i, DeletionVectorMeta.SCHEMA.getFieldCount());
+            String dataFileName = row.getString(0).toString();
+            DeletionFileKey key = DeletionFileKey.ofFileName(dataFileName);
+            dvMetas.put(
+                    key,
+                    new DeletionVectorMeta(
+                            key,
+                            row.getInt(1),
+                            row.getInt(2),
+                            row.isNullAt(3) ? null : row.getLong(3)));
+        }
+        return dvMetas;
     }
 }

@@ -35,12 +35,13 @@ import java.util.Optional;
 public class BucketedDvMaintainer {
 
     private final DeletionVectorsIndexFile dvIndexFile;
-    private final Map<String, DeletionVector> deletionVectors;
+    private final Map<DeletionFileKey, DeletionVector> deletionVectors;
     protected final boolean bitmap64;
     private boolean modified;
 
     private BucketedDvMaintainer(
-            DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
+            DeletionVectorsIndexFile dvIndexFile,
+            Map<DeletionFileKey, DeletionVector> deletionVectors) {
         this.dvIndexFile = dvIndexFile;
         this.deletionVectors = deletionVectors;
         this.bitmap64 = dvIndexFile.bitmap64();
@@ -59,8 +60,12 @@ public class BucketedDvMaintainer {
      * @param position The row position within the file that has been deleted.
      */
     public void notifyNewDeletion(String fileName, long position) {
+        notifyNewDeletion(DeletionFileKey.ofFileName(fileName), position);
+    }
+
+    public void notifyNewDeletion(DeletionFileKey key, long position) {
         DeletionVector deletionVector =
-                deletionVectors.computeIfAbsent(fileName, k -> createNewDeletionVector());
+                deletionVectors.computeIfAbsent(key, k -> createNewDeletionVector());
         if (deletionVector.checkedDelete(position)) {
             modified = true;
         }
@@ -73,7 +78,11 @@ public class BucketedDvMaintainer {
      * @param deletionVector The deletion vector
      */
     public void notifyNewDeletion(String fileName, DeletionVector deletionVector) {
-        deletionVectors.put(fileName, deletionVector);
+        notifyNewDeletion(DeletionFileKey.ofFileName(fileName), deletionVector);
+    }
+
+    public void notifyNewDeletion(DeletionFileKey key, DeletionVector deletionVector) {
+        deletionVectors.put(key, deletionVector);
         modified = true;
     }
 
@@ -85,11 +94,15 @@ public class BucketedDvMaintainer {
      * @param deletionVector The deletion vector
      */
     public void mergeNewDeletion(String fileName, DeletionVector deletionVector) {
-        DeletionVector old = deletionVectors.get(fileName);
+        mergeNewDeletion(DeletionFileKey.ofFileName(fileName), deletionVector);
+    }
+
+    public void mergeNewDeletion(DeletionFileKey key, DeletionVector deletionVector) {
+        DeletionVector old = deletionVectors.get(key);
         if (old != null) {
             deletionVector.merge(old);
         }
-        deletionVectors.put(fileName, deletionVector);
+        deletionVectors.put(key, deletionVector);
         modified = true;
     }
 
@@ -100,8 +113,12 @@ public class BucketedDvMaintainer {
      * @param fileName The name of the file whose deletion vector should be removed.
      */
     public void removeDeletionVectorOf(String fileName) {
-        if (deletionVectors.containsKey(fileName)) {
-            deletionVectors.remove(fileName);
+        removeDeletionVectorOf(DeletionFileKey.ofFileName(fileName));
+    }
+
+    public void removeDeletionVectorOf(DeletionFileKey key) {
+        if (deletionVectors.containsKey(key)) {
+            deletionVectors.remove(key);
             modified = true;
         }
     }
@@ -128,7 +145,11 @@ public class BucketedDvMaintainer {
      *     Optional} if not.
      */
     public Optional<DeletionVector> deletionVectorOf(String fileName) {
-        return Optional.ofNullable(deletionVectors.get(fileName));
+        return deletionVectorOf(DeletionFileKey.ofFileName(fileName));
+    }
+
+    public Optional<DeletionVector> deletionVectorOf(DeletionFileKey key) {
+        return Optional.ofNullable(deletionVectors.get(key));
     }
 
     public DeletionVectorsIndexFile dvIndexFile() {
@@ -136,7 +157,7 @@ public class BucketedDvMaintainer {
     }
 
     @VisibleForTesting
-    public Map<String, DeletionVector> deletionVectors() {
+    public Map<DeletionFileKey, DeletionVector> deletionVectors() {
         return deletionVectors;
     }
 
@@ -166,13 +187,15 @@ public class BucketedDvMaintainer {
             if (restoredFiles == null) {
                 restoredFiles = Collections.emptyList();
             }
-            Map<String, DeletionVector> deletionVectors =
+            Map<DeletionFileKey, DeletionVector> deletionVectors =
                     new HashMap<>(handler.readAllDeletionVectors(partition, bucket, restoredFiles));
             return create(partition, bucket, deletionVectors);
         }
 
         public BucketedDvMaintainer create(
-                BinaryRow partition, int bucket, Map<String, DeletionVector> deletionVectors) {
+                BinaryRow partition,
+                int bucket,
+                Map<DeletionFileKey, DeletionVector> deletionVectors) {
             return new BucketedDvMaintainer(handler.dvIndex(partition, bucket), deletionVectors);
         }
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.index;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
@@ -272,12 +273,12 @@ public class IndexFileHandler {
         indexManifestFile.delete(indexManifest);
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(
+    public Map<DeletionFileKey, DeletionVector> readAllDeletionVectors(
             BinaryRow partition, int bucket, List<IndexFileMeta> fileMetas) {
         return dvIndex(partition, bucket).readAllDeletionVectors(fileMetas);
     }
 
-    public Map<String, DeletionVector> readAllDeletionVectors(IndexManifestEntry entry) {
+    public Map<DeletionFileKey, DeletionVector> readAllDeletionVectors(IndexManifestEntry entry) {
         return dvIndex(entry.partition(), entry.bucket()).readAllDeletionVectors(entry.indexFile());
     }
 }

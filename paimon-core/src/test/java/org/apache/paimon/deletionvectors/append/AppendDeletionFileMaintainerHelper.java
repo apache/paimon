@@ -19,11 +19,13 @@
 package org.apache.paimon.deletionvectors.append;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.source.DeletionFile;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -49,10 +51,15 @@ public class AppendDeletionFileMaintainerHelper {
                                         touchedIndexFileNames.contains(
                                                 indexManifestEntry.indexFile().fileName()))
                         .collect(Collectors.toList());
+        Map<DeletionFileKey, DeletionFile> convertedFiles = new HashMap<>();
+        deletionFiles.forEach(
+                (fileName, file) -> {
+                    convertedFiles.put(DeletionFileKey.ofFileName(fileName), file);
+                });
         return new AppendDeleteFileMaintainer(
                 indexFileHandler.dvIndex(partition, UNAWARE_BUCKET),
                 partition,
                 manifests,
-                deletionFiles);
+                convertedFiles);
     }
 }

@@ -51,10 +51,11 @@ public class DeletionVectorIndexFileWriter {
      *
      * <p>TODO: We can consider sending a message to delete the deletion file in the future.
      */
-    public IndexFileMeta writeSingleFile(Map<String, DeletionVector> input) throws IOException {
+    public IndexFileMeta writeSingleFile(Map<DeletionFileKey, DeletionVector> input)
+            throws IOException {
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
         try {
-            for (Map.Entry<String, DeletionVector> entry : input.entrySet()) {
+            for (Map.Entry<DeletionFileKey, DeletionVector> entry : input.entrySet()) {
                 writer.write(entry.getKey(), entry.getValue());
             }
         } finally {
@@ -63,25 +64,25 @@ public class DeletionVectorIndexFileWriter {
         return writer.result();
     }
 
-    public List<IndexFileMeta> writeWithRolling(Map<String, DeletionVector> input)
+    public List<IndexFileMeta> writeWithRolling(Map<DeletionFileKey, DeletionVector> input)
             throws IOException {
         if (input.isEmpty()) {
             return Collections.emptyList();
         }
         List<IndexFileMeta> result = new ArrayList<>();
-        Iterator<Map.Entry<String, DeletionVector>> iterator = input.entrySet().iterator();
+        Iterator<Map.Entry<DeletionFileKey, DeletionVector>> iterator = input.entrySet().iterator();
         while (iterator.hasNext()) {
             result.add(tryWriter(iterator));
         }
         return result;
     }
 
-    private IndexFileMeta tryWriter(Iterator<Map.Entry<String, DeletionVector>> iterator)
+    private IndexFileMeta tryWriter(Iterator<Map.Entry<DeletionFileKey, DeletionVector>> iterator)
             throws IOException {
         DeletionFileWriter writer = new DeletionFileWriter(indexPathFactory, fileIO);
         try {
             while (iterator.hasNext()) {
-                Map.Entry<String, DeletionVector> entry = iterator.next();
+                Map.Entry<DeletionFileKey, DeletionVector> entry = iterator.next();
                 writer.write(entry.getKey(), entry.getValue());
                 if (writer.getPos() > targetSizeInBytes) {
                     break;

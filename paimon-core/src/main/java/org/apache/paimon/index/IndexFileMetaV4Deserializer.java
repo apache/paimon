@@ -27,7 +27,6 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
@@ -39,8 +38,8 @@ import java.util.List;
 
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** Serializer for {@link IndexFileMeta} with 0.9 version. */
-public class IndexFileMetaV1Deserializer implements Serializable {
+/** Deserializer for {@link IndexFileMeta} in commit message version 11. */
+public class IndexFileMetaV4Deserializer implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -55,27 +54,39 @@ public class IndexFileMetaV1Deserializer implements Serializable {
                             new DataField(
                                     4,
                                     "_DELETIONS_VECTORS_RANGES",
-                                    new ArrayType(
-                                            true,
-                                            RowType.of(
-                                                    newStringType(false),
-                                                    new IntType(false),
-                                                    new IntType(false))))));
+                                    new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(5, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(6, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
 
     protected final InternalRowSerializer rowSerializer;
 
-    public IndexFileMetaV1Deserializer() {
+    public IndexFileMetaV4Deserializer() {
         this.rowSerializer = InternalSerializers.create(SCHEMA);
     }
 
     public IndexFileMeta fromRow(InternalRow row) {
+        GlobalIndexMeta globalIndexMeta = null;
+        if (!row.isNullAt(6)) {
+            InternalRow globalIndexRow = row.getRow(6, 5);
+            globalIndexMeta =
+                    new GlobalIndexMeta(
+                            globalIndexRow.getLong(0),
+                            globalIndexRow.getLong(1),
+                            globalIndexRow.getInt(2),
+                            globalIndexRow.isNullAt(3)
+                                    ? null
+                                    : globalIndexRow.getArray(3).toIntArray(),
+                            globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4));
+        }
+
         return new IndexFileMeta(
                 row.getString(0).toString(),
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
                 row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
-                null);
+                row.isNullAt(5) ? null : row.getString(5).toString(),
+                globalIndexMeta);
     }
 
     public final List<IndexFileMeta> deserializeList(DataInputView source) throws IOException {
@@ -93,13 +104,6 @@ public class IndexFileMetaV1Deserializer implements Serializable {
 
     public static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> rowArrayDataToDvMetas(
             InternalArray arrayData) {
-        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas =
-                new LinkedHashMap<>(arrayData.size());
-        for (int i = 0; i < arrayData.size(); i++) {
-            InternalRow row = arrayData.getRow(i, 3);
-            DeletionFileKey key = DeletionFileKey.ofFileName(row.getString(0).toString());
-            dvMetas.put(key, new DeletionVectorMeta(key, row.getInt(1), row.getInt(2), null));
-        }
-        return dvMetas;
+        return IndexFileMetaV2Deserializer.rowArrayDataToDvMetas(arrayData);
     }
 }

@@ -24,7 +24,9 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.deletionvectors.RowIdRangeKey;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -59,6 +61,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
@@ -398,7 +401,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> entries) {
         List<DataSplit> splits = new ArrayList<>();
         // Read deletion indexes at once to reduce file IO
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFilesMap = null;
+        Map<Pair<BinaryRow, Integer>, Map<DeletionFileKey, DeletionFile>> deletionFilesMap = null;
         if (!isStreaming) {
             deletionFilesMap =
                     deletionVectors && snapshot != null
@@ -435,12 +438,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
                     if (deletionVectors && deletionFilesMap != null) {
-                        builder.withDataDeletionFiles(
-                                getDeletionFiles(
-                                        dataFiles,
-                                        deletionFilesMap.getOrDefault(
-                                                Pair.of(partition, bucket),
-                                                Collections.emptyMap())));
+                        Map<DeletionFileKey, DeletionFile> deletionFiles =
+                                deletionFilesMap.getOrDefault(
+                                        Pair.of(partition, bucket), Collections.emptyMap());
+                        if (!options.dataEvolutionEnabled()) {
+                            builder.withDataDeletionFiles(
+                                    getDeletionFiles(dataFiles, deletionFiles));
+                        } else {
+                            Map<Range, DeletionFile> rangeDeletionFiles =
+                                    getDataEvolutionDeletionFiles(dataFiles, deletionFiles);
+                            builder.withDataEvolutionDeletionFiles(rangeDeletionFiles);
+                        }
                     }
                     splits.add(builder.build());
                 }
@@ -502,8 +510,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
         // Read deletion indexes at once to reduce file IO
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> beforeDeletionFilesMap = null;
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> afterDeletionFilesMap = null;
+        Map<Pair<BinaryRow, Integer>, Map<DeletionFileKey, DeletionFile>> beforeDeletionFilesMap =
+                null;
+        Map<Pair<BinaryRow, Integer>, Map<DeletionFileKey, DeletionFile>> afterDeletionFilesMap =
+                null;
         if (!isStreaming && deletionVectors) {
             beforeDeletionFilesMap =
                     beforeSnapshot.get() != null
@@ -609,12 +619,36 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     private List<DeletionFile> getDeletionFiles(
-            List<DataFileMeta> dataFiles, Map<String, DeletionFile> deletionFilesMap) {
+            List<DataFileMeta> dataFiles, Map<DeletionFileKey, DeletionFile> deletionFilesMap) {
         List<DeletionFile> deletionFiles = new ArrayList<>(dataFiles.size());
         dataFiles.stream()
-                .map(DataFileMeta::fileName)
-                .map(f -> deletionFilesMap == null ? null : deletionFilesMap.get(f))
+                .map(f -> deletionFilesMap.get(DeletionFileKey.ofFileName(f.fileName())))
                 .forEach(deletionFiles::add);
+        return deletionFiles;
+    }
+
+    private Map<Range, DeletionFile> getDataEvolutionDeletionFiles(
+            List<DataFileMeta> dataFiles, Map<DeletionFileKey, DeletionFile> deletionFilesMap) {
+        // Add all deletion files whose RowRange intersecting with any data file
+        // TODO: can we cache ranges of each bucket DVs?
+        List<Range> dataRanges =
+                dataFiles.stream()
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        RowRangeIndex index = RowRangeIndex.create(dataRanges, false);
+
+        Map<Range, DeletionFile> deletionFiles = new LinkedHashMap<>();
+        for (Map.Entry<DeletionFileKey, DeletionFile> entry : deletionFilesMap.entrySet()) {
+            DeletionFileKey key = entry.getKey();
+            Preconditions.checkState(
+                    key instanceof RowIdRangeKey,
+                    "Data Evolution tables should only have DVs by RowId Ranges.");
+
+            Range dvRange = ((RowIdRangeKey) key).range();
+            if (index.intersects(dvRange.from, dvRange.to)) {
+                deletionFiles.put(dvRange, entry.getValue());
+            }
+        }
         return deletionFiles;
     }
 
@@ -628,12 +662,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .collect(Collectors.toSet());
     }
 
-    private Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> scanDvIndex(
+    private Map<Pair<BinaryRow, Integer>, Map<DeletionFileKey, DeletionFile>> scanDvIndex(
             @Nullable Snapshot snapshot, Set<Pair<BinaryRow, Integer>> buckets) {
         if (snapshot == null || snapshot.indexManifest() == null || buckets.isEmpty()) {
             return Collections.emptyMap();
         }
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> result = new HashMap<>();
+        Map<Pair<BinaryRow, Integer>, Map<DeletionFileKey, DeletionFile>> result = new HashMap<>();
         Path indexManifestPath = indexFileHandler.indexManifestFilePath(snapshot.indexManifest());
         Set<Pair<BinaryRow, Integer>> remainingBuckets = new HashSet<>(buckets);
 
@@ -644,7 +678,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 Pair<BinaryRow, Integer> next = iterator.next();
                 BinaryRow partition = next.getLeft();
                 int bucket = next.getRight();
-                Map<String, DeletionFile> fromCache =
+                Map<DeletionFileKey, DeletionFile> fromCache =
                         dvMetaCache.read(indexManifestPath, partition, bucket);
                 if (fromCache != null) {
                     result.put(next, fromCache);
@@ -678,7 +712,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 (entry, indexFileMetas) -> {
                     Pair<BinaryRow, Integer> partitionBucket = entry;
                     if (remainingBuckets.contains(entry)) {
-                        Map<String, DeletionFile> deletionFiles =
+                        Map<DeletionFileKey, DeletionFile> deletionFiles =
                                 toDeletionFiles(partitionBucket, indexFileMetas);
                         result.put(partitionBucket, deletionFiles);
                         if (dvMetaCache != null) {
@@ -703,7 +737,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private int deletionFileNumber(List<IndexFileMeta> fileMetas) {
         int count = 0;
         for (IndexFileMeta indexFile : fileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
             if (dvRanges != null) {
                 count += dvRanges.size();
             }
@@ -711,18 +745,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return count;
     }
 
-    private Map<String, DeletionFile> toDeletionFiles(
+    private Map<DeletionFileKey, DeletionFile> toDeletionFiles(
             Pair<BinaryRow, Integer> partitionBucket, List<IndexFileMeta> fileMetas) {
-        Map<String, DeletionFile> deletionFiles = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> deletionFiles = new HashMap<>();
         DeletionVectorsIndexFile dvIndex =
                 indexFileHandler.dvIndex(partitionBucket.getLeft(), partitionBucket.getRight());
         for (IndexFileMeta indexFile : fileMetas) {
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
             String dvFilePath = dvIndex.path(indexFile).toString();
             if (dvRanges != null && !dvRanges.isEmpty()) {
-                for (DeletionVectorMeta dvMeta : dvRanges.values()) {
+                for (Map.Entry<DeletionFileKey, DeletionVectorMeta> entry : dvRanges.entrySet()) {
+                    DeletionVectorMeta dvMeta = entry.getValue();
                     deletionFiles.put(
-                            dvMeta.dataFileName(),
+                            entry.getKey(),
                             new DeletionFile(
                                     dvFilePath,
                                     dvMeta.offset(),

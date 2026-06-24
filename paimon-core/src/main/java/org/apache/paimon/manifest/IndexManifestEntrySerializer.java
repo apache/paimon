@@ -22,15 +22,20 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import java.util.LinkedHashMap;
 import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.apache.paimon.index.IndexFileMetaSerializer.dvMetasToRowArrayData;
-import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
+import static org.apache.paimon.index.IndexFileMetaSerializer.metasToRowArrayData;
+import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToFileNameDvMetas;
+import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToRowIdRangeDvMetas;
+import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
@@ -69,9 +74,10 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                 fromString(indexFile.fileName()),
                 indexFile.fileSize(),
                 indexFile.rowCount(),
-                dvMetasToRowArrayData(indexFile.dvRanges()),
+                metasToRowArrayData(indexFile.dvRanges(), DeletionFileKey.Type.FILE_NAME),
                 fromString(indexFile.externalPath()),
-                globalIndexRow);
+                globalIndexRow,
+                metasToRowArrayData(indexFile.dvRanges(), DeletionFileKey.Type.ROW_RANGE));
     }
 
     @Override
@@ -94,6 +100,21 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                             rowRangeStart, rowRangeEnd, indexFieldId, extralFields, indexMeta);
         }
 
+        boolean hasFileNameDvRanges =
+                !row.isNullAt(7) && !DeletionVectorMeta.isLegacyMarker(row.getArray(7));
+        boolean hasRowRangeDvRanges = row.getFieldCount() > 10 && !row.isNullAt(10);
+        checkState(
+                !(hasFileNameDvRanges && hasRowRangeDvRanges),
+                "File-name deletion vector ranges and row-range deletion vector ranges should not"
+                        + " be both non-null.");
+
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = null;
+        if (hasFileNameDvRanges) {
+            dvRanges = rowArrayDataToFileNameDvMetas(row.getArray(7));
+        } else if (hasRowRangeDvRanges) {
+            dvRanges = rowArrayDataToRowIdRangeDvMetas(row.getArray(10));
+        }
+
         return new IndexManifestEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
@@ -103,7 +124,7 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getString(4).toString(),
                         row.getLong(5),
                         row.getLong(6),
-                        row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
+                        dvRanges,
                         row.isNullAt(8) ? null : row.getString(8).toString(),
                         globalIndexMeta));
     }

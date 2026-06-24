@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.DataTypes;
@@ -50,44 +51,46 @@ public class DVMetaCacheTest {
         BinaryRow partition = partition("year=2023/month=12");
 
         // Put data for bucket 1 with multiple files
-        Map<String, DeletionFile> dvFiles1 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles1 = new HashMap<>();
         dvFiles1.put(
-                "data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet",
+                key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet"),
                 new DeletionFile("index-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1", 0L, 100L, 42L));
         dvFiles1.put(
-                "data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet",
+                key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet"),
                 new DeletionFile("index-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1", 100L, 500L, null));
         cache.put(path, partition, 1, dvFiles1);
 
         // Put data for bucket 2 with single file
-        Map<String, DeletionFile> dvFiles2 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles2 = new HashMap<>();
         dvFiles2.put(
-                "data-b2c3d4e5-f6g7-8901-bcde-f23456789012-1.parquet",
+                key("data-b2c3d4e5-f6g7-8901-bcde-f23456789012-1.parquet"),
                 new DeletionFile("index-b2c3d4e5-f6g7-8901-bcde-f23456789012-1", 0L, 300L, 12L));
         cache.put(path, partition, 2, dvFiles2);
 
         // Read bucket 1 - verify multiple files
-        Map<String, DeletionFile> result1 = cache.read(path, partition, 1);
+        Map<DeletionFileKey, DeletionFile> result1 = cache.read(path, partition, 1);
         assertThat(result1).isNotNull().hasSize(2);
         assertThat(result1)
                 .containsKeys(
-                        "data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet",
-                        "data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet");
+                        key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet"),
+                        key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet"));
 
-        DeletionFile file1 = result1.get("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet");
+        DeletionFile file1 =
+                result1.get(key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1.parquet"));
         assertThat(file1.path()).isEqualTo("index-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1");
         assertThat(file1.offset()).isEqualTo(0L);
         assertThat(file1.length()).isEqualTo(100L);
         assertThat(file1.cardinality()).isEqualTo(42L);
 
-        DeletionFile file2 = result1.get("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet");
+        DeletionFile file2 =
+                result1.get(key("data-a1b2c3d4-e5f6-7890-abcd-ef1234567890-2.parquet"));
         assertThat(file2.path()).isEqualTo("index-a1b2c3d4-e5f6-7890-abcd-ef1234567890-1");
         assertThat(file2.cardinality()).isNull();
 
         // Read bucket 2 - verify single file
-        Map<String, DeletionFile> result2 = cache.read(path, partition, 2);
+        Map<DeletionFileKey, DeletionFile> result2 = cache.read(path, partition, 2);
         assertThat(result2).isNotNull().hasSize(1);
-        assertThat(result2).containsKey("data-b2c3d4e5-f6g7-8901-bcde-f23456789012-1.parquet");
+        assertThat(result2).containsKey(key("data-b2c3d4e5-f6g7-8901-bcde-f23456789012-1.parquet"));
 
         // Read non-existent key
         assertThat(cache.read(path, partition("year=2024/month=01"), 0)).isNull();
@@ -102,7 +105,7 @@ public class DVMetaCacheTest {
         cache.put(path, partition, 1, new HashMap<>());
 
         // Should return empty map, not null
-        Map<String, DeletionFile> result = cache.read(path, partition, 1);
+        Map<DeletionFileKey, DeletionFile> result = cache.read(path, partition, 1);
         assertThat(result).isNotNull().isEmpty();
     }
 
@@ -120,9 +123,9 @@ public class DVMetaCacheTest {
                 1,
                 () -> {
                     invoked.incrementAndGet();
-                    Map<String, DeletionFile> dvFiles = new HashMap<>();
+                    Map<DeletionFileKey, DeletionFile> dvFiles = new HashMap<>();
                     dvFiles.put(
-                            "data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet",
+                            key("data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet"),
                             new DeletionFile(
                                     "index-d4e5f6g7-h8i9-0123-defg-456789012345-1", 0L, 100L, 1L));
                     return dvFiles;
@@ -130,11 +133,11 @@ public class DVMetaCacheTest {
 
         assertThat(invoked).hasValue(0);
 
-        Map<String, DeletionFile> result1 = cache.read(path, partition, 1);
+        Map<DeletionFileKey, DeletionFile> result1 = cache.read(path, partition, 1);
         assertThat(result1).isNotNull().hasSize(1);
         assertThat(invoked).hasValue(1);
 
-        Map<String, DeletionFile> result2 = cache.read(path, partition, 1);
+        Map<DeletionFileKey, DeletionFile> result2 = cache.read(path, partition, 1);
         assertThat(result2).isSameAs(result1);
         assertThat(invoked).hasValue(1);
     }
@@ -147,9 +150,9 @@ public class DVMetaCacheTest {
         AtomicInteger invoked = new AtomicInteger();
         CountDownLatch supplierEntered = new CountDownLatch(1);
         CountDownLatch releaseSupplier = new CountDownLatch(1);
-        Map<String, DeletionFile> dvFiles = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles = new HashMap<>();
         dvFiles.put(
-                "data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet",
+                key("data-d4e5f6g7-h8i9-0123-defg-456789012345-1.parquet"),
                 new DeletionFile("index-d4e5f6g7-h8i9-0123-defg-456789012345-1", 0L, 100L, 1L));
 
         cache.putLazy(
@@ -171,11 +174,11 @@ public class DVMetaCacheTest {
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<Map<String, DeletionFile>> first =
+            Future<Map<DeletionFileKey, DeletionFile>> first =
                     executor.submit(() -> cache.read(path, partition, 1));
             assertThat(supplierEntered.await(5, TimeUnit.SECONDS)).isTrue();
 
-            Future<Map<String, DeletionFile>> second =
+            Future<Map<DeletionFileKey, DeletionFile>> second =
                     executor.submit(() -> cache.read(path, partition, 1));
             releaseSupplier.countDown();
 
@@ -195,18 +198,18 @@ public class DVMetaCacheTest {
         BinaryRow partition = partition("year=2023/month=08");
 
         // Fill cache to capacity
-        Map<String, DeletionFile> dvFiles1 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles1 = new HashMap<>();
         dvFiles1.put(
-                "data-e5f6g7h8-i9j0-1234-efgh-567890123456-1.parquet",
+                key("data-e5f6g7h8-i9j0-1234-efgh-567890123456-1.parquet"),
                 new DeletionFile("index-e5f6g7h8-i9j0-1234-efgh-567890123456-1", 0L, 100L, 1L));
         dvFiles1.put(
-                "data-e5f6g7h8-i9j0-1234-efgh-567890123456-2.parquet",
+                key("data-e5f6g7h8-i9j0-1234-efgh-567890123456-2.parquet"),
                 new DeletionFile("index-e5f6g7h8-i9j0-1234-efgh-567890123456-1", 100L, 200L, 2L));
         cache.put(path, partition, 1, dvFiles1);
 
-        Map<String, DeletionFile> dvFiles2 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles2 = new HashMap<>();
         dvFiles2.put(
-                "data-f6g7h8i9-j0k1-2345-fghi-678901234567-1.parquet",
+                key("data-f6g7h8i9-j0k1-2345-fghi-678901234567-1.parquet"),
                 new DeletionFile("index-f6g7h8i9-j0k1-2345-fghi-678901234567-1", 0L, 100L, 2L));
         cache.put(path, partition, 2, dvFiles2);
 
@@ -215,16 +218,16 @@ public class DVMetaCacheTest {
         assertThat(cache.read(path, partition, 2)).isNotNull();
 
         // Add third entry, should evict itself
-        Map<String, DeletionFile> dvFiles3 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles3 = new HashMap<>();
         dvFiles3.put(
-                "data-g7h8i9j0-k1l2-3456-ghij-789012345678-1.parquet",
+                key("data-g7h8i9j0-k1l2-3456-ghij-789012345678-1.parquet"),
                 new DeletionFile("index-g7h8i9j0-k1l2-3456-ghij-789012345678-1", 0L, 100L, 3L));
         cache.put(path, partition, 3, dvFiles3);
 
         // Add forth entry, should evict first one
-        Map<String, DeletionFile> dvFiles4 = new HashMap<>();
+        Map<DeletionFileKey, DeletionFile> dvFiles4 = new HashMap<>();
         dvFiles4.put(
-                "data-g7h8i9j0-k1l2-311456-ghij-789012345678-1.parquet",
+                key("data-g7h8i9j0-k1l2-311456-ghij-789012345678-1.parquet"),
                 new DeletionFile("index-g117h8i9j0-k1l2-3456-ghij-789012345678-1", 0L, 100L, 3L));
         cache.put(path, partition, 4, dvFiles4);
 
@@ -243,5 +246,9 @@ public class DVMetaCacheTest {
         return serializer
                 .toBinaryRow(GenericRow.of(BinaryString.fromString(partitionValue)))
                 .copy();
+    }
+
+    private DeletionFileKey key(String fileName) {
+        return DeletionFileKey.ofFileName(fileName);
     }
 }
