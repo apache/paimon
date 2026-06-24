@@ -59,6 +59,8 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
             compression = null;
         }
 
+        // Keep this exact map instance shared by ParquetBulkWriter and WriteSupport. The writer
+        // collects metadata before close, and WriteSupport reads it when finalizing the footer.
         Map<String, byte[]> metadata = new HashMap<>();
         final ParquetWriter<InternalRow> writer =
                 writerBuilder.createWriter(out, compression, () -> metadata);
@@ -77,6 +79,8 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
         ParquetBuilder<InternalRow> newBuilder =
                 ((RowDataParquetBuilder) writerBuilder)
                         .withShreddingSchemas(inferredShreddingSchema);
+        // Keep this exact map instance shared by ParquetBulkWriter and WriteSupport. The writer
+        // collects metadata before close, and WriteSupport reads it when finalizing the footer.
         Map<String, byte[]> metadata = new HashMap<>();
         final ParquetWriter<InternalRow> writer =
                 newBuilder.createWriter(out, compression, () -> metadata);

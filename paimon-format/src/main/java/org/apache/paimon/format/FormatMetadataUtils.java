@@ -72,8 +72,12 @@ public class FormatMetadataUtils {
         if (encodedSchema == null) {
             return Optional.empty();
         }
-        byte[] schemaBytes = Base64.getDecoder().decode(encodedSchema);
-        return Optional.of(Schema.deserializeMessage(ByteBuffer.wrap(schemaBytes)));
+        try {
+            byte[] schemaBytes = Base64.getDecoder().decode(encodedSchema);
+            return Optional.of(Schema.deserializeMessage(ByteBuffer.wrap(schemaBytes)));
+        } catch (RuntimeException e) {
+            return Optional.empty();
+        }
     }
 
     public static byte[] serializeArrowSchema(Schema arrowSchema) {
@@ -84,7 +88,9 @@ public class FormatMetadataUtils {
      * Builds an Arrow schema from a Paimon row type and injects metadata into top-level fields.
      *
      * <p>The keys of {@code fieldMetadata} are top-level field names. Nested fields are converted
-     * from the {@link RowType} but do not receive metadata from this map.
+     * from the {@link RowType} but do not receive metadata from this map. If injected metadata
+     * conflicts with metadata produced during Arrow conversion, the Arrow conversion metadata wins
+     * to preserve format-specific field information.
      */
     public static Schema buildArrowSchema(
             RowType rowType, Map<String, Map<String, String>> fieldMetadata) {

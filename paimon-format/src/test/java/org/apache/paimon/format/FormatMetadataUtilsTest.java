@@ -81,6 +81,14 @@ public class FormatMetadataUtilsTest {
 
         assertThat(FormatMetadataUtils.readArrowSchema(encodedSchema)).hasValue(schema);
         assertThat(FormatMetadataUtils.readArrowSchema(null)).isEmpty();
+        assertThat(FormatMetadataUtils.readArrowSchema("not-base64")).isEmpty();
+        assertThat(
+                        FormatMetadataUtils.readArrowSchema(
+                                Base64.getEncoder()
+                                        .encodeToString(
+                                                "not-arrow-schema"
+                                                        .getBytes(StandardCharsets.UTF_8))))
+                .isEmpty();
     }
 
     @Test
