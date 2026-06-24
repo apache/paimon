@@ -196,11 +196,13 @@ public class HybridSearchRoute implements Serializable {
         private String fieldName;
         private float[] vector;
         private FullTextQuery fullTextQuery;
+        private RouteType routeType;
         private int limit;
         private float weight = 1.0f;
         private Map<String, String> options = new HashMap<>();
 
         public Builder vectorColumn(String fieldName) {
+            setRouteType(RouteType.VECTOR);
             this.fieldName = fieldName;
             return this;
         }
@@ -210,6 +212,7 @@ public class HybridSearchRoute implements Serializable {
         }
 
         public Builder queryVector(float[] vector) {
+            setRouteType(RouteType.VECTOR);
             this.vector = vector;
             return this;
         }
@@ -219,9 +222,24 @@ public class HybridSearchRoute implements Serializable {
         }
 
         public Builder query(String queryJson) {
-            this.fullTextQuery = FullTextQuery.fromJson(queryJson);
+            checkRouteType(RouteType.FULL_TEXT);
+            FullTextQuery fullTextQuery = FullTextQuery.fromJson(queryJson);
+            this.routeType = RouteType.FULL_TEXT;
+            this.fullTextQuery = fullTextQuery;
             this.fieldName = fullTextQuery.columns().get(0);
             return this;
+        }
+
+        private void setRouteType(RouteType routeType) {
+            checkRouteType(routeType);
+            this.routeType = routeType;
+        }
+
+        private void checkRouteType(RouteType routeType) {
+            if (this.routeType != null && this.routeType != routeType) {
+                throw new IllegalArgumentException(
+                        "Cannot mix vector and full-text hybrid route settings");
+            }
         }
 
         public Builder limit(int limit) {
@@ -247,7 +265,7 @@ public class HybridSearchRoute implements Serializable {
         }
 
         public HybridSearchRoute build() {
-            if (fullTextQuery != null) {
+            if (routeType == RouteType.FULL_TEXT) {
                 checkFullTextOptions(options);
                 return new HybridSearchRoute(
                         RouteType.FULL_TEXT,
