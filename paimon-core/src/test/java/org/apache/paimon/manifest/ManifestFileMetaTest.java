@@ -1118,6 +1118,74 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         }
     }
 
+    @Test
+    public void testDataEvolutionManifestSortFallsBackToPartitionWhenRowIdStatsMissing() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p2-row0", 2, 0, 5)));
+        input.add(makeManifest(makeEntry(true, "legacy-p0", 0)));
+        input.add(makeManifest(makeRowIdEntry(true, "rowid-p1-row10", 1, 10, 5)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        assertThat(
+                        readEntries(merged).stream()
+                                .map(entry -> entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("legacy-p0", "rowid-p1-row10", "rowid-p2-row0");
+    }
+
+    @Test
+    public void testDataEvolutionMinorManifestSortPreservesUnmatchedDeleteEntries() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(true, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(true, "survivor-row30", 0, 30, 5, 1)));
+        input.add(
+                makeManifest(
+                        makeRowIdEntry(false, "base-row0", 0, 0, 5, 1),
+                        makeRowIdEntry(false, "old-row10", 0, 10, 5, 1),
+                        makeRowIdEntry(true, "new-row20", 0, 20, 5, 2)));
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("data-evolution.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", Long.MAX_VALUE + "B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        List<ManifestEntry> outputEntries = readEntries(merged);
+        assertThat(
+                        outputEntries.stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+
+        assertThat(
+                        FileEntry.mergeEntries(outputEntries).stream()
+                                .map(entry -> entry.kind() + "-" + entry.file().fileName())
+                                .collect(Collectors.toList()))
+                .containsExactly("ADD-new-row20", "ADD-survivor-row30", "DELETE-old-row10");
+    }
+
     /**
      * Test manifest sort with a multi-field partition type.
      *
@@ -1597,5 +1665,13 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         firstRowId,
                         Collections.singletonList("f0")));
+    }
+
+    private List<ManifestEntry> readEntries(List<ManifestFileMeta> manifestMetas) {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestMetas) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+        return entries;
     }
 }

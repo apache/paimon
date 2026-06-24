@@ -1099,6 +1099,9 @@ public class ManifestFileSorter {
             String sortPartitionField,
             RowType partitionType) {
         if (dataEvolutionEnabled && ManifestFileMeta.allContainsRowId(input)) {
+            // RowID sorting uses the full partition row as the primary key to preserve partition
+            // locality, then orders files by RowID. The optional manifest-sort.partition-field is
+            // only used by the partition-sort fallback when RowID stats are incomplete.
             RecordComparator partitionComparator =
                     partitionType.getFieldCount() == 0
                             ? null
