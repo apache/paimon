@@ -20,8 +20,6 @@ package org.apache.paimon.format.parquet.reader;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.format.FormatMetadataUtils;
-import org.apache.paimon.format.SupportsReaderArrowSchema;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.FileIO;
@@ -43,7 +41,6 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -51,8 +48,7 @@ import static java.lang.String.format;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createReadableColumnVectors;
 
 /** Record reader for parquet. */
-public class VectorizedParquetRecordReader
-        implements FileRecordReader<InternalRow>, SupportsReaderArrowSchema {
+public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
 
     private ParquetFileReader reader;
 
@@ -271,16 +267,6 @@ public class VectorizedParquetRecordReader
         } else {
             return null;
         }
-    }
-
-    @Override
-    public Optional<org.apache.arrow.vector.types.pojo.Schema> readArrowSchema()
-            throws IOException {
-        return FormatMetadataUtils.readArrowSchema(
-                reader.getFooter()
-                        .getFileMetaData()
-                        .getKeyValueMetaData()
-                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
     }
 
     @Override
