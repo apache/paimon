@@ -26,7 +26,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
-import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
@@ -78,11 +77,7 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
             throws IOException {
         this(
                 tableRowType,
-                createReader(
-                        readerFactory,
-                        withoutSelection(context),
-                        ignoreCorruptFiles,
-                        ignoreLostFiles),
+                createReader(readerFactory, context, ignoreCorruptFiles, ignoreLostFiles),
                 ignoreCorruptFiles,
                 ignoreLostFiles,
                 indexMapping,
@@ -156,19 +151,6 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
                 }
             }
         }
-    }
-
-    private static FormatReaderFactory.Context withoutSelection(
-            FormatReaderFactory.Context context) {
-        if (context.selection() == null) {
-            return context;
-        }
-
-        // Apply row selection once in DataFileRecordReader. Some format readers expose selected
-        // returnedPosition values while still materializing column vectors from the unfiltered
-        // page,
-        // which can misalign columns when data-evolution readers merge multiple field bunches.
-        return new FormatReaderContext(context.fileIO(), context.filePath(), context.fileSize());
     }
 
     @Nullable
