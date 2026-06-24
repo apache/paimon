@@ -21,7 +21,7 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.FormatMetadataUtils;
-import org.apache.paimon.format.SupportsReaderArrowSchema;
+import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.FileIO;
@@ -43,7 +43,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -52,7 +52,7 @@ import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createRe
 
 /** Record reader for parquet. */
 public class VectorizedParquetRecordReader
-        implements FileRecordReader<InternalRow>, SupportsReaderArrowSchema {
+        implements FileRecordReader<InternalRow>, SupportsReaderFieldMetadata {
 
     private ParquetFileReader reader;
 
@@ -274,9 +274,8 @@ public class VectorizedParquetRecordReader
     }
 
     @Override
-    public Optional<org.apache.arrow.vector.types.pojo.Schema> readArrowSchema()
-            throws IOException {
-        return FormatMetadataUtils.readArrowSchema(
+    public Map<String, Map<String, String>> readFieldMetadata() throws IOException {
+        return FormatMetadataUtils.readFieldMetadata(
                 reader.getFooter()
                         .getFileMetaData()
                         .getKeyValueMetaData()

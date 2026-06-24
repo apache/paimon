@@ -365,6 +365,18 @@ under the License.
                                     <include>commons-pool:commons-pool</include>
                                     <include>org.locationtech.jts:jts-core</include>
 
+                                    <!-- Arrow schema metadata -->
+                                    <include>org.apache.paimon:paimon-arrow</include>
+                                    <include>org.apache.arrow:arrow-vector</include>
+                                    <include>org.apache.arrow:arrow-format</include>
+                                    <include>org.apache.arrow:arrow-c-data</include>
+                                    <include>org.apache.arrow:arrow-memory-core</include>
+                                    <include>org.apache.arrow:arrow-memory-unsafe</include>
+                                    <include>com.google.flatbuffers:flatbuffers-java</include>
+                                    <include>commons-codec:commons-codec</include>
+                                    <include>org.eclipse.collections:eclipse-collections</include>
+                                    <include>org.eclipse.collections:eclipse-collections-api</include>
+
                                     <!-- compress -->
                                     <include>com.github.luben:zstd-jni</include>
                                 </includes>
@@ -427,6 +439,20 @@ under the License.
                                 <relocation>
                                     <pattern>org.locationtech.jts</pattern>
                                     <shadedPattern>org.apache.paimon.shade.org.locationtech.jts</shadedPattern>
+                                </relocation>
+
+                                <!-- Relocate Arrow. -->
+                                <relocation>
+                                    <pattern>org.apache.arrow</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.apache.arrow</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.google.flatbuffers</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.com.google.flatbuffers</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.eclipse.collections</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.eclipse.collections</shadedPattern>
                                 </relocation>
 
                                 <!-- Relocate Common. -->

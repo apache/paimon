@@ -68,7 +68,29 @@ public class FormatMetadataUtils {
         return decoded;
     }
 
-    public static Optional<Schema> readArrowSchema(@Nullable String encodedSchema) {
+    /**
+     * Builds serialized Arrow schema metadata from a Paimon row type and injects metadata into
+     * top-level fields.
+     *
+     * <p>The keys of {@code fieldMetadata} are top-level field names. Nested fields are converted
+     * from the {@link RowType} but do not receive metadata from this map. If injected metadata
+     * conflicts with metadata produced during Arrow conversion, the Arrow conversion metadata wins
+     * to preserve format-specific field information.
+     */
+    public static byte[] buildArrowSchemaMetadata(
+            RowType rowType, Map<String, Map<String, String>> fieldMetadata) {
+        return buildArrowSchema(rowType, fieldMetadata).serializeAsMessage();
+    }
+
+    /** Returns metadata for top-level Arrow fields only. */
+    public static Map<String, Map<String, String>> readFieldMetadata(
+            @Nullable String encodedSchema) {
+        return readArrowSchema(encodedSchema)
+                .map(FormatMetadataUtils::readFieldMetadata)
+                .orElse(Collections.emptyMap());
+    }
+
+    private static Optional<Schema> readArrowSchema(@Nullable String encodedSchema) {
         if (encodedSchema == null) {
             return Optional.empty();
         }
@@ -80,19 +102,7 @@ public class FormatMetadataUtils {
         }
     }
 
-    public static byte[] serializeArrowSchema(Schema arrowSchema) {
-        return arrowSchema.serializeAsMessage();
-    }
-
-    /**
-     * Builds an Arrow schema from a Paimon row type and injects metadata into top-level fields.
-     *
-     * <p>The keys of {@code fieldMetadata} are top-level field names. Nested fields are converted
-     * from the {@link RowType} but do not receive metadata from this map. If injected metadata
-     * conflicts with metadata produced during Arrow conversion, the Arrow conversion metadata wins
-     * to preserve format-specific field information.
-     */
-    public static Schema buildArrowSchema(
+    private static Schema buildArrowSchema(
             RowType rowType, Map<String, Map<String, String>> fieldMetadata) {
         List<Field> fields =
                 rowType.getFields().stream()
@@ -106,8 +116,7 @@ public class FormatMetadataUtils {
         return new Schema(fields);
     }
 
-    /** Returns metadata for top-level Arrow fields only. */
-    public static Map<String, Map<String, String>> readFieldMetadata(Schema arrowSchema) {
+    private static Map<String, Map<String, String>> readFieldMetadata(Schema arrowSchema) {
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
         for (Field field : arrowSchema.getFields()) {
             result.put(

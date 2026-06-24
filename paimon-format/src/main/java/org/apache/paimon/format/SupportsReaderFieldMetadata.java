@@ -18,13 +18,11 @@
 
 package org.apache.paimon.format;
 
-import org.apache.arrow.vector.types.pojo.Schema;
-
 import java.io.IOException;
-import java.util.Optional;
+import java.util.Map;
 
-/** Reader capability for formats that can recover Arrow schema from file metadata. */
-public interface SupportsReaderArrowSchema {
+/** Reader capability for formats that can recover top-level field metadata. */
+public interface SupportsReaderFieldMetadata {
 
-    Optional<Schema> readArrowSchema() throws IOException;
+    Map<String, Map<String, String>> readFieldMetadata() throws IOException;
 }

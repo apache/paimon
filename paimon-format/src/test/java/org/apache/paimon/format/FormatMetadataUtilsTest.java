@@ -21,16 +21,10 @@ package org.apache.paimon.format;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.arrow.vector.types.Types;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.FieldType;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -61,29 +55,23 @@ public class FormatMetadataUtilsTest {
     }
 
     @Test
-    public void testReadArrowSchema() {
+    public void testReadFieldMetadataFromArrowSchemaMetadata() {
+        RowType rowType = DataTypes.ROW(DataTypes.FIELD(0, "field", DataTypes.STRING()));
         Map<String, String> fieldMetadata = new LinkedHashMap<>();
         fieldMetadata.put("paimon.test.field-key", "field-value");
-        Schema schema =
-                new Schema(
-                        Collections.singletonList(
-                                new Field(
-                                        "field",
-                                        new FieldType(
-                                                true,
-                                                Types.MinorType.VARCHAR.getType(),
-                                                null,
-                                                fieldMetadata),
-                                        null)));
+        Map<String, Map<String, String>> expected = new LinkedHashMap<>();
+        expected.put("field", fieldMetadata);
         String encodedSchema =
                 Base64.getEncoder()
-                        .encodeToString(FormatMetadataUtils.serializeArrowSchema(schema));
+                        .encodeToString(
+                                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, expected));
 
-        assertThat(FormatMetadataUtils.readArrowSchema(encodedSchema)).hasValue(schema);
-        assertThat(FormatMetadataUtils.readArrowSchema(null)).isEmpty();
-        assertThat(FormatMetadataUtils.readArrowSchema("not-base64")).isEmpty();
+        assertThat(FormatMetadataUtils.readFieldMetadata(encodedSchema).get("field"))
+                .containsAllEntriesOf(fieldMetadata);
+        assertThat(FormatMetadataUtils.readFieldMetadata(null)).isEmpty();
+        assertThat(FormatMetadataUtils.readFieldMetadata("not-base64")).isEmpty();
         assertThat(
-                        FormatMetadataUtils.readArrowSchema(
+                        FormatMetadataUtils.readFieldMetadata(
                                 Base64.getEncoder()
                                         .encodeToString(
                                                 "not-arrow-schema"
@@ -93,31 +81,23 @@ public class FormatMetadataUtilsTest {
 
     @Test
     public void testReadFieldMetadata() {
-        assertThat(FormatMetadataUtils.readFieldMetadata(new Schema(Collections.emptyList())))
-                .isEmpty();
-
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "with_metadata", DataTypes.INT()),
+                        DataTypes.FIELD(1, "without_metadata", DataTypes.INT()));
         Map<String, String> fieldMetadata = new LinkedHashMap<>();
         fieldMetadata.put("paimon.test.field-key", "field-value");
-        Schema schema =
-                new Schema(
-                        Arrays.asList(
-                                new Field(
-                                        "with_metadata",
-                                        new FieldType(
-                                                true,
-                                                Types.MinorType.INT.getType(),
-                                                null,
-                                                fieldMetadata),
-                                        null),
-                                new Field(
-                                        "without_metadata",
-                                        new FieldType(
-                                                true, Types.MinorType.INT.getType(), null, null),
-                                        null)));
+        Map<String, Map<String, String>> expected = new LinkedHashMap<>();
+        expected.put("with_metadata", fieldMetadata);
+        String encodedSchema =
+                Base64.getEncoder()
+                        .encodeToString(
+                                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, expected));
 
-        assertThat(FormatMetadataUtils.readFieldMetadata(schema))
-                .containsEntry("with_metadata", fieldMetadata)
-                .containsEntry("without_metadata", Collections.emptyMap());
+        Map<String, Map<String, String>> metadata =
+                FormatMetadataUtils.readFieldMetadata(encodedSchema);
+        assertThat(metadata.get("with_metadata")).containsAllEntriesOf(fieldMetadata);
+        assertThat(metadata).containsKey("without_metadata");
     }
 
     @Test
@@ -140,13 +120,16 @@ public class FormatMetadataUtilsTest {
         Map<String, Map<String, String>> fieldMetadata = new LinkedHashMap<>();
         fieldMetadata.put("tags", tagsMetadata);
 
-        Schema schema = FormatMetadataUtils.buildArrowSchema(rowType, fieldMetadata);
+        String encodedSchema =
+                Base64.getEncoder()
+                        .encodeToString(
+                                FormatMetadataUtils.buildArrowSchemaMetadata(
+                                        rowType, fieldMetadata));
 
-        assertThat(schema.getFields())
-                .extracting(Field::getName)
-                .containsExactly("id", "tags", "nested");
-        assertThat(schema.findField("tags").getMetadata())
-                .containsEntry("paimon.test.tags", "enabled");
-        assertThat(schema.findField("nested").getMetadata()).doesNotContainKey("paimon.test.tags");
+        Map<String, Map<String, String>> metadata =
+                FormatMetadataUtils.readFieldMetadata(encodedSchema);
+        assertThat(metadata).containsOnlyKeys("id", "tags", "nested");
+        assertThat(metadata.get("tags")).containsAllEntriesOf(tagsMetadata);
+        assertThat(metadata.get("nested")).doesNotContainKey("paimon.test.tags");
     }
 }

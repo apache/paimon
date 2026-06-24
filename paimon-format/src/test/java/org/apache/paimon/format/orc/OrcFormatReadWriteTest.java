@@ -29,7 +29,7 @@ import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.OrcOptions;
-import org.apache.paimon.format.SupportsReaderArrowSchema;
+import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -38,10 +38,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.arrow.vector.types.Types;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.FieldType;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -50,12 +46,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -108,26 +102,10 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         Map<String, String> fieldMetadata = new HashMap<>();
         fieldMetadata.put("paimon.test.field-key", "field-value");
         fieldMetadata.put("paimon.test.field-version", "1");
-        Schema arrowSchema =
-                new Schema(
-                        Arrays.asList(
-                                new Field(
-                                        "id",
-                                        new FieldType(
-                                                true,
-                                                Types.MinorType.INT.getType(),
-                                                null,
-                                                Collections.singletonMap("PARQUET:field_id", "0")),
-                                        null),
-                                new Field(
-                                        "name",
-                                        new FieldType(
-                                                true,
-                                                Types.MinorType.VARCHAR.getType(),
-                                                null,
-                                                fieldMetadata),
-                                        null)));
-        byte[] arrowSchemaBytes = arrowSchema.serializeAsMessage();
+        Map<String, Map<String, String>> fieldMetadataByName = new HashMap<>();
+        fieldMetadataByName.put("name", fieldMetadata);
+        byte[] arrowSchemaBytes =
+                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, fieldMetadataByName);
         Map<String, byte[]> metadata = new HashMap<>();
         metadata.put("paimon.test.key", "paimon-test-value".getBytes(StandardCharsets.UTF_8));
         metadata.put(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY, arrowSchemaBytes);
@@ -158,11 +136,10 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                 newFormat
                         .createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
                         .createReader(context)) {
-            Optional<Schema> readArrowSchema =
-                    ((SupportsReaderArrowSchema) reader).readArrowSchema();
-            assertThat(readArrowSchema).hasValue(arrowSchema);
-            assertThat(FormatMetadataUtils.readFieldMetadata(readArrowSchema.get()))
-                    .containsEntry("name", fieldMetadata);
+            Map<String, Map<String, String>> readFieldMetadata =
+                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
+            assertThat(readFieldMetadata).containsKey("id").containsKey("name");
+            assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
         }
     }
 

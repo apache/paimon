@@ -27,7 +27,7 @@ import org.apache.paimon.data.columnar.VectorizedRowIterator;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.OrcFormatReaderContext;
-import org.apache.paimon.format.SupportsReaderArrowSchema;
+import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
@@ -41,7 +41,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -58,8 +57,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
@@ -230,7 +230,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * skipped before.
      */
     private static final class OrcVectorizedReader
-            implements FileRecordReader<InternalRow>, SupportsReaderArrowSchema {
+            implements FileRecordReader<InternalRow>, SupportsReaderFieldMetadata {
 
         private final OrcRecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -257,14 +257,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
 
         @Override
-        public Optional<Schema> readArrowSchema() {
+        public Map<String, Map<String, String>> readFieldMetadata() {
             org.apache.orc.Reader fileReader = orcReader.fileReader;
             if (!fileReader
                     .getMetadataKeys()
                     .contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
-                return Optional.empty();
+                return Collections.emptyMap();
             }
-            return FormatMetadataUtils.readArrowSchema(
+            return FormatMetadataUtils.readFieldMetadata(
                     StandardCharsets.UTF_8
                             .decode(
                                     fileReader
