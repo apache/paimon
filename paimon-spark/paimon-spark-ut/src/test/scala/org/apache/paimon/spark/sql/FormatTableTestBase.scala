@@ -440,6 +440,46 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test("Paimon format table: runtime filter combined with pushed-down partition filter") {
+    withTable("dwd_fact", "dim") {
+      sql("""
+            |CREATE TABLE dwd_fact (id INT, amount DOUBLE, dt STRING, hour STRING)
+            |USING PARQUET
+            |TBLPROPERTIES ('format-table.implementation'='paimon')
+            |PARTITIONED BY (dt, hour)
+            |""".stripMargin)
+      sql("""
+            |CREATE TABLE dim (dt STRING, name STRING)
+            |USING PARQUET
+            |TBLPROPERTIES ('format-table.implementation'='paimon')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO dwd_fact VALUES
+            |(1, 10.0, '20260622', '00'),
+            |(2, 20.0, '20260622', '01'),
+            |(3, 30.0, '20260621', '00'),
+            |(4, 40.0, '20260620', '23')
+            |""".stripMargin)
+      sql("INSERT INTO dim VALUES ('20260622', 'today')")
+
+      val df = sql("""
+                     |SELECT f.id, f.dt, f.hour, d.name
+                     |FROM dwd_fact f
+                     |JOIN dim d ON f.dt = d.dt
+                     |WHERE f.dt >= '20260620'
+                     |ORDER BY f.id
+                     |""".stripMargin)
+
+      checkAnswer(df, Seq(Row(1, "20260622", "00", "today"), Row(2, "20260622", "01", "today")))
+
+      // Static pushdown (dt >= '20260620') alone keeps all 4 partitions; the runtime filter on dt
+      // prunes the scan down to the two partitions of dt='20260622'.
+      val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "dwd_fact")
+      assert(filteredSplits.size == 2)
+    }
+  }
+
   def collectFilteredInputSplits(plan: SparkPlan, tableName: String): Seq[Split] = {
     flatMap(plan) {
       case s: BatchScanExec =>

@@ -33,6 +33,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.predicate.Equal;
@@ -53,6 +54,9 @@ import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -75,6 +79,8 @@ import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
 
     private final FormatTable table;
     private final CoreOptions coreOptions;
@@ -174,6 +180,10 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+        LOG.info(
+                "Find partitions for format table {}, partition filter: {}",
+                table.name(),
+                partitionFilter);
         boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
@@ -190,17 +200,22 @@ public class FormatTableScan implements InnerTableScan {
             // This will prune partition directories early during traversal,
             // which is especially important for cloud storage like OSS/S3
             Map<String, Predicate> partitionPredicates = new HashMap<>();
-            if (partitionFilter instanceof DefaultPartitionPredicate) {
-                Predicate predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
+            Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
+            LOG.info(
+                    "Extracted predicate for format table {} partition pruning: {}",
+                    table.name(),
+                    predicate.orElse(null));
+            if (predicate.isPresent()) {
                 partitionPredicates =
-                        PredicateUtils.splitPartitionPredicate(table.partitionType(), predicate);
+                        PredicateUtils.splitPartitionPredicate(
+                                table.partitionType(), predicate.get());
             }
 
             Pair<Path, Integer> scanPathAndLevel =
                     computeScanPathAndLevel(
                             new Path(table.location()),
                             table.partitionKeys(),
-                            partitionFilter,
+                            predicate,
                             table.partitionType(),
                             onlyValueInPath);
             return searchPartSpecAndPaths(
@@ -241,22 +256,48 @@ public class FormatTableScan implements InnerTableScan {
         return result;
     }
 
+    /**
+     * Extracts the underlying {@link Predicate} used for partition-directory pruning from a {@link
+     * PartitionPredicate}. Unlike data-table scans, which prune purely via {@link
+     * PartitionPredicate#test} on partitions read from the manifest, a format table has no manifest
+     * and must derive a {@link Predicate} to compute the scan-path prefix and per-directory filters
+     * while listing. {@link AndPartitionPredicate} is unwrapped recursively. Returns empty when the
+     * predicate cannot be expressed as a single {@link Predicate} (e.g. {@link
+     * MultiplePartitionPredicate}), in which case the caller falls back to listing without pruning.
+     */
+    static Optional<Predicate> extractPartitionPredicate(
+            @Nullable PartitionPredicate partitionFilter) {
+        if (partitionFilter instanceof DefaultPartitionPredicate) {
+            return Optional.of(((DefaultPartitionPredicate) partitionFilter).predicate());
+        } else if (partitionFilter instanceof AndPartitionPredicate) {
+            List<Predicate> predicates = new ArrayList<>();
+            for (PartitionPredicate child :
+                    ((AndPartitionPredicate) partitionFilter).predicates()) {
+                Optional<Predicate> childPredicate = extractPartitionPredicate(child);
+                childPredicate.ifPresent(predicates::add);
+                // Skip children that can't be expressed as Predicate (e.g. Multiple);
+                // they are still applied by partitionFilter.test() in plan().
+            }
+            return predicates.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(PredicateBuilder.and(predicates));
+        }
+        return Optional.empty();
+    }
+
     protected static Pair<Path, Integer> computeScanPathAndLevel(
             Path tableLocation,
             List<String> partitionKeys,
-            PartitionPredicate partitionFilter,
+            Optional<Predicate> predicate,
             RowType partitionType,
             boolean onlyValueInPath) {
         Path scanPath = tableLocation;
         int level = partitionKeys.size();
         if (!partitionKeys.isEmpty()) {
-            // Try to optimize for equality partition filters
-            if (partitionFilter instanceof DefaultPartitionPredicate) {
+            if (predicate.isPresent()) {
                 Map<String, String> equalityPrefix =
                         extractLeadingEqualityPartitionSpecWhenOnlyAnd(
-                                partitionKeys,
-                                ((DefaultPartitionPredicate) partitionFilter).predicate(),
-                                partitionType);
+                                partitionKeys, predicate.get(), partitionType);
                 if (!equalityPrefix.isEmpty()) {
                     // Use optimized scan for specific partition path
                     String partitionPath =
