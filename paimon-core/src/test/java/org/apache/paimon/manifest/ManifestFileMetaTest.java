@@ -1119,6 +1119,67 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testDataEvolutionManifestSortUsesConfiguredPartitionFieldBeforeRowId() {
+        RowType multiPartitionType = RowType.of(new IntType(), new IntType(), new IntType());
+        ManifestFile multiPartManifestFile = createManifestFileForPartitionType(multiPartitionType);
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartRowIdEntry(
+                                                "region10-dt2-row30", 10, 2, 0, 30, 5),
+                                        makeMultiPartRowIdEntry(
+                                                "region20-dt1-row5", 20, 1, 0, 5, 5)))
+                        .get(0));
+        input.add(
+                multiPartManifestFile
+                        .write(
+                                Arrays.asList(
+                                        makeMultiPartRowIdEntry(
+                                                "region5-dt2-row10", 5, 2, 0, 10, 5),
+                                        makeMultiPartRowIdEntry(
+                                                "region0-dt1-row20", 0, 1, 0, 20, 5)))
+                        .get(0));
+
+        Options defaultOptions = new Options();
+        defaultOptions.set("manifest-sort.enabled", "true");
+        defaultOptions.set("data-evolution.enabled", "true");
+        defaultOptions.set("manifest.full-compaction-threshold-size", "1B");
+        List<ManifestFileMeta> sortedByFullPartition =
+                ManifestFileMerger.merge(
+                        input,
+                        multiPartManifestFile,
+                        multiPartitionType,
+                        CoreOptions.fromMap(defaultOptions.toMap()));
+        assertThat(readFileNames(multiPartManifestFile, sortedByFullPartition))
+                .containsExactly(
+                        "region0-dt1-row20",
+                        "region5-dt2-row10",
+                        "region10-dt2-row30",
+                        "region20-dt1-row5");
+
+        Options configuredFieldOptions = new Options();
+        configuredFieldOptions.set("manifest-sort.enabled", "true");
+        configuredFieldOptions.set("manifest-sort.partition-field", "f1");
+        configuredFieldOptions.set("data-evolution.enabled", "true");
+        configuredFieldOptions.set("manifest.full-compaction-threshold-size", "1B");
+        List<ManifestFileMeta> sortedByDt =
+                ManifestFileMerger.merge(
+                        input,
+                        multiPartManifestFile,
+                        multiPartitionType,
+                        CoreOptions.fromMap(configuredFieldOptions.toMap()));
+        assertThat(readFileNames(multiPartManifestFile, sortedByDt))
+                .containsExactly(
+                        "region20-dt1-row5",
+                        "region0-dt1-row20",
+                        "region5-dt2-row10",
+                        "region10-dt2-row30");
+    }
+
+    @Test
     public void testDataEvolutionManifestSortFallsBackToPartitionWhenRowIdStatsMissing() {
         List<ManifestFileMeta> input = new ArrayList<>();
 
@@ -1619,6 +1680,84 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         null));
+    }
+
+    private ManifestFile createManifestFileForPartitionType(RowType partitionType) {
+        Path path = new Path(tempDir.toString());
+        FileIO fileIO = FileIOFinder.find(path);
+        return new ManifestFile.Factory(
+                        fileIO,
+                        new SchemaManager(fileIO, path),
+                        partitionType,
+                        avro,
+                        "zstd",
+                        new FileStorePathFactory(
+                                path,
+                                partitionType,
+                                "default",
+                                CoreOptions.FILE_FORMAT.defaultValue(),
+                                CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                                CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                                CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
+                                CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                null,
+                                null,
+                                CoreOptions.ExternalPathStrategy.NONE,
+                                null,
+                                false,
+                                null),
+                        Long.MAX_VALUE,
+                        null)
+                .create();
+    }
+
+    private ManifestEntry makeMultiPartRowIdEntry(
+            String fileName, int region, int dt, int hour, long firstRowId, long rowCount) {
+        BinaryRow binaryRow = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, region);
+        writer.writeInt(1, dt);
+        writer.writeInt(2, hour);
+        writer.complete();
+
+        return ManifestEntry.create(
+                FileKind.ADD,
+                binaryRow,
+                0,
+                0,
+                DataFileMeta.create(
+                        fileName,
+                        0,
+                        rowCount,
+                        binaryRow,
+                        binaryRow,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000),
+                        0L,
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        firstRowId,
+                        Collections.singletonList("f0")));
+    }
+
+    private List<String> readFileNames(
+            ManifestFile manifestFile, List<ManifestFileMeta> manifestMetas) {
+        List<String> fileNames = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestMetas) {
+            for (ManifestEntry entry : manifestFile.read(meta.fileName(), meta.fileSize())) {
+                fileNames.add(entry.file().fileName());
+            }
+        }
+        return fileNames;
     }
 
     /** Create a ManifestEntry with row ID metadata for data evolution manifest sort tests. */

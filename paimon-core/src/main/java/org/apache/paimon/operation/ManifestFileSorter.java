@@ -1099,13 +1099,11 @@ public class ManifestFileSorter {
             String sortPartitionField,
             RowType partitionType) {
         if (dataEvolutionEnabled && ManifestFileMeta.allContainsRowId(input)) {
-            // RowID sorting uses the full partition row as the primary key to preserve partition
-            // locality, then orders files by RowID. The optional manifest-sort.partition-field is
-            // only used by the partition-sort fallback when RowID stats are incomplete.
+            // RowID sorting uses the configured partition field as the primary key when specified,
+            // otherwise it uses the full partition row to preserve partition locality. It then
+            // orders files by RowID.
             RecordComparator partitionComparator =
-                    partitionType.getFieldCount() == 0
-                            ? null
-                            : CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
+                    createPartitionComparator(sortPartitionField, partitionType);
             return new RowIdSortKey(partitionComparator);
         }
 
@@ -1127,6 +1125,28 @@ public class ManifestFileSorter {
                 CodeGenUtils.newRecordComparator(
                         partitionType.getFieldTypes(), new int[] {sortFieldIndex});
         return new PartitionSortKey(fieldComparator);
+    }
+
+    @Nullable
+    private static RecordComparator createPartitionComparator(
+            String sortPartitionField, RowType partitionType) {
+        if (sortPartitionField != null && !sortPartitionField.isEmpty()) {
+            int sortFieldIndex = partitionType.getFieldNames().indexOf(sortPartitionField);
+            if (sortFieldIndex < 0) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Cannot resolve sort field '%s' for manifest sort rewrite.",
+                                sortPartitionField));
+            }
+            return CodeGenUtils.newRecordComparator(
+                    partitionType.getFieldTypes(), new int[] {sortFieldIndex});
+        }
+
+        if (partitionType.getFieldCount() == 0) {
+            return null;
+        }
+
+        return CodeGenUtils.newRecordComparator(partitionType.getFieldTypes());
     }
 
     interface ManifestSortKey {
