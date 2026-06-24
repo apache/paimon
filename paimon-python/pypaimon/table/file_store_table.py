@@ -160,7 +160,8 @@ class FileStoreTable(Table):
             self,
             tag_name: str,
             snapshot_id: Optional[int] = None,
-            ignore_if_exists: bool = False
+            ignore_if_exists: bool = False,
+            time_retained: Optional[str] = None
     ) -> None:
         """
         Create a tag for a snapshot.
@@ -169,6 +170,8 @@ class FileStoreTable(Table):
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
             ignore_if_exists: If True, don't raise error if tag already exists
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the tag
+                carries a create-time and TTL.
 
         Raises:
             ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
@@ -186,7 +189,7 @@ class FileStoreTable(Table):
                 raise ValueError("No snapshot exists in this table.")
 
         tag_mgr = self.tag_manager()
-        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists, time_retained)
 
     def delete_tag(self, tag_name: str) -> bool:
         """
@@ -335,7 +338,12 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
 
-    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+    def replace_tag(
+            self,
+            tag_name: str,
+            snapshot_id: int = None,
+            time_retained: Optional[str] = None
+    ) -> None:
         """
         Replace an existing tag with a new snapshot.
 
@@ -343,6 +351,8 @@ class FileStoreTable(Table):
             tag_name: Name of the tag to replace
             snapshot_id: The snapshot id to associate with the tag.
                         If None, uses the latest snapshot.
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the
+                replaced tag carries a create-time and TTL.
 
         Raises:
             ValueError: If tag doesn't exist, or snapshot doesn't exist
@@ -355,7 +365,7 @@ class FileStoreTable(Table):
             snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
             if snapshot is None:
                 raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
-        self.tag_manager().replace_tag(snapshot, tag_name)
+        self.tag_manager().replace_tag(snapshot, tag_name, time_retained)
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
