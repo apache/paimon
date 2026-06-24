@@ -70,42 +70,76 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
         self._load_lock = threading.Lock()
 
     def visit_vector_search(self, vector_search):
+        results = self._run_search(
+            [vector_search.vector],
+            vector_search.limit,
+            vector_search.include_row_ids,
+            vector_search.options,
+        )
+        return _completed_future(results[0])
+
+    def visit_batch_vector_search(self, batch_vector_search):
+        results = self._run_search(
+            batch_vector_search.vectors,
+            batch_vector_search.limit,
+            batch_vector_search.include_row_ids,
+            batch_vector_search.options,
+        )
+        return _completed_future(results)
+
+    def _run_search(self, vectors, limit, include_row_ids, query_options):
         self._ensure_loaded()
 
-        query = np.asarray(vector_search.vector, dtype=np.float32)
-        if query.ndim != 1:
-            raise ValueError("Query vector must be a one-dimensional float32 array")
-        expected_dim = self._metadata.dimension
-        if query.shape[0] != expected_dim:
-            raise ValueError(
-                "Query vector dimension mismatch: expected %d, got %d"
-                % (expected_dim, query.shape[0]))
-
-        effective_k = self._effective_k(vector_search)
+        queries = self._validate_queries(vectors)
+        n = len(queries)
+        effective_k = self._effective_k(limit, include_row_ids)
         if effective_k <= 0:
-            return _completed_future(None)
+            return [None] * n
 
-        options = vector_search.options or {}
+        options = query_options or {}
         nprobe = _int_parameter(options, NPROBE_PARAMETER, DEFAULT_NPROBE)
         ef_search = _int_parameter(options, EF_SEARCH_PARAMETER, DEFAULT_EF_SEARCH)
-        filter_bytes = _filter_bytes(vector_search.include_row_ids)
+        filter_bytes = _filter_bytes(include_row_ids)
 
-        ids, distances = self._reader.search(
-            query, effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
-        id_to_scores = _build_scores(ids, distances, self._metadata.metric)
-        if not id_to_scores:
-            return _completed_future(None)
-        return _completed_future(DictBasedScoredIndexResult(id_to_scores))
+        if n == 1:
+            ids, distances = self._reader.search(
+                queries[0], effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+            return [_result_from_scores(ids, distances, self._metadata.metric)]
+
+        if hasattr(self._reader, "search_batch"):
+            flat_queries = np.ascontiguousarray(queries).reshape(-1)
+            batch_result = self._reader.search_batch(
+                flat_queries, n, effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+            return _batch_results(batch_result, n, effective_k, self._metadata.metric)
+
+        results = []
+        for query in queries:
+            ids, distances = self._reader.search(
+                query, effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+            results.append(_result_from_scores(ids, distances, self._metadata.metric))
+        return results
+
+    def _validate_queries(self, vectors):
+        queries = []
+        expected_dim = self._metadata.dimension
+        for vector in vectors:
+            query = np.asarray(vector, dtype=np.float32)
+            if query.ndim != 1:
+                raise ValueError("Query vector must be a one-dimensional float32 array")
+            if query.shape[0] != expected_dim:
+                raise ValueError(
+                    "Query vector dimension mismatch: expected %d, got %d"
+                    % (expected_dim, query.shape[0]))
+            queries.append(query)
+        return np.asarray(queries, dtype=np.float32)
 
     def vector_metric(self):
         self._ensure_loaded()
         return self._metadata.metric
 
-    def _effective_k(self, vector_search):
-        limit = vector_search.limit
+    def _effective_k(self, limit, include_row_ids):
         total_vectors = getattr(self._metadata, "total_vectors", limit)
         effective_k = min(limit, int(total_vectors))
-        include_row_ids = vector_search.include_row_ids
         if include_row_ids is not None:
             cardinality = include_row_ids.cardinality()
             if cardinality == 0:
@@ -175,6 +209,43 @@ def _build_scores(ids, distances, metric):
             continue
         id_to_scores[row_id] = _convert_distance_to_score(float(distance), metric)
     return id_to_scores
+
+
+def _result_from_scores(ids, distances, metric):
+    id_to_scores = _build_scores(ids, distances, metric)
+    if not id_to_scores:
+        return None
+    return DictBasedScoredIndexResult(id_to_scores)
+
+
+def _batch_results(batch_result, vector_count, effective_k, metric):
+    if hasattr(batch_result, "ids_for_query"):
+        return [
+            _result_from_scores(
+                batch_result.ids_for_query(i),
+                batch_result.distances_for_query(i),
+                metric,
+            )
+            for i in range(vector_count)
+        ]
+
+    ids, distances = batch_result
+    return [
+        _result_from_scores(
+            _values_for_query(ids, i, effective_k),
+            _values_for_query(distances, i, effective_k),
+            metric,
+        )
+        for i in range(vector_count)
+    ]
+
+
+def _values_for_query(values, query_index, effective_k):
+    array = np.asarray(values)
+    if array.ndim >= 2:
+        return array[query_index]
+    start = query_index * effective_k
+    return array[start:start + effective_k]
 
 
 def _convert_distance_to_score(distance, metric):
