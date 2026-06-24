@@ -1669,6 +1669,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Whether to process distributed vector search.</td>
         </tr>
         <tr>
+            <td><h5>vector-search.lateral-join.batch-size</h5></td>
+            <td style="word-wrap: break-word;">256</td>
+            <td>Integer</td>
+            <td>The batch size for lateral vector search. Each batch executes vector topK search and table lookup for multiple query vectors.</td>
+        </tr>
+        <tr>
             <td><h5>vector.file.format</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1735,12 +1741,6 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
         </tr>
         <tr>
-            <td><h5>write.sequence-number-init-mode</h5></td>
-            <td style="word-wrap: break-word;">scan</td>
-            <td><p>Enum</p></td>
-            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>write.batch-memory</h5></td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
@@ -1751,6 +1751,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
             <td>Write batch size for any file format if it supports.</td>
+        </tr>
+        <tr>
+            <td><h5>write.sequence-number-init-mode</h5></td>
+            <td style="word-wrap: break-word;">scan</td>
+            <td><p>Enum</p></td>
+            <td>Specify how to initialize the next sequence number for primary key table writers.<br /><br />Possible values:<ul><li>"scan": initialize by scanning existing file metadata.</li><li>"snapshot": initialize from the maximum sequence number recorded in snapshot properties, which can avoid scanning existing file metadata in write-only mode.</li></ul></td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>
