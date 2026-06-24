@@ -24,6 +24,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -41,8 +43,12 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
             "global-index.es-index.read-search-threads";
     private static final int DEFAULT_READ_SEARCH_THREADS = -1;
 
-    private static volatile ExecutorService readSearchExecutor;
-    private static final Object LOCK = new Object();
+    // Cache one shared pool per resolved thread count, so tables/reads configured with different
+    // global-index.es-index.read-search-threads values each get their own pool instead of all
+    // reusing whichever pool was created first. A value of 0 maps to null (serial / async disabled)
+    // and is never cached.
+    private static final ConcurrentMap<Integer, ExecutorService> READ_SEARCH_EXECUTORS =
+            new ConcurrentHashMap<>();
 
     @Override
     public String identifier() {
@@ -51,10 +57,6 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
 
     @Override
     public boolean supportsFullTextSearch() {
-        // The ES index is a hybrid backend: a FULLTEXT-typed column (whether it is the primary
-        // index field or an extra field of a multi-column index) is served by Lucene full-text
-        // search. Without this override FullTextScanImpl filters out every es-index file and the
-        // planner full-text path returns nothing.
         return true;
     }
 
@@ -87,20 +89,13 @@ public class ESIndexGlobalIndexerFactory implements GlobalIndexerFactory {
     private static ExecutorService getOrCreateReadSearchExecutor(Options options) {
         int threads = options.getInteger(READ_SEARCH_THREADS_KEY, DEFAULT_READ_SEARCH_THREADS);
         if (threads == 0) {
+            // Explicitly disable async/searcher parallelism for this reader (serial execution).
             return null;
         }
-        if (threads < 0) {
-            threads = Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
-        }
-        if (readSearchExecutor == null) {
-            int finalThreads = threads;
-            synchronized (LOCK) {
-                if (readSearchExecutor == null) {
-                    readSearchExecutor = createExecutor(finalThreads);
-                }
-            }
-        }
-        return readSearchExecutor;
+        int resolved =
+                threads < 0 ? Math.max(2, Runtime.getRuntime().availableProcessors() / 2) : threads;
+        return READ_SEARCH_EXECUTORS.computeIfAbsent(
+                resolved, ESIndexGlobalIndexerFactory::createExecutor);
     }
 
     private static ExecutorService createExecutor(int threads) {
