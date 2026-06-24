@@ -118,18 +118,14 @@ public class FormatMetadataUtilsTest {
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "id", DataTypes.INT()),
                         DataTypes.FIELD(
-                                1,
-                                "tags",
-                                DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                                1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
                         DataTypes.FIELD(
                                 2,
                                 "nested",
                                 DataTypes.ROW(
                                         DataTypes.FIELD(3, "name", DataTypes.STRING()),
                                         DataTypes.FIELD(
-                                                4,
-                                                "scores",
-                                                DataTypes.ARRAY(DataTypes.INT())))));
+                                                4, "scores", DataTypes.ARRAY(DataTypes.INT())))));
         Map<String, String> tagsMetadata = new LinkedHashMap<>();
         tagsMetadata.put("paimon.test.tags", "enabled");
 
@@ -143,7 +139,6 @@ public class FormatMetadataUtilsTest {
                 .containsExactly("id", "tags", "nested");
         assertThat(schema.findField("tags").getMetadata())
                 .containsEntry("paimon.test.tags", "enabled");
-        assertThat(schema.findField("nested").getMetadata())
-                .doesNotContainKey("paimon.test.tags");
+        assertThat(schema.findField("nested").getMetadata()).doesNotContainKey("paimon.test.tags");
     }
 }
