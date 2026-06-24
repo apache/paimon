@@ -415,6 +415,189 @@ public class IcebergRestMetadataCommitterTest {
     }
 
     @Test
+    public void testOptionOnlyAlterTableDoesNotCrashIcebergSync() throws Exception {
+        // The fix deduplicates schemas in adjustMetadataForRest() and remaps
+        // currentSchemaId + snapshot schemaId references to the surviving ID.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        randomFormat(),
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // Initial write — establishes schema-0 in Paimon, schema-1 in Iceberg
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)");
+
+        // Perform 3 option-only schema changes — each increments Paimon schema ID
+        // but does NOT change columns, creating the dedup scenario
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.1", "value1"));
+        schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.2", "value2"));
+        schemaManager.commitChanges(SchemaChange.setOption("my.custom.option.3", "value3"));
+        table = table.copy(table.schemaManager().latest().get());
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        // Write more data — this triggers IcebergRestMetadataCommitter with
+        // multiple schemas that have identical fields but different IDs.
+        // Without the fix, this crashes with "Cannot set current schema to
+        // unknown schema: N".
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        // Verify data is readable through Iceberg
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        // Verify schema dedup happened: Iceberg should have fewer schemas than
+        // Paimon (Paimon has 4 schemas: original + 3 option changes; Iceberg
+        // should have just 1 unique schema after dedup, plus the empty placeholder)
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        int icebergSchemaCount = icebergTable.schemas().size();
+        int paimonSchemaCount = table.schemaManager().listAllIds().size();
+        assertThat(icebergSchemaCount).isLessThan(paimonSchemaCount);
+
+        // Perform another write + commit to verify no drift on subsequent commits
+        // (the deduped currentSchemaId should match what Iceberg stored, so we
+        // should NOT re-enter the schema update path unnecessarily)
+        write.write(GenericRow.of(2, 21));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 21)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSchemaEvolutionWithInterleavedOptionAlter() throws Exception {
+        // Verifies correct behaviour across a full schema-evolution cycle:
+        //
+        //   1. Initial schema: [k, v1, v2]
+        //   2. Drop column v2: [k, v1]          — genuine schema change
+        //   3. Option-only alter on [k, v1]      — same fields; must be deduped with step 2
+        //   4. Re-add column v2 (BIGINT): [k, v1, v2_new] — new field ID; must NOT be
+        //      deduped with step 1 even though the column name matches
+        //
+        // Without the fix, step 3 crashes with "Cannot set current schema to unknown schema: N"
+        // and step 4 would expose a renumbering bug where Iceberg assigns sequential IDs
+        // (1, 2, 3) while setCurrentSchema references the gap-containing ID (4).
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()},
+                        new String[] {"k", "v1", "v2"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        randomFormat(),
+                        Collections.emptyMap());
+        String commitUser = UUID.randomUUID().toString();
+        EvolveContext ctx = new EvolveContext(table, commitUser);
+
+        // Step 1: baseline
+        ctx.writeAndCommit(
+                GenericRow.of(1, 10, BinaryString.fromString("a")),
+                GenericRow.of(2, 20, BinaryString.fromString("b")));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10, a)", "Record(2, 20, b)");
+
+        // Step 2: drop v2 → [k, v1]
+        ctx.evolve(SchemaChange.dropColumn("v2"));
+        ctx.writeAndCommit(GenericRow.of(1, 11), GenericRow.of(3, 30));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+
+        // Step 3: option-only alter — same fields [k, v1], increments Paimon schema ID
+        ctx.evolve(SchemaChange.setOption("my.test.option", "trigger-dedup"));
+        ctx.writeAndCommit(GenericRow.of(2, 21));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 21)", "Record(3, 30)");
+
+        // Step 4: re-add v2 as BIGINT — new field ID, distinct from original v2 (STRING)
+        ctx.evolve(SchemaChange.addColumn("v2", DataTypes.BIGINT()));
+        ctx.writeAndCommit(GenericRow.of(1, 11, 100L), GenericRow.of(4, 40, 400L));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 11, 100)",
+                        "Record(2, 21, null)",
+                        "Record(3, 30, null)",
+                        "Record(4, 40, 400)");
+
+        // Final Iceberg schema must reflect [k, v1, v2_new(BIGINT)], not the old v2(STRING)
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(icebergTable.schema().columns()).hasSize(3);
+        assertThat(icebergTable.schema().findField("v2").type().toString()).isEqualTo("long");
+
+        // Paimon has 4 schema versions (0-3); step 3 is a duplicate of step 2 (same fields).
+        // Iceberg should have exactly 4 schemas: the empty placeholder (id=0) plus 3 unique
+        // field-sets. Without dedup it would have 5 (empty + one-per-Paimon-schema).
+        int paimonSchemaCount = ctx.table.schemaManager().listAllIds().size();
+        assertThat(paimonSchemaCount).isEqualTo(4);
+        assertThat(icebergTable.schemas().size()).isEqualTo(4); // 5 without dedup
+
+        ctx.close();
+    }
+
+    /** Helper context that keeps write/commit in sync with table schema evolution. */
+    private class EvolveContext implements AutoCloseable {
+        FileStoreTable table;
+        private final String commitUser;
+        private TableWriteImpl<?> write;
+        private TableCommitImpl commit;
+        private int seq = 0;
+
+        EvolveContext(FileStoreTable table, String commitUser) throws Exception {
+            this.table = table;
+            this.commitUser = commitUser;
+            this.write = table.newWrite(commitUser);
+            this.commit = table.newCommit(commitUser);
+        }
+
+        void evolve(SchemaChange change) throws Exception {
+            new SchemaManager(table.fileIO(), table.location()).commitChanges(change);
+            table = table.copy(table.schemaManager().latest().get());
+            write.close();
+            write = table.newWrite(commitUser);
+            commit.close();
+            commit = table.newCommit(commitUser);
+        }
+
+        void writeAndCommit(GenericRow... rows) throws Exception {
+            for (GenericRow row : rows) {
+                write.write(row);
+            }
+            write.compact(BinaryRow.EMPTY_ROW, 0, true);
+            commit.commit(++seq, write.prepareCommit(true, seq));
+        }
+
+        @Override
+        public void close() throws Exception {
+            write.close();
+            commit.close();
+        }
+    }
+
+    @Test
     public void testSchemaChangeBeforeSync() throws Exception {
         RowType rowType =
                 RowType.of(
