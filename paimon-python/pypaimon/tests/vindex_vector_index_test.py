@@ -55,13 +55,12 @@ class _FakeVectorIndexReader:
         return list(range(10, 10 + effective_k)), [float(i) for i in range(effective_k)]
 
     def search_batch(
-        self, queries, query_count, effective_k, nprobe, ef_search, filter_bytes=None
+        self, queries, top_k, nprobe, ef_search=0, filter_bytes=None
     ):
         self.batch_calls.append(
             {
-                "queries": list(queries),
-                "query_count": query_count,
-                "effective_k": effective_k,
+                "queries": queries,
+                "top_k": top_k,
                 "nprobe": nprobe,
                 "ef_search": ef_search,
                 "filter_bytes": filter_bytes,
@@ -69,9 +68,10 @@ class _FakeVectorIndexReader:
         )
         ids = []
         distances = []
+        query_count = queries.shape[0]
         for query_index in range(query_count):
             base_id = (query_index + 1) * 10
-            for rank in range(effective_k):
+            for rank in range(top_k):
                 ids.append(base_id + rank)
                 distances.append(float(rank))
         return ids, distances
@@ -131,8 +131,8 @@ class VindexVectorIndexTest(unittest.TestCase):
             self.assertEqual(1, len(fake_reader.batch_calls))
 
             call = fake_reader.batch_calls[0]
-            self.assertEqual(3, call["query_count"])
-            self.assertEqual(2, call["effective_k"])
+            self.assertEqual((3, 2), call["queries"].shape)
+            self.assertEqual(2, call["top_k"])
             self.assertEqual(7, call["nprobe"])
             self.assertEqual(11, call["ef_search"])
             self.assertIsNotNone(call["filter_bytes"])

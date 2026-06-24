@@ -107,9 +107,13 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
             return [_result_from_scores(ids, distances, self._metadata.metric)]
 
         if hasattr(self._reader, "search_batch"):
-            flat_queries = np.ascontiguousarray(queries).reshape(-1)
             batch_result = self._reader.search_batch(
-                flat_queries, n, effective_k, nprobe, ef_search, filter_bytes=filter_bytes)
+                np.ascontiguousarray(queries),
+                effective_k,
+                nprobe,
+                ef_search,
+                filter_bytes=filter_bytes,
+            )
             return _batch_results(batch_result, n, effective_k, self._metadata.metric)
 
         results = []
