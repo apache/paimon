@@ -106,6 +106,11 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         this.closed = false;
     }
 
+    /** The read/search executor in use (null = serial); visible for tests. */
+    ExecutorService searchExecutor() {
+        return searchExecutor;
+    }
+
     @Override
     public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
             VectorSearch vectorSearch) {
