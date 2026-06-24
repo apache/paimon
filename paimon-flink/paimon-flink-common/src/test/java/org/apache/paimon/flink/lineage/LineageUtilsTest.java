@@ -256,10 +256,11 @@ class LineageUtilsTest {
     }
 
     @Test
-    void testConfigFacetIncludesMetadataOptionsAndExcludesArbitrary() throws Exception {
+    void testConfigFacetIncludesIcebergOptionsAndExcludesArbitrary() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("metadata.iceberg.storage", "hadoop-catalog");
         options.put("metadata.iceberg.uri", "s3://my-bucket/iceberg");
+        options.put("metadata.iceberg.rest.token", "should-not-appear");
         options.put("some.arbitrary.secret", "should-not-appear");
 
         FileStoreTable table = createTable(options, Collections.emptyList(), Arrays.asList("f0"));
@@ -271,6 +272,7 @@ class LineageUtilsTest {
         Map<String, String> config = configFacet.config();
         assertThat(config).containsEntry("metadata.iceberg.storage", "hadoop-catalog");
         assertThat(config).containsEntry("metadata.iceberg.uri", "s3://my-bucket/iceberg");
+        assertThat(config).doesNotContainKey("metadata.iceberg.rest.token");
         assertThat(config).doesNotContainKey("some.arbitrary.secret");
     }
 

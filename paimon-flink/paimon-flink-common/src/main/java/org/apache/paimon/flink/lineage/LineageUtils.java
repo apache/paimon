@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.jdbc.JdbcCatalogFactory;
 import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
@@ -43,9 +44,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Lineage utilities for building {@link SourceLineageVertex} and {@link LineageVertex} from a
@@ -66,7 +69,10 @@ public class LineageUtils {
     private static final String DEFAULT_CATALOG_IDENTIFIER = FlinkCatalogFactory.IDENTIFIER;
 
     private static final Set<String> PAIMON_OPTION_KEYS =
-            CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
+            Stream.of(CoreOptions.getOptions(), IcebergOptions.getOptions())
+                    .flatMap(List::stream)
+                    .map(opt -> opt.key())
+                    .collect(Collectors.toSet());
 
     /** Extracts the {@link CatalogContext} from a table, or null if not available. */
     @Nullable
@@ -82,8 +88,8 @@ public class LineageUtils {
 
     /**
      * Builds the config map for a dataset facet from a {@link Table}. Includes {@link CoreOptions}
-     * and {@code metadata.*} prefixed options (e.g. iceberg), partition keys, primary keys, and a
-     * safe subset of catalog-level options prefixed with {@code "catalog."}.
+     * and {@link IcebergOptions}, partition keys, primary keys, and a safe subset of catalog-level
+     * options prefixed with {@code "catalog."}.
      */
     private static Map<String, String> buildConfigMap(
             Table table, @Nullable CatalogContext catalogContext) {
@@ -92,10 +98,7 @@ public class LineageUtils {
         config.put("primary-keys", String.join(",", table.primaryKeys()));
 
         table.options().entrySet().stream()
-                .filter(
-                        e ->
-                                PAIMON_OPTION_KEYS.contains(e.getKey())
-                                        || e.getKey().startsWith("metadata."))
+                .filter(e -> PAIMON_OPTION_KEYS.contains(e.getKey()))
                 .forEach(e -> config.put(e.getKey(), e.getValue()));
 
         config.put("type", "paimon");
