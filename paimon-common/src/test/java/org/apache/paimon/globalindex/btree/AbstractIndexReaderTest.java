@@ -44,6 +44,7 @@ import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeDefaultVisitor;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -272,6 +273,37 @@ public abstract class AbstractIndexReaderTest {
                 result = reader.visitNotIn(ref, literals).join().get();
                 assertResult(result, filter(obj -> !set.contains(obj)));
             }
+        }
+    }
+
+    @TestTemplate
+    public void testStartsWith() throws Exception {
+        if (!dataType.is(DataTypeFamily.CHARACTER_STRING)) {
+            return;
+        }
+
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            Random random = new Random();
+            for (int i = 0; i < 5; i++) {
+                String value =
+                        ((BinaryString) data.get(random.nextInt(dataNum)).getKey()).toString();
+                String prefix = value.substring(0, 1 + random.nextInt(value.length()));
+                GlobalIndexResult result =
+                        reader.visitStartsWith(ref, BinaryString.fromString(prefix)).join().get();
+                assertResult(
+                        result, filter(obj -> ((BinaryString) obj).toString().startsWith(prefix)));
+            }
+
+            GlobalIndexResult all =
+                    reader.visitStartsWith(ref, BinaryString.fromString("")).join().get();
+            assertResult(all, filter(Objects::nonNull));
+
+            GlobalIndexResult none =
+                    reader.visitStartsWith(ref, BinaryString.fromString("zzz_no_such_prefix"))
+                            .join()
+                            .get();
+            Assertions.assertTrue(none.results().isEmpty());
         }
     }
 
