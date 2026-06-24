@@ -288,8 +288,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
                             .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
-                            .tolerateMissingSchema(
-                                    OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
+                            .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf))
+                            .isSchemaEvolutionCaseAware(
+                                    OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.getBoolean(conf));
             if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled && selection == null) {
                 // row group filter push down will make row number change incorrect
                 // so deletion vectors mode and bitmap index cannot work with row group push down
