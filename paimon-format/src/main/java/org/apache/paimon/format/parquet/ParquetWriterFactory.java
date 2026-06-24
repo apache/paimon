@@ -22,8 +22,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
+import org.apache.paimon.format.parquet.writer.MetadataParquetBuilder;
 import org.apache.paimon.format.parquet.writer.ParquetBuilder;
 import org.apache.paimon.format.parquet.writer.ParquetBulkWriter;
+import org.apache.paimon.format.parquet.writer.ParquetMetadataBulkWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.format.parquet.writer.StreamOutputFile;
 import org.apache.paimon.format.variant.SupportsVariantInference;
@@ -34,6 +36,8 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /** A factory that creates a Parquet {@link FormatWriter}. */
 public class ParquetWriterFactory implements FormatWriterFactory, SupportsVariantInference {
@@ -57,6 +61,11 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
             compression = null;
         }
 
+        if (writerBuilder instanceof MetadataParquetBuilder) {
+            return createMetadataWriter(
+                    (MetadataParquetBuilder<InternalRow>) writerBuilder, out, compression);
+        }
+
         final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, compression);
         return new ParquetBulkWriter(writer);
     }
@@ -70,10 +79,20 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
             compression = null;
         }
 
-        ParquetBuilder<InternalRow> newBuilder =
+        RowDataParquetBuilder newBuilder =
                 ((RowDataParquetBuilder) writerBuilder)
                         .withShreddingSchemas(inferredShreddingSchema);
-        final ParquetWriter<InternalRow> writer = newBuilder.createWriter(out, compression);
-        return new ParquetBulkWriter(writer);
+        return createMetadataWriter(newBuilder, out, compression);
+    }
+
+    private FormatWriter createMetadataWriter(
+            MetadataParquetBuilder<InternalRow> builder, OutputFile out, String compression)
+            throws IOException {
+        // Keep this exact map instance shared by ParquetBulkWriter and WriteSupport. The writer
+        // collects metadata before close, and WriteSupport reads it when finalizing the footer.
+        Map<String, byte[]> metadata = new HashMap<>();
+        final ParquetWriter<InternalRow> writer =
+                builder.createWriter(out, compression, () -> metadata);
+        return new ParquetMetadataBulkWriter(writer, metadata);
     }
 }
