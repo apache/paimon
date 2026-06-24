@@ -106,6 +106,11 @@ Paimon JDBC Catalog in Spark needs to correctly add the corresponding jar packag
 JDBC catalog supports persistent Paimon views. View metadata is stored in the automatically created
 `paimon_views` table in the catalog database.
 
+Within a single database, a name cannot be used by both a table and a view; all writers
+(`createTable`, `renameTable`, `createView`, `renameView`) reject conflicting identifiers. See
+[Views](../concepts/views#jdbc-catalog-notes) for upgrade-time permissions, single-process locking
+semantics, and database visibility details.
+
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \

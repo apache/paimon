@@ -54,6 +54,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.Striped;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,11 +100,20 @@ public class JdbcCatalog extends AbstractCatalog {
 
     public static final String PROPERTY_PREFIX = "jdbc.";
     private static final String DATABASE_EXISTS_PROPERTY = "exists";
+    private static final int LOCAL_LOCK_STRIPES = 64;
 
     private final JdbcClientPool connections;
     private final String catalogKey;
     private final Options options;
     private final String warehouse;
+
+    /**
+     * Per-JVM stripe locks keyed by (catalogKey, database, objectName). They guarantee that the new
+     * table / view name validation and metadata write happen atomically within the same process
+     * even when the catalog-level distributed lock is disabled (e.g. {@code lock.enabled = false}).
+     */
+    private static final Striped<java.util.concurrent.locks.Lock> LOCAL_LOCKS =
+            Striped.lazyWeakLock(LOCAL_LOCK_STRIPES);
 
     protected JdbcCatalog(
             FileIO fileIO, String catalogKey, CatalogContext context, String warehouse) {
@@ -392,10 +402,22 @@ public class JdbcCatalog extends AbstractCatalog {
                 }
                 break;
             case FORMAT_TABLE:
-                if (!validateTableNotExists(identifier, ignoreIfExists)) {
-                    return;
+                try {
+                    runWithLock(
+                            identifier,
+                            () -> {
+                                if (!validateTableNotExists(identifier, ignoreIfExists)) {
+                                    return null;
+                                }
+                                createFormatTable(identifier, schema);
+                                return null;
+                            });
+                } catch (TableAlreadyExistException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            "Failed to create table " + identifier.getFullName(), e);
                 }
-                createFormatTable(identifier, schema);
                 break;
             case OBJECT_TABLE:
                 throw new UnsupportedOperationException(
@@ -448,17 +470,10 @@ public class JdbcCatalog extends AbstractCatalog {
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
-        try {
-            runWithLock(
-                    identifier,
-                    () -> {
-                        validateTableNotExists(identifier, false);
-                        createTableImplWithLock(identifier, schema);
-                        return null;
-                    });
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
-        }
+        // Callers (currently only the overridden createTable above) are expected to invoke this
+        // method while already holding the catalog lock for `identifier`. Acquiring another
+        // distributed lock here would cause non-reentrant nested lock acquisition.
+        createTableImplWithLock(identifier, schema);
     }
 
     private void createTableImplWithLock(Identifier identifier, Schema schema) {
@@ -527,26 +542,59 @@ public class JdbcCatalog extends AbstractCatalog {
         checkNotSystemTable(toTable, "renameTable");
 
         try {
-            getTable(fromTable);
-        } catch (TableNotExistException e) {
-            if (ignoreIfNotExists) {
-                return;
+            runWithLocks(
+                    fromTable,
+                    toTable,
+                    () -> {
+                        // Re-check existence inside the lock so that the validation is atomic
+                        // with the metadata update below. This prevents races against
+                        // concurrent createView / renameView / createTable targeting the same
+                        // identifier (tables and views are stored in separate JDBC tables
+                        // without a shared uniqueness constraint).
+                        try {
+                            getTable(fromTable);
+                        } catch (TableNotExistException e) {
+                            if (ignoreIfNotExists) {
+                                return null;
+                            }
+                            throw new TableNotExistException(fromTable);
+                        }
+
+                        requireDatabaseExistsForWrite(toTable);
+
+                        if (JdbcUtils.tableExists(
+                                        connections,
+                                        catalogKey,
+                                        toTable.getDatabaseName(),
+                                        toTable.getObjectName())
+                                || JdbcUtils.viewExists(
+                                        connections,
+                                        catalogKey,
+                                        toTable.getDatabaseName(),
+                                        toTable.getObjectName())) {
+                            throw new TableAlreadyExistException(toTable);
+                        }
+
+                        renameTableImpl(fromTable, toTable);
+                        return null;
+                    });
+        } catch (TableNotExistException | TableAlreadyExistException e) {
+            throw e;
+        } catch (IllegalArgumentException e) {
+            // Propagate "target database does not exist" verbatim to mirror renameView's
+            // behaviour and to match RESTCatalog's BadRequest semantics.
+            throw e;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
             }
-            throw new TableNotExistException(fromTable);
+            throw new RuntimeException(
+                    "Failed to rename table from "
+                            + fromTable.getFullName()
+                            + " to "
+                            + toTable.getFullName(),
+                    e);
         }
-
-        try {
-            getTable(toTable);
-            throw new TableAlreadyExistException(toTable);
-        } catch (TableNotExistException ignored) {
-        }
-
-        if (JdbcUtils.viewExists(
-                connections, catalogKey, toTable.getDatabaseName(), toTable.getObjectName())) {
-            throw new TableAlreadyExistException(toTable);
-        }
-
-        renameTableImpl(fromTable, toTable);
     }
 
     @Override
@@ -646,16 +694,26 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {
-        if (!lockEnabled()) {
-            return callable.call();
+        // Always serialize same-identifier mutations within a single JVM via stripe locks. This
+        // keeps the table/view name uniqueness invariant intact even when the JDBC distributed
+        // lock is disabled, so that view operations never silently degrade to a non-atomic
+        // check-then-act.
+        java.util.concurrent.locks.Lock localLock = LOCAL_LOCKS.get(lockKey(identifier));
+        localLock.lock();
+        try {
+            if (!lockEnabled()) {
+                return callable.call();
+            }
+            JdbcCatalogLock lock =
+                    new JdbcCatalogLock(
+                            connections,
+                            catalogKey,
+                            checkMaxSleep(options.toMap()),
+                            acquireTimeout(options.toMap()));
+            return Lock.fromCatalog(lock, identifier).runWithLock(callable);
+        } finally {
+            localLock.unlock();
         }
-        JdbcCatalogLock lock =
-                new JdbcCatalogLock(
-                        connections,
-                        catalogKey,
-                        checkMaxSleep(options.toMap()),
-                        acquireTimeout(options.toMap()));
-        return Lock.fromCatalog(lock, identifier).runWithLock(callable);
     }
 
     private <T> T runWithLocks(
@@ -677,7 +735,24 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     private String lockKey(Identifier identifier) {
-        return identifier.getDatabaseName() + "\0" + identifier.getObjectName();
+        return catalogKey + "\0" + identifier.getDatabaseName() + "\0" + identifier.getObjectName();
+    }
+
+    /**
+     * Validate that the target database of a write operation exists.
+     *
+     * <p>The check uses {@link JdbcUtils#databaseExists}, which considers both the catalog table
+     * properties and the view metadata table, so that this single helper can be shared by {@code
+     * createTable}, {@code createView}, {@code renameTable} and {@code renameView}.
+     *
+     * <p>An {@link IllegalArgumentException} is thrown for missing databases, mirroring the
+     * behavior of {@code RESTCatalog.renameView} for {@code BadRequest} errors.
+     */
+    private void requireDatabaseExistsForWrite(Identifier identifier) {
+        if (!JdbcUtils.databaseExists(connections, catalogKey, identifier.getDatabaseName())) {
+            throw new IllegalArgumentException(
+                    String.format("Database %s does not exist.", identifier.getDatabaseName()));
+        }
     }
 
     private RuntimeException viewOperationException(
@@ -1075,13 +1150,7 @@ public class JdbcCatalog extends AbstractCatalog {
                             throw new ViewNotExistException(fromView);
                         }
 
-                        if (!JdbcUtils.databaseExists(
-                                connections, catalogKey, toView.getDatabaseName())) {
-                            throw new IllegalArgumentException(
-                                    String.format(
-                                            "Database %s does not exist.",
-                                            toView.getDatabaseName()));
-                        }
+                        requireDatabaseExistsForWrite(toView);
 
                         if (JdbcUtils.viewExists(
                                         connections,

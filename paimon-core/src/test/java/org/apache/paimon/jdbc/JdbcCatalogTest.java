@@ -71,12 +71,16 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     private JdbcCatalog initCatalog(Map<String, String> props) {
-        Map<String, String> properties = Maps.newHashMap();
-        properties.put(
-                CatalogOptions.URI.key(),
+        return initCatalog(
+                props,
                 "jdbc:sqlite:file:"
                         + UUID.randomUUID().toString().replace("-", "")
                         + "?mode=memory&cache=shared");
+    }
+
+    private JdbcCatalog initCatalog(Map<String, String> props, String uri) {
+        Map<String, String> properties = Maps.newHashMap();
+        properties.put(CatalogOptions.URI.key(), uri);
 
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
@@ -347,6 +351,18 @@ public class JdbcCatalogTest extends CatalogTestBase {
         Map<String, String> props = Maps.newHashMap();
         props.put(CatalogOptions.SYNC_ALL_PROPERTIES.key(), String.valueOf(syncAllProperties));
         return initCatalog(props);
+    }
+
+    private JdbcCatalog initCatalogWithoutLock() {
+        Map<String, String> props = Maps.newHashMap();
+        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        return initCatalog(props);
+    }
+
+    private JdbcCatalog initCatalogWithoutLock(String uri) {
+        Map<String, String> props = Maps.newHashMap();
+        props.put(CatalogOptions.LOCK_ENABLED.key(), "false");
+        return initCatalog(props, uri);
     }
 
     private Map<String, String> fetchTableProperties(
@@ -805,6 +821,24 @@ public class JdbcCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testRenameTableRejectsMissingTargetDatabase() throws Exception {
+        String sourceDatabase = "source_rename_table_db";
+        Identifier source = Identifier.create(sourceDatabase, "table_name");
+        Identifier target = Identifier.create("missing_target_db", "table_name");
+
+        catalog.createDatabase(sourceDatabase, false);
+        catalog.createTable(source, DEFAULT_TABLE_SCHEMA, false);
+
+        assertThatThrownBy(() -> catalog.renameTable(source, target, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Database missing_target_db does not exist.");
+        // Source table must remain intact.
+        assertDoesNotThrow(() -> catalog.getTable(source));
+        assertThatThrownBy(() -> catalog.getTable(target))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+    }
+
+    @Test
     public void testTableAndViewCannotShareName() throws Exception {
         String databaseName = "shared_name_db";
         Identifier tableFirst = Identifier.create(databaseName, "table_first");
@@ -928,6 +962,215 @@ public class JdbcCatalogTest extends CatalogTestBase {
             throw new RuntimeException(e.getCause());
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testConcurrentRenameTableAndCreateViewCannotShareName() throws Exception {
+        String databaseName = "concurrent_rename_table_view_db";
+        Identifier source = Identifier.create(databaseName, "src_table");
+        Identifier target = Identifier.create(databaseName, "shared_name");
+        View view = createView(target);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(source, DEFAULT_TABLE_SCHEMA, false);
+
+        Callable<Boolean> renameTable =
+                () -> {
+                    try {
+                        catalog.renameTable(source, target, false);
+                        return true;
+                    } catch (Catalog.TableAlreadyExistException e) {
+                        return false;
+                    }
+                };
+        Callable<Boolean> createView =
+                () -> {
+                    try {
+                        catalog.createView(target, view, false);
+                        return true;
+                    } catch (Catalog.ViewAlreadyExistException e) {
+                        return false;
+                    }
+                };
+
+        try {
+            Future<Boolean> tableRenamed = executor.submit(renameTable);
+            Future<Boolean> viewCreated = executor.submit(createView);
+
+            assertThat(ImmutableList.of(tableRenamed.get(), viewCreated.get()))
+                    .containsExactlyInAnyOrder(true, false);
+            // The shared identifier must be either a table or a view, but never both.
+            assertThat(catalog.listTables(databaseName).contains(target.getObjectName()))
+                    .isNotEqualTo(catalog.listViews(databaseName).contains(target.getObjectName()));
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testConcurrentRenameTableAndRenameViewCannotShareName() throws Exception {
+        String databaseName = "concurrent_rename_collision_db";
+        Identifier sourceTable = Identifier.create(databaseName, "src_table");
+        Identifier sourceView = Identifier.create(databaseName, "src_view");
+        Identifier target = Identifier.create(databaseName, "shared_name");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        catalog.createDatabase(databaseName, false);
+        catalog.createTable(sourceTable, DEFAULT_TABLE_SCHEMA, false);
+        catalog.createView(sourceView, createView(sourceView), false);
+
+        Callable<Boolean> renameTable =
+                () -> {
+                    try {
+                        catalog.renameTable(sourceTable, target, false);
+                        return true;
+                    } catch (Catalog.TableAlreadyExistException e) {
+                        return false;
+                    }
+                };
+        Callable<Boolean> renameView =
+                () -> {
+                    try {
+                        catalog.renameView(sourceView, target, false);
+                        return true;
+                    } catch (Catalog.ViewAlreadyExistException e) {
+                        return false;
+                    }
+                };
+
+        try {
+            Future<Boolean> tableRenamed = executor.submit(renameTable);
+            Future<Boolean> viewRenamed = executor.submit(renameView);
+
+            assertThat(ImmutableList.of(tableRenamed.get(), viewRenamed.get()))
+                    .containsExactlyInAnyOrder(true, false);
+            assertThat(catalog.listTables(databaseName).contains(target.getObjectName()))
+                    .isNotEqualTo(catalog.listViews(databaseName).contains(target.getObjectName()));
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testConcurrentCreateTableAndViewCannotShareNameWithoutDistributedLock()
+            throws Exception {
+        // Even when the JDBC distributed lock is disabled, mutations targeting the same
+        // identifier within a single JVM must remain atomic. This is provided by the per-JVM
+        // local stripe lock.
+        JdbcCatalog noLockCatalog = initCatalogWithoutLock();
+        try {
+            String databaseName = "no_lock_concurrent_db";
+            Identifier identifier = Identifier.create(databaseName, "same_name");
+            View view = createView(identifier);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+
+            noLockCatalog.createDatabase(databaseName, false);
+            Callable<Boolean> createTable =
+                    () -> {
+                        try {
+                            noLockCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+                            return true;
+                        } catch (Catalog.TableAlreadyExistException e) {
+                            return false;
+                        }
+                    };
+            Callable<Boolean> createView =
+                    () -> {
+                        try {
+                            noLockCatalog.createView(identifier, view, false);
+                            return true;
+                        } catch (Catalog.ViewAlreadyExistException e) {
+                            return false;
+                        }
+                    };
+
+            try {
+                Future<Boolean> tableCreated = executor.submit(createTable);
+                Future<Boolean> viewCreated = executor.submit(createView);
+
+                assertThat(ImmutableList.of(tableCreated.get(), viewCreated.get()))
+                        .containsExactlyInAnyOrder(true, false);
+                assertThat(
+                                noLockCatalog
+                                        .listTables(databaseName)
+                                        .contains(identifier.getObjectName()))
+                        .isNotEqualTo(
+                                noLockCatalog
+                                        .listViews(databaseName)
+                                        .contains(identifier.getObjectName()));
+            } catch (ExecutionException e) {
+                throw new RuntimeException(e.getCause());
+            } finally {
+                executor.shutdownNow();
+            }
+        } finally {
+            noLockCatalog.close();
+        }
+    }
+
+    @Test
+    public void testConcurrentCreateTableAndViewCannotShareNameAcrossCatalogInstancesWithoutLock()
+            throws Exception {
+        String uri =
+                "jdbc:sqlite:file:"
+                        + UUID.randomUUID().toString().replace("-", "")
+                        + "?mode=memory&cache=shared";
+        JdbcCatalog tableCatalog = initCatalogWithoutLock(uri);
+        JdbcCatalog viewCatalog = initCatalogWithoutLock(uri);
+        try {
+            String databaseName = "no_lock_two_catalogs_db";
+            Identifier identifier = Identifier.create(databaseName, "same_name");
+            View view = createView(identifier);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+
+            tableCatalog.createDatabase(databaseName, false);
+            Callable<Boolean> createTable =
+                    () -> {
+                        try {
+                            tableCatalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+                            return true;
+                        } catch (Catalog.TableAlreadyExistException e) {
+                            return false;
+                        }
+                    };
+            Callable<Boolean> createView =
+                    () -> {
+                        try {
+                            viewCatalog.createView(identifier, view, false);
+                            return true;
+                        } catch (Catalog.ViewAlreadyExistException e) {
+                            return false;
+                        }
+                    };
+
+            try {
+                Future<Boolean> tableCreated = executor.submit(createTable);
+                Future<Boolean> viewCreated = executor.submit(createView);
+
+                assertThat(ImmutableList.of(tableCreated.get(), viewCreated.get()))
+                        .containsExactlyInAnyOrder(true, false);
+                assertThat(
+                                tableCatalog
+                                        .listTables(databaseName)
+                                        .contains(identifier.getObjectName()))
+                        .isNotEqualTo(
+                                viewCatalog
+                                        .listViews(databaseName)
+                                        .contains(identifier.getObjectName()));
+            } catch (ExecutionException e) {
+                throw new RuntimeException(e.getCause());
+            } finally {
+                executor.shutdownNow();
+            }
+        } finally {
+            tableCatalog.close();
+            viewCatalog.close();
         }
     }
 

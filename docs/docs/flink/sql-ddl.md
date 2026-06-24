@@ -150,6 +150,11 @@ JDBC catalog supports persistent Paimon views. View metadata is stored in the au
 `paimon_views` table in the catalog database. The view SQL is stored as catalog metadata and is not
 resolved when the view is created.
 
+Within a single database, a name cannot be used by both a table and a view; all writers
+(`createTable`, `renameTable`, `createView`, `renameView`) reject conflicting identifiers. See
+[Views](../concepts/views#jdbc-catalog-notes) for upgrade-time permissions, single-process locking
+semantics, and database visibility details.
+
 ```sql
 CREATE VIEW sales_view AS SELECT name, amount FROM sales WHERE amount > 100;
 

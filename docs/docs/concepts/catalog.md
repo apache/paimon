@@ -92,3 +92,9 @@ CREATE CATALOG my_jdbc WITH (
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 ```
+
+The JDBC catalog also persists Paimon views. View metadata is stored in an automatically created
+`paimon_views` table, and table/view names share a single namespace per database (a name cannot be
+used by both a table and a view at the same time). See [Views](./views) for details on the JDBC
+catalog upgrade requirements, single-process locking semantics, and behavior of `DROP DATABASE`
+against view-only databases.
