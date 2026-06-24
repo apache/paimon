@@ -358,15 +358,23 @@ public final class RowType extends DataType {
                 continue;
             }
             matched.add(field.name());
-            if (wholeChildren.contains(field.name())
-                    || subPaths.isEmpty()
-                    || !(field.type() instanceof RowType)) {
+            if (wholeChildren.contains(field.name()) || subPaths.isEmpty()) {
                 result.add(field);
-            } else {
+            } else if (field.type() instanceof RowType) {
                 RowType prunedChild =
                         projectTypeByPaths((RowType) field.type(), subPaths)
                                 .copy(field.type().isNullable());
                 result.add(field.newType(prunedChild));
+            } else {
+                // a dotted path addresses a sub-field, but this field is not a ROW; reject rather
+                // than silently selecting the whole field, so invalid dotted paths surface early
+                throw new IllegalArgumentException(
+                        "Cannot project sub-field(s) "
+                                + subPaths
+                                + " of non-ROW field '"
+                                + field.name()
+                                + "' in "
+                                + type);
             }
         }
         if (!matched.containsAll(childToSubPaths.keySet())) {

@@ -671,12 +671,16 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         .getTypeRoot()
                                         .getFamilies()
                                         .contains(DataTypeFamily.BINARY_STRING);
-                // For sub-field-level data evolution, a struct column's source value is a partial
-                // (subset) ROW carrying only the updated sub-fields, which is not directly
-                // cast-compatible with the full target struct. Accept it when every source
-                // sub-field exists in the target struct with a compatible cast.
+                // For sub-field-level data evolution, a struct column written through dotted paths
+                // (e.g. nest.a) has a partial (subset) ROW source carrying only the updated
+                // sub-fields, which is not directly cast-compatible with the full target struct.
+                // Accept it only for such sub-field writes (not whole-column assignments, which
+                // must
+                // stay on the full-type check), when every source sub-field exists in the target
+                // struct with a compatible cast.
                 boolean partialStructCompatible =
-                        paimonType instanceof RowType
+                        isSubFieldWrite(flinkColumn.getName())
+                                && paimonType instanceof RowType
                                 && targetField.type() instanceof RowType
                                 && isCompatiblePartialStruct(
                                         (RowType) paimonType, (RowType) targetField.type());
@@ -714,6 +718,17 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             }
         }
         return true;
+    }
+
+    /**
+     * Whether the given top-level column is written through dotted sub-field paths (e.g. nest.a).
+     */
+    private boolean isSubFieldWrite(String topColumn) {
+        if (writePaths == null) {
+            return false;
+        }
+        String prefix = topColumn + ".";
+        return writePaths.stream().anyMatch(p -> p.startsWith(prefix));
     }
 
     private void handleSqls() {
