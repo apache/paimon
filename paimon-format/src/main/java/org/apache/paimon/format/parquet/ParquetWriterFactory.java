@@ -34,6 +34,8 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /** A factory that creates a Parquet {@link FormatWriter}. */
 public class ParquetWriterFactory implements FormatWriterFactory, SupportsVariantInference {
@@ -57,8 +59,12 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
             compression = null;
         }
 
-        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, compression);
-        return new ParquetBulkWriter(writer);
+        // Keep this exact map instance shared by ParquetBulkWriter and WriteSupport. The writer
+        // collects metadata before close, and WriteSupport reads it when finalizing the footer.
+        Map<String, byte[]> metadata = new HashMap<>();
+        final ParquetWriter<InternalRow> writer =
+                writerBuilder.createWriter(out, compression, () -> metadata);
+        return new ParquetBulkWriter(writer, metadata);
     }
 
     @Override
@@ -73,7 +79,11 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
         ParquetBuilder<InternalRow> newBuilder =
                 ((RowDataParquetBuilder) writerBuilder)
                         .withShreddingSchemas(inferredShreddingSchema);
-        final ParquetWriter<InternalRow> writer = newBuilder.createWriter(out, compression);
-        return new ParquetBulkWriter(writer);
+        // Keep this exact map instance shared by ParquetBulkWriter and WriteSupport. The writer
+        // collects metadata before close, and WriteSupport reads it when finalizing the footer.
+        Map<String, byte[]> metadata = new HashMap<>();
+        final ParquetWriter<InternalRow> writer =
+                newBuilder.createWriter(out, compression, () -> metadata);
+        return new ParquetBulkWriter(writer, metadata);
     }
 }
