@@ -50,13 +50,13 @@ under the License.
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-core</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
             <classifier>lucene9</classifier>
         </dependency>
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-simdvec</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
         </dependency>
         <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
              not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm
