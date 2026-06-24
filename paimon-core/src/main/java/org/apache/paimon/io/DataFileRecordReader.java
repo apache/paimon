@@ -158,13 +158,15 @@ public class DataFileRecordReader implements FileRecordReader<InternalRow> {
         }
     }
 
-    private static FormatReaderFactory.Context withoutSelection(FormatReaderFactory.Context context) {
+    private static FormatReaderFactory.Context withoutSelection(
+            FormatReaderFactory.Context context) {
         if (context.selection() == null) {
             return context;
         }
 
         // Apply row selection once in DataFileRecordReader. Some format readers expose selected
-        // returnedPosition values while still materializing column vectors from the unfiltered page,
+        // returnedPosition values while still materializing column vectors from the unfiltered
+        // page,
         // which can misalign columns when data-evolution readers merge multiple field bunches.
         return new FormatReaderContext(context.fileIO(), context.filePath(), context.fileSize());
     }
