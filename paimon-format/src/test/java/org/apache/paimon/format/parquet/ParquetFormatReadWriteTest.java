@@ -134,8 +134,9 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
 
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        RowType emptyRowType = new RowType(Collections.emptyList());
         try (FileRecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType, rowType, Collections.emptyList())
+                format.createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
                         .createReader(context)) {
             Optional<Schema> readArrowSchema =
                     ((SupportsReaderArrowSchema) reader).readArrowSchema();

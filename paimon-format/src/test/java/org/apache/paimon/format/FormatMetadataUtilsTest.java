@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
@@ -72,7 +75,9 @@ public class FormatMetadataUtilsTest {
                                                 null,
                                                 fieldMetadata),
                                         null)));
-        String encodedSchema = Base64.getEncoder().encodeToString(schema.serializeAsMessage());
+        String encodedSchema =
+                Base64.getEncoder()
+                        .encodeToString(FormatMetadataUtils.serializeArrowSchema(schema));
 
         assertThat(FormatMetadataUtils.readArrowSchema(encodedSchema)).hasValue(schema);
         assertThat(FormatMetadataUtils.readArrowSchema(null)).isEmpty();
@@ -105,5 +110,40 @@ public class FormatMetadataUtilsTest {
         assertThat(FormatMetadataUtils.readFieldMetadata(schema))
                 .containsEntry("with_metadata", fieldMetadata)
                 .containsEntry("without_metadata", Collections.emptyMap());
+    }
+
+    @Test
+    public void testBuildArrowSchemaWithFieldMetadata() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "tags",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        DataTypes.FIELD(
+                                2,
+                                "nested",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(3, "name", DataTypes.STRING()),
+                                        DataTypes.FIELD(
+                                                4,
+                                                "scores",
+                                                DataTypes.ARRAY(DataTypes.INT())))));
+        Map<String, String> tagsMetadata = new LinkedHashMap<>();
+        tagsMetadata.put("paimon.test.tags", "enabled");
+
+        Map<String, Map<String, String>> fieldMetadata = new LinkedHashMap<>();
+        fieldMetadata.put("tags", tagsMetadata);
+
+        Schema schema = FormatMetadataUtils.buildArrowSchema(rowType, fieldMetadata);
+
+        assertThat(schema.getFields())
+                .extracting(Field::getName)
+                .containsExactly("id", "tags", "nested");
+        assertThat(schema.findField("tags").getMetadata())
+                .containsEntry("paimon.test.tags", "enabled");
+        assertThat(schema.findField("nested").getMetadata())
+                .doesNotContainKey("paimon.test.tags");
     }
 }

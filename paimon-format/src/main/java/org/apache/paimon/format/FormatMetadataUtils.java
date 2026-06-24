@@ -18,7 +18,11 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.types.RowType;
+
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
@@ -28,8 +32,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Utilities for format metadata encoded at file boundaries. */
 public class FormatMetadataUtils {
@@ -70,6 +76,30 @@ public class FormatMetadataUtils {
         return Optional.of(Schema.deserializeMessage(ByteBuffer.wrap(schemaBytes)));
     }
 
+    public static byte[] serializeArrowSchema(Schema arrowSchema) {
+        return arrowSchema.serializeAsMessage();
+    }
+
+    /**
+     * Builds an Arrow schema from a Paimon row type and injects metadata into top-level fields.
+     *
+     * <p>The keys of {@code fieldMetadata} are top-level field names. Nested fields are converted
+     * from the {@link RowType} but do not receive metadata from this map.
+     */
+    public static Schema buildArrowSchema(
+            RowType rowType, Map<String, Map<String, String>> fieldMetadata) {
+        List<Field> fields =
+                rowType.getFields().stream()
+                        .map(
+                                field ->
+                                        withMetadata(
+                                                ArrowUtils.toArrowField(
+                                                        field.name(), field.id(), field.type(), 0),
+                                                fieldMetadata.get(field.name())))
+                        .collect(Collectors.toList());
+        return new Schema(fields);
+    }
+
     /** Returns metadata for top-level Arrow fields only. */
     public static Map<String, Map<String, String>> readFieldMetadata(Schema arrowSchema) {
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
@@ -79,5 +109,23 @@ public class FormatMetadataUtils {
                     Collections.unmodifiableMap(new LinkedHashMap<>(field.getMetadata())));
         }
         return Collections.unmodifiableMap(result);
+    }
+
+    private static Field withMetadata(Field field, @Nullable Map<String, String> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return field;
+        }
+        FieldType fieldType = field.getFieldType();
+        Map<String, String> result = new LinkedHashMap<>();
+        result.putAll(metadata);
+        result.putAll(fieldType.getMetadata());
+        return new Field(
+                field.getName(),
+                new FieldType(
+                        fieldType.isNullable(),
+                        fieldType.getType(),
+                        fieldType.getDictionary(),
+                        result),
+                field.getChildren());
     }
 }
