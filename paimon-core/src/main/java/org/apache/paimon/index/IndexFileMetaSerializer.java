@@ -24,7 +24,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.utils.ObjectSerializer;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
@@ -177,10 +176,6 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
             long rowCount,
             @Nullable InternalArray fileNameDvRanges,
             @Nullable InternalArray rowRangeDvRanges) {
-        if (!DELETION_VECTORS_INDEX.equals(indexType)) {
-            return null;
-        }
-
         boolean hasFileNameDvRanges =
                 fileNameDvRanges != null && !DeletionVectorMeta.isLegacyMarker(fileNameDvRanges);
         boolean hasRowRangeDvRanges = rowRangeDvRanges != null;
@@ -194,7 +189,11 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
             return rowArrayDataToRowIdRangeDvMetas(rowRangeDvRanges);
         }
 
-        Preconditions.checkState(
+        if (!DELETION_VECTORS_INDEX.equals(indexType)) {
+            return null;
+        }
+
+        checkState(
                 rowCount == 0,
                 "Invalid state, all null dvRanges with non-zero row count: " + rowCount);
 
