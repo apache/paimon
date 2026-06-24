@@ -24,7 +24,10 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.VersionedObjectSerializer;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -33,6 +36,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
@@ -161,19 +165,39 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     private static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> readDvRanges(
             InternalRow row) {
+        InternalArray fileNameDvRanges = row.isNullAt(4) ? null : row.getArray(4);
+        InternalArray rowRangeDvRanges =
+                row.getFieldCount() > 7 && !row.isNullAt(7) ? row.getArray(7) : null;
+        return readDvRanges(
+                row.getString(0).toString(), row.getLong(3), fileNameDvRanges, rowRangeDvRanges);
+    }
+
+    public static LinkedHashMap<DeletionFileKey, DeletionVectorMeta> readDvRanges(
+            String indexType,
+            long rowCount,
+            @Nullable InternalArray fileNameDvRanges,
+            @Nullable InternalArray rowRangeDvRanges) {
+        if (!DELETION_VECTORS_INDEX.equals(indexType)) {
+            return null;
+        }
+
         boolean hasFileNameDvRanges =
-                !row.isNullAt(4) && !DeletionVectorMeta.isLegacyMarker(row.getArray(4));
-        boolean hasRowRangeDvRanges = row.getFieldCount() > 7 && !row.isNullAt(7);
+                fileNameDvRanges != null && !DeletionVectorMeta.isLegacyMarker(fileNameDvRanges);
+        boolean hasRowRangeDvRanges = rowRangeDvRanges != null;
         checkState(
                 !(hasFileNameDvRanges && hasRowRangeDvRanges),
                 "File-name deletion vector ranges and row-range deletion vector ranges should not"
                         + " be both non-null.");
         if (hasFileNameDvRanges) {
-            return rowArrayDataToFileNameDvMetas(row.getArray(4));
+            return rowArrayDataToFileNameDvMetas(fileNameDvRanges);
         } else if (hasRowRangeDvRanges) {
-            return rowArrayDataToRowIdRangeDvMetas(row.getArray(7));
-        } else {
-            return null;
+            return rowArrayDataToRowIdRangeDvMetas(rowRangeDvRanges);
         }
+
+        Preconditions.checkState(
+                rowCount == 0,
+                "Invalid state, all null dvRanges with non-zero row count: " + rowCount);
+
+        return new LinkedHashMap<>();
     }
 }

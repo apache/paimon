@@ -18,7 +18,11 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
@@ -26,6 +30,7 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.Random;
 
 import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
@@ -69,5 +74,44 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
         assertThat(actual).isEqualTo(entry);
         assertThat(actualIndexFile.dvRanges())
                 .containsOnlyKeys(DeletionFileKey.ofRange(new Range(10, 19)));
+    }
+
+    @Test
+    public void testRowFilterGetters() {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        BinaryRow partition = row(1);
+        IndexManifestEntry entry =
+                new IndexManifestEntry(FileKind.ADD, partition, 2, randomIndexFile());
+
+        InternalRow row = serializer.toRow(entry);
+
+        assertThat(IndexManifestEntrySerializer.partitionGetter().apply(row)).isEqualTo(partition);
+        assertThat(IndexManifestEntrySerializer.bucketGetter().apply(row)).isEqualTo(2);
+        assertThat(IndexManifestEntrySerializer.indexTypeGetter().apply(row))
+                .isEqualTo(entry.indexFile().indexType());
+    }
+
+    @Test
+    public void testEmptyDeletionVectorsRoundTrip() {
+        IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
+        IndexManifestEntry entry =
+                new IndexManifestEntry(
+                        FileKind.ADD,
+                        row(1),
+                        2,
+                        new IndexFileMeta(
+                                DeletionVectorsIndexFile.DELETION_VECTORS_INDEX,
+                                "empty-dv",
+                                1,
+                                0,
+                                new LinkedHashMap<DeletionFileKey, DeletionVectorMeta>(),
+                                null));
+
+        InternalRow row = serializer.convertTo(entry);
+        IndexManifestEntry actual = serializer.convertFrom(serializer.getVersion(), row);
+
+        assertThat(row.isNullAt(7)).isTrue();
+        assertThat(row.isNullAt(10)).isTrue();
+        assertThat(actual.indexFile().dvRanges()).isEmpty();
     }
 }

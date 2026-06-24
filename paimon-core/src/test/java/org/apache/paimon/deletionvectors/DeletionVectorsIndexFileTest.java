@@ -18,10 +18,12 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
@@ -354,6 +356,23 @@ public class DeletionVectorsIndexFileTest {
             assertThat(deletionVector.isDeleted(e.getValue() + 1)).isTrue();
             assertThat(deletionVector.isDeleted(e.getValue() + 2)).isFalse();
         }
+    }
+
+    @Test
+    public void testReadEmptyDeletionVectorsAfterSerialization() {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, false);
+        IndexFileMeta emptyFile = deletionVectorsIndexFile.writeSingleFile(Collections.emptyMap());
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        InternalRow row = serializer.toRow(emptyFile);
+        IndexFileMeta serializedEmptyFile = serializer.fromRow(row);
+
+        assertThat(emptyFile.dvRanges()).isEmpty();
+        assertThat(row.isNullAt(4)).isTrue();
+        assertThat(row.isNullAt(7)).isTrue();
+        assertThat(serializedEmptyFile.dvRanges()).isEmpty();
+        assertThat(deletionVectorsIndexFile.readAllDeletionVectors(serializedEmptyFile)).isEmpty();
     }
 
     @ParameterizedTest

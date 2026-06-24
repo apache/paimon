@@ -33,9 +33,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.index.IndexFileMetaSerializer.metasToRowArrayData;
-import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToFileNameDvMetas;
-import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToRowIdRangeDvMetas;
-import static org.apache.paimon.utils.Preconditions.checkState;
+import static org.apache.paimon.index.IndexFileMetaSerializer.readDvRanges;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
@@ -100,30 +98,24 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                             rowRangeStart, rowRangeEnd, indexFieldId, extralFields, indexMeta);
         }
 
-        boolean hasFileNameDvRanges =
-                !row.isNullAt(7) && !DeletionVectorMeta.isLegacyMarker(row.getArray(7));
-        boolean hasRowRangeDvRanges = row.getFieldCount() > 10 && !row.isNullAt(10);
-        checkState(
-                !(hasFileNameDvRanges && hasRowRangeDvRanges),
-                "File-name deletion vector ranges and row-range deletion vector ranges should not"
-                        + " be both non-null.");
-
-        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges = null;
-        if (hasFileNameDvRanges) {
-            dvRanges = rowArrayDataToFileNameDvMetas(row.getArray(7));
-        } else if (hasRowRangeDvRanges) {
-            dvRanges = rowArrayDataToRowIdRangeDvMetas(row.getArray(10));
-        }
+        String indexType = row.getString(3).toString();
+        long rowCount = row.getLong(6);
+        LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvRanges =
+                readDvRanges(
+                        indexType,
+                        rowCount,
+                        row.isNullAt(7) ? null : row.getArray(7),
+                        row.getFieldCount() > 10 && !row.isNullAt(10) ? row.getArray(10) : null);
 
         return new IndexManifestEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),
                 new IndexFileMeta(
-                        row.getString(3).toString(),
+                        indexType,
                         row.getString(4).toString(),
                         row.getLong(5),
-                        row.getLong(6),
+                        rowCount,
                         dvRanges,
                         row.isNullAt(8) ? null : row.getString(8).toString(),
                         globalIndexMeta));
