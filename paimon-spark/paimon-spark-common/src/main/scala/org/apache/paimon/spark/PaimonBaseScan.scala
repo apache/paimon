@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.globalindex.GlobalIndexResult
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder, VectorSearch}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.read.{BaseScan, BatchReadTagCleanupListener, PaimonSupportsRuntimeFiltering, SparkHybridSearchBuilderImpl, SparkVectorSearchBuilderImpl}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
@@ -83,25 +83,11 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   private def evalVectorSearch(): GlobalIndexResult = {
-    val vectorSearch = pushedVectorSearch.get
-    val vectorSearchBuilder =
-      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
-        new SparkVectorSearchBuilderImpl(table)
-      } else {
-        table.newVectorSearchBuilder()
-      }
-    val vectorBuilder = vectorSearchBuilder
-      .withVector(vectorSearch.vector())
-      .withVectorColumn(vectorSearch.fieldName())
-      .withLimit(vectorSearch.limit())
-      .withOptions(vectorSearch.options())
-    if (pushedPartitionFilters.nonEmpty) {
-      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
-    }
-    if (pushedDataFilters.nonEmpty) {
-      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
-    }
-    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+    PaimonBaseScan.evalVectorSearch(
+      table,
+      pushedVectorSearch.get,
+      pushedPartitionFilters,
+      pushedDataFilters)
   }
 
   private def evalHybridSearch(): GlobalIndexResult = {
@@ -180,5 +166,33 @@ abstract class PaimonBaseScan(table: InnerTable)
         }
       case _ =>
     }
+  }
+}
+
+object PaimonBaseScan {
+
+  private[spark] def evalVectorSearch(
+      table: InnerTable,
+      vectorSearch: VectorSearch,
+      pushedPartitionFilters: Seq[PartitionPredicate],
+      pushedDataFilters: Seq[Predicate]): GlobalIndexResult = {
+    val vectorSearchBuilder =
+      if (CoreOptions.fromMap(table.options).vectorSearchDistributeEnabled()) {
+        new SparkVectorSearchBuilderImpl(table)
+      } else {
+        table.newVectorSearchBuilder()
+      }
+    val vectorBuilder = vectorSearchBuilder
+      .withVector(vectorSearch.vector())
+      .withVectorColumn(vectorSearch.fieldName())
+      .withLimit(vectorSearch.limit())
+      .withOptions(vectorSearch.options())
+    if (pushedPartitionFilters.nonEmpty) {
+      vectorBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
+    }
+    if (pushedDataFilters.nonEmpty) {
+      vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
+    }
+    vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
   }
 }
