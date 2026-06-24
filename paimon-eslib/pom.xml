@@ -111,10 +111,6 @@ under the License.
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>false</enabled></snapshots>
         </repository>
-        <repository>
-            <id>eslib-releases</id>
-            <url>https://raw.githubusercontent.com/CrownChu/es-paimon-lib-releases/main/repository</url>
-        </repository>
     </repositories>
 
     <build>
