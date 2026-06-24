@@ -532,17 +532,40 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFullTextSearchRequiresTextColumnAsPrimaryField() throws Exception {
+    public void testFullTextSearchServesTextColumnAsExtraField() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
 
         String[] documents = {"Apache Paimon", "vector search"};
         writeDocuments(table, documents);
+        // Multi-column index: primary is "id", the text column is an EXTRA field. Full-text search
+        // on the extra text column is served (matched via extraFieldIds).
         buildAndCommitIndexWithFields(
                 table,
                 documents,
                 Arrays.asList(
                         table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)));
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2);
+
+        assertThat(searchBuilder.newFullTextScan().scan().splits()).isNotEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isFalse();
+    }
+
+    @Test
+    public void testFullTextSearchSkipsIndexNotCoveringTextColumn() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        // The index covers only "id" — the text column is neither the primary nor an extra field —
+        // so full-text search on the text column finds no index and returns empty.
+        buildAndCommitIndexWithFields(
+                table, documents, Arrays.asList(table.rowType().getField("id")));
 
         FullTextSearchBuilder searchBuilder =
                 table.newFullTextSearchBuilder()

@@ -167,15 +167,23 @@ class ESIndexGlobalIndexE2ETest {
         assertTrue(ft.isPresent(), "full-text search returns a result");
         assertEquals(10, ft.get().results().getIntCardinality(), "10 even docs");
 
-        // --- structured full-text queries are rejected explicitly (not serialized to JSON and fed
-        // to the text parser, which would return wrong results) ---
-        org.junit.jupiter.api.Assertions.assertThrows(
-                UnsupportedOperationException.class,
-                () ->
-                        reader.visitFullTextSearch(
+        // --- Phrase query honours token order: titles are "document {i} even/odd". "document 0"
+        // is a consecutive phrase only in row 0; "even document" never occurs in that order. ---
+        Optional<ScoredGlobalIndexResult> phraseHit =
+                reader.visitFullTextSearch(
+                                new FullTextSearch(FullTextQuery.phrase("document 0", "title"), 50))
+                        .join();
+        assertTrue(phraseHit.isPresent(), "phrase 'document 0' matches");
+        assertEquals(
+                1, phraseHit.get().results().getIntCardinality(), "only row 0 has 'document 0'");
+        assertTrue(contains(phraseHit.get().results(), 0L), "phrase 'document 0' is row 0");
+        assertTrue(
+                reader.visitFullTextSearch(
                                 new FullTextSearch(
-                                        FullTextQuery.phrase("even document", "title"), 50)),
-                "Phrase full-text query must be rejected, not silently mis-evaluated");
+                                        FullTextQuery.phrase("even document", "title"), 50))
+                        .join()
+                        .isEmpty(),
+                "phrase 'even document' never occurs in that order");
 
         // --- operator is honoured: every doc has "document", only 10 have "even" ---
         // default OR("even document") matches all 20; AND("even document") matches only the 10

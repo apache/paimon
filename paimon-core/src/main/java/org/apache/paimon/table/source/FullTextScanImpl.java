@@ -92,7 +92,7 @@ public class FullTextScanImpl implements FullTextScan {
                     if (globalIndex == null) {
                         return false;
                     }
-                    return textColumnIds.contains(globalIndex.indexFieldId())
+                    return !matchedTextColumnIds(globalIndex, textColumnIds).isEmpty()
                             && supportsFullTextSearch(entry.indexFile().indexType());
                 };
 
@@ -101,16 +101,20 @@ public class FullTextScanImpl implements FullTextScan {
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
 
-        // Group full-text index files by column and row range.
+        // Group full-text index files by column and row range. A multi-column index serves a text
+        // column through either its primary indexFieldId or its extraFieldIds, and one file may
+        // cover more than one searched text column.
         Map<String, Map<Range, List<IndexFileMeta>>> byColumnAndRange = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
-            String columnName = checkNotNull(idToColumn.get(meta.indexFieldId()));
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
-            byColumnAndRange
-                    .computeIfAbsent(columnName, k -> new HashMap<>())
-                    .computeIfAbsent(range, k -> new ArrayList<>())
-                    .add(indexFile);
+            for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
+                String columnName = checkNotNull(idToColumn.get(columnId));
+                byColumnAndRange
+                        .computeIfAbsent(columnName, k -> new HashMap<>())
+                        .computeIfAbsent(range, k -> new ArrayList<>())
+                        .add(indexFile);
+            }
         }
 
         List<FullTextSearchSplit> splits = new ArrayList<>();
@@ -127,6 +131,28 @@ public class FullTextScanImpl implements FullTextScan {
         }
 
         return () -> splits;
+    }
+
+    /**
+     * Returns the searched text-column ids served by {@code meta}: its primary {@code indexFieldId}
+     * plus any {@code extraFieldIds} present in {@code textColumnIds}. This lets a multi-column
+     * index (e.g. vector primary + text extra) serve full-text search on its extra text column.
+     */
+    private static List<Integer> matchedTextColumnIds(
+            GlobalIndexMeta meta, Set<Integer> textColumnIds) {
+        List<Integer> matched = new ArrayList<>();
+        if (textColumnIds.contains(meta.indexFieldId())) {
+            matched.add(meta.indexFieldId());
+        }
+        int[] extraFieldIds = meta.extraFieldIds();
+        if (extraFieldIds != null) {
+            for (int extraFieldId : extraFieldIds) {
+                if (textColumnIds.contains(extraFieldId)) {
+                    matched.add(extraFieldId);
+                }
+            }
+        }
+        return matched;
     }
 
     private static boolean supportsFullTextSearch(String indexType) {

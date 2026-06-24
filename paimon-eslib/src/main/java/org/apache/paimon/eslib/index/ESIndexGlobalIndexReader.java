@@ -34,6 +34,7 @@ import org.elasticsearch.eslib.api.ArchiveDataProvider;
 import org.elasticsearch.eslib.api.ESIndexSearcher;
 import org.elasticsearch.eslib.api.model.FieldIndexConfig;
 import org.elasticsearch.eslib.api.model.FullTextParams;
+import org.elasticsearch.eslib.api.model.FullTextQuerySpec;
 import org.elasticsearch.eslib.api.model.IndexFilter;
 import org.elasticsearch.eslib.api.model.ScalarPredicate;
 import org.elasticsearch.eslib.api.model.SearchResult;
@@ -106,7 +107,6 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         this.closed = false;
     }
 
-    /** The read/search executor in use (null = serial); visible for tests. */
     ExecutorService searchExecutor() {
         return searchExecutor;
     }
@@ -118,6 +118,8 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     try {
                         ensureLoaded();
+                        // Extract params before vector-search: query vector, field, result count
+                        // (topK), candidate
                         float[] queryVector = vectorSearch.vector();
                         int topK = vectorSearch.limit();
                         int searchTopK = vectorSearchTopK(vectorSearch);
@@ -179,23 +181,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     try {
                         ensureLoaded();
-                        String fieldName = fullTextSearch.fieldName();
-                        FieldIndexConfig config = indexOptions.getConfig(fieldName);
-                        if (config == null
-                                || config.indexType() != FieldIndexConfig.IndexType.FULLTEXT) {
-                            // This ES index carries the column, but not as a FULLTEXT field (a
-                            // string column defaults to KEYWORD unless an analyzer is configured).
-                            // Full-text search is index-only, so a non-FULLTEXT field yields an
-                            // empty result here rather than letting the eslib searcher throw.
-                            return Optional.empty();
-                        }
-                        org.apache.paimon.predicate.FullTextQuery.Match match =
-                                requireMatch(fullTextSearch);
-                        int topK = fullTextSearch.limit();
-
-                        SearchResult result =
-                                searcher.fullTextSearch(
-                                        fieldName, match.query(), topK, toFullTextParams(match));
+                        // Map the paimon query tree to an eslib FullTextQuerySpec and run it. The
+                        // eslib searcher builds the Lucene query (Match/Phrase/Bool/Boost) and
+                        // treats any referenced field that is not FULLTEXT in this index as a
+                        // no-match, so a non-FULLTEXT column simply yields an empty result rather
+                        // than throwing.
+                        FullTextQuerySpec spec = toSpec(fullTextSearch.query());
+                        SearchResult result = searcher.fullTextSearch(spec, fullTextSearch.limit());
                         return toScoredResult(result);
                     } catch (IOException e) {
                         throw new RuntimeException("Full-text search failed", e);
@@ -203,24 +195,60 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 });
     }
 
-    /**
-     * Returns the {@link org.apache.paimon.predicate.FullTextQuery.Match} of {@code
-     * fullTextSearch}, rejecting structured queries. Only {@code Match} maps onto the eslib
-     * single-field full-text API; Phrase/Boolean/Boost/MultiMatch are rejected rather than
-     * serialized to JSON and fed to the text parser, which would silently search for the literal
-     * JSON tokens.
-     */
-    private static org.apache.paimon.predicate.FullTextQuery.Match requireMatch(
-            FullTextSearch fullTextSearch) {
-        org.apache.paimon.predicate.FullTextQuery ftq = fullTextSearch.query();
+    /** Recursively maps a paimon {@link org.apache.paimon.predicate.FullTextQuery} to a spec. */
+    private static FullTextQuerySpec toSpec(org.apache.paimon.predicate.FullTextQuery ftq) {
         if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match) {
-            return (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
+            org.apache.paimon.predicate.FullTextQuery.Match m =
+                    (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
+            return new FullTextQuerySpec.Match(m.column(), m.query(), toFullTextParams(m));
+        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Phrase) {
+            org.apache.paimon.predicate.FullTextQuery.Phrase p =
+                    (org.apache.paimon.predicate.FullTextQuery.Phrase) ftq;
+            return new FullTextQuerySpec.Phrase(p.column(), p.query(), p.slop());
+        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Boost) {
+            org.apache.paimon.predicate.FullTextQuery.Boost b =
+                    (org.apache.paimon.predicate.FullTextQuery.Boost) ftq;
+            return new FullTextQuerySpec.Boost(
+                    toSpec(b.positive()), toSpec(b.negative()), b.negativeBoost());
+        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.BooleanQuery) {
+            org.apache.paimon.predicate.FullTextQuery.BooleanQuery b =
+                    (org.apache.paimon.predicate.FullTextQuery.BooleanQuery) ftq;
+            return new FullTextQuerySpec.Bool(
+                    toSpecs(b.must()), toSpecs(b.should()), toSpecs(b.mustNot()));
+        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.MultiMatch) {
+            // Expand a multi_match into a SHOULD-bool of per-column matches (with per-column
+            // boost).
+            // Columns that are not FULLTEXT in this index no-match inside the searcher.
+            org.apache.paimon.predicate.FullTextQuery.MultiMatch mm =
+                    (org.apache.paimon.predicate.FullTextQuery.MultiMatch) ftq;
+            List<String> columns = mm.columns();
+            List<Float> boosts = mm.boosts();
+            FullTextParams.Operator operator =
+                    mm.operator() == org.apache.paimon.predicate.FullTextQuery.Operator.AND
+                            ? FullTextParams.Operator.AND
+                            : FullTextParams.Operator.OR;
+            List<FullTextQuerySpec> should = new ArrayList<>(columns.size());
+            for (int i = 0; i < columns.size(); i++) {
+                float boost = (boosts != null && i < boosts.size()) ? boosts.get(i) : 1.0f;
+                FullTextParams params = new FullTextParams(operator, boost, 0, 50, 0);
+                should.add(new FullTextQuerySpec.Match(columns.get(i), mm.query(), params));
+            }
+            return new FullTextQuerySpec.Bool(null, should, null);
         }
         throw new UnsupportedOperationException(
-                "ES global index full-text search currently supports only Match queries; got "
-                        + ftq.getClass().getSimpleName()
-                        + ". Structured full-text queries (Phrase/Boolean/Boost/MultiMatch) are"
-                        + " not yet implemented for the es-index backend.");
+                "Unsupported full-text query type: " + ftq.getClass().getName());
+    }
+
+    private static List<FullTextQuerySpec> toSpecs(
+            List<org.apache.paimon.predicate.FullTextQuery> queries) {
+        if (queries == null || queries.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        List<FullTextQuerySpec> specs = new ArrayList<>(queries.size());
+        for (org.apache.paimon.predicate.FullTextQuery q : queries) {
+            specs.add(toSpec(q));
+        }
+        return specs;
     }
 
     /**
@@ -304,13 +332,9 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
 
     private void ensureLoaded() throws IOException {
         checkNotClosed();
-        // Fast path: once loaded, concurrent visit* calls (running on the search executor) skip the
-        // lock entirely and run in parallel.
         if (loaded) {
             return;
         }
-        // Slow path: serialize the one-time searcher build so concurrent first calls don't build it
-        // twice (which would leak input streams / double-register them in allStreams).
         synchronized (loadLock) {
             if (loaded) {
                 return;
@@ -323,6 +347,7 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
             long loadStartNanos = System.nanoTime();
             GlobalIndexIOMeta meta = files.get(0);
             byte[] metaBytes = meta.metadata();
+            // Map each lucene file to its [start, end] byte offsets
             Map<String, long[]> fileOffsets = parseFileOffsets(metaBytes);
 
             if (debugEnabled()) {
@@ -338,9 +363,15 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                         fieldsSample());
             }
 
+            // Offset/length + fork() reader over the Paimon stream of the global-index archive
+            // (*.index)
+            // dataProvider bridge Lucene's per-file reads into offset/length reads over the packed
+            // archive
+            // fork() gives each IndexInput clone its own stream for concurrent search.
             ArchiveDataProvider dataProvider = createProvider(meta);
 
             searcher = ESIndexBuilderFactory.createSearcher();
+            // Mount the packed archive as a Lucene index:then open the reader/searcher.
             searcher.load(
                     dataProvider, fileOffsets, indexOptions.getFieldConfigs(), searchExecutor);
             loaded = true;
