@@ -671,21 +671,23 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         .getTypeRoot()
                                         .getFamilies()
                                         .contains(DataTypeFamily.BINARY_STRING);
-                // For sub-field-level data evolution, a struct column written through dotted paths
-                // (e.g. nest.a) has a partial (subset) ROW source carrying only the updated
-                // sub-fields, which is not directly cast-compatible with the full target struct.
-                // Accept it only for such sub-field writes (not whole-column assignments, which
-                // must
-                // stay on the full-type check), when every source sub-field exists in the target
-                // struct with a compatible cast.
-                boolean partialStructCompatible =
-                        isSubFieldWrite(flinkColumn.getName())
-                                && paimonType instanceof RowType
-                                && targetField.type() instanceof RowType
-                                && isCompatiblePartialStruct(
-                                        (RowType) paimonType, (RowType) targetField.type());
+                // Struct columns need a structural compatibility check: DataTypeCasts does not
+                // support ROW-to-ROW casts. For a sub-field write (dotted paths like nest.a) the
+                // source is a partial (subset) struct carrying only the updated sub-fields, so a
+                // subset check is correct. For a whole-column assignment (e.g. T.nest=S.nest) the
+                // source must fully cover the target struct, so a narrower source is rejected
+                // instead of being written as an incomplete whole-struct file.
+                boolean structCompatible = false;
+                if (paimonType instanceof RowType && targetField.type() instanceof RowType) {
+                    RowType sourceStruct = (RowType) paimonType;
+                    RowType targetStruct = (RowType) targetField.type();
+                    structCompatible =
+                            isSubFieldWrite(flinkColumn.getName())
+                                    ? isCompatiblePartialStruct(sourceStruct, targetStruct)
+                                    : isFullyCompatibleStruct(sourceStruct, targetStruct);
+                }
                 if (!blobCompatible
-                        && !partialStructCompatible
+                        && !structCompatible
                         && !DataTypeCasts.supportsCompatibleCast(paimonType, targetField.type())) {
                     throw new IllegalStateException(
                             String.format(
@@ -714,6 +716,29 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                     return false;
                 }
             } else if (!DataTypeCasts.supportsCompatibleCast(partField.type(), fullSubType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether {@code source} fully covers the target struct {@code target} for a whole-column
+     * assignment: every target sub-field must exist in {@code source} (by name) with a compatible
+     * cast. A source missing a target sub-field (a narrower struct) is rejected.
+     */
+    private boolean isFullyCompatibleStruct(RowType source, RowType target) {
+        for (DataField targetField : target.getFields()) {
+            if (!source.containsField(targetField.name())) {
+                return false;
+            }
+            DataType sourceSubType = source.getField(targetField.name()).type();
+            DataType targetSubType = targetField.type();
+            if (sourceSubType instanceof RowType && targetSubType instanceof RowType) {
+                if (!isFullyCompatibleStruct((RowType) sourceSubType, (RowType) targetSubType)) {
+                    return false;
+                }
+            } else if (!DataTypeCasts.supportsCompatibleCast(sourceSubType, targetSubType)) {
                 return false;
             }
         }

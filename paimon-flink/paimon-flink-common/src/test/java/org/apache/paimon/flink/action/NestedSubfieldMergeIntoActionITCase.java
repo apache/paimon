@@ -168,6 +168,37 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testWholeStructAssignmentWithNarrowerSourceThrows() throws Exception {
+        // target nest is ROW<a, b>; a whole-column assignment from a narrower source ROW<a> must be
+        // rejected (it would otherwise be written as an incomplete whole-struct file)
+        prepareNestedTarget(true);
+        sEnv.executeSql(
+                buildDdl(
+                        "S",
+                        Arrays.asList("id INT", "nest ROW<a INT>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("S", "(1, CAST(ROW(100) AS ROW<a INT>))");
+
+        assertThatThrownBy(
+                        () ->
+                                builder(warehouse, database, "T")
+                                        .withMergeCondition("T.id=S.id")
+                                        .withMatchedUpdateSet("T.nest=S.nest")
+                                        .withSourceTable("S")
+                                        .withSinkParallelism(2)
+                                        .build()
+                                        .run())
+                .hasMessageContaining("incompatible");
+    }
+
+    @Test
     public void testUpdateMultipleSubFieldsWritesOnlyThoseLeaves() throws Exception {
         // a 3-field struct so that updating two sub-fields is a strict subset (stays
         // sub-field-level
