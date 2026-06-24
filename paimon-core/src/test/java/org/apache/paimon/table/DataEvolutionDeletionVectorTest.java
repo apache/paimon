@@ -80,7 +80,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
         DataSplit dataSplit = toDataSplit(plan.splits().get(0));
         assertRegularFileRowRanges(
-                dataSplit,
+                dataSplit.dataFiles(),
                 Arrays.asList(
                         new Range(0, 4),
                         new Range(0, 4),
@@ -192,8 +192,37 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 table.newReadBuilder().withRowRanges(Collections.singletonList(new Range(0, 14)));
         assertThat(readRows(readWithDvs)).hasSize(10);
 
-        commitDeletedDeletionVectors(
-                table, Arrays.asList(new Range(0, 3), new Range(4, 10), new Range(11, 12)));
+        AppendDeleteFileMaintainer maintainer =
+                BaseAppendDeleteFileMaintainer.forUnawareAppend(
+                        table.store().newIndexFileHandler(),
+                        table.latestSnapshot().get(),
+                        BinaryRow.EMPTY_ROW);
+        maintainer.notifyRemovedDeletionVector(DeletionFileKey.ofRange(new Range(0, 3)));
+        maintainer.notifyRemovedDeletionVector(DeletionFileKey.ofRange(new Range(4, 10)));
+        maintainer.notifyRemovedDeletionVector(DeletionFileKey.ofRange(new Range(11, 12)));
+
+        List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+        List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
+        for (IndexManifestEntry entry : maintainer.persist()) {
+            if (entry.kind() == FileKind.ADD) {
+                newIndexFiles.add(entry.indexFile());
+            } else if (entry.kind() == FileKind.DELETE) {
+                deletedIndexFiles.add(entry.indexFile());
+            }
+        }
+        commitDefault(
+                Collections.singletonList(
+                        new CommitMessageImpl(
+                                BinaryRow.EMPTY_ROW,
+                                UNAWARE_BUCKET,
+                                null,
+                                new DataIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        newIndexFiles,
+                                        deletedIndexFiles),
+                                CompactIncrement.emptyIncrement())));
         table = getTableDefault();
 
         ReadBuilder readBuilder =
@@ -205,8 +234,22 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(dataSplit.dataEvolutionDeletionFiles())
                 .hasValueSatisfying(deletionFiles -> assertThat(deletionFiles).isEmpty());
         assertThat(readRows(readBuilder, plan))
-                .containsExactlyElementsOf(
-                        expectedRows(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14));
+                .containsExactly(
+                        "0|name-0|updated-0|0",
+                        "1|name-1|updated-1|1",
+                        "2|name-2|updated-2|2",
+                        "3|name-3|updated-3|3",
+                        "4|name-4|updated-4|4",
+                        "5|name-5|updated-5|5",
+                        "6|name-6|updated-6|6",
+                        "7|name-7|updated-7|7",
+                        "8|name-8|updated-8|8",
+                        "9|name-9|updated-9|9",
+                        "10|name-10|updated-10|10",
+                        "11|name-11|updated-11|11",
+                        "12|name-12|updated-12|12",
+                        "13|name-13|updated-13|13",
+                        "14|name-14|updated-14|14");
     }
 
     @Override
@@ -239,7 +282,10 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         FileStoreTable table = getTableDefault();
         writeBaseRows(table);
         assertRegularFileRowRanges(
-                table, Arrays.asList(new Range(0, 4), new Range(5, 9), new Range(10, 14)));
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()),
+                Arrays.asList(new Range(0, 4), new Range(5, 9), new Range(10, 14)));
         assertFirstBlobFileRowRanges(
                 table, Arrays.asList(new Range(0, 0), new Range(1, 1), new Range(2, 2)), 15);
 
@@ -259,7 +305,7 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                     rowId,
                                     BinaryString.fromString("name-" + rowId),
                                     BinaryString.fromString("base-" + rowId),
-                                    new BlobData(blobBytes(rowId))));
+                                    new BlobData(new byte[] {(byte) rowId})));
                 }
                 commit.commit(write.prepareCommit());
             }
@@ -292,29 +338,13 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         BinaryRow.EMPTY_ROW);
 
         for (DvSpec spec : deletionVectorSpecs) {
-            notifyDeletion(maintainer, spec.range, spec.deletedRowIds);
+            DeletionVector deletionVector = new BitmapDeletionVector();
+            for (long rowId : spec.deletedRowIds) {
+                deletionVector.delete(rowId - spec.range.from);
+            }
+            maintainer.notifyNewDeletionVector(DeletionFileKey.ofRange(spec.range), deletionVector);
         }
 
-        commitDeletionVectorChanges(maintainer);
-    }
-
-    private void commitDeletedDeletionVectors(FileStoreTable table, List<Range> ranges)
-            throws Exception {
-        AppendDeleteFileMaintainer maintainer =
-                BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                        table.store().newIndexFileHandler(),
-                        table.latestSnapshot().get(),
-                        BinaryRow.EMPTY_ROW);
-
-        for (Range range : ranges) {
-            maintainer.notifyRemovedDeletionVector(DeletionFileKey.ofRange(range));
-        }
-
-        commitDeletionVectorChanges(maintainer);
-    }
-
-    private void commitDeletionVectorChanges(AppendDeleteFileMaintainer maintainer)
-            throws Exception {
         List<IndexFileMeta> newIndexFiles = new ArrayList<>();
         List<IndexFileMeta> deletedIndexFiles = new ArrayList<>();
         for (IndexManifestEntry entry : maintainer.persist()) {
@@ -338,15 +368,6 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                         newIndexFiles,
                                         deletedIndexFiles),
                                 CompactIncrement.emptyIncrement())));
-    }
-
-    private static void notifyDeletion(
-            AppendDeleteFileMaintainer maintainer, Range range, long... rowIds) {
-        DeletionVector deletionVector = new BitmapDeletionVector();
-        for (long rowId : rowIds) {
-            deletionVector.delete(rowId - range.from);
-        }
-        maintainer.notifyNewDeletionVector(DeletionFileKey.ofRange(range), deletionVector);
     }
 
     private static DataSplit planDataSplit(FileStoreTable table, Range range) {
@@ -400,12 +421,6 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         return Integer.parseInt(row.substring(row.lastIndexOf('-') + 1));
     }
 
-    private static List<String> expectedRows(int... rowIds) {
-        return Arrays.stream(rowIds)
-                .mapToObj(rowId -> rowId + "|name-" + rowId + "|updated-" + rowId + "|" + rowId)
-                .collect(Collectors.toList());
-    }
-
     private static String formatRow(InternalRow row) {
         return row.getInt(0)
                 + "|"
@@ -416,27 +431,11 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 + (row.getBlob(3).toData()[0] & 0xFF);
     }
 
-    private static byte[] blobBytes(int value) {
-        return new byte[] {(byte) value};
-    }
-
     private static DataSplit toDataSplit(Split split) {
         if (split instanceof IndexedSplit) {
             return ((IndexedSplit) split).dataSplit();
         }
         return (DataSplit) split;
-    }
-
-    private static void assertRegularFileRowRanges(FileStoreTable table, List<Range> expected) {
-        assertRegularFileRowRanges(
-                table.store().newScan().plan().files().stream()
-                        .map(ManifestEntry::file)
-                        .collect(Collectors.toList()),
-                expected);
-    }
-
-    private static void assertRegularFileRowRanges(DataSplit dataSplit, List<Range> expected) {
-        assertRegularFileRowRanges(dataSplit.dataFiles(), expected);
     }
 
     private static void assertRegularFileRowRanges(
@@ -450,17 +449,12 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         assertThat(actual).isEqualTo(expected);
     }
 
-    private static List<DataFileMeta> blobFiles(FileStoreTable table) {
-        return table.store().newScan().plan().files().stream()
-                .map(ManifestEntry::file)
-                .filter(file -> BlobFileFormat.isBlobFile(file.fileName()))
-                .collect(Collectors.toList());
-    }
-
     private static void assertFirstBlobFileRowRanges(
             FileStoreTable table, List<Range> expectedFirstRanges, int expectedCount) {
         List<Range> actual =
-                blobFiles(table).stream()
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .filter(file -> BlobFileFormat.isBlobFile(file.fileName()))
                         .map(DataFileMeta::nonNullRowIdRange)
                         .sorted((left, right) -> Long.compare(left.from, right.from))
                         .collect(Collectors.toList());
