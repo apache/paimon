@@ -106,7 +106,9 @@ class OverwriteChangesProvider:
         mfm = ManifestFileManager(self.table)
         for mf in delta_manifests:
             for entry in mfm.read(mf.file_name):
-                if self.partition_filter is None or self.partition_filter.test(entry.partition):
+                # _can_use_cache already returned False for a null filter, so
+                # partition_filter is always set here.
+                if self.partition_filter.test(entry.partition):
                     return True
         return False
 
