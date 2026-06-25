@@ -146,6 +146,66 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
         self.assertEqual(len(actual[actual['f0'] == 99]), K)
 
+    def test_cache_rebuilt_when_concurrent_append_hits_target_partition(self):
+        # Concurrent appends hit the overwrite target; probe sees it touched -> rebuild.
+        K = 3
+
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        messages = w.prepare_commit()
+
+        fsc = c.file_store_commit
+
+        counts = {'full_scan': 0, 'probe': 0}
+        orig_full = OverwriteChangesProvider._full_scan
+        orig_probe = OverwriteChangesProvider._delta_touches_target
+
+        def spy_full(self, *a, **k):
+            counts['full_scan'] += 1
+            return orig_full(self, *a, **k)
+
+        def spy_probe(self, *a, **k):
+            counts['probe'] += 1
+            return orig_probe(self, *a, **k)
+
+        orig_cas = fsc.snapshot_commit.commit
+        cas = {'fails': 0}
+
+        def patched_cas(snapshot, statistics):
+            if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
+                cas['fails'] += 1
+                self._append(pd.DataFrame({'f0': [1], 'f1': [f'y{cas["fails"]}']}))
+                return False
+            return orig_cas(snapshot, statistics)
+
+        fsc.snapshot_commit.commit = patched_cas
+        OverwriteChangesProvider._full_scan = spy_full
+        OverwriteChangesProvider._delta_touches_target = spy_probe
+        try:
+            c.commit(messages)
+            c.close()
+        finally:
+            OverwriteChangesProvider._full_scan = orig_full
+            OverwriteChangesProvider._delta_touches_target = orig_probe
+
+        self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
+
+        # Target touched each retry => cache rebuilds; full scan runs every attempt.
+        self.assertEqual(counts['full_scan'], K + 1,
+                         f"full scan ran {counts['full_scan']}x; cache must rebuild "
+                         f"when the target partition is touched")
+        self.assertEqual(counts['probe'], K,
+                         f"delta probe ran {counts['probe']}x; once per retry (= K)")
+
+        # Overwrite wins: f0=1 is just 'new', f0=2 untouched.
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
+        self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
+
 
 if __name__ == '__main__':
     unittest.main()
