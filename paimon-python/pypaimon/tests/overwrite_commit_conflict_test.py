@@ -293,6 +293,70 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertIn(None, incr_results)
         self.assertEqual(full_scans['n'], 2)
 
+    def test_incremental_merge_across_non_append_snapshot(self):
+        # A non-APPEND (OVERWRITE) snapshot lands between retries; merging its
+        # delta (ADD+DELETE) must still yield a base equal to a fresh full scan.
+        K = 2
+
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        messages = w.prepare_commit()
+
+        fsc = c.file_store_commit
+
+        captured = []
+        orig_check = fsc.conflict_detection.check_conflicts
+        orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
+
+        def spy_check(latest_snapshot, base_entries, delta_entries, *a, **k):
+            captured.append((latest_snapshot, list(base_entries), list(delta_entries)))
+            return orig_check(latest_snapshot, base_entries, delta_entries, *a, **k)
+
+        fsc.conflict_detection.check_conflicts = spy_check
+
+        orig_cas = fsc.snapshot_commit.commit
+        cas = {'fails': 0}
+
+        def patched_cas(snapshot, statistics):
+            if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
+                cas['fails'] += 1
+                # Concurrent OVERWRITE of the target partition -> a non-APPEND snapshot.
+                self._overwrite_target(f'z{cas["fails"]}')
+                return False
+            return orig_cas(snapshot, statistics)
+
+        fsc.snapshot_commit.commit = patched_cas
+
+        c.commit(messages)
+        c.close()
+
+        self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
+
+        # Across OVERWRITE snapshots, the merged base on the final attempt must
+        # still equal a fresh full scan.
+        last_snapshot, merged_base, last_delta = captured[-1]
+        full = orig_full(last_snapshot, last_delta)
+        self.assertEqual(
+            set(e.identifier() for e in merged_base),
+            set(e.identifier() for e in full),
+            "merged base must equal a full scan even across non-APPEND snapshots")
+
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
+
+    def _overwrite_target(self, f1_val):
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': [f1_val]}))
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
 
 if __name__ == '__main__':
     unittest.main()
