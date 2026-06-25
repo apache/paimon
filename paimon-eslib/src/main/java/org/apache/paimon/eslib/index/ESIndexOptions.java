@@ -37,18 +37,26 @@ import java.util.Map;
 /**
  * Parses Paimon Options into ESLib FieldIndexConfig for each field.
  *
- * <p>Options format (in table properties):
+ * <p>Keys are read from the (unscoped) table options. A field-level key {@code
+ * fields.<field>.<key>} takes precedence over the index-type-level key {@code es-index.<key>}
+ * (mirrors the native vector parser).
  *
  * <pre>
- *   global-index.es-index.fields.vector_field.algorithm = diskbbq
- *   global-index.es-index.fields.vector_field.dimension = 128
- *   global-index.es-index.fields.text_field.analyzer = standard
- *   global-index.es-index.fields.id_field.type = keyword
+ *   es-index.metric = cosine                       # index-type-level default for all vector fields
+ *   fields.vector_field.algorithm = diskbbq        # field-level override
+ *   fields.vector_field.dimension = 128
+ *   fields.text_field.analyzer = standard
+ *   fields.id_field.type = keyword
  * </pre>
  */
 public class ESIndexOptions {
 
     private static final String FIELDS_PREFIX = "fields.";
+
+    /**
+     * Index-type-level key prefix (e.g. {@code es-index.metric}); overridden by field-level keys.
+     */
+    private static final String INDEX_TYPE_PREFIX = ESIndexGlobalIndexerFactory.IDENTIFIER + ".";
 
     /**
      * Suffix of the keyword multi-field sub-field of a FULLTEXT column (mirrors ES text.keyword).
@@ -64,11 +72,10 @@ public class ESIndexOptions {
             fieldConfigs.put(field.name(), config);
             // Multi-field: a FULLTEXT column also gets a keyword sub-field (content.keyword) so
             // exact filters (=, IN, prefix, ...) work alongside full-text match. Enabled by
-            // default;
-            // disable with fields.<name>.keyword_subfield=false.
+            // default; disable with fields.<name>.keyword_subfield=false.
             if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT
-                    && options.getBoolean(
-                            FIELDS_PREFIX + field.name() + ".keyword_subfield", true)) {
+                    && Boolean.parseBoolean(
+                            resolve(options, field.name(), "keyword_subfield", "true"))) {
                 String subField = field.name() + KEYWORD_SUBFIELD_SUFFIX;
                 fieldConfigs.put(
                         subField,
@@ -96,21 +103,34 @@ public class ESIndexOptions {
         return fieldConfigs.containsKey(subField) ? subField : null;
     }
 
+    /**
+     * Resolves a config value for {@code fieldName}/{@code key}: the field-level key {@code
+     * fields.<field>.<key>} takes precedence over the index-type-level key {@code es-index.<key>};
+     * returns {@code defaultValue} when neither is set.
+     */
+    private static String resolve(
+            Options options, String fieldName, String key, String defaultValue) {
+        String value = options.getString(FIELDS_PREFIX + fieldName + "." + key, null);
+        if (value == null) {
+            value = options.getString(INDEX_TYPE_PREFIX + key, null);
+        }
+        return value == null ? defaultValue : value;
+    }
+
     private FieldIndexConfig parseFieldConfig(DataField field, Options options) {
-        String prefix = FIELDS_PREFIX + field.name() + ".";
         DataType dataType = field.type();
 
         // Explicit type override takes priority
-        String explicitType = options.getString(prefix + "type", null);
+        String explicitType = resolve(options, field.name(), "type", null);
         if (explicitType != null) {
-            return parseExplicitType(field.name(), explicitType, dataType, options, prefix);
+            return parseExplicitType(field.name(), explicitType, dataType, options);
         }
 
         if (isVectorType(dataType)) {
-            return parseVectorConfig(field.name(), dataType, options, prefix);
+            return parseVectorConfig(field.name(), dataType, options);
         } else if (isTextType(dataType)) {
             // String fields: check if analyzer is set → FULLTEXT; otherwise → KEYWORD
-            String analyzer = options.getString(prefix + "analyzer", null);
+            String analyzer = resolve(options, field.name(), "analyzer", null);
             if (analyzer != null) {
                 return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.FULLTEXT)
                         .analyzer(BuiltinAnalyzer.fromName(analyzer))
@@ -131,10 +151,10 @@ public class ESIndexOptions {
     }
 
     private FieldIndexConfig parseExplicitType(
-            String fieldName, String typeName, DataType dataType, Options options, String prefix) {
+            String fieldName, String typeName, DataType dataType, Options options) {
         switch (typeName.toLowerCase()) {
             case "fulltext":
-                String analyzer = options.getString(prefix + "analyzer", "standard");
+                String analyzer = resolve(options, fieldName, "analyzer", "standard");
                 return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.FULLTEXT)
                         .analyzer(BuiltinAnalyzer.fromName(analyzer))
                         .build();
@@ -151,7 +171,7 @@ public class ESIndexOptions {
                         .scalarType(ScalarFieldType.DATE)
                         .build();
             case "vector":
-                return parseVectorConfig(fieldName, dataType, options, prefix);
+                return parseVectorConfig(fieldName, dataType, options);
             default:
                 return FieldIndexConfig.builder(fieldName, FieldIndexConfig.IndexType.SCALAR)
                         .scalarType(mapScalarType(dataType))
@@ -160,21 +180,22 @@ public class ESIndexOptions {
     }
 
     private FieldIndexConfig parseVectorConfig(
-            String fieldName, DataType dataType, Options options, String prefix) {
-        String algorithm = options.getString(prefix + "algorithm", "hnsw");
-        int dimension = options.getInteger(prefix + "dimension", inferDimension(dataType));
-        String metric = options.getString(prefix + "metric", "cosine");
+            String fieldName, DataType dataType, Options options) {
+        String algorithm = resolve(options, fieldName, "algorithm", "hnsw");
+        String dimStr = resolve(options, fieldName, "dimension", null);
+        int dimension = dimStr != null ? Integer.parseInt(dimStr) : inferDimension(dataType);
+        String metric = resolve(options, fieldName, "metric", "cosine");
 
         Map<String, String> params = new LinkedHashMap<>();
-        String mStr = options.getString(prefix + "m", null);
+        String mStr = resolve(options, fieldName, "m", null);
         if (mStr != null) {
             params.put("m", mStr);
         }
-        String efStr = options.getString(prefix + "ef_construction", null);
+        String efStr = resolve(options, fieldName, "ef_construction", null);
         if (efStr != null) {
             params.put("ef_construction", efStr);
         }
-        String vpcStr = options.getString(prefix + "vectors_per_cluster", null);
+        String vpcStr = resolve(options, fieldName, "vectors_per_cluster", null);
         if (vpcStr != null) {
             params.put("vectors_per_cluster", vpcStr);
         }
