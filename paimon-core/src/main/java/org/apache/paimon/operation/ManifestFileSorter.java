@@ -994,7 +994,7 @@ public class ManifestFileSorter {
                 };
 
         List<ManifestFileMeta> sorted =
-                ManifestEntryExternalSort.sortAndWriteEntries(
+                ManifestEntryExternalSort.sortAndWriteFullEntries(
                         sequentialBatchedExecute(reader, section, manifestReadParallelism),
                         ctx.sortKey,
                         ctx.externalSortConfig,
@@ -1006,8 +1006,9 @@ public class ManifestFileSorter {
     }
 
     /**
-     * Minor compaction path: cancel ADD/DELETE pairs with an external identifier sort, then sort
-     * surviving ADD and DELETE entries independently and write them to output.
+     * Minor compaction path: collect DELETE entries in memory while external-sorting all entries,
+     * then write surviving ADD entries from the sorted stream and remaining DELETE entries from
+     * memory.
      */
     private static void rewriteMinor(
             List<ManifestFileMeta> section,
@@ -1023,7 +1024,7 @@ public class ManifestFileSorter {
         }
 
         Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sorted =
-                ManifestEntryExternalSort.cancelAndWriteMinorEntries(
+                ManifestEntryExternalSort.sortAndWriteMinorEntries(
                         section,
                         ctx.sortKey,
                         ctx.externalSortConfig,

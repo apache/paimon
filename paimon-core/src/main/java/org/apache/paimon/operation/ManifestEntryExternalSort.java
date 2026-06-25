@@ -19,9 +19,10 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
@@ -32,64 +33,52 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Spillable external sort utilities for manifest entries. */
-final class ManifestEntryExternalSort {
+public class ManifestEntryExternalSort {
 
-    private ManifestEntryExternalSort() {}
-
-    static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> cancelAndWriteMinorEntries(
+    static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sortAndWriteMinorEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.ManifestSortKey sortKey,
             Config config,
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        try (EntryCanceler canceler = new EntryCanceler(config);
-                EntrySorter addSorter = new EntrySorter(sortKey, config);
-                EntrySorter deleteSorter = new EntrySorter(sortKey, config)) {
+        try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
+            Map<FileEntry.Identifier, ManifestEntry> deleteEntries = new HashMap<>();
             Function<ManifestFileMeta, List<ManifestEntry>> reader =
                     meta -> manifestFile.read(meta.fileName(), meta.fileSize());
             for (ManifestEntry entry :
                     sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-                canceler.write(entry);
+                sorter.write(entry);
+                if (entry.kind() == FileKind.DELETE) {
+                    deleteEntries.put(entry.identifier(), entry);
+                }
             }
 
-            canceler.writeSurvivors(addSorter, deleteSorter);
-
-            List<ManifestFileMeta> addFiles = Collections.emptyList();
-            if (!addSorter.isEmpty()) {
-                addFiles = addSorter.writeToManifest(manifestFile);
-            }
-
-            List<ManifestFileMeta> deleteFiles = Collections.emptyList();
-            if (!deleteSorter.isEmpty()) {
-                deleteFiles = deleteSorter.writeToManifest(manifestFile);
-            }
-
+            List<ManifestFileMeta> addFiles =
+                    sorter.writeSurvivingAddsToManifest(manifestFile, deleteEntries);
+            List<ManifestFileMeta> deleteFiles =
+                    sortAndWriteDeleteEntries(deleteEntries.values(), sortKey, manifestFile);
             return Pair.of(addFiles, deleteFiles);
         }
     }
 
-    static List<ManifestFileMeta> sortAndWriteEntries(
+    static List<ManifestFileMeta> sortAndWriteFullEntries(
             Iterable<ManifestEntry> entries,
             ManifestFileSorter.ManifestSortKey sortKey,
             Config config,
@@ -134,105 +123,6 @@ final class ManifestEntryExternalSort {
                     options.localSortMaxNumFileHandles(),
                     options.spillCompressOptions(),
                     options.writeBufferSpillDiskSize());
-        }
-    }
-
-    /** Spillable identifier join that cancels ADD/DELETE pairs without keeping a hash map. */
-    private static class EntryCanceler implements AutoCloseable {
-        private static final int IDENTIFIER_FIELD = 0;
-        private static final int KIND_FIELD = 1;
-        private static final int ENTRY_FIELD = 2;
-        private static final RowType ROW_TYPE =
-                DataTypes.ROW(DataTypes.BYTES(), DataTypes.TINYINT(), DataTypes.BYTES());
-        private static final int[] KEY_FIELDS = new int[] {IDENTIFIER_FIELD};
-
-        private final ManifestEntrySerializer entrySerializer;
-        private final IOManager ioManager;
-        private final BinaryExternalSortBuffer sortBuffer;
-
-        private EntryCanceler(Config config) {
-            this.entrySerializer = new ManifestEntrySerializer();
-            this.ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
-            this.sortBuffer =
-                    BinaryExternalSortBuffer.create(
-                            ioManager,
-                            ROW_TYPE,
-                            KEY_FIELDS,
-                            config.bufferSize,
-                            config.pageSize,
-                            config.maxNumFileHandles,
-                            config.compression,
-                            config.maxDiskSize);
-        }
-
-        private void write(ManifestEntry entry) throws Exception {
-            GenericRow row = new GenericRow(ROW_TYPE.getFieldCount());
-            row.setField(IDENTIFIER_FIELD, identifierBytes(entry.identifier()));
-            row.setField(KIND_FIELD, entry.kind().toByteValue());
-            row.setField(ENTRY_FIELD, entrySerializer.serializeToBytes(entry));
-            sortBuffer.write(row);
-        }
-
-        private void writeSurvivors(EntrySorter addSorter, EntrySorter deleteSorter)
-                throws Exception {
-            if (sortBuffer.isEmpty()) {
-                return;
-            }
-
-            MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
-            BinaryRow reuse = new BinaryRow(ROW_TYPE.getFieldCount());
-            BinaryRow row;
-            byte[] currentIdentifier = null;
-            byte[] addEntry = null;
-            byte[] deleteEntry = null;
-
-            while ((row = iterator.next(reuse)) != null) {
-                byte[] identifier = row.getBinary(IDENTIFIER_FIELD);
-                if (currentIdentifier != null && !Arrays.equals(currentIdentifier, identifier)) {
-                    writeSurvivorGroup(addEntry, deleteEntry, addSorter, deleteSorter);
-                    addEntry = null;
-                    deleteEntry = null;
-                }
-
-                currentIdentifier = identifier;
-                if (row.getByte(KIND_FIELD) == FileKind.ADD.toByteValue()) {
-                    addEntry = row.getBinary(ENTRY_FIELD);
-                } else {
-                    deleteEntry = row.getBinary(ENTRY_FIELD);
-                }
-            }
-
-            if (currentIdentifier != null) {
-                writeSurvivorGroup(addEntry, deleteEntry, addSorter, deleteSorter);
-            }
-        }
-
-        private void writeSurvivorGroup(
-                @Nullable byte[] addEntry,
-                @Nullable byte[] deleteEntry,
-                EntrySorter addSorter,
-                EntrySorter deleteSorter)
-                throws Exception {
-            if (addEntry != null && deleteEntry != null) {
-                return;
-            }
-
-            if (addEntry != null) {
-                writeEntry(addEntry, addSorter);
-            }
-            if (deleteEntry != null) {
-                writeEntry(deleteEntry, deleteSorter);
-            }
-        }
-
-        private void writeEntry(byte[] entry, EntrySorter sorter) throws Exception {
-            sorter.write(entrySerializer.deserializeFromBytes(entry));
-        }
-
-        @Override
-        public void close() throws Exception {
-            sortBuffer.clear();
-            ioManager.close();
         }
     }
 
@@ -291,6 +181,49 @@ final class ManifestEntryExternalSort {
             return writer.result();
         }
 
+        private List<ManifestFileMeta> writeSurvivingAddsToManifest(
+                ManifestFile manifestFile, Map<FileEntry.Identifier, ManifestEntry> deleteEntries)
+                throws Exception {
+            if (isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = null;
+            Exception exception = null;
+            try {
+                MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
+                BinaryRow reuse = new BinaryRow(sortKey.externalSortRowType().getFieldCount());
+                BinaryRow row;
+                while ((row = iterator.next(reuse)) != null) {
+                    ManifestEntry entry =
+                            entrySerializer.deserializeFromBytes(sortKey.entryBytes(row));
+                    if (entry.kind() == FileKind.DELETE) {
+                        continue;
+                    }
+                    if (deleteEntries.remove(entry.identifier()) != null) {
+                        continue;
+                    }
+                    if (writer == null) {
+                        writer = manifestFile.createRollingWriter();
+                    }
+                    writer.write(entry);
+                }
+            } catch (Exception e) {
+                exception = e;
+            } finally {
+                if (exception != null) {
+                    if (writer != null) {
+                        writer.abort();
+                    }
+                    throw exception;
+                }
+                if (writer != null) {
+                    writer.close();
+                }
+            }
+            return writer == null ? Collections.emptyList() : writer.result();
+        }
+
         @Override
         public void close() throws Exception {
             sortBuffer.clear();
@@ -298,49 +231,40 @@ final class ManifestEntryExternalSort {
         }
     }
 
-    private static byte[] identifierBytes(FileEntry.Identifier identifier) throws IOException {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(bytes);
-        writeString(out, identifier.getClass().getName());
-        writeBytes(out, serializeBinaryRow(identifier.partition));
-        out.writeInt(identifier.bucket);
-        out.writeInt(identifier.level);
-        writeString(out, identifier.fileName);
-        writeStrings(out, identifier.extraFiles);
-        writeBytes(out, identifier.embeddedIndex);
-        writeString(out, identifier.externalPath);
-        out.flush();
-        return bytes.toByteArray();
-    }
+    private static List<ManifestFileMeta> sortAndWriteDeleteEntries(
+            Collection<ManifestEntry> entries,
+            ManifestFileSorter.ManifestSortKey sortKey,
+            ManifestFile manifestFile)
+            throws Exception {
+        if (entries.isEmpty()) {
+            return Collections.emptyList();
+        }
 
-    private static void writeStrings(DataOutputStream out, @Nullable List<String> values)
-            throws IOException {
-        if (values == null) {
-            out.writeInt(-1);
-            return;
-        }
-        out.writeInt(values.size());
-        for (String value : values) {
-            writeString(out, value);
-        }
-    }
+        List<ManifestEntry> sorted = new ArrayList<>(entries);
+        RecordComparator comparator =
+                CodeGenUtils.newRecordComparator(
+                        sortKey.externalSortRowType().getFieldTypes(),
+                        sortKey.externalSortKeyFields());
+        sorted.sort(
+                (a, b) ->
+                        comparator.compare(
+                                sortKey.toExternalSortRow(a, new byte[0]),
+                                sortKey.toExternalSortRow(b, new byte[0])));
 
-    private static void writeString(DataOutputStream out, @Nullable String value)
-            throws IOException {
-        if (value == null) {
-            out.writeInt(-1);
-            return;
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+                manifestFile.createRollingWriter();
+        Exception exception = null;
+        try {
+            writer.write(sorted);
+        } catch (Exception e) {
+            exception = e;
+        } finally {
+            if (exception != null) {
+                writer.abort();
+                throw exception;
+            }
+            writer.close();
         }
-        writeBytes(out, value.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static void writeBytes(DataOutputStream out, @Nullable byte[] value)
-            throws IOException {
-        if (value == null) {
-            out.writeInt(-1);
-            return;
-        }
-        out.writeInt(value.length);
-        out.write(value);
+        return writer.result();
     }
 }
