@@ -30,7 +30,6 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
-from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -39,6 +38,7 @@ from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import ConflictDetection
+from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesProvider
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
@@ -217,11 +217,11 @@ class FileStoreCommit:
         changelog_entries = self._collect_changelog_entries(commit_messages)
 
         if not skip_overwrite:
+            provider = self._overwrite_changes_provider(partition_filter, commit_messages)
             self._try_commit(
                 commit_kind="OVERWRITE",
                 commit_identifier=commit_identifier,
-                commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                    snapshot, partition_filter, commit_messages),
+                commit_entries_plan=provider.provide,
                 changelog_entries=changelog_entries,
                 detect_conflicts=True,
                 allow_rollback=False,
@@ -260,22 +260,22 @@ class FileStoreCommit:
 
         partition_filter = predicate_builder.or_predicates(partition_predicates)
 
+        provider = self._overwrite_changes_provider(partition_filter, [])
         self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, partition_filter, []),
+            commit_entries_plan=provider.provide,
             detect_conflicts=True,
             allow_rollback=False,
         )
 
     def truncate_table(self, commit_identifier: int) -> None:
         """Truncate the entire table, deleting all data."""
+        provider = self._overwrite_changes_provider(None, [])
         self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, None, []),
+            commit_entries_plan=provider.provide,
             detect_conflicts=True,
             allow_rollback=False,
         )
@@ -579,26 +579,17 @@ class FileStoreCommit:
                                    f"in {msg.partition} does not belong to this partition")
         return partition_filter
 
-    def _generate_overwrite_entries(self, latest_snapshot, partition_filter, commit_messages):
-        """Generate commit entries for OVERWRITE mode based on latest snapshot."""
-        entries = []
-        current_entries = [] if latest_snapshot is None \
-            else (FileScanner(self.table, lambda: ([], None), partition_predicate=partition_filter).
-                  read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
-        for entry in current_entries:
-            entry.kind = 1  # DELETE
-            entries.append(entry)
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                entries.append(ManifestEntry(
-                    kind=0,  # ADD
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
-        return entries
+    def _overwrite_changes_provider(self, partition_filter, commit_messages):
+        """Build a stateful provider of OVERWRITE commit entries that caches the
+        existing files of the target partitions across retries (see
+        OverwriteChangesProvider). One instance per overwrite operation."""
+        return OverwriteChangesProvider(
+            self.table,
+            self.manifest_list_manager,
+            self.snapshot_manager,
+            partition_filter,
+            commit_messages,
+        )
 
     def _commit_retry_wait(self, retry_count: int):
 
