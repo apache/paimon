@@ -32,6 +32,8 @@ import java.util.Map;
 public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     private static final int DEFAULT_DIMENSION = 128;
+    static final String TRAIN_MAX_SAMPLES_OPTION = "train.max-samples";
+    static final int DEFAULT_TRAIN_MAX_SAMPLES = 65536;
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
@@ -39,7 +41,8 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         return new NativeVectorGlobalIndexer(
                 field.type(),
                 nativeOptions(field.type(), options, identifier, field.name()),
-                identifier);
+                identifier,
+                trainMaxSamples(options, identifier, field.name()));
     }
 
     static Map<String, String> nativeOptions(
@@ -76,6 +79,43 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
         return nativeOptions;
+    }
+
+    static int trainMaxSamples(Options tableOptions, String identifier, String fieldName) {
+        String optionPrefix = identifier + ".";
+        String fieldPrefix = "fields." + fieldName + ".";
+        String indexKey = optionPrefix + TRAIN_MAX_SAMPLES_OPTION;
+        String fieldKey = fieldPrefix + TRAIN_MAX_SAMPLES_OPTION;
+        Map<String, String> tableOptionsMap = tableOptions.toMap();
+
+        String key = null;
+        String value = null;
+        if (tableOptionsMap.containsKey(indexKey)) {
+            key = indexKey;
+            value = tableOptionsMap.get(indexKey);
+        }
+        if (tableOptionsMap.containsKey(fieldKey)) {
+            key = fieldKey;
+            value = tableOptionsMap.get(fieldKey);
+        }
+        if (value == null) {
+            return DEFAULT_TRAIN_MAX_SAMPLES;
+        }
+
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            if (parsed > 0) {
+                return parsed;
+            }
+            throw invalidTrainMaxSamples(key, value);
+        } catch (NumberFormatException e) {
+            throw invalidTrainMaxSamples(key, value);
+        }
+    }
+
+    private static IllegalArgumentException invalidTrainMaxSamples(String key, String value) {
+        return new IllegalArgumentException(
+                "Invalid value for '" + key + "': " + value + ". Must be a positive integer.");
     }
 
     private static String nativeOptionKey(String optionKey) {

@@ -217,4 +217,79 @@ public class NativeVectorGlobalIndexerFactoryTest {
                 .containsEntry("nlist", "256")
                 .doesNotContainKey("aggregate-function");
     }
+
+    @Test
+    public void testTrainMaxSamplesDefaultAndOverrides() {
+        Options options = new Options();
+
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
+                .isEqualTo(NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_MAX_SAMPLES);
+
+        options.setString("ivf-flat.train.max-samples", "1024");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
+                .isEqualTo(1024);
+
+        options.setString("fields.vec.train.max-samples", "2048");
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
+                .isEqualTo(2048);
+
+        assertThat(
+                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "other"))
+                .isEqualTo(1024);
+    }
+
+    @Test
+    public void testInvalidTrainMaxSamples() {
+        Options options = new Options();
+        options.setString("ivf-flat.train.max-samples", "0");
+
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                        options,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ivf-flat.train.max-samples")
+                .hasMessageContaining("positive integer");
+
+        options.setString("fields.vec.train.max-samples", "bad");
+        assertThatThrownBy(
+                        () ->
+                                NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                        options,
+                                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                                        "vec"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fields.vec.train.max-samples")
+                .hasMessageContaining("positive integer");
+    }
+
+    @Test
+    public void testTrainMaxSamplesIsNotNativeOption() {
+        Options options = new Options();
+        options.setString("ivf-flat.dimension", "32");
+        options.setString("ivf-flat.nlist", "128");
+        options.setString("ivf-flat.train.max-samples", "1024");
+        options.setString("fields.vec.train.max-samples", "2048");
+
+        Map<String, String> nativeOptions =
+                NativeVectorGlobalIndexerFactory.nativeOptions(
+                        new ArrayType(new FloatType()),
+                        options,
+                        IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
+                        "vec");
+
+        assertThat(nativeOptions)
+                .containsEntry("dimension", "32")
+                .containsEntry("nlist", "128")
+                .doesNotContainKey("train.max-samples");
+    }
 }

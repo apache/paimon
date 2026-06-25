@@ -39,17 +39,36 @@ public class NativeVectorGlobalIndexer implements VectorGlobalIndexer {
     private final DataType fieldType;
     private final Map<String, String> options;
     private final String identifier;
+    private final int trainMaxSamples;
 
     public NativeVectorGlobalIndexer(
             DataType fieldType, Map<String, String> options, String identifier) {
+        this(
+                fieldType,
+                options,
+                identifier,
+                NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_MAX_SAMPLES);
+    }
+
+    public NativeVectorGlobalIndexer(
+            DataType fieldType,
+            Map<String, String> options,
+            String identifier,
+            int trainMaxSamples) {
         this.fieldType = fieldType;
         this.options = Objects.requireNonNull(options, "options must not be null");
         this.identifier = Objects.requireNonNull(identifier, "identifier must not be null");
+        if (trainMaxSamples <= 0) {
+            throw new IllegalArgumentException(
+                    "trainMaxSamples must be a positive integer: " + trainMaxSamples);
+        }
+        this.trainMaxSamples = trainMaxSamples;
     }
 
     @Override
     public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
-        return new NativeVectorGlobalIndexWriter(fileWriter, fieldType, options, identifier);
+        return new NativeVectorGlobalIndexWriter(
+                fileWriter, fieldType, options, identifier, trainMaxSamples);
     }
 
     @Override

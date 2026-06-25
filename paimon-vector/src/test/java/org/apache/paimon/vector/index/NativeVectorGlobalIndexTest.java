@@ -181,6 +181,31 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
+    public void testTrainingVectorCountUsesOnlyConfiguredSampleLimit() {
+        int oldJavaArrayLimitFor1024Dim =
+                NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH / 1024;
+        int requestedSamples = oldJavaArrayLimitFor1024Dim + 1;
+
+        assertThat(
+                        NativeVectorGlobalIndexWriter.trainingVectorCount(
+                                requestedSamples, requestedSamples))
+                .isEqualTo(requestedSamples);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 64)).isEqualTo(64);
+    }
+
+    @Test
+    public void testTrainingBatchSizeProtectsSingleJavaArrayAllocation() {
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 128)).isEqualTo(4096);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                4096, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positive integer");
+    }
+
+    @Test
     public void testMetaSerializationIsEmptyMap() throws IOException {
         VectorIndexMeta meta = new VectorIndexMeta();
         byte[] serialized = meta.serialize();
