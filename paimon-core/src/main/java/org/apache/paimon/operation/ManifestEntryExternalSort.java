@@ -64,9 +64,10 @@ public class ManifestEntryExternalSort {
                     meta -> manifestFile.read(meta.fileName(), meta.fileSize());
             for (ManifestEntry entry :
                     sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
-                sorter.write(entry);
                 if (entry.kind() == FileKind.DELETE) {
                     deleteEntries.put(entry.identifier(), entry);
+                } else {
+                    sorter.write(entry);
                 }
             }
 
@@ -206,9 +207,6 @@ public class ManifestEntryExternalSort {
                 while ((row = iterator.next(reuse)) != null) {
                     ManifestEntry entry =
                             entrySerializer.deserializeFromBytes(sortKey.entryBytes(row));
-                    if (entry.kind() == FileKind.DELETE) {
-                        continue;
-                    }
                     if (deleteEntries.remove(entry.identifier()) != null) {
                         continue;
                     }
