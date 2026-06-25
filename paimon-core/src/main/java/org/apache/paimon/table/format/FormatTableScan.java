@@ -180,7 +180,7 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
-        LOG.info(
+        LOG.debug(
                 "Find partitions for format table {}, partition filter: {}",
                 table.name(),
                 partitionFilter);
@@ -201,7 +201,7 @@ public class FormatTableScan implements InnerTableScan {
             // which is especially important for cloud storage like OSS/S3
             Map<String, Predicate> partitionPredicates = new HashMap<>();
             Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
-            LOG.info(
+            LOG.debug(
                     "Extracted predicate for format table {} partition pruning: {}",
                     table.name(),
                     predicate.orElse(null));
