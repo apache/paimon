@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -146,6 +147,18 @@ public class ManifestFileSorter {
             RowType partitionType,
             CoreOptions options)
             throws Exception {
+        return trySortCompaction(
+                input, newFilesForAbort, manifestFile, partitionType, options, null);
+    }
+
+    static List<ManifestFileMeta> trySortCompaction(
+            List<ManifestFileMeta> input,
+            List<ManifestFileMeta> newFilesForAbort,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            CoreOptions options,
+            @Nullable IOManager ioManager)
+            throws Exception {
         String sortPartitionField = options.manifestSortPartitionField();
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
@@ -155,7 +168,7 @@ public class ManifestFileSorter {
         int sortedRunSizeRatio = options.sortedRunSizeRatio();
         Integer manifestReadParallelism = options.scanManifestParallelism();
         ManifestEntryExternalSort.ExternalSortConfig externalSortConfig =
-                ManifestEntryExternalSort.ExternalSortConfig.from(options);
+                ManifestEntryExternalSort.ExternalSortConfig.from(options, ioManager);
 
         Optional<List<ManifestFileMeta>> fullCompacted =
                 tryFullCompaction(

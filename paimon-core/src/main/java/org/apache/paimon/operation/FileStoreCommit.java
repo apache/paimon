@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
@@ -33,6 +34,10 @@ import java.util.Map;
 
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
+
+    default FileStoreCommit withIOManager(IOManager ioManager) {
+        return this;
+    }
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 

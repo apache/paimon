@@ -102,27 +102,35 @@ public class ManifestEntryExternalSort {
         final int maxNumFileHandles;
         final CompressOptions compression;
         final MemorySize maxDiskSize;
+        @Nullable final IOManager ioManager;
 
         ExternalSortConfig(
                 long bufferSize,
                 int pageSize,
                 int maxNumFileHandles,
                 CompressOptions compression,
-                MemorySize maxDiskSize) {
+                MemorySize maxDiskSize,
+                @Nullable IOManager ioManager) {
             this.bufferSize = bufferSize;
             this.pageSize = pageSize;
             this.maxNumFileHandles = maxNumFileHandles;
             this.compression = compression;
             this.maxDiskSize = maxDiskSize;
+            this.ioManager = ioManager;
         }
 
         static ExternalSortConfig from(CoreOptions options) {
+            return from(options, null);
+        }
+
+        static ExternalSortConfig from(CoreOptions options, @Nullable IOManager ioManager) {
             return new ExternalSortConfig(
                     options.sortSpillBufferSize(),
                     options.pageSize(),
                     options.localSortMaxNumFileHandles(),
                     options.spillCompressOptions(),
-                    options.writeBufferSpillDiskSize());
+                    options.writeBufferSpillDiskSize(),
+                    ioManager);
         }
     }
 
@@ -131,12 +139,17 @@ public class ManifestEntryExternalSort {
         private final ManifestFileSorter.ManifestSortKey sortKey;
         private final ManifestEntrySerializer entrySerializer;
         private final IOManager ioManager;
+        private final boolean ownedIOManager;
         private final BinaryExternalSortBuffer sortBuffer;
 
         private EntrySorter(ManifestFileSorter.ManifestSortKey sortKey, ExternalSortConfig config) {
             this.sortKey = sortKey;
             this.entrySerializer = new ManifestEntrySerializer();
-            this.ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));
+            this.ioManager =
+                    config.ioManager == null
+                            ? IOManager.create(System.getProperty("java.io.tmpdir"))
+                            : config.ioManager;
+            this.ownedIOManager = config.ioManager == null;
             this.sortBuffer =
                     BinaryExternalSortBuffer.create(
                             ioManager,
@@ -227,7 +240,9 @@ public class ManifestEntryExternalSort {
         @Override
         public void close() throws Exception {
             sortBuffer.clear();
-            ioManager.close();
+            if (ownedIOManager) {
+                ioManager.close();
+            }
         }
     }
 

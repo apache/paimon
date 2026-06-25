@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -66,6 +67,15 @@ public class ManifestFileMerger {
             ManifestFile manifestFile,
             RowType partitionType,
             CoreOptions options) {
+        return merge(input, manifestFile, partitionType, options, null);
+    }
+
+    public static List<ManifestFileMeta> merge(
+            List<ManifestFileMeta> input,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            CoreOptions options,
+            @Nullable IOManager ioManager) {
         // Extract configuration from options
         long suggestedMetaSize = options.manifestTargetSize().getBytes();
         int suggestedMinMetaCount = options.manifestMergeMinCount();
@@ -83,7 +93,7 @@ public class ManifestFileMerger {
                     && (partitionType.getFieldCount() > 0
                             || (options.dataEvolutionEnabled() && allContainsRowId(input)))) {
                 return ManifestFileSorter.trySortCompaction(
-                        input, newFilesForAbort, manifestFile, partitionType, options);
+                        input, newFilesForAbort, manifestFile, partitionType, options, ioManager);
             } else {
                 // Otherwise try full compaction first, then minor compaction if needed
                 Optional<List<ManifestFileMeta>> fullCompacted =

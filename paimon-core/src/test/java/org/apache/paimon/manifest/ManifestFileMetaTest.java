@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -1003,6 +1004,51 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         .isGreaterThanOrEqualTo(prevPartition);
             }
         }
+    }
+
+    @Test
+    public void testManifestSortUsesExternalIOManagerWithoutClosingIt() throws Exception {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 2; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int i = 0; i < 40; i++) {
+                int partition = manifest == 0 ? 39 - i : i;
+                entries.add(
+                        makeEntry(
+                                true,
+                                String.format(
+                                        "external-io-manager-%02d-entry-%03d-payload-%040d",
+                                        manifest, i, i),
+                                partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.full-compaction-threshold-size", "1B");
+        testOptions.set("page-size", "1kb");
+        testOptions.set("sort-spill-buffer-size", "4kb");
+
+        java.nio.file.Path spillBase = tempDir.resolve("manifest-spill");
+        java.nio.file.Files.createDirectories(spillBase);
+        IOManager ioManager = IOManager.create(spillBase.toString());
+        try {
+            List<ManifestFileMeta> merged =
+                    ManifestFileMerger.merge(
+                            input,
+                            manifestFile,
+                            getPartitionType(),
+                            CoreOptions.fromMap(testOptions.toMap()),
+                            ioManager);
+
+            assertEquivalentEntries(input, merged);
+            assertThat(spillBase.toFile().list((dir, name) -> name.startsWith("paimon-")))
+                    .isNotEmpty();
+        } finally {
+            ioManager.close();
+        }
+        assertThat(spillBase.toFile().list()).isEmpty();
     }
 
     /**

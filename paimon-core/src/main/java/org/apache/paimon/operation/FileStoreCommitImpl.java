@@ -25,6 +25,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -164,6 +165,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean appendCommitCheckConflict = false;
     private long lastCommittedSnapshotId = -1L;
     @Nullable private Snapshot.Operation operation;
+    @Nullable private IOManager ioManager;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -226,6 +228,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
+    }
+
+    @Override
+    public FileStoreCommit withIOManager(IOManager ioManager) {
+        this.ioManager = ioManager;
+        return this;
     }
 
     @Override
@@ -1019,7 +1027,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             } else {
                 mergeAfterManifests =
                         ManifestFileMerger.merge(
-                                mergeBeforeManifests, manifestFile, partitionType, options);
+                                mergeBeforeManifests,
+                                manifestFile,
+                                partitionType,
+                                options,
+                                ioManager);
             }
             baseManifestList = manifestList.write(mergeAfterManifests);
 
@@ -1317,7 +1329,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        new CoreOptions(compactOptions));
+                        new CoreOptions(compactOptions),
+                        ioManager);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
             // no need to commit this snapshot, because no compact were happened

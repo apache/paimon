@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.sink.listener.CommitListeners;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,6 +46,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     private final CommitListeners commitListeners;
+    private final IOManager commitIOManager;
     private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
@@ -62,6 +64,9 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+
+        this.commitIOManager = IOManager.create(context.tempDirs());
+        this.commit.withIOManager(commitIOManager);
         allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
     }
 
@@ -132,8 +137,15 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     @Override
     public void close() throws Exception {
-        commit.close();
-        commitListeners.close();
+        try {
+            commit.close();
+        } finally {
+            try {
+                commitListeners.close();
+            } finally {
+                commitIOManager.close();
+            }
+        }
     }
 
     public boolean allowLogOffsetDuplicate() {

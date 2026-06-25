@@ -94,6 +94,10 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
         int getParallelism();
 
         int getSubtaskIndex();
+
+        default String[] tempDirs() {
+            return new String[] {System.getProperty("java.io.tmpdir")};
+        }
     }
 
     static Context createContext(
@@ -104,6 +108,26 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             StateStore stateStore,
             int parallelism,
             int subtaskIndex) {
+        return createContext(
+                commitUser,
+                metricGroup,
+                streamingCheckpointEnabled,
+                isRestored,
+                stateStore,
+                parallelism,
+                subtaskIndex,
+                new String[] {System.getProperty("java.io.tmpdir")});
+    }
+
+    static Context createContext(
+            String commitUser,
+            @Nullable MetricGroup metricGroup,
+            boolean streamingCheckpointEnabled,
+            boolean isRestored,
+            StateStore stateStore,
+            int parallelism,
+            int subtaskIndex,
+            String[] tempDirs) {
         return new Committer.Context() {
             @Override
             public String commitUser() {
@@ -138,6 +162,11 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             @Override
             public int getSubtaskIndex() {
                 return subtaskIndex;
+            }
+
+            @Override
+            public String[] tempDirs() {
+                return tempDirs;
             }
         };
     }
