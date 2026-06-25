@@ -71,7 +71,6 @@ import java.util.stream.Collectors;
  */
 class ArrowSchemaMetadata {
 
-    private static final String PARQUET_FIELD_ID = "PARQUET:field_id";
     private static final String LIST_DATA_VECTOR_NAME = "$data$";
     private static final String MAP_DATA_VECTOR_NAME = "entries";
     private static final String MAP_KEY_NAME = "key";
@@ -112,9 +111,7 @@ class ArrowSchemaMetadata {
     private ArrowSchemaMetadata() {}
 
     static byte[] serialize(
-            RowType rowType,
-            Map<String, Map<String, String>> fieldMetadata,
-            boolean includeParquetFieldId) {
+            RowType rowType, Map<String, Map<String, String>> fieldMetadata, String fieldIdKey) {
         FlatBufferBuilder builder = new FlatBufferBuilder();
         int schemaOffset =
                 buildSchema(
@@ -128,7 +125,7 @@ class ArrowSchemaMetadata {
                                                                 field.id(),
                                                                 field.type(),
                                                                 0,
-                                                                includeParquetFieldId),
+                                                                fieldIdKey),
                                                         fieldMetadata.get(field.name())))
                                 .collect(Collectors.toList()));
         int messageOffset =
@@ -393,13 +390,9 @@ class ArrowSchemaMetadata {
     }
 
     private static ArrowField toArrowField(
-            String fieldName,
-            int fieldId,
-            DataType dataType,
-            int depth,
-            boolean includeParquetFieldId) {
+            String fieldName, int fieldId, DataType dataType, int depth, String fieldIdKey) {
         ArrowTypeInfo type = dataType.accept(ArrowFieldTypeVisitor.INSTANCE);
-        Map<String, String> metadata = parquetFieldIdMetadata(fieldId, includeParquetFieldId);
+        Map<String, String> metadata = fieldIdMetadata(fieldId, fieldIdKey);
         List<ArrowField> children = Collections.emptyList();
         if (dataType instanceof ArrayType || dataType instanceof VectorType) {
             DataType elementType =
@@ -408,16 +401,12 @@ class ArrowSchemaMetadata {
                             : ((ArrayType) dataType).getElementType();
             ArrowField field =
                     toArrowField(
-                            LIST_DATA_VECTOR_NAME,
-                            fieldId,
-                            elementType,
-                            depth + 1,
-                            includeParquetFieldId);
-            if (includeParquetFieldId) {
+                            LIST_DATA_VECTOR_NAME, fieldId, elementType, depth + 1, fieldIdKey);
+            if (fieldIdKey != null) {
                 field =
                         field.withMetadata(
                                 Collections.singletonMap(
-                                        PARQUET_FIELD_ID,
+                                        fieldIdKey,
                                         String.valueOf(
                                                 SpecialFields.getArrayElementFieldId(
                                                         fieldId, depth + 1))));
@@ -426,8 +415,7 @@ class ArrowSchemaMetadata {
         } else if (dataType instanceof MapType) {
             children =
                     Collections.singletonList(
-                            toArrowMapEntryField(
-                                    fieldId, (MapType) dataType, depth, includeParquetFieldId));
+                            toArrowMapEntryField(fieldId, (MapType) dataType, depth, fieldIdKey));
         } else if (dataType instanceof VariantType) {
             children =
                     Arrays.asList(
@@ -448,8 +436,7 @@ class ArrowSchemaMetadata {
             List<ArrowField> rowChildren = new ArrayList<>();
             for (DataField field : rowType.getFields()) {
                 rowChildren.add(
-                        toArrowField(
-                                field.name(), field.id(), field.type(), 0, includeParquetFieldId));
+                        toArrowField(field.name(), field.id(), field.type(), 0, fieldIdKey));
             }
             children = rowChildren;
         }
@@ -457,35 +444,31 @@ class ArrowSchemaMetadata {
     }
 
     private static ArrowField toArrowMapEntryField(
-            int fieldId, MapType mapType, int depth, boolean includeParquetFieldId) {
+            int fieldId, MapType mapType, int depth, String fieldIdKey) {
         ArrowField keyField =
                 toArrowField(
                         MAP_KEY_NAME,
                         fieldId,
                         mapType.getKeyType().notNull(),
                         depth + 1,
-                        includeParquetFieldId);
-        if (includeParquetFieldId) {
+                        fieldIdKey);
+        if (fieldIdKey != null) {
             keyField =
                     keyField.withMetadata(
                             Collections.singletonMap(
-                                    PARQUET_FIELD_ID,
+                                    fieldIdKey,
                                     String.valueOf(
                                             SpecialFields.getMapKeyFieldId(fieldId, depth + 1))));
         }
 
         ArrowField valueField =
                 toArrowField(
-                        MAP_VALUE_NAME,
-                        fieldId,
-                        mapType.getValueType(),
-                        depth + 1,
-                        includeParquetFieldId);
-        if (includeParquetFieldId) {
+                        MAP_VALUE_NAME, fieldId, mapType.getValueType(), depth + 1, fieldIdKey);
+        if (fieldIdKey != null) {
             valueField =
                     valueField.withMetadata(
                             Collections.singletonMap(
-                                    PARQUET_FIELD_ID,
+                                    fieldIdKey,
                                     String.valueOf(
                                             SpecialFields.getMapValueFieldId(fieldId, depth + 1))));
         }
@@ -495,14 +478,13 @@ class ArrowSchemaMetadata {
                 false,
                 ArrowTypeInfo.simple(TYPE_STRUCT),
                 Arrays.asList(keyField, valueField),
-                parquetFieldIdMetadata(fieldId, includeParquetFieldId));
+                fieldIdMetadata(fieldId, fieldIdKey));
     }
 
-    private static Map<String, String> parquetFieldIdMetadata(
-            int fieldId, boolean includeParquetFieldId) {
-        return includeParquetFieldId
-                ? Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId))
-                : Collections.emptyMap();
+    private static Map<String, String> fieldIdMetadata(int fieldId, String fieldIdKey) {
+        return fieldIdKey == null
+                ? Collections.emptyMap()
+                : Collections.singletonMap(fieldIdKey, String.valueOf(fieldId));
     }
 
     private static class ArrowField {

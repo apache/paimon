@@ -32,6 +32,7 @@ import java.util.Map;
 public class FormatMetadataUtils {
 
     public static final String ARROW_SCHEMA_METADATA_KEY = "ARROW:schema";
+    public static final String PARQUET_FIELD_ID_KEY = "PARQUET:field_id";
 
     private FormatMetadataUtils() {}
 
@@ -70,30 +71,29 @@ public class FormatMetadataUtils {
      * <p>The keys of {@code fieldMetadata} are top-level field names. Nested fields are converted
      * from the {@link RowType} but do not receive metadata from this map. If injected metadata
      * conflicts with metadata produced during Arrow conversion, the Arrow conversion metadata wins
-     * to preserve format-specific field information. Set {@code includeParquetFieldId} to {@code
-     * true} when the Arrow schema is written for Parquet metadata.
+     * to preserve format-specific field information. Set {@code fieldIdKey} to the field id
+     * metadata key used by the target format, or {@code null} if field id metadata should not be
+     * written.
      */
     public static byte[] buildArrowSchemaMetadata(
             RowType rowType,
             Map<String, Map<String, String>> fieldMetadata,
-            boolean includeParquetFieldId) {
-        return ArrowSchemaMetadata.serialize(rowType, fieldMetadata, includeParquetFieldId);
+            @Nullable String fieldIdKey) {
+        return ArrowSchemaMetadata.serialize(rowType, fieldMetadata, fieldIdKey);
     }
 
     /**
-     * Reads field metadata from a base64-encoded {@code ARROW:schema} value.
+     * Reads field metadata from serialized Arrow schema metadata.
      *
      * <p>The returned map contains top-level fields only, keyed by field name. If the input is
-     * {@code null}, is not valid base64, or cannot be parsed as an Arrow schema message, this
-     * method returns an empty map.
+     * {@code null} or cannot be parsed as an Arrow schema message, this method returns an empty
+     * map. Fields without any metadata are omitted from the returned map.
      */
-    public static Map<String, Map<String, String>> readFieldMetadata(
-            @Nullable String encodedSchema) {
-        if (encodedSchema == null) {
+    public static Map<String, Map<String, String>> readFieldMetadata(@Nullable byte[] schemaBytes) {
+        if (schemaBytes == null) {
             return Collections.emptyMap();
         }
         try {
-            byte[] schemaBytes = Base64.getDecoder().decode(encodedSchema);
             return ArrowSchemaMetadata.readFieldMetadata(schemaBytes);
         } catch (RuntimeException e) {
             return Collections.emptyMap();

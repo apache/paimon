@@ -41,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -275,10 +276,19 @@ public class VectorizedParquetRecordReader
 
     @Override
     public Map<String, Map<String, String>> readFieldMetadata() throws IOException {
-        return FormatMetadataUtils.readFieldMetadata(
+        String encodedSchema =
                 reader.getFooter()
                         .getFileMetaData()
                         .getKeyValueMetaData()
+                        .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY);
+        if (encodedSchema == null) {
+            return FormatMetadataUtils.readFieldMetadata(null);
+        }
+        return FormatMetadataUtils.readFieldMetadata(
+                FormatMetadataUtils.decodeMetadata(
+                                Collections.singletonMap(
+                                        FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                        encodedSchema))
                         .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
     }
 

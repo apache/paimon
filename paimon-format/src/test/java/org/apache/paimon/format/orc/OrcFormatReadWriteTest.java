@@ -105,7 +105,8 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
         Map<String, Map<String, String>> fieldMetadataByName = new HashMap<>();
         fieldMetadataByName.put("name", fieldMetadata);
         byte[] arrowSchemaBytes =
-                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, fieldMetadataByName, false);
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType, fieldMetadataByName, OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY);
         Map<String, byte[]> metadata = new HashMap<>();
         metadata.put("paimon.test.key", "paimon-test-value".getBytes(StandardCharsets.UTF_8));
         metadata.put(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY, arrowSchemaBytes);
@@ -138,8 +139,12 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
                         .createReader(context)) {
             Map<String, Map<String, String>> readFieldMetadata =
                     ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-            assertThat(readFieldMetadata).containsOnlyKeys("name");
+            assertThat(readFieldMetadata).containsOnlyKeys("id", "name");
+            assertThat(readFieldMetadata.get("id"))
+                    .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "0");
             assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
+            assertThat(readFieldMetadata.get("name"))
+                    .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");
         }
     }
 

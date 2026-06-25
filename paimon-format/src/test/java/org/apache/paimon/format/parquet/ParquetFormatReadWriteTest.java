@@ -84,7 +84,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         Map<String, Map<String, String>> fieldMetadataByName = new HashMap<>();
         fieldMetadataByName.put("name", fieldMetadata);
         byte[] arrowSchemaBytes =
-                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, fieldMetadataByName, true);
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType, fieldMetadataByName, FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
         Map<String, byte[]> metadata = new HashMap<>();
         metadata.put("paimon.test.key", "paimon-test-value".getBytes(StandardCharsets.UTF_8));
         metadata.put(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY, arrowSchemaBytes);
@@ -116,8 +117,12 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
             Map<String, Map<String, String>> readFieldMetadata =
                     ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
             Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");
+            Assertions.assertThat(readFieldMetadata.get("id"))
+                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
             Assertions.assertThat(readFieldMetadata.get("name"))
                     .containsAllEntriesOf(fieldMetadata);
+            Assertions.assertThat(readFieldMetadata.get("name"))
+                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
         }
     }
 

@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +47,8 @@ public class ArrowSchemaMetadataCompatibilityTest {
         fieldMetadata.put("tags", tagsMetadata);
 
         byte[] schemaBytes =
-                FormatMetadataUtils.buildArrowSchemaMetadata(rowType, fieldMetadata, true);
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType, fieldMetadata, FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
         Schema schema = Schema.deserializeMessage(ByteBuffer.wrap(schemaBytes));
 
         assertThat(schema.getFields()).extracting(Field::getName).containsExactly("id", "tags");
@@ -71,11 +71,10 @@ public class ArrowSchemaMetadataCompatibilityTest {
             }
             fields.add(arrowField);
         }
-        String encodedSchema =
-                Base64.getEncoder().encodeToString(new Schema(fields).serializeAsMessage());
+        byte[] schemaBytes = new Schema(fields).serializeAsMessage();
 
         Map<String, Map<String, String>> metadata =
-                FormatMetadataUtils.readFieldMetadata(encodedSchema);
+                FormatMetadataUtils.readFieldMetadata(schemaBytes);
 
         assertThat(metadata).containsOnlyKeys("id", "tags");
         assertThat(metadata.get("id")).containsEntry(ArrowUtils.PARQUET_FIELD_ID, "0");

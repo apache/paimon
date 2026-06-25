@@ -264,14 +264,20 @@ public class OrcReaderFactory implements FormatReaderFactory {
                     .contains(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)) {
                 return Collections.emptyMap();
             }
-            return FormatMetadataUtils.readFieldMetadata(
+            String encodedSchema =
                     StandardCharsets.UTF_8
                             .decode(
                                     fileReader
                                             .getMetadataValue(
                                                     FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY)
                                             .duplicate())
-                            .toString());
+                            .toString();
+            return FormatMetadataUtils.readFieldMetadata(
+                    FormatMetadataUtils.decodeMetadata(
+                                    Collections.singletonMap(
+                                            FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                                            encodedSchema))
+                            .get(FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY));
         }
 
         @Override
