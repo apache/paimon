@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -95,7 +96,7 @@ public class VectorType extends DataType {
 
     @Override
     public int defaultSize() {
-        return elementType.defaultSize() * length;
+        return MathUtils.multiplySafely(elementType.defaultSize(), length);
     }
 
     @Override
