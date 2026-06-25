@@ -213,6 +213,7 @@ public abstract class AbstractVectorRead implements Serializable {
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             float[] vector,
+            int searchLimit,
             @Nullable RoaringNavigableMap64 includeRowIds,
             ExecutorService executor) {
         if (vectorIndexFiles.isEmpty()) {
@@ -227,7 +228,7 @@ public abstract class AbstractVectorRead implements Serializable {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         VectorSearch vectorSearch =
-                new VectorSearch(vector, limit, vectorColumn.name(), options)
+                new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitVectorSearch(vectorSearch)
@@ -241,6 +242,7 @@ public abstract class AbstractVectorRead implements Serializable {
             long rowRangeEnd,
             List<IndexFileMeta> vectorIndexFiles,
             float[][] vectors,
+            int searchLimit,
             @Nullable RoaringNavigableMap64 includeRowIds,
             ExecutorService executor) {
         if (vectorIndexFiles.isEmpty()) {
@@ -255,7 +257,7 @@ public abstract class AbstractVectorRead implements Serializable {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         BatchVectorSearch batchVectorSearch =
-                new BatchVectorSearch(vectors, limit, vectorColumn.name(), options)
+                new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitBatchVectorSearch(batchVectorSearch)
@@ -280,6 +282,40 @@ public abstract class AbstractVectorRead implements Serializable {
                         rawSearchIndexer(rawSplits, globalIndexer),
                         queryVector);
         return result.or(rawResult).topK(limit);
+    }
+
+    protected int indexedSearchLimit(String indexType) {
+        int refineFactor = configuredRefineFactor(indexType);
+        if (refineFactor == 0) {
+            return limit;
+        }
+        if (limit > Integer.MAX_VALUE / refineFactor) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Vector search limit overflow: limit=%d, refine factor=%d",
+                            limit, refineFactor));
+        }
+        return limit * refineFactor;
+    }
+
+    protected ScoredGlobalIndexResult maybeRerankIndexedResult(
+            ScoredGlobalIndexResult result,
+            String indexType,
+            @Nullable GlobalIndexer globalIndexer,
+            float[] queryVector) {
+        if (configuredRefineFactor(indexType) == 0 || result.results().isEmpty()) {
+            return result;
+        }
+        ScoredGlobalIndexResult candidates = result.topK(indexedSearchLimit(indexType));
+        return readRawSearch(
+                candidates.results().toRangeList(),
+                candidates.results(),
+                globalIndexer,
+                queryVector);
+    }
+
+    protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
+        return firstVectorIndexFile(splits).indexType();
     }
 
     protected ScoredGlobalIndexResult[] emptyScoredResults(int n) {
@@ -507,6 +543,76 @@ public abstract class AbstractVectorRead implements Serializable {
 
     private static String normalizeMetric(String metric) {
         return metric.toLowerCase().replace('-', '_');
+    }
+
+    private int configuredRefineFactor(String indexType) {
+        String value = configuredRefineFactor(options, indexType);
+        if (value == null) {
+            value = configuredRefineFactor(table.options(), indexType);
+        }
+        if (value == null) {
+            return 0;
+        }
+        try {
+            int factor = Integer.parseInt(value);
+            if (factor <= 0) {
+                throw new IllegalArgumentException(
+                        "Vector refine factor must be positive, got: " + value);
+            }
+            return factor;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Invalid vector refine factor: " + value + ". Must be an integer.", e);
+        }
+    }
+
+    @Nullable
+    private String configuredRefineFactor(Map<String, String> options, String indexType) {
+        List<String> prefixes = new ArrayList<>();
+        String fieldPrefix = "fields." + vectorColumn.name() + ".";
+        addRefinePrefixes(prefixes, fieldPrefix, indexType);
+        addRefinePrefixes(prefixes, "", indexType);
+
+        for (String prefix : prefixes) {
+            String value = refineFactorOption(options, prefix + "refine_factor");
+            if (value == null) {
+                value = refineFactorOption(options, prefix + "refine-factor");
+            }
+            if (value == null) {
+                value = refineFactorOption(options, prefix + "rerank_factor");
+            }
+            if (value == null) {
+                value = refineFactorOption(options, prefix + "rerank-factor");
+            }
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static void addRefinePrefixes(List<String> prefixes, String base, String indexType) {
+        if (indexType != null && !indexType.isEmpty()) {
+            prefixes.add(base + indexType + ".");
+            String normalizedIndexType = normalizeIndexType(indexType);
+            if (!normalizedIndexType.equals(indexType)) {
+                prefixes.add(base + normalizedIndexType + ".");
+            }
+            if (normalizedIndexType.startsWith("ivf")) {
+                prefixes.add(base + "ivf.");
+            }
+        }
+        prefixes.add(base);
+    }
+
+    @Nullable
+    private static String refineFactorOption(Map<String, String> options, String key) {
+        String value = options.get(key);
+        return value == null ? null : value.trim();
+    }
+
+    private static String normalizeIndexType(String indexType) {
+        return indexType.toLowerCase().replace('-', '_');
     }
 
     private static IndexFileMeta firstVectorIndexFile(List<IndexVectorSearchSplit> splits) {

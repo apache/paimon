@@ -56,6 +56,7 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final GlobalIndexIOMeta ioMeta;
     private final String metric;
+    private final boolean reverseScore;
     private final String requiredOptionKey;
     private final String requiredOptionValue;
 
@@ -66,18 +67,20 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
 
     public TestVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, GlobalIndexIOMeta ioMeta, String metric) {
-        this(fileReader, ioMeta, metric, null, null);
+        this(fileReader, ioMeta, metric, false, null, null);
     }
 
     public TestVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             GlobalIndexIOMeta ioMeta,
             String metric,
+            boolean reverseScore,
             String requiredOptionKey,
             String requiredOptionValue) {
         this.fileReader = fileReader;
         this.ioMeta = ioMeta;
         this.metric = metric;
+        this.reverseScore = reverseScore;
         this.requiredOptionKey = requiredOptionKey;
         this.requiredOptionValue = requiredOptionValue;
     }
@@ -148,16 +151,21 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     private float computeScore(float[] query, float[] stored) {
+        float score;
         switch (metric) {
             case "l2":
-                return computeL2Score(query, stored);
+                score = computeL2Score(query, stored);
+                break;
             case "cosine":
-                return computeCosineScore(query, stored);
+                score = computeCosineScore(query, stored);
+                break;
             case "inner_product":
-                return computeInnerProductScore(query, stored);
+                score = computeInnerProductScore(query, stored);
+                break;
             default:
                 throw new IllegalArgumentException("Unknown metric: " + metric);
         }
+        return reverseScore ? -score : score;
     }
 
     private static float computeL2Score(float[] a, float[] b) {

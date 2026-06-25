@@ -103,7 +103,8 @@ public class SparkVectorReadImpl extends VectorReadImpl {
         }
 
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
-        String indexType = splits.get(0).vectorIndexFiles().get(0).indexType();
+        String indexType = vectorIndexType(splits);
+        int searchLimit = indexedSearchLimit(indexType);
         List<SerializedSplit> serializedSplits = new ArrayList<>(splits.size());
         for (int i = 0; i < splits.size(); i++) {
             try {
@@ -143,6 +144,7 @@ public class SparkVectorReadImpl extends VectorReadImpl {
                                         split.rowRangeEnd(),
                                         split.vectorIndexFiles(),
                                         vector,
+                                        searchLimit,
                                         deserializePreFilter(serializedSplit.preFilter),
                                         executor));
                     }
@@ -154,7 +156,7 @@ public class SparkVectorReadImpl extends VectorReadImpl {
                             result = result.or(next.get());
                         }
                     }
-                    result = result.topK(limit);
+                    result = result.topK(searchLimit);
                     if (result.results().isEmpty()) {
                         return null;
                     }
@@ -168,7 +170,13 @@ public class SparkVectorReadImpl extends VectorReadImpl {
 
         List<byte[]> remoteResults = mapInSpark(splitGroups, task, splitGroups.size());
 
-        return mergeRemoteResults(remoteResults);
+        GlobalIndexer rerankGlobalIndexer =
+                globalIndexer == null ? createGlobalIndexer(splits) : globalIndexer;
+        return maybeRerankIndexedResult(
+                mergeRemoteResults(remoteResults, searchLimit),
+                indexType,
+                rerankGlobalIndexer,
+                vector);
     }
 
     protected ScoredGlobalIndexResult readRawSplitsInSpark(
@@ -290,6 +298,10 @@ public class SparkVectorReadImpl extends VectorReadImpl {
     }
 
     private ScoredGlobalIndexResult mergeRemoteResults(List<byte[]> remoteResults) {
+        return mergeRemoteResults(remoteResults, limit);
+    }
+
+    private ScoredGlobalIndexResult mergeRemoteResults(List<byte[]> remoteResults, int topK) {
         ScoredGlobalIndexResult result = ScoredGlobalIndexResult.createEmpty();
         GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
         for (byte[] bytes : remoteResults) {
@@ -301,7 +313,7 @@ public class SparkVectorReadImpl extends VectorReadImpl {
                 }
             }
         }
-        return result.topK(limit);
+        return result.topK(topK);
     }
 
     private List<List<Range>> rangeGroups(List<Range> ranges, int parallelism) {
