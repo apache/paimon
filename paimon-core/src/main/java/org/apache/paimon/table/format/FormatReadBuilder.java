@@ -19,6 +19,7 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -26,6 +27,8 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.io.DataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
@@ -78,7 +81,24 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.readType = this.table.rowType();
-        this.options = new CoreOptions(table.options());
+        this.options = mergeCaseSensitive(table);
+    }
+
+    /**
+     * Case-sensitivity is a catalog-level property carried by {@link CatalogContext}, not part of
+     * the table options. Merge it onto the format options bus once so it flows naturally to the
+     * format readers via {@link org.apache.paimon.format.FileFormatFactory.FormatContext}.
+     */
+    private static CoreOptions mergeCaseSensitive(FormatTable table) {
+        CatalogContext ctx = table.catalogContext();
+        if (ctx == null) {
+            return new CoreOptions(table.options());
+        }
+        Options merged = new Options(table.options());
+        ctx.options()
+                .getOptional(CatalogOptions.CASE_SENSITIVE)
+                .ifPresent(v -> merged.set(CatalogOptions.CASE_SENSITIVE, v));
+        return new CoreOptions(merged);
     }
 
     @Override

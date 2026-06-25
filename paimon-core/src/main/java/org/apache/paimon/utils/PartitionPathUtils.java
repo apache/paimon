@@ -28,6 +28,7 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -345,28 +346,25 @@ public class PartitionPathUtils {
         ArrayList<FileStatus> result = new ArrayList<>();
 
         try {
-            if (fileIO.exists(path)) {
-                // ignore hidden file
-                FileStatus fileStatus = fileIO.getFileStatus(path);
-                // Calculate the starting offset when we begin from a prefix path
-                // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
-                // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
-                int levelOffset = partitionKeys.size() - expectLevel;
-                listStatusRecursively(
-                        fileIO,
-                        fileStatus,
-                        0,
-                        expectLevel,
-                        result,
-                        partitionKeys,
-                        onlyValueInPath,
-                        partitionFilter,
-                        partitionType,
-                        defaultPartValue,
-                        levelOffset);
-            } else {
-                return new FileStatus[0];
-            }
+            FileStatus fileStatus = fileIO.getFileStatus(path);
+            // Calculate the starting offset when we begin from a prefix path
+            // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
+            // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
+            int levelOffset = partitionKeys.size() - expectLevel;
+            listStatusRecursively(
+                    fileIO,
+                    fileStatus,
+                    0,
+                    expectLevel,
+                    result,
+                    partitionKeys,
+                    onlyValueInPath,
+                    partitionFilter,
+                    partitionType,
+                    defaultPartValue,
+                    levelOffset);
+        } catch (FileNotFoundException e) {
+            return new FileStatus[0];
         } catch (IOException e) {
             throw new RuntimeException("Failed to list files in " + path, e);
         }

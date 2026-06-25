@@ -332,6 +332,16 @@ Download [paimon-jindo-@@VERSION@@.jar](https://repository.apache.org/snapshots/
 
 </Unstable>
 
+### Server-Side Encryption with Customer CMK (SSE-KMS)
+
+To encrypt OSS writes with a customer-managed CMK (BYOK) via SSE-KMS, configure the CMK key id:
+
+```yaml
+fs.oss.server-side-encryption-key-id: your-cmk-key-id
+```
+
+When set, Paimon stamps the given CMK on the OSS write paths it performs: `PutObject`, server-side `CopyObject` (used by rename/commit), and multipart-upload initiation (parts inherit the CMK).
+
 ## S3
 
 <Stable>

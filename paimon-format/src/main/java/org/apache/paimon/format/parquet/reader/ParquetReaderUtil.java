@@ -62,6 +62,7 @@ import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.PrimitiveColumnIO;
+import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
@@ -275,7 +276,7 @@ public class ParquetReaderUtil {
                         constructField(
                                 children.get(i),
                                 lookupColumnByName(groupColumnIO, childName),
-                                parquetType.asGroupType().getType(childName)));
+                                getTypeIgnoreCase(parquetType.asGroupType(), childName)));
             }
 
             return new ParquetGroupField(
@@ -412,6 +413,23 @@ public class ParquetReaderUtil {
                 String.format(
                         "ColumnIO for '%s' not found in Parquet schema under '%s'.",
                         columnName, String.join(".", groupColumnIO.getFieldPath())));
+    }
+
+    /**
+     * Resolves a child {@link Type} by name, first by exact match then case-insensitively,
+     * mirroring {@link #lookupColumnByName}. Falls back to {@link GroupType#getType(String)} (which
+     * throws) so a genuinely missing field keeps the original failure behavior.
+     */
+    private static Type getTypeIgnoreCase(GroupType groupType, String fieldName) {
+        if (groupType.containsField(fieldName)) {
+            return groupType.getType(fieldName);
+        }
+        for (Type field : groupType.getFields()) {
+            if (field.getName().equalsIgnoreCase(fieldName)) {
+                return field;
+            }
+        }
+        return groupType.getType(fieldName);
     }
 
     public static GroupColumnIO getMapKeyValueColumn(GroupColumnIO groupColumnIO) {

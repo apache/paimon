@@ -18,6 +18,7 @@
 """Builder to build hybrid search."""
 
 import heapq
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -32,6 +33,7 @@ from pypaimon.globalindex.vector_search_result import (
 
 RRF_RANKER = "rrf"
 WEIGHTED_SCORE_RANKER = "weighted_score"
+MRR_RANKER = "mrr"
 _RRF_K = 60.0
 
 
@@ -45,7 +47,7 @@ def _normalize_ranker(ranker: Optional[str]) -> str:
     if ranker is None or not ranker.strip():
         return RRF_RANKER
     normalized = ranker.strip().lower()
-    if normalized not in (RRF_RANKER, WEIGHTED_SCORE_RANKER):
+    if normalized not in (RRF_RANKER, WEIGHTED_SCORE_RANKER, MRR_RANKER):
         raise ValueError("Unsupported hybrid ranker: %s" % ranker)
     return normalized
 
@@ -77,8 +79,9 @@ class HybridSearchRoute:
                 "Query cannot be None for full-text route")
         if self.limit <= 0:
             raise ValueError("Limit must be positive, got: %s" % self.limit)
-        if self.weight <= 0:
-            raise ValueError("Weight must be positive, got: %s" % self.weight)
+        if not math.isfinite(self.weight) or self.weight <= 0:
+            raise ValueError(
+                "Weight must be finite and positive, got: %s" % self.weight)
         self.options = dict(self.options or {})
         if self.route_type == self.FULL_TEXT:
             _check_full_text_options(self.options)
@@ -320,6 +323,8 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
         ]
         if self._ranker == WEIGHTED_SCORE_RANKER:
             return self._weighted_score(non_empty)
+        if self._ranker == MRR_RANKER:
+            return self._mrr(non_empty)
         return self._rrf(non_empty)
 
     def _validate_search(self):
@@ -362,14 +367,16 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
     def _rrf(self, route_results):
         scores = {}
         for route_result in route_results:
-            result = route_result.result
-            score_getter = result.score_getter()
-            row_ids = sorted(
-                result.results(),
-                key=lambda row_id: (
-                    -(score_getter(row_id) or 0.0), row_id))
-            for rank, row_id in enumerate(row_ids):
+            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
                 contribution = route_result.route.weight / (_RRF_K + rank + 1.0)
+                scores[row_id] = scores.get(row_id, 0.0) + contribution
+        return _top_k(scores, self._limit)
+
+    def _mrr(self, route_results):
+        scores = {}
+        for route_result in route_results:
+            for rank, row_id in enumerate(_ranked_row_ids(route_result.result)):
+                contribution = route_result.route.weight / (rank + 1.0)
                 scores[row_id] = scores.get(row_id, 0.0) + contribution
         return _top_k(scores, self._limit)
 
@@ -452,6 +459,13 @@ class HybridSearchBuilderImpl(HybridSearchBuilder):
                 [cls._rebuild_leaf_indices_by_name(c, name_to_idx)
                  for c in (predicate.literals or [])])
         return predicate.new_index(name_to_idx[predicate.field])
+
+
+def _ranked_row_ids(result):
+    score_getter = result.score_getter()
+    return sorted(
+        result.results(),
+        key=lambda row_id: (-(score_getter(row_id) or 0.0), row_id))
 
 
 def _top_k(scores, limit):

@@ -22,15 +22,18 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 
 /** Ranker utilities for hybrid search results. */
 public class HybridSearchRanker {
 
     public static final String RRF_RANKER = "rrf";
     public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
+    public static final String MRR_RANKER = "mrr";
 
     private static final float RRF_K = 60.0f;
 
@@ -47,8 +50,11 @@ public class HybridSearchRanker {
 
     public static ScoredGlobalIndexResult rank(
             String ranker, List<WeightedResult> results, int limit) {
-        if (WEIGHTED_SCORE_RANKER.equals(normalizeRanker(ranker))) {
+        String normalized = normalizeRanker(ranker);
+        if (WEIGHTED_SCORE_RANKER.equals(normalized)) {
             return weightedScore(results, limit);
+        } else if (MRR_RANKER.equals(normalized)) {
+            return mrr(results, limit);
         }
         return rrf(results, limit);
     }
@@ -58,7 +64,9 @@ public class HybridSearchRanker {
             return RRF_RANKER;
         }
         String normalized = ranker.trim().toLowerCase();
-        if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
+        if (!RRF_RANKER.equals(normalized)
+                && !WEIGHTED_SCORE_RANKER.equals(normalized)
+                && !MRR_RANKER.equals(normalized)) {
             throw new IllegalArgumentException("Unsupported hybrid ranker: " + ranker);
         }
         return normalized;
@@ -132,6 +140,32 @@ public class HybridSearchRanker {
         return topK(scores, limit);
     }
 
+    public static ScoredGlobalIndexResult mrr(
+            List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
+        List<WeightedResult> weightedResults = new ArrayList<>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
+        }
+        return mrr(weightedResults, limit);
+    }
+
+    public static ScoredGlobalIndexResult mrr(List<WeightedResult> results, int limit) {
+        Map<Long, Float> scores = new HashMap<>();
+        for (WeightedResult weightedResult : results) {
+            ScoredGlobalIndexResult result = weightedResult.result();
+            float weight = weightedResult.weight();
+            List<Long> ranked = rankedRowIds(result);
+            for (int rank = 0; rank < ranked.size(); rank++) {
+                Long rowId = ranked.get(rank);
+                float contribution = weight / (rank + 1.0f);
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
+            }
+        }
+        return topK(scores, limit);
+    }
+
     private static List<Long> rankedRowIds(ScoredGlobalIndexResult result) {
         List<Long> rowIds = new ArrayList<>();
         for (long rowId : result.results()) {
@@ -151,24 +185,42 @@ public class HybridSearchRanker {
     }
 
     private static ScoredGlobalIndexResult topK(Map<Long, Float> scores, int limit) {
-        if (scores.isEmpty()) {
+        if (scores.isEmpty() || limit <= 0) {
             return ScoredGlobalIndexResult.createEmpty();
         }
-        List<Map.Entry<Long, Float>> ranked = new ArrayList<>(scores.entrySet());
-        ranked.sort(
+        if (scores.size() <= limit) {
+            return toScoredResult(scores.entrySet());
+        }
+
+        // The heap head is the weakest kept row: lowest score, then largest rowId.
+        Comparator<Map.Entry<Long, Float>> weakestFirst =
                 (left, right) -> {
-                    int scoreCompare = Float.compare(right.getValue(), left.getValue());
+                    int scoreCompare = Float.compare(left.getValue(), right.getValue());
                     if (scoreCompare != 0) {
                         return scoreCompare;
                     }
-                    return Long.compare(left.getKey(), right.getKey());
-                });
+                    return Long.compare(right.getKey(), left.getKey());
+                };
 
-        int size = Math.min(limit, ranked.size());
+        PriorityQueue<Map.Entry<Long, Float>> topEntries =
+                new PriorityQueue<>(limit + 1, weakestFirst);
+        for (Map.Entry<Long, Float> entry : scores.entrySet()) {
+            if (topEntries.size() < limit) {
+                topEntries.offer(entry);
+            } else if (weakestFirst.compare(entry, topEntries.peek()) > 0) {
+                topEntries.poll();
+                topEntries.offer(entry);
+            }
+        }
+
+        return toScoredResult(topEntries);
+    }
+
+    private static ScoredGlobalIndexResult toScoredResult(
+            Iterable<Map.Entry<Long, Float>> entries) {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         Map<Long, Float> topScores = new HashMap<>();
-        for (int i = 0; i < size; i++) {
-            Map.Entry<Long, Float> entry = ranked.get(i);
+        for (Map.Entry<Long, Float> entry : entries) {
             bitmap.add(entry.getKey());
             topScores.put(entry.getKey(), entry.getValue());
         }
@@ -182,6 +234,14 @@ public class HybridSearchRanker {
         return weights[index];
     }
 
+    private static float checkWeight(float weight) {
+        if (!Float.isFinite(weight) || weight <= 0) {
+            throw new IllegalArgumentException(
+                    "Weight must be finite and positive, got: " + weight);
+        }
+        return weight;
+    }
+
     /** Weighted result from one search route. */
     public static class WeightedResult implements Serializable {
 
@@ -192,7 +252,7 @@ public class HybridSearchRanker {
 
         public WeightedResult(ScoredGlobalIndexResult result, float weight) {
             this.result = result;
-            this.weight = weight;
+            this.weight = checkWeight(weight);
         }
 
         public ScoredGlobalIndexResult result() {

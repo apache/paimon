@@ -21,10 +21,11 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.{BinaryString, GenericRow, Timestamp}
 import org.apache.paimon.manifest.ManifestCommittable
 import org.apache.paimon.spark.PaimonHiveTestBase
-import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
+import org.apache.paimon.spark.catalyst.plans.logical.{LateralVectorSearch, PaimonTableValuedFunctions}
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.catalyst.plans.logical.Filter
 
 import java.time.LocalDateTime
 import java.util.Collections
@@ -39,6 +40,145 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       PaimonTableValuedFunctions.parsePositiveLimit(longValue)
     }
     assert(error.getMessage.contains("Limit must be no greater than"))
+  }
+
+  test("lateral vector search preserves subquery alias qualifiers") {
+    withTable("vector_search_source", "vector_search_result") {
+      spark.sql("""
+                  |CREATE TABLE vector_search_source (gid BIGINT, embs ARRAY<FLOAT>, dt STRING)
+                  |USING paimon
+                  |TBLPROPERTIES (
+                  |  'vector.file.format' = 'lance',
+                  |  'vector-field' = 'embs',
+                  |  'field.embs.vector-dim' = '3',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |PARTITIONED BY (dt)
+                  |""".stripMargin)
+      spark.sql("""
+                  |CREATE TABLE vector_search_result (
+                  |  query_gid BIGINT,
+                  |  query_embs ARRAY<FLOAT>,
+                  |  result_gid BIGINT,
+                  |  result_embs ARRAY<FLOAT>,
+                  |  score FLOAT,
+                  |  dt STRING)
+                  |USING paimon
+                  |PARTITIONED BY (dt)
+                  |""".stripMargin)
+
+      val insertOptimizedPlan = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, q.embs AS query_embs,
+               |       r.gid AS result_gid, r.embs AS result_embs,
+               |       r.__paimon_search_score AS score
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT gid, embs, __paimon_search_score
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |) AS r
+               |WHERE q.dt = '20260608'
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      val lateralVectorSearches = insertOptimizedPlan.collect {
+        case lvs: LateralVectorSearch => lvs
+      }
+      assert(lateralVectorSearches.size == 1, insertOptimizedPlan.toString)
+
+      val optimizedPlanWithoutScore = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.embs AS result_embs
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT embs
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      assert(
+        optimizedPlanWithoutScore.exists(_.isInstanceOf[LateralVectorSearch]),
+        optimizedPlanWithoutScore.toString)
+
+      val analyzedPlanWithJoinCondition = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.result_gid, r.score
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT gid AS result_gid, __paimon_search_score AS score
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |) AS r
+               |WHERE q.gid = r.result_gid AND r.score >= 0.0
+               |""".stripMargin)
+        .queryExecution
+        .analyzed
+      val lateralVectorSearchFilters = analyzedPlanWithJoinCondition.collect {
+        case filter @ Filter(_, _: LateralVectorSearch) => filter
+      }
+      assert(lateralVectorSearchFilters.size == 1, analyzedPlanWithJoinCondition.toString)
+      assert(
+        lateralVectorSearchFilters.head.condition.references
+          .subsetOf(lateralVectorSearchFilters.head.child.outputSet),
+        analyzedPlanWithJoinCondition.toString
+      )
+
+      val optimizedPlanWithSearchFilter = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.result_gid, r.dt
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT gid AS result_gid, dt
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |) AS r
+               |WHERE r.dt = '20260608'
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      val lateralVectorSearchesWithSearchFilter = optimizedPlanWithSearchFilter.collect {
+        case lvs: LateralVectorSearch => lvs
+      }
+      assert(
+        lateralVectorSearchesWithSearchFilter.size == 1,
+        optimizedPlanWithSearchFilter.toString)
+      assert(
+        lateralVectorSearchesWithSearchFilter.head.searchFilters.nonEmpty,
+        optimizedPlanWithSearchFilter.toString)
+
+      val optimizedPlanWithSubqueryFilter = spark
+        .sql("""
+               |SELECT q.gid AS query_gid, r.result_gid
+               |FROM vector_search_source AS q,
+               |LATERAL (
+               |  SELECT gid AS result_gid
+               |  FROM vector_search('vector_search_source', 'embs', q.embs, 5)
+               |  WHERE dt = '20260608'
+               |) AS r
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      val lateralVectorSearchesWithSubqueryFilter = optimizedPlanWithSubqueryFilter.collect {
+        case lvs: LateralVectorSearch => lvs
+      }
+      assert(
+        lateralVectorSearchesWithSubqueryFilter.size == 1,
+        optimizedPlanWithSubqueryFilter.toString)
+      assert(
+        lateralVectorSearchesWithSubqueryFilter.head.searchFilters.nonEmpty,
+        optimizedPlanWithSubqueryFilter.toString)
+
+      val constantVectorPlan = spark
+        .sql("""
+               |SELECT gid
+               |FROM vector_search(
+               |  'vector_search_source', 'embs', array(1.0f, 2.0f, 3.0f), 5)
+               |""".stripMargin)
+        .queryExecution
+        .optimizedPlan
+      assert(
+        !constantVectorPlan.exists(_.isInstanceOf[LateralVectorSearch]),
+        constantVectorPlan.toString)
+    }
   }
 
   withPk.foreach {

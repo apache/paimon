@@ -199,4 +199,86 @@ public class FullTextQueryTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Full-text hybrid route options are not supported yet");
     }
+
+    @Test
+    public void testHybridRouteBuilderRejectsMixedRouteTypes() {
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.builder()
+                                        .vectorColumn("embedding")
+                                        .queryVector(new float[] {1.0f, 2.0f})
+                                        .query(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"paimon lake\"}}")
+                                        .limit(10)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot mix vector and full-text hybrid route settings");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.builder()
+                                        .query(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"paimon lake\"}}")
+                                        .vectorColumn("embedding")
+                                        .limit(10)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot mix vector and full-text hybrid route settings");
+    }
+
+    @Test
+    public void testHybridRouteBuilderKeepsRouteUnsetAfterInvalidFullTextQuery() {
+        HybridSearchRoute.Builder builder = HybridSearchRoute.builder();
+
+        assertThatThrownBy(() -> builder.query("{\"match\":{"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        HybridSearchRoute route =
+                builder.vectorColumn("embedding")
+                        .queryVector(new float[] {1.0f, 2.0f})
+                        .limit(10)
+                        .build();
+
+        assertThat(route.isVector()).isTrue();
+        assertThat(route.fieldName()).isEqualTo("embedding");
+    }
+
+    @Test
+    public void testHybridRouteRejectsNonFiniteWeight() {
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.vector(
+                                        "embedding",
+                                        new float[] {1.0f},
+                                        10,
+                                        Float.NaN,
+                                        Collections.emptyMap()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.vector(
+                                        "embedding",
+                                        new float[] {1.0f},
+                                        10,
+                                        Float.POSITIVE_INFINITY,
+                                        Collections.emptyMap()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+
+        assertThatThrownBy(
+                        () ->
+                                HybridSearchRoute.builder()
+                                        .query(
+                                                "{\"match\":{\"column\":\"content\","
+                                                        + "\"terms\":\"paimon lake\"}}")
+                                        .limit(10)
+                                        .weight(Float.NEGATIVE_INFINITY)
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Weight must be finite and positive");
+    }
 }
