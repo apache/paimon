@@ -145,17 +145,6 @@ public class ManifestFileSorter {
             List<ManifestFileMeta> newFilesForAbort,
             ManifestFile manifestFile,
             RowType partitionType,
-            CoreOptions options)
-            throws Exception {
-        return trySortCompaction(
-                input, newFilesForAbort, manifestFile, partitionType, options, null);
-    }
-
-    static List<ManifestFileMeta> trySortCompaction(
-            List<ManifestFileMeta> input,
-            List<ManifestFileMeta> newFilesForAbort,
-            ManifestFile manifestFile,
-            RowType partitionType,
             CoreOptions options,
             @Nullable IOManager ioManager)
             throws Exception {

@@ -119,10 +119,6 @@ public class ManifestEntryExternalSort {
             this.ioManager = ioManager;
         }
 
-        static ExternalSortConfig from(CoreOptions options) {
-            return from(options, null);
-        }
-
         static ExternalSortConfig from(CoreOptions options, @Nullable IOManager ioManager) {
             return new ExternalSortConfig(
                     options.sortSpillBufferSize(),

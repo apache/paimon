@@ -35,9 +35,7 @@ import java.util.Map;
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
 
-    default FileStoreCommit withIOManager(IOManager ioManager) {
-        return this;
-    }
+    FileStoreCommit withIOManager(IOManager ioManager);
 
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 

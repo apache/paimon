@@ -30,6 +30,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -46,7 +47,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private final TableCommitImpl commit;
     @Nullable private final CommitterMetrics committerMetrics;
     private final CommitListeners commitListeners;
-    private final IOManager commitIOManager;
+    @Nullable private final IOManager commitIOManager;
     private final boolean allowLogOffsetDuplicate;
 
     public StoreCommitter(FileStoreTable table, TableCommit commit, Context context) {
@@ -65,8 +66,13 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             throw new RuntimeException(e);
         }
 
-        this.commitIOManager = IOManager.create(context.tempDirs());
-        this.commit.withIOManager(commitIOManager);
+        String[] tempDirs = context.tempDirs();
+        if (tempDirs == null) {
+            this.commitIOManager = null;
+        } else {
+            this.commitIOManager = IOManager.create(tempDirs);
+            this.commit.withIOManager(commitIOManager);
+        }
         allowLogOffsetDuplicate = table.bucketMode() == BucketMode.BUCKET_UNAWARE;
     }
 
@@ -137,15 +143,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     @Override
     public void close() throws Exception {
-        try {
-            commit.close();
-        } finally {
-            try {
-                commitListeners.close();
-            } finally {
-                commitIOManager.close();
-            }
-        }
+        IOUtils.closeAll(commit, commitListeners, commitIOManager);
     }
 
     public boolean allowLogOffsetDuplicate() {

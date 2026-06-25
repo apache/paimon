@@ -134,8 +134,6 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         int index = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
 
         // parallelism of commit operator is always 1, so commitUser will never be null
-        org.apache.flink.runtime.io.disk.iomanager.IOManager flinkIOManager =
-                getContainingTask().getEnvironment().getIOManager();
         Committer.Context committerContext =
                 Committer.createContext(
                         commitUser,
@@ -145,7 +143,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                         new OperatorBackendStateStore(context.getOperatorStateStore()),
                         parallelism,
                         index,
-                        flinkIOManager.getSpillingDirectoriesPaths());
+                        getContainingTask()
+                                .getEnvironment()
+                                .getIOManager()
+                                .getSpillingDirectoriesPaths());
         committer = committerFactory.create(committerContext);
 
         committableStateManager.initializeState(committerContext, committer);
