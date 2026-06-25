@@ -75,6 +75,16 @@ Please note that
   data correctness issues. The recommended workflow is: suspend the streaming job with a savepoint →
   perform the rescale overwrite → restart from the savepoint.
 
+:::warning
+Per-partition bucket counts are currently supported by the **Flink** engine only. The **Spark** writer
+still derives the bucket from the single table-level bucket count, so when partitions have different
+bucket counts (for example, after changing the table-level `bucket` while existing partitions keep
+their previous count), Spark may route rows to buckets that do not belong to the partition and corrupt
+the per-partition layout. Until Spark support is added, use Flink to write to tables that have
+per-partition bucket counts, or perform a full-table rescale so every partition shares the same bucket
+count before writing with Spark.
+:::
+
 ## Use Case
 
 Rescale bucket helps to handle sudden spikes in throughput. Suppose there is a daily streaming ETL task to sync transaction data. The table's DDL and pipeline
