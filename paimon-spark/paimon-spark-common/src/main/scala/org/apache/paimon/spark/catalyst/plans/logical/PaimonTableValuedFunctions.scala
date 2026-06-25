@@ -644,7 +644,8 @@ case class VectorSearchQuery(override val args: Seq[Expression])
  *   - vector_routes: route config array with field, query_vector, limit, weight, and options fields
  *   - full_text_routes: route config array with query, limit, weight, and empty options fields
  *   - limit: the final number of ranked top results to return
- *   - ranker: optional ranker for combining results from multiple routes
+ *   - ranker: optional ranker for combining results from multiple routes: rrf, weighted_score, or
+ *     mrr
  */
 case class HybridSearchQuery(override val args: Seq[Expression])
   extends PaimonTableValueFunction(HYBRID_SEARCH) {

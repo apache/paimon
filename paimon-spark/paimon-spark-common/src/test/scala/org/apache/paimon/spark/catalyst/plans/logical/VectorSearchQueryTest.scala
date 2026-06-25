@@ -101,6 +101,28 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).options().isEmpty)
   }
 
+  test("create hybrid search with mrr ranker") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(
+              Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
+              )))),
+        CreateArray(Seq.empty),
+        Literal(7),
+        Literal("mrr")
+      )
+    )
+
+    assert(search.ranker() == "mrr")
+  }
+
   test("create hybrid search with full-text route configs") {
     val search = HybridSearchQuery(Seq.empty).createHybridSearch(
       innerTable,

@@ -33,6 +33,7 @@ public class HybridSearchRanker {
 
     public static final String RRF_RANKER = "rrf";
     public static final String WEIGHTED_SCORE_RANKER = "weighted_score";
+    public static final String MRR_RANKER = "mrr";
 
     private static final float RRF_K = 60.0f;
 
@@ -49,8 +50,11 @@ public class HybridSearchRanker {
 
     public static ScoredGlobalIndexResult rank(
             String ranker, List<WeightedResult> results, int limit) {
-        if (WEIGHTED_SCORE_RANKER.equals(normalizeRanker(ranker))) {
+        String normalized = normalizeRanker(ranker);
+        if (WEIGHTED_SCORE_RANKER.equals(normalized)) {
             return weightedScore(results, limit);
+        } else if (MRR_RANKER.equals(normalized)) {
+            return mrr(results, limit);
         }
         return rrf(results, limit);
     }
@@ -60,7 +64,9 @@ public class HybridSearchRanker {
             return RRF_RANKER;
         }
         String normalized = ranker.trim().toLowerCase();
-        if (!RRF_RANKER.equals(normalized) && !WEIGHTED_SCORE_RANKER.equals(normalized)) {
+        if (!RRF_RANKER.equals(normalized)
+                && !WEIGHTED_SCORE_RANKER.equals(normalized)
+                && !MRR_RANKER.equals(normalized)) {
             throw new IllegalArgumentException("Unsupported hybrid ranker: " + ranker);
         }
         return normalized;
@@ -126,6 +132,32 @@ public class HybridSearchRanker {
                 // so every hit maps to 1.0 rather than being zeroed out.
                 float normalized = range > 0.0f ? (scoreGetter.score(rowId) - min) / range : 1.0f;
                 float contribution = weight * normalized;
+                scores.compute(
+                        rowId,
+                        (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
+            }
+        }
+        return topK(scores, limit);
+    }
+
+    public static ScoredGlobalIndexResult mrr(
+            List<ScoredGlobalIndexResult> results, float[] weights, int limit) {
+        List<WeightedResult> weightedResults = new ArrayList<>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            weightedResults.add(new WeightedResult(results.get(i), weightAt(weights, i)));
+        }
+        return mrr(weightedResults, limit);
+    }
+
+    public static ScoredGlobalIndexResult mrr(List<WeightedResult> results, int limit) {
+        Map<Long, Float> scores = new HashMap<>();
+        for (WeightedResult weightedResult : results) {
+            ScoredGlobalIndexResult result = weightedResult.result();
+            float weight = weightedResult.weight();
+            List<Long> ranked = rankedRowIds(result);
+            for (int rank = 0; rank < ranked.size(); rank++) {
+                Long rowId = ranked.get(rank);
+                float contribution = weight / (rank + 1.0f);
                 scores.compute(
                         rowId,
                         (k, oldScore) -> oldScore == null ? contribution : oldScore + contribution);
