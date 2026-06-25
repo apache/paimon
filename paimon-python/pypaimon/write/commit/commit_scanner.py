@@ -97,16 +97,21 @@ class CommitScanner:
         ).read_manifest_entries(delta_manifests)
 
     def read_incremental_raw_entries_from_changed_partitions(self, snapshot: Snapshot,
-                                                             commit_entries: List[ManifestEntry]):
+                                                             commit_entries: List[ManifestEntry],
+                                                             partition_filter=None):
         """Like ``read_incremental_entries_from_changed_partitions`` but
         preserves DELETE entries (kind=1). The regular method funnels through
         ``read_entries_parallel`` which discards standalone DELETEs.
+
+        ``partition_filter`` may be passed to avoid rebuilding it per call;
+        built from ``commit_entries`` if None.
         """
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)
         if not delta_manifests:
             return []
 
-        partition_filter = self._build_partition_filter_from_entries(commit_entries)
+        if partition_filter is None:
+            partition_filter = self._build_partition_filter_from_entries(commit_entries)
         mfm = ManifestFileManager(self.table)
         entries = []
         for mf in delta_manifests:
@@ -127,13 +132,18 @@ class CommitScanner:
         ``CommitScanner#readIncrementalChanges``.
         """
         snapshot_manager = self.table.snapshot_manager()
+        partition_filter = self._build_partition_filter_from_entries(commit_entries)
         entries = []
         for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
             snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
-                continue
+                # Skipping would silently drop concurrent changes; fail loudly.
+                raise RuntimeError(
+                    f"Snapshot #{snapshot_id} is missing while reading incremental "
+                    f"changes between #{from_snapshot.id} and #{to_snapshot.id}.")
             entries.extend(
-                self.read_incremental_raw_entries_from_changed_partitions(snapshot, commit_entries))
+                self.read_incremental_raw_entries_from_changed_partitions(
+                    snapshot, commit_entries, partition_filter))
         return entries
 
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):

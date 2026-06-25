@@ -381,11 +381,8 @@ class FileStoreCommit:
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
-        # Conflict detection: build the base entries of the changed partitions, then
-        # check conflicts. On a retry we reuse the base entries computed by the previous
-        # attempt and only read the incremental changes committed since, instead of
-        # re-scanning the whole changed partitions every time (mirrors Java
-        # FileStoreCommitImpl conflict handling).
+        # Base entries for conflict detection. On retry, reuse the previous
+        # attempt's base + read only the incremental changes (mirrors Java).
         base_data_files = None
         if detect_conflicts and latest_snapshot is not None:
             if (retry_result is not None
@@ -407,9 +404,9 @@ class FileStoreCommit:
             if conflict_exception is not None:
                 if allow_rollback and self.rollback is not None:
                     if self.rollback.try_to_rollback(latest_snapshot):
-                        # Rolled back: the table state changed, so the base entries are no
-                        # longer valid for reuse; do not carry them to the next attempt.
-                        return RetryResult(latest_snapshot, conflict_exception)
+                        # Rolled back: base/snapshot no longer valid; next attempt
+                        # re-scans from scratch (matches Java RollbackRetryResult).
+                        return RetryResult(None, conflict_exception)
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)

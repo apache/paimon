@@ -15,23 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Regression test for overwrite-commit conflict retries.
+"""Regression test for conflict-detection scan reuse across commit retries.
 
-Reproduces the behaviour that makes a single OVERWRITE commit slow under
-concurrent writers: on every retry, pypaimon re-runs *two* full manifest
-scans of the changed partitions instead of reusing the previous attempt's
-work and reading only the incremental changes (as the Java side does).
+When a commit detects conflicts, it reads the base entries of the changed
+partitions from the latest snapshot. Previously every retry re-ran that full
+scan (``read_all_entries_from_changed_partitions``), making each retry as
+expensive as the first under concurrent writers. Now the base entries from the
+previous attempt are reused and only the incremental changes committed since are
+read (``read_incremental_changes``).
 
-The test deterministically forces ``K`` commit conflicts (each one advances
-the latest snapshot via an external append to an unrelated partition, then
-makes our CAS fail) and counts how many times the two full scans run:
-
-  * ``_generate_overwrite_entries``            (computes the DELETE set)
-  * ``read_all_entries_from_changed_partitions`` (feeds conflict detection)
-
-Current behaviour:  each is called ``K + 1`` times (once per attempt).
-Target behaviour:   each is called exactly once; retries read only the
-                    incremental delta.
+The test deterministically forces ``K`` conflicts, each advancing the latest
+snapshot with an append to an unrelated partition, and asserts the full scan
+runs once (not ``K + 1``) while the incremental read runs once per retry.
 """
 
 import os
@@ -71,10 +66,10 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _append(self, df):
-        """A normal (non-overwrite) append commit on a fresh write builder.
+        """A normal append commit on a fresh write builder.
 
-        Used both to seed data and, during the test, as the "concurrent
-        writer" that advances the latest snapshot between retries.
+        Used both to seed data and, during the test, as the "concurrent writer"
+        that advances the latest snapshot between retries.
         """
         wb = self.table.new_batch_write_builder()
         w = wb.new_write()
@@ -84,7 +79,7 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         w.close()
         c.close()
 
-    def test_full_scan_runs_once_not_once_per_retry(self):
+    def test_conflict_scan_runs_once_not_once_per_retry(self):
         K = 3  # force 3 conflicts; the 4th attempt wins
 
         # Build the overwrite of partition f0=1 (do not commit yet).
@@ -96,37 +91,26 @@ class OverwriteCommitConflictTest(unittest.TestCase):
 
         fsc = c.file_store_commit
 
-        # --- spies -----------------------------------------------------------
-        # scan2_conflict: full conflict-detection scan (this PR / #4286 makes it
-        #                 run once, then reuse + incremental on retries).
-        # incremental:    the incremental read used on retries (new path).
-        # scan1_delete:   full overwrite-DELETE scan (out of scope here; still
-        #                 once-per-attempt until #7894 is ported).
-        counts = {'scan1_delete': 0, 'scan2_conflict': 0, 'incremental': 0}
-        orig_scan1 = fsc._generate_overwrite_entries
-        orig_scan2 = fsc.commit_scanner.read_all_entries_from_changed_partitions
+        # --- count the conflict-detection base scans -------------------------
+        counts = {'full_scan': 0, 'incremental': 0}
+        orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
         orig_incr = fsc.commit_scanner.read_incremental_changes
 
-        def spy_scan1(*a, **k):
-            counts['scan1_delete'] += 1
-            return orig_scan1(*a, **k)
-
-        def spy_scan2(*a, **k):
-            counts['scan2_conflict'] += 1
-            return orig_scan2(*a, **k)
+        def spy_full(*a, **k):
+            counts['full_scan'] += 1
+            return orig_full(*a, **k)
 
         def spy_incr(*a, **k):
             counts['incremental'] += 1
             return orig_incr(*a, **k)
 
-        fsc._generate_overwrite_entries = spy_scan1
-        fsc.commit_scanner.read_all_entries_from_changed_partitions = spy_scan2
+        fsc.commit_scanner.read_all_entries_from_changed_partitions = spy_full
         fsc.commit_scanner.read_incremental_changes = spy_incr
 
         # --- inject K CAS conflicts ------------------------------------------
-        # Each forced failure first advances the latest snapshot via an append
-        # to an unrelated partition (f0=99), so retries face a genuinely newer
-        # snapshot (and thus a real incremental delta), then fails our CAS.
+        # Each forced failure first advances the latest snapshot via an append to
+        # an unrelated partition (f0=99), so retries face a genuinely newer
+        # snapshot (and a real incremental delta), then fails our CAS.
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
 
@@ -147,28 +131,24 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
 
         print(f"\n[overwrite-conflict] K={K} conflicts -> "
-              f"scan2_conflict={counts['scan2_conflict']}, "
-              f"incremental={counts['incremental']}, "
-              f"scan1_delete={counts['scan1_delete']} (PR2 territory)")
+              f"full_scan={counts['full_scan']}, incremental={counts['incremental']} "
+              f"(target: full_scan=1, incremental=K)")
 
-        # #4286: the full conflict-detection scan runs once; every retry reuses
-        # the previous base entries and only reads the incremental changes.
+        # The full base scan runs once; every retry reuses the previous base and
+        # reads only the incremental changes since.
         self.assertEqual(
-            counts['scan2_conflict'], 1,
-            f"read_all_entries_from_changed_partitions ran "
-            f"{counts['scan2_conflict']}x; should run once and read incremental "
-            f"on retry")
+            counts['full_scan'], 1,
+            f"read_all_entries_from_changed_partitions ran {counts['full_scan']}x; "
+            f"should run once and read incremental on retry")
         self.assertEqual(
             counts['incremental'], K,
             f"read_incremental_changes ran {counts['incremental']}x; should run "
             f"once per retry (= K = {K})")
 
-        # Sanity: the overwrite still produced the correct table (f0=1 overwritten,
-        # f0=2 preserved, f0=99 appended by the simulated concurrent writer).
+        # Sanity: f0=1 overwritten, f0=2 preserved, f0=99 appended K times.
         read_builder = self.table.new_read_builder()
         actual = read_builder.new_read().to_pandas(
-            read_builder.new_scan().plan().splits()).sort_values(
-            by=['f0', 'f1']).reset_index(drop=True)
+            read_builder.new_scan().plan().splits())
         self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
         self.assertEqual(len(actual[actual['f0'] == 99]), K)
