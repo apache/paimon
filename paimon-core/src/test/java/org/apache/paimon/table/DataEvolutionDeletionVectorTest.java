@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
@@ -31,6 +32,7 @@ import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -49,6 +51,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.TableIndexesTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -65,6 +68,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests row-range deletion vectors for data evolution tables. */
 public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
@@ -283,6 +287,54 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         "12|name-12|updated-12|12",
                         "13|name-13|updated-13|13",
                         "14|name-14|updated-14|14");
+    }
+
+    @Test
+    public void testCommitOverlappingRowRangeDeletionVectorsFails() throws Exception {
+        createTableDefault();
+
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+
+        assertThatThrownBy(
+                        () ->
+                                commitDeletionVectors(
+                                        table,
+                                        Arrays.asList(
+                                                new DvSpec(new Range(0, 5), 1),
+                                                new DvSpec(new Range(5, 10), 6))))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasStackTraceContaining(
+                        "Found overlapping row range [0, 5] and [5, 10] for data-evolution deletion files.");
+    }
+
+    @Test
+    public void testTableIndexesShowsRowRangeDeletionVectorKeys() throws Exception {
+        FileStoreTable table = prepareTableWithStructuredUpdateAndDeletionVectors();
+        TableIndexesTable indexesTable = new TableIndexesTable(table);
+
+        ReadBuilder readBuilder = indexesTable.newReadBuilder();
+        List<String> dvKeys = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row -> {
+                        if (!row.isNullAt(6)) {
+                            InternalArray dvRanges = row.getArray(6);
+                            for (int i = 0; i < dvRanges.size(); i++) {
+                                dvKeys.add(
+                                        dvRanges.getRow(
+                                                        i,
+                                                        DeletionVectorMeta.SCHEMA.getFieldCount())
+                                                .getString(0)
+                                                .toString());
+                            }
+                        }
+                    });
+        }
+
+        assertThat(dvKeys).containsExactlyInAnyOrder("[0, 3]", "[4, 10]", "[11, 12]");
     }
 
     @Override

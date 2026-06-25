@@ -635,7 +635,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 dataFiles.stream()
                         .map(DataFileMeta::nonNullRowIdRange)
                         .collect(Collectors.toList());
-        RowRangeIndex index = RowRangeIndex.create(dataRanges, false);
+        RowRangeIndex index = RowRangeIndex.create(dataRanges);
 
         Map<Range, DeletionFile> deletionFiles = new LinkedHashMap<>();
         for (Map.Entry<DeletionFileKey, DeletionFile> entry : deletionFilesMap.entrySet()) {

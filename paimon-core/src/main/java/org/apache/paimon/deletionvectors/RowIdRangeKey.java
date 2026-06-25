@@ -22,7 +22,10 @@ import org.apache.paimon.utils.Range;
 
 import java.util.Objects;
 
-/** A deletion vector key backed by an inclusive row id range. */
+/**
+ * A deletion vector key backed by an inclusive row id range. Note that the deletion vector of this
+ * key will store the relative offset within this range, just aligned with current FileNameKey.
+ */
 public final class RowIdRangeKey extends DeletionFileKey {
 
     private static final long serialVersionUID = 1L;

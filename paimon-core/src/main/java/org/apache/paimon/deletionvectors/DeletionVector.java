@@ -159,8 +159,8 @@ public interface DeletionVector extends DeletionVectorJudger {
     static Factory factory(
             FileIO fileIO, List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
         DeletionFile.Factory factory = DeletionFile.factory(files, deletionFiles);
-        return fileName -> {
-            Optional<DeletionFile> deletionFile = factory.create(fileName);
+        return key -> {
+            Optional<DeletionFile> deletionFile = factory.create(key);
             if (deletionFile.isPresent()) {
                 return Optional.of(DeletionVector.read(fileIO, deletionFile.get()));
             }

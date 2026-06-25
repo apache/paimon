@@ -22,9 +22,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.RowIdRangeKey;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
@@ -58,6 +61,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -255,14 +259,39 @@ public class TableIndexesTable implements ReadonlyTable {
                     BinaryString.fromString(indexManifestEntry.indexFile().fileName()),
                     indexManifestEntry.indexFile().fileSize(),
                     indexManifestEntry.indexFile().rowCount(),
-                    dvMetas == null
-                            ? null
-                            : IndexFileMetaSerializer.metasToRowArrayData(
-                                    dvMetas, DeletionFileKey.Type.FILE_NAME),
+                    deletionVectorMetasToArray(dvMetas),
                     globalMeta != null ? globalMeta.rowRangeStart() : null,
                     globalMeta != null ? globalMeta.rowRangeEnd() : null,
                     globalMeta != null ? globalMeta.indexFieldId() : null,
                     indexFieldName != null ? BinaryString.fromString(indexFieldName) : null);
+        }
+
+        private InternalArray deletionVectorMetasToArray(
+                LinkedHashMap<DeletionFileKey, DeletionVectorMeta> dvMetas) {
+            if (dvMetas == null || dvMetas.isEmpty()) {
+                return null;
+            }
+
+            DeletionFileKey.Type keyType = DeletionFileKey.checkType(dvMetas.keySet());
+            if (keyType == DeletionFileKey.Type.FILE_NAME) {
+                return IndexFileMetaSerializer.metasToRowArrayData(
+                        dvMetas, DeletionFileKey.Type.FILE_NAME);
+            }
+
+            // For row-range deletion vectors, reuse the same schema, replacing
+            // `fileName` field by formated range string e.g. [0, 100]
+            List<GenericRow> rows = new ArrayList<>();
+            for (Map.Entry<DeletionFileKey, DeletionVectorMeta> entry : dvMetas.entrySet()) {
+                DeletionVectorMeta meta = entry.getValue();
+                rows.add(
+                        GenericRow.of(
+                                BinaryString.fromString(
+                                        ((RowIdRangeKey) entry.getKey()).range().toString()),
+                                meta.offset(),
+                                meta.length(),
+                                meta.cardinality()));
+            }
+            return new GenericArray(rows.toArray(new GenericRow[0]));
         }
     }
 

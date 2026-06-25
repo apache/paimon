@@ -24,6 +24,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
@@ -39,6 +40,9 @@ import java.util.Map;
 /**
  * The RecordReader to apply deletion vectors for data evolution tables. At first, readType will be
  * enriched by `_ROW_ID`, then the returned id will be filtered by DVs.
+ *
+ * <p>This reader assumes that the underlying reader will return monotonically incrementing
+ * _ROW_IDs, which is guaranteed by the current implementation.
  */
 public class DataEvolutionApplyDvReader implements RecordReader<InternalRow> {
 
@@ -47,6 +51,7 @@ public class DataEvolutionApplyDvReader implements RecordReader<InternalRow> {
     @Nullable private final ProjectedRow projectedRow;
     private final int rowIdIndex;
 
+    private long lastRowId = -1;
     private int nextDvIndex;
     private RowRangeDeletionVector currentDv;
 
@@ -98,6 +103,7 @@ public class DataEvolutionApplyDvReader implements RecordReader<InternalRow> {
 
     private boolean isDeleted(InternalRow row) {
         long rowId = row.getLong(rowIdIndex);
+        checkRowIdMonotonicity(rowId);
 
         moveToPossibleDv(rowId);
 
@@ -106,6 +112,16 @@ public class DataEvolutionApplyDvReader implements RecordReader<InternalRow> {
         }
 
         return currentDv.isDeleted(rowId);
+    }
+
+    private void checkRowIdMonotonicity(long rowId) {
+        if (lastRowId >= 0) {
+            Preconditions.checkState(
+                    rowId > lastRowId,
+                    "This reader works only if underlying reader produces incremental _ROW_IDs.");
+        }
+
+        lastRowId = rowId;
     }
 
     private void moveToPossibleDv(long rowId) {

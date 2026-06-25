@@ -20,6 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionFileKey;
+import org.apache.paimon.deletionvectors.RowIdRangeKey;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -168,6 +170,31 @@ public class IndexManifestFileHandler {
                     indexEntries.remove(fileName);
                 }
             }
+
+            if (!dvDataFiles.isEmpty()) {
+                // Check all deletion files with the same key type
+                if (DeletionFileKey.checkType(dvDataFiles) == DeletionFileKey.Type.ROW_RANGE) {
+                    // Check row range deletion files non-overlapping
+                    List<Range> fileRanges =
+                            dvDataFiles.stream()
+                                    .map(key -> ((RowIdRangeKey) key).range())
+                                    .sorted(Comparator.comparingLong(range -> range.from))
+                                    .collect(Collectors.toList());
+
+                    Range prevRange = null;
+                    for (Range range : fileRanges) {
+                        if (prevRange != null) {
+                            checkState(
+                                    prevRange.to < range.from,
+                                    "Found overlapping row range %s and %s for data-evolution deletion files.",
+                                    prevRange,
+                                    range);
+                        }
+                        prevRange = range;
+                    }
+                }
+            }
+
             return new ArrayList<>(indexEntries.values());
         }
     }
