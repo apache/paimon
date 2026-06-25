@@ -1023,13 +1023,12 @@ public class ManifestFileSorter {
         }
 
         Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sorted =
-                ManifestEntryExternalSort.cancelAndWriteEntries(
+                ManifestEntryExternalSort.cancelAndWriteMinorEntries(
                         section,
                         ctx.sortKey,
                         ctx.externalSortConfig,
                         manifestFile,
-                        manifestReadParallelism,
-                        ManifestEntryExternalSort.CancelMode.MINOR);
+                        manifestReadParallelism);
 
         if (!sorted.getLeft().isEmpty()) {
             output.addSortedFiles(sorted.getLeft());

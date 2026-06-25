@@ -43,7 +43,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -57,18 +56,16 @@ final class ManifestEntryExternalSort {
 
     private ManifestEntryExternalSort() {}
 
-    static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> cancelAndWriteEntries(
+    static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> cancelAndWriteMinorEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.ManifestSortKey sortKey,
             Config config,
             ManifestFile manifestFile,
-            @Nullable Integer manifestReadParallelism,
-            CancelMode cancelMode)
+            @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntryCanceler canceler = new EntryCanceler(config);
                 EntrySorter addSorter = new EntrySorter(sortKey, config);
-                EntrySorter deleteSorter =
-                        cancelMode == CancelMode.MINOR ? new EntrySorter(sortKey, config) : null) {
+                EntrySorter deleteSorter = new EntrySorter(sortKey, config)) {
             Function<ManifestFileMeta, List<ManifestEntry>> reader =
                     meta -> manifestFile.read(meta.fileName(), meta.fileSize());
             for (ManifestEntry entry :
@@ -76,7 +73,7 @@ final class ManifestEntryExternalSort {
                 canceler.write(entry);
             }
 
-            canceler.writeSurvivors(cancelMode, addSorter, deleteSorter);
+            canceler.writeSurvivors(addSorter, deleteSorter);
 
             List<ManifestFileMeta> addFiles = Collections.emptyList();
             if (!addSorter.isEmpty()) {
@@ -84,7 +81,7 @@ final class ManifestEntryExternalSort {
             }
 
             List<ManifestFileMeta> deleteFiles = Collections.emptyList();
-            if (deleteSorter != null && !deleteSorter.isEmpty()) {
+            if (!deleteSorter.isEmpty()) {
                 deleteFiles = deleteSorter.writeToManifest(manifestFile);
             }
 
@@ -107,11 +104,6 @@ final class ManifestEntryExternalSort {
             }
             return sorter.writeToManifest(manifestFile);
         }
-    }
-
-    enum CancelMode {
-        FULL,
-        MINOR
     }
 
     /** Config used by manifest entry external sort. */
@@ -181,8 +173,7 @@ final class ManifestEntryExternalSort {
             sortBuffer.write(row);
         }
 
-        private void writeSurvivors(
-                CancelMode cancelMode, EntrySorter addSorter, @Nullable EntrySorter deleteSorter)
+        private void writeSurvivors(EntrySorter addSorter, EntrySorter deleteSorter)
                 throws Exception {
             if (sortBuffer.isEmpty()) {
                 return;
@@ -192,63 +183,45 @@ final class ManifestEntryExternalSort {
             BinaryRow reuse = new BinaryRow(ROW_TYPE.getFieldCount());
             BinaryRow row;
             byte[] currentIdentifier = null;
-            List<byte[]> addEntries = new ArrayList<>(1);
-            List<byte[]> deleteEntries = new ArrayList<>(1);
+            byte[] addEntry = null;
+            byte[] deleteEntry = null;
 
             while ((row = iterator.next(reuse)) != null) {
                 byte[] identifier = row.getBinary(IDENTIFIER_FIELD);
                 if (currentIdentifier != null && !Arrays.equals(currentIdentifier, identifier)) {
-                    writeSurvivorGroup(
-                            cancelMode, addEntries, deleteEntries, addSorter, deleteSorter);
-                    addEntries.clear();
-                    deleteEntries.clear();
+                    writeSurvivorGroup(addEntry, deleteEntry, addSorter, deleteSorter);
+                    addEntry = null;
+                    deleteEntry = null;
                 }
 
                 currentIdentifier = identifier;
                 if (row.getByte(KIND_FIELD) == FileKind.ADD.toByteValue()) {
-                    addEntries.add(row.getBinary(ENTRY_FIELD));
+                    addEntry = row.getBinary(ENTRY_FIELD);
                 } else {
-                    deleteEntries.add(row.getBinary(ENTRY_FIELD));
+                    deleteEntry = row.getBinary(ENTRY_FIELD);
                 }
             }
 
             if (currentIdentifier != null) {
-                writeSurvivorGroup(cancelMode, addEntries, deleteEntries, addSorter, deleteSorter);
+                writeSurvivorGroup(addEntry, deleteEntry, addSorter, deleteSorter);
             }
         }
 
         private void writeSurvivorGroup(
-                CancelMode cancelMode,
-                List<byte[]> addEntries,
-                List<byte[]> deleteEntries,
+                @Nullable byte[] addEntry,
+                @Nullable byte[] deleteEntry,
                 EntrySorter addSorter,
-                @Nullable EntrySorter deleteSorter)
+                EntrySorter deleteSorter)
                 throws Exception {
-            if (cancelMode == CancelMode.FULL) {
-                if (deleteEntries.isEmpty()) {
-                    writeEntries(addEntries, addSorter);
-                }
+            if (addEntry != null && deleteEntry != null) {
                 return;
             }
 
-            if (!addEntries.isEmpty() && !deleteEntries.isEmpty()) {
-                if (deleteSorter != null) {
-                    for (int i = 1; i < deleteEntries.size(); i++) {
-                        writeEntry(deleteEntries.get(i), deleteSorter);
-                    }
-                }
-                return;
+            if (addEntry != null) {
+                writeEntry(addEntry, addSorter);
             }
-
-            writeEntries(addEntries, addSorter);
-            if (deleteSorter != null) {
-                writeEntries(deleteEntries, deleteSorter);
-            }
-        }
-
-        private void writeEntries(List<byte[]> entries, EntrySorter sorter) throws Exception {
-            for (byte[] entry : entries) {
-                writeEntry(entry, sorter);
+            if (deleteEntry != null) {
+                writeEntry(deleteEntry, deleteSorter);
             }
         }
 
