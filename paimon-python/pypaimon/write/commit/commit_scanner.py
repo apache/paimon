@@ -99,12 +99,9 @@ class CommitScanner:
     def read_incremental_raw_entries_from_changed_partitions(self, snapshot: Snapshot,
                                                              commit_entries: List[ManifestEntry],
                                                              partition_filter=None):
-        """Like ``read_incremental_entries_from_changed_partitions`` but
-        preserves DELETE entries (kind=1). The regular method funnels through
-        ``read_entries_parallel`` which discards standalone DELETEs.
-
-        ``partition_filter`` may be passed to avoid rebuilding it per call;
-        built from ``commit_entries`` if None.
+        """Like ``read_incremental_entries_from_changed_partitions`` but preserves
+        DELETE entries (kind=1). ``partition_filter`` may be passed to avoid
+        rebuilding it per call.
         """
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)
         if not delta_manifests:
@@ -123,17 +120,10 @@ class CommitScanner:
 
     def read_incremental_changes(self, from_snapshot: Snapshot, to_snapshot: Snapshot,
                                  commit_entries: List[ManifestEntry]) -> Optional[List[ManifestEntry]]:
-        """Read delta entries (including DELETEs) for snapshots in the range
-        ``(from_snapshot, to_snapshot]``, filtered to the changed partitions.
-
-        Lets a commit retry reuse the base entries computed by the previous
-        attempt and only read what concurrent writers committed since, instead
-        of re-scanning the whole changed partitions. Mirrors Java
-        ``CommitScanner#readIncrementalChanges``.
-
-        Returns None if an intermediate snapshot is missing/expired, since the
-        reconstructed base would not be equivalent to ``to_snapshot``; the caller
-        should then fall back to a full scan.
+        """Delta entries (incl. DELETEs) in ``(from_snapshot, to_snapshot]``,
+        changed-partition filtered, so a retry can reuse the prior base and read
+        only the changes since. Returns None on a missing snapshot (caller then
+        full-scans). Mirrors Java ``CommitScanner#readIncrementalChanges``.
         """
         snapshot_manager = self.table.snapshot_manager()
         partition_filter = self._build_partition_filter_from_entries(commit_entries)

@@ -68,10 +68,8 @@ class RetryResult(CommitResult):
                  base_data_files: Optional[List[ManifestEntry]] = None):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
-        # Base entries of the changed partitions as of ``latest_snapshot``,
-        # computed during the failed attempt. Carried forward so the next
-        # attempt can reuse them and only read the incremental changes since
-        # then, instead of re-scanning the whole partition.
+        # Base entries as of latest_snapshot, carried so the next attempt reuses
+        # them and reads only the incremental changes.
         self.base_data_files = base_data_files
 
     def is_success(self) -> bool:
