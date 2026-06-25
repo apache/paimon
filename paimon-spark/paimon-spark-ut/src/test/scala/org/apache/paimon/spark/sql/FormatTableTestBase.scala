@@ -441,7 +441,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
   }
 
   test("Paimon format table: runtime filter combined with pushed-down partition filter") {
-    withTable("dwd_fact", "dim") {
+    withTable("dwd_fact", "dim_date") {
       sql("""
             |CREATE TABLE dwd_fact (id INT, amount DOUBLE, dt STRING, hour STRING)
             |USING PARQUET
@@ -449,7 +449,7 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
             |PARTITIONED BY (dt, hour)
             |""".stripMargin)
       sql("""
-            |CREATE TABLE dim (dt STRING, name STRING)
+            |CREATE TABLE dim_date (dt STRING, name STRING)
             |USING PARQUET
             |TBLPROPERTIES ('format-table.implementation'='paimon')
             |""".stripMargin)
@@ -461,12 +461,12 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
             |(3, 30.0, '20260621', '00'),
             |(4, 40.0, '20260620', '23')
             |""".stripMargin)
-      sql("INSERT INTO dim VALUES ('20260622', 'today')")
+      sql("INSERT INTO dim_date VALUES ('20260622', 'today')")
 
       val df = sql("""
                      |SELECT f.id, f.dt, f.hour, d.name
                      |FROM dwd_fact f
-                     |JOIN dim d ON f.dt = d.dt
+                     |JOIN dim_date d ON f.dt = d.dt
                      |WHERE f.dt >= '20260620'
                      |ORDER BY f.id
                      |""".stripMargin)
