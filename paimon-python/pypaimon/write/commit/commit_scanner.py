@@ -122,7 +122,7 @@ class CommitScanner:
         return entries
 
     def read_incremental_changes(self, from_snapshot: Snapshot, to_snapshot: Snapshot,
-                                 commit_entries: List[ManifestEntry]):
+                                 commit_entries: List[ManifestEntry]) -> Optional[List[ManifestEntry]]:
         """Read delta entries (including DELETEs) for snapshots in the range
         ``(from_snapshot, to_snapshot]``, filtered to the changed partitions.
 

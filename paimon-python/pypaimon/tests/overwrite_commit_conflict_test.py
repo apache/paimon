@@ -228,6 +228,71 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
 
+    def test_falls_back_to_full_scan_when_intermediate_snapshot_missing(self):
+        # A missing/expired intermediate snapshot -> read_incremental_changes
+        # returns None and the retry falls back to a full scan.
+        K = 1
+        missing_id = self.table.snapshot_manager().get_latest_snapshot().id + 1
+
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        messages = w.prepare_commit()
+
+        fsc = c.file_store_commit
+
+        full_scans = {'n': 0}
+        incr_results = []
+        orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
+        orig_incr = fsc.commit_scanner.read_incremental_changes
+
+        def spy_full(*a, **k):
+            full_scans['n'] += 1
+            return orig_full(*a, **k)
+
+        def spy_incr(*a, **k):
+            r = orig_incr(*a, **k)
+            incr_results.append(r)
+            return r
+
+        fsc.commit_scanner.read_all_entries_from_changed_partitions = spy_full
+        fsc.commit_scanner.read_incremental_changes = spy_incr
+
+        # Only the scanner's lookups see missing_id as absent; the commit's own
+        # manager (bound earlier) is untouched.
+        real_mgr = fsc.commit_scanner.table.snapshot_manager()
+
+        class _Wrap:
+            def __getattr__(self, name):
+                return getattr(real_mgr, name)
+
+            def get_snapshot_by_id(self, i):
+                return None if i == missing_id else real_mgr.get_snapshot_by_id(i)
+
+        fsc.commit_scanner.table.snapshot_manager = lambda: _Wrap()
+
+        orig_cas = fsc.snapshot_commit.commit
+        cas = {'fails': 0}
+
+        def patched_cas(snapshot, statistics):
+            if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
+                cas['fails'] += 1
+                self._append(pd.DataFrame({'f0': [99], 'f1': ['x']}))
+                return False
+            return orig_cas(snapshot, statistics)
+
+        fsc.snapshot_commit.commit = patched_cas
+
+        c.commit(messages)
+        c.close()
+
+        self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
+        # Incremental hit the missing snapshot and returned None, so the retry
+        # fell back to a full scan (first attempt + fallback = 2).
+        self.assertIn(None, incr_results)
+        self.assertEqual(full_scans['n'], 2)
+
 
 if __name__ == '__main__':
     unittest.main()
