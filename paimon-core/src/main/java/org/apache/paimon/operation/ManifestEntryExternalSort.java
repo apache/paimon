@@ -54,7 +54,7 @@ public class ManifestEntryExternalSort {
     static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sortAndWriteMinorEntries(
             List<ManifestFileMeta> section,
             ManifestFileSorter.ManifestSortKey sortKey,
-            Config config,
+            ExternalSortConfig config,
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
@@ -81,7 +81,7 @@ public class ManifestEntryExternalSort {
     static List<ManifestFileMeta> sortAndWriteFullEntries(
             Iterable<ManifestEntry> entries,
             ManifestFileSorter.ManifestSortKey sortKey,
-            Config config,
+            ExternalSortConfig config,
             ManifestFile manifestFile)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
@@ -96,14 +96,14 @@ public class ManifestEntryExternalSort {
     }
 
     /** Config used by manifest entry external sort. */
-    static class Config {
+    static class ExternalSortConfig {
         final long bufferSize;
         final int pageSize;
         final int maxNumFileHandles;
         final CompressOptions compression;
         final MemorySize maxDiskSize;
 
-        Config(
+        ExternalSortConfig(
                 long bufferSize,
                 int pageSize,
                 int maxNumFileHandles,
@@ -116,8 +116,8 @@ public class ManifestEntryExternalSort {
             this.maxDiskSize = maxDiskSize;
         }
 
-        static Config from(CoreOptions options) {
-            return new Config(
+        static ExternalSortConfig from(CoreOptions options) {
+            return new ExternalSortConfig(
                     options.sortSpillBufferSize(),
                     options.pageSize(),
                     options.localSortMaxNumFileHandles(),
@@ -133,7 +133,7 @@ public class ManifestEntryExternalSort {
         private final IOManager ioManager;
         private final BinaryExternalSortBuffer sortBuffer;
 
-        private EntrySorter(ManifestFileSorter.ManifestSortKey sortKey, Config config) {
+        private EntrySorter(ManifestFileSorter.ManifestSortKey sortKey, ExternalSortConfig config) {
             this.sortKey = sortKey;
             this.entrySerializer = new ManifestEntrySerializer();
             this.ioManager = IOManager.create(System.getProperty("java.io.tmpdir"));

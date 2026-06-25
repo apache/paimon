@@ -70,7 +70,7 @@ public class ManifestFileSorter {
     static class CompactionContext {
         final boolean fullCompaction;
         final ManifestSortKey sortKey;
-        final ManifestEntryExternalSort.Config externalSortConfig;
+        final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
         final Set<FileEntry.Identifier> deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
@@ -88,7 +88,7 @@ public class ManifestFileSorter {
         CompactionContext(
                 boolean fullCompaction,
                 ManifestSortKey sortKey,
-                ManifestEntryExternalSort.Config externalSortConfig,
+                ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
                 Set<FileEntry.Identifier> deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
@@ -154,8 +154,8 @@ public class ManifestFileSorter {
         int maxSizeAmplificationPercent = options.maxSizeAmplificationPercent();
         int sortedRunSizeRatio = options.sortedRunSizeRatio();
         Integer manifestReadParallelism = options.scanManifestParallelism();
-        ManifestEntryExternalSort.Config externalSortConfig =
-                ManifestEntryExternalSort.Config.from(options);
+        ManifestEntryExternalSort.ExternalSortConfig externalSortConfig =
+                ManifestEntryExternalSort.ExternalSortConfig.from(options);
 
         Optional<List<ManifestFileMeta>> fullCompacted =
                 tryFullCompaction(
@@ -211,7 +211,7 @@ public class ManifestFileSorter {
             long maxRewriteSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
-            ManifestEntryExternalSort.Config externalSortConfig,
+            ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Check if full compaction threshold is met
@@ -316,7 +316,7 @@ public class ManifestFileSorter {
             long maxRewriteSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
-            ManifestEntryExternalSort.Config externalSortConfig,
+            ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         // Step 1: Prepare compaction context (early-return if nothing to compact)
@@ -440,7 +440,7 @@ public class ManifestFileSorter {
             long suggestedMetaSize,
             int maxSizeAmplificationPercent,
             int sortedRunSizeRatio,
-            ManifestEntryExternalSort.Config externalSortConfig,
+            ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
             @Nullable Integer manifestReadParallelism) {
 
         // Step 1: Resolve sort key. Data evolution tables prefer RowID ranges when available.
@@ -1140,21 +1140,21 @@ public class ManifestFileSorter {
         private final InternalRow.FieldGetter sortFieldGetter;
         private final RowType externalSortRowType;
         private final int[] externalSortKeyFields;
-        private final int payloadField;
+        private final int sortFieldNum;
 
         private PartitionSortKey(
                 RecordComparator fieldComparator, RowType partitionType, int sortFieldIndex) {
             this.fieldComparator = fieldComparator;
             DataType sortFieldType = partitionType.getTypeAt(sortFieldIndex);
             this.sortFieldGetter = InternalRow.createFieldGetter(sortFieldType, sortFieldIndex);
-            this.payloadField = 3;
+            this.sortFieldNum = 3;
             this.externalSortRowType =
                     DataTypes.ROW(
                             sortFieldType,
                             DataTypes.TINYINT(),
                             DataTypes.STRING(),
                             DataTypes.BYTES());
-            this.externalSortKeyFields = createSequentialFields(payloadField);
+            this.externalSortKeyFields = createSequentialFields(sortFieldNum);
         }
 
         @Override
@@ -1198,7 +1198,7 @@ public class ManifestFileSorter {
 
         @Override
         public byte[] entryBytes(BinaryRow row) {
-            return row.getBinary(payloadField);
+            return row.getBinary(sortFieldNum);
         }
     }
 
@@ -1208,7 +1208,7 @@ public class ManifestFileSorter {
         private final InternalRow.FieldGetter[] partitionFieldGetters;
         private final RowType externalSortRowType;
         private final int[] externalSortKeyFields;
-        private final int payloadField;
+        private final int sortFieldNum;
 
         private RowIdSortKey(
                 @Nullable RecordComparator partitionComparator,
@@ -1229,8 +1229,8 @@ public class ManifestFileSorter {
             fieldTypes.add(DataTypes.STRING());
             fieldTypes.add(DataTypes.BYTES());
             this.externalSortRowType = DataTypes.ROW(fieldTypes.toArray(new DataType[0]));
-            this.payloadField = externalSortRowType.getFieldCount() - 1;
-            this.externalSortKeyFields = createSequentialFields(payloadField);
+            this.sortFieldNum = externalSortRowType.getFieldCount() - 1;
+            this.externalSortKeyFields = createSequentialFields(sortFieldNum);
         }
 
         @Override
@@ -1293,7 +1293,7 @@ public class ManifestFileSorter {
 
         @Override
         public byte[] entryBytes(BinaryRow row) {
-            return row.getBinary(payloadField);
+            return row.getBinary(sortFieldNum);
         }
 
         private int comparePartitionMin(ManifestFileMeta a, ManifestFileMeta b) {
