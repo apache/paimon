@@ -153,6 +153,39 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testReadWithoutRowRangePushdownWithRowRangeDeletionVectors() throws Exception {
+        FileStoreTable table = prepareTableWithStructuredUpdateAndDeletionVectors();
+
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactly(
+                        "0|name-0|updated-0|0",
+                        "2|name-2|updated-2|2",
+                        "3|name-3|updated-3|3",
+                        "5|name-5|updated-5|5",
+                        "7|name-7|updated-7|7",
+                        "8|name-8|updated-8|8",
+                        "9|name-9|updated-9|9",
+                        "11|name-11|updated-11|11",
+                        "13|name-13|updated-13|13",
+                        "14|name-14|updated-14|14");
+
+        assertThat(readProjectedStrings(table.newReadBuilder().withProjection(new int[] {2})))
+                .containsExactly(
+                        "updated-0",
+                        "updated-2",
+                        "updated-3",
+                        "updated-5",
+                        "updated-7",
+                        "updated-8",
+                        "updated-9",
+                        "updated-11",
+                        "updated-13",
+                        "updated-14");
+        assertThat(readProjectedBlobValues(table.newReadBuilder().withProjection(new int[] {3})))
+                .containsExactly(0, 2, 3, 5, 7, 8, 9, 11, 13, 14);
+    }
+
+    @Test
     public void testMergedRowCountWithSpanningRowRangeDeletionVector() throws Exception {
         FileStoreTable table = prepareTableWithStructuredUpdateAndDeletionVectors();
 
