@@ -193,8 +193,11 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             if (writer != null) {
-                beforeCloseFormatWriter(writer);
-                writer.close();
+                try {
+                    beforeCloseFormatWriter(writer);
+                } finally {
+                    writer.close();
+                }
                 writerMetadata = writer.writerMetadata();
                 writer = null;
             }
@@ -204,10 +207,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 out.close();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
             abort();
-            throw e;
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            }
+            throw new IOException(e);
         } finally {
             closed = true;
         }
