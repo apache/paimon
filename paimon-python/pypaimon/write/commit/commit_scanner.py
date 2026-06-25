@@ -130,6 +130,10 @@ class CommitScanner:
         attempt and only read what concurrent writers committed since, instead
         of re-scanning the whole changed partitions. Mirrors Java
         ``CommitScanner#readIncrementalChanges``.
+
+        Returns None if an intermediate snapshot is missing/expired, since the
+        reconstructed base would not be equivalent to ``to_snapshot``; the caller
+        should then fall back to a full scan.
         """
         snapshot_manager = self.table.snapshot_manager()
         partition_filter = self._build_partition_filter_from_entries(commit_entries)
@@ -137,10 +141,7 @@ class CommitScanner:
         for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
             snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
-                # Skipping would silently drop concurrent changes; fail loudly.
-                raise RuntimeError(
-                    f"Snapshot #{snapshot_id} is missing while reading incremental "
-                    f"changes between #{from_snapshot.id} and #{to_snapshot.id}.")
+                return None
             entries.extend(
                 self.read_incremental_raw_entries_from_changed_partitions(
                     snapshot, commit_entries, partition_filter))

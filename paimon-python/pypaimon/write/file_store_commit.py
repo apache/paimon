@@ -385,16 +385,20 @@ class FileStoreCommit:
         # attempt's base + read only the incremental changes (mirrors Java).
         base_data_files = None
         if detect_conflicts and latest_snapshot is not None:
+            incremental = None
             if (retry_result is not None
                     and retry_result.latest_snapshot is not None
                     and retry_result.base_data_files is not None):
-                base_data_files = list(retry_result.base_data_files)
                 incremental = self.commit_scanner.read_incremental_changes(
                     retry_result.latest_snapshot, latest_snapshot, commit_entries)
+            if incremental is not None:
+                base_data_files = list(retry_result.base_data_files)
                 if incremental:
                     base_data_files.extend(incremental)
                     base_data_files = FileEntry.merge_entries(base_data_files)
             else:
+                # First attempt, or incremental could not be built (missing
+                # snapshot): scan the changed partitions in full.
                 base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
                     latest_snapshot, commit_entries)
 

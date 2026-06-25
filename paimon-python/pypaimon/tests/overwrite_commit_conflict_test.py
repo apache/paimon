@@ -153,6 +153,81 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
         self.assertEqual(len(actual[actual['f0'] == 99]), K)
 
+    def test_incremental_merge_when_concurrent_append_hits_target_partition(self):
+        # Concurrent appends hit the SAME partition being overwritten, so the
+        # incremental read is non-empty and must be merged into the reused base.
+        K = 3
+
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        messages = w.prepare_commit()
+
+        fsc = c.file_store_commit
+
+        full_scans = {'n': 0}
+        incr_lengths = []
+        captured = []  # (latest_snapshot, base_entries, delta_entries) per check
+        orig_full = fsc.commit_scanner.read_all_entries_from_changed_partitions
+        orig_incr = fsc.commit_scanner.read_incremental_changes
+        orig_check = fsc.conflict_detection.check_conflicts
+
+        def spy_full(*a, **k):
+            full_scans['n'] += 1
+            return orig_full(*a, **k)
+
+        def spy_incr(*a, **k):
+            r = orig_incr(*a, **k)
+            incr_lengths.append(None if r is None else len(r))
+            return r
+
+        def spy_check(latest_snapshot, base_entries, delta_entries, *a, **k):
+            captured.append((latest_snapshot, list(base_entries), list(delta_entries)))
+            return orig_check(latest_snapshot, base_entries, delta_entries, *a, **k)
+
+        fsc.commit_scanner.read_all_entries_from_changed_partitions = spy_full
+        fsc.commit_scanner.read_incremental_changes = spy_incr
+        fsc.conflict_detection.check_conflicts = spy_check
+
+        orig_cas = fsc.snapshot_commit.commit
+        cas = {'fails': 0}
+
+        def patched_cas(snapshot, statistics):
+            if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
+                cas['fails'] += 1
+                self._append(pd.DataFrame({'f0': [1], 'f1': [f'y{cas["fails"]}']}))
+                return False
+            return orig_cas(snapshot, statistics)
+
+        fsc.snapshot_commit.commit = patched_cas
+
+        c.commit(messages)
+        c.close()
+
+        self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
+
+        # One full scan; each retry takes the incremental path with non-empty deltas.
+        self.assertEqual(full_scans['n'], 1)
+        self.assertEqual(len(incr_lengths), K)
+        self.assertTrue(all(incr_lengths),
+                        f"expected non-empty incremental on every retry, got {incr_lengths}")
+
+        # The incremental-merged base must equal a fresh full scan at that snapshot.
+        last_snapshot, merged_base, last_delta = captured[-1]
+        full = orig_full(last_snapshot, last_delta)
+        self.assertEqual(
+            set(e.identifier() for e in merged_base),
+            set(e.identifier() for e in full),
+            "incremental-merged base must equal a full scan of the target partition")
+
+        # Overwrite wins: f0=1 is just 'new', f0=2 untouched.
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
+        self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
+
 
 if __name__ == '__main__':
     unittest.main()
