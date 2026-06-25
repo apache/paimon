@@ -428,6 +428,19 @@ public final class RowType extends DataType {
                                 + path);
             }
             if (willExpand) {
+                // A partial struct nested inside another partial struct (a path deeper than one
+                // level, e.g. nest.sub.x) cannot be composed back on read — the data-evolution read
+                // path only assembles one nested level. Reject it here so such a file is never
+                // written/committed and later breaks full-table reads.
+                if (!prefix.isEmpty()) {
+                    throw new UnsupportedOperationException(
+                            "Sub-field-level data evolution supports only one level of partial "
+                                    + "nesting; the nested sub-field '"
+                                    + path
+                                    + "' cannot be partially written. Write the whole '"
+                                    + path
+                                    + "' sub-field instead.");
+                }
                 collectLeafPaths(
                         ((RowType) writeField.type()).getFields(),
                         (RowType) fullField.type(),

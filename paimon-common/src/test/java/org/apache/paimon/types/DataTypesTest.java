@@ -255,6 +255,48 @@ public class DataTypesTest {
                 .containsExactly("a.b");
     }
 
+    @Test
+    void testLeafPaths() {
+        RowType full =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "nest",
+                                        DataTypes.ROW(
+                                                new DataField(2, "a", DataTypes.INT()),
+                                                new DataField(
+                                                        3,
+                                                        "sub",
+                                                        DataTypes.ROW(
+                                                                new DataField(
+                                                                        4, "x", DataTypes.INT()),
+                                                                new DataField(
+                                                                        5,
+                                                                        "y",
+                                                                        DataTypes.INT())))))));
+
+        // a full write collapses to top-level names (no dotted paths)
+        Assertions.assertThat(full.leafPaths(full)).containsExactly("id", "nest");
+
+        // one level of partial nesting: a direct sub-field of a top-level struct
+        Assertions.assertThat(
+                        full.projectByPaths(Collections.singletonList("nest.a")).leafPaths(full))
+                .containsExactly("nest.a");
+
+        // a whole sub-struct under a partial top-level struct is still one level
+        Assertions.assertThat(
+                        full.projectByPaths(Collections.singletonList("nest.sub")).leafPaths(full))
+                .containsExactly("nest.sub");
+
+        // deeper than one level (a partial sub-struct) is rejected so it can never be committed
+        RowType deepPartial = full.projectByPaths(Collections.singletonList("nest.sub.x"));
+        assertThatThrownBy(() -> deepPartial.leafPaths(full))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("one level");
+    }
+
     // --------------------------------------------------------------------------------------------
 
     private static ThrowingConsumer<DataType> baseAssertions(String sqlString, DataType otherType) {
