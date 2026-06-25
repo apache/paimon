@@ -149,7 +149,9 @@ public class ESIndexGlobalIndexWriter
                 }
                 break;
             case FULLTEXT:
-                builder.addTextField(field.name(), docId, fieldData.toString());
+                String singleText = fieldData.toString();
+                builder.addTextField(field.name(), docId, singleText);
+                writeKeywordSubField(field.name(), docId, singleText);
                 break;
             case KEYWORD:
                 builder.addScalarField(
@@ -183,6 +185,7 @@ public class ESIndexGlobalIndexWriter
             case FULLTEXT:
                 String text = row.getString(pos).toString();
                 builder.addTextField(field.name(), docId, text);
+                writeKeywordSubField(field.name(), docId, text);
                 break;
             case KEYWORD:
                 String keyword = row.getString(pos).toString();
@@ -201,6 +204,23 @@ public class ESIndexGlobalIndexWriter
                 break;
             default:
                 break;
+        }
+    }
+
+    /**
+     * Multi-field: when a FULLTEXT column has a keyword sub-field configured, write the raw value
+     * into {@code <field>.keyword} as an exact keyword term so exact filters can use it while
+     * full-text match uses the analyzed primary field. No-op when the sub-field is disabled.
+     */
+    private void writeKeywordSubField(String fieldName, long docId, String value)
+            throws IOException {
+        String subField = indexOptions.keywordSubField(fieldName);
+        if (subField != null) {
+            builder.addScalarField(
+                    subField,
+                    docId,
+                    value,
+                    org.elasticsearch.eslib.api.model.ScalarFieldType.KEYWORD);
         }
     }
 

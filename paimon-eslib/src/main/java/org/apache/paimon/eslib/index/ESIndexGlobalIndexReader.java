@@ -606,10 +606,21 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
         }
         if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT) {
             // A FULLTEXT field is indexed as analyzer-produced tokens, which are not equivalent to
-            // the raw column value. Ordinary SQL predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
-            // evaluated against those tokens would return an incorrect bitmap and wrongly prune
-            // rows, so we disable them and fall back to raw scan (Optional.empty). Only true
-            // full-text search (visitFullTextSearch) is served for FULLTEXT fields.
+            // the raw column value, so ordinary predicates (=, <>, <, >, IN, LIKE, IS NULL, ...)
+            // cannot run on it directly. Route them to the keyword multi-field sub-field
+            // (content.keyword) when present — it holds the exact value and serves these correctly.
+            // Without the sub-field, fall back to raw scan (Optional.empty). Full-text search
+            // (visitFullTextSearch) still targets the analyzed primary field.
+            String subField = indexOptions.keywordSubField(fieldRef.name());
+            if (subField != null) {
+                try {
+                    return executeFilter(subField, filter);
+                } catch (UnsupportedOperationException | IllegalArgumentException e) {
+                    // The keyword sub-field serves term/IN/prefix/wildcard/exists but not e.g. a
+                    // numeric range on a string; fall back to raw scan rather than failing.
+                    return Optional.empty();
+                }
+            }
             return Optional.empty();
         }
         return executeFilter(fieldRef.name(), filter);

@@ -50,12 +50,32 @@ public class ESIndexOptions {
 
     private static final String FIELDS_PREFIX = "fields.";
 
+    /**
+     * Suffix of the keyword multi-field sub-field of a FULLTEXT column (mirrors ES text.keyword).
+     */
+    public static final String KEYWORD_SUBFIELD_SUFFIX = ".keyword";
+
     private final Map<String, FieldIndexConfig> fieldConfigs;
 
     public ESIndexOptions(List<DataField> fields, Options options) {
         this.fieldConfigs = new LinkedHashMap<>();
         for (DataField field : fields) {
-            fieldConfigs.put(field.name(), parseFieldConfig(field, options));
+            FieldIndexConfig config = parseFieldConfig(field, options);
+            fieldConfigs.put(field.name(), config);
+            // Multi-field: a FULLTEXT column also gets a keyword sub-field (content.keyword) so
+            // exact filters (=, IN, prefix, ...) work alongside full-text match. Enabled by
+            // default;
+            // disable with fields.<name>.keyword_subfield=false.
+            if (config.indexType() == FieldIndexConfig.IndexType.FULLTEXT
+                    && options.getBoolean(
+                            FIELDS_PREFIX + field.name() + ".keyword_subfield", true)) {
+                String subField = field.name() + KEYWORD_SUBFIELD_SUFFIX;
+                fieldConfigs.put(
+                        subField,
+                        FieldIndexConfig.builder(subField, FieldIndexConfig.IndexType.KEYWORD)
+                                .scalarType(ScalarFieldType.KEYWORD)
+                                .build());
+            }
         }
     }
 
@@ -65,6 +85,15 @@ public class ESIndexOptions {
 
     public FieldIndexConfig getConfig(String fieldName) {
         return fieldConfigs.get(fieldName);
+    }
+
+    /**
+     * Returns the keyword multi-field sub-field name for {@code fieldName} if one exists (i.e. the
+     * field is FULLTEXT and the keyword sub-field is enabled), otherwise {@code null}.
+     */
+    public String keywordSubField(String fieldName) {
+        String subField = fieldName + KEYWORD_SUBFIELD_SUFFIX;
+        return fieldConfigs.containsKey(subField) ? subField : null;
     }
 
     private FieldIndexConfig parseFieldConfig(DataField field, Options options) {

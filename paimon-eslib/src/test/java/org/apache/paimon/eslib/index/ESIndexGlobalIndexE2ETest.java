@@ -254,19 +254,23 @@ class ESIndexGlobalIndexE2ETest {
                         .isEmpty(),
                 "full-text search on a KEYWORD field must return empty, not throw");
 
-        // --- ordinary SQL predicates on a FULLTEXT field are disabled (analyzed tokens != raw
-        // value); they must return empty so the engine falls back to raw scan instead of pruning
-        // rows with a wrong bitmap ---
+        // --- multi-field: title is FULLTEXT, so ordinary predicates route to the keyword
+        // sub-field title.keyword (written by default) and evaluate exactly on the raw value ---
         FieldRef titleRef = new FieldRef(1, "title", DataTypes.STRING());
-        assertTrue(
-                reader.visitEqual(titleRef, "document 0 even").join().isEmpty(),
-                "= on FULLTEXT field must not be index-evaluated");
-        assertTrue(
-                reader.visitLike(titleRef, "doc%").join().isEmpty(),
-                "LIKE on FULLTEXT field must not be index-evaluated");
+        Optional<GlobalIndexResult> titleEq = reader.visitEqual(titleRef, "document 0 even").join();
+        assertTrue(titleEq.isPresent(), "= on FULLTEXT routes to keyword sub-field");
+        assertEquals(
+                1, titleEq.get().results().getIntCardinality(), "exact title matches only row 0");
+        assertTrue(contains(titleEq.get().results(), 0L), "exact title 'document 0 even' is row 0");
+        assertEquals(
+                20,
+                reader.visitLike(titleRef, "doc%").join().get().results().getIntCardinality(),
+                "LIKE 'doc%' on title.keyword matches all 20 'document ...' titles");
+        // A range predicate on a string keyword sub-field is unsupported -> falls back to empty
+        // (not an error).
         assertTrue(
                 reader.visitGreaterThan(titleRef, "abc").join().isEmpty(),
-                "> on FULLTEXT field must not be index-evaluated");
+                "> (range) on a keyword sub-field is unsupported and falls back to empty");
 
         // --- scalar filter: price >= 100 means rows 10..19 (price = i*10) ---
         FieldRef priceRef = new FieldRef(3, "price", DataTypes.INT());
@@ -300,6 +304,69 @@ class ESIndexGlobalIndexE2ETest {
             reader.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void fulltextMultiFieldServesBothMatchAndExact(@TempDir java.nio.file.Path tmp)
+            throws IOException {
+        // Single STRING column "t" configured FULLTEXT. By default a keyword sub-field "t.keyword"
+        // is also written, so full-text match works on the analyzed field AND exact = works via the
+        // sub-field. With fields.t.keyword_subfield=false the sub-field is absent and exact = falls
+        // back to empty.
+        List<DataField> fields = Arrays.asList(new DataField(0, "t", DataTypes.STRING()));
+        String[] docs = {"Apache Paimon", "vector search", "Apache Paimon"};
+
+        for (boolean keywordSub : new boolean[] {true, false}) {
+            Map<String, String> opt = new HashMap<>();
+            opt.put("fields.t.analyzer", "standard");
+            if (!keywordSub) {
+                opt.put("fields.t.keyword_subfield", "false");
+            }
+            ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
+
+            java.nio.file.Path dir = tmp.resolve("mf-" + keywordSub);
+            Files.createDirectories(dir);
+            LocalDirWriter fw = new LocalDirWriter(dir);
+            ESIndexGlobalIndexWriter w = new ESIndexGlobalIndexWriter(fw, fields, options);
+            for (int i = 0; i < docs.length; i++) {
+                w.write(BinaryString.fromString(docs[i]), i);
+            }
+            ResultEntry entry = w.finish().get(0);
+            GlobalIndexIOMeta ioMeta =
+                    new GlobalIndexIOMeta(
+                            new org.apache.paimon.fs.Path(dir.resolve(entry.fileName()).toString()),
+                            Files.size(dir.resolve(entry.fileName())),
+                            entry.meta());
+            ESIndexGlobalIndexReader reader =
+                    new ESIndexGlobalIndexReader(
+                            new LocalFileReader(), List.of(ioMeta), fields, options);
+            FieldRef tRef = new FieldRef(0, "t", DataTypes.STRING());
+
+            // full-text match works regardless of the sub-field (analyzed field).
+            Optional<ScoredGlobalIndexResult> m =
+                    reader.visitFullTextSearch(
+                                    new FullTextSearch(FullTextQuery.match("paimon", "t"), 50))
+                            .join();
+            assertTrue(m.isPresent(), "match works on the FULLTEXT field");
+            assertEquals(2, m.get().results().getIntCardinality(), "two docs contain 'paimon'");
+
+            // exact = only works when the keyword sub-field exists.
+            Optional<GlobalIndexResult> eq = reader.visitEqual(tRef, "Apache Paimon").join();
+            if (keywordSub) {
+                assertTrue(eq.isPresent(), "exact = served via t.keyword");
+                assertEquals(
+                        2,
+                        eq.get().results().getIntCardinality(),
+                        "two rows equal 'Apache Paimon'");
+            } else {
+                assertTrue(eq.isEmpty(), "exact = falls back to empty when sub-field disabled");
+            }
+            try {
+                reader.close();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
