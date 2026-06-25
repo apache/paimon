@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -70,7 +71,7 @@ public class ManifestFileSorter {
         final boolean fullCompaction;
         final ManifestSortKey sortKey;
         final ManifestEntryExternalSort.Config externalSortConfig;
-        final boolean hasDeleteEntries;
+        final Set<FileEntry.Identifier> deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -88,14 +89,14 @@ public class ManifestFileSorter {
                 boolean fullCompaction,
                 ManifestSortKey sortKey,
                 ManifestEntryExternalSort.Config externalSortConfig,
-                boolean hasDeleteEntries,
+                Set<FileEntry.Identifier> deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
             this.fullCompaction = fullCompaction;
             this.sortKey = sortKey;
             this.externalSortConfig = externalSortConfig;
-            this.hasDeleteEntries = hasDeleteEntries;
+            this.deleteEntries = deleteEntries;
             this.compactWithoutSort = compactWithoutSort;
             this.levelRuns = levelRuns;
             this.pickedRuns = pickedRuns;
@@ -110,7 +111,7 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files. */
     private static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
-        final boolean hasDeleteEntries;
+        final Set<FileEntry.Identifier> deleteEntries;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -123,10 +124,10 @@ public class ManifestFileSorter {
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
-                boolean hasDeleteEntries,
+                Set<FileEntry.Identifier> deleteEntries,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
-            this.hasDeleteEntries = hasDeleteEntries;
+            this.deleteEntries = deleteEntries;
             this.compactWithoutSort = compactWithoutSort;
         }
     }
@@ -470,7 +471,7 @@ public class ManifestFileSorter {
                 fullCompaction,
                 sortKey,
                 externalSortConfig,
-                classifyResult.hasDeleteEntries,
+                classifyResult.deleteEntries,
                 classifyResult.compactWithoutSort,
                 levelRuns,
                 pickedRuns);
@@ -485,7 +486,7 @@ public class ManifestFileSorter {
      * <p>Non-full compaction: small files go to compactWithoutSort for minor-style merge; the rest
      * are returned as lsmFiles.
      *
-     * @return ClassifyResult containing lsmFiles, delete-entry existence, and compactWithoutSort
+     * @return ClassifyResult containing lsmFiles, deleteEntries, and compactWithoutSort
      */
     private static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
@@ -497,23 +498,23 @@ public class ManifestFileSorter {
         // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> compactWithoutSort = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        boolean hasDeleteEntries = false;
+        Set<FileEntry.Identifier> classifiedDeleteEntries = Collections.emptySet();
         PartitionPredicate predicate = null;
         if (fullCompaction) {
-            for (ManifestFileMeta meta : input) {
-                if (meta.numDeletedFiles() > 0) {
-                    hasDeleteEntries = true;
-                    break;
-                }
-            }
+            classifiedDeleteEntries =
+                    FileEntry.readDeletedEntries(manifestFile, input, manifestReadParallelism);
 
-            if (hasDeleteEntries) {
-                // Avoid keeping all delete identifiers or delete partitions in heap. Full
-                // compaction with deletes is handled by an external identifier sort, so all files
-                // are conservatively included in the cleanup scope.
-                predicate = PartitionPredicate.ALWAYS_TRUE;
-            } else {
+            // Build partition predicate from delete entries for overlap detection.
+            if (classifiedDeleteEntries.isEmpty()) {
                 predicate = PartitionPredicate.ALWAYS_FALSE;
+            } else {
+                if (partitionType.getFieldCount() > 0) {
+                    Set<BinaryRow> deletePartitions =
+                            ManifestFileMerger.computeDeletePartitions(classifiedDeleteEntries);
+                    predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+                } else {
+                    predicate = PartitionPredicate.ALWAYS_TRUE;
+                }
             }
         }
 
@@ -535,7 +536,7 @@ public class ManifestFileSorter {
             }
         }
 
-        return new ClassifyResult(lsmFiles, hasDeleteEntries, compactWithoutSort);
+        return new ClassifyResult(lsmFiles, classifiedDeleteEntries, compactWithoutSort);
     }
 
     /**
@@ -740,17 +741,6 @@ public class ManifestFileSorter {
         for (int i = 0; i < sections.size(); i++) {
             Section section = sections.get(i);
 
-            if (ctx.fullCompaction && ctx.hasDeleteEntries) {
-                rewriteSection(
-                        section.files,
-                        output,
-                        sortNewFiles,
-                        ctx,
-                        manifestFile,
-                        manifestReadParallelism);
-                continue;
-            }
-
             // A single-file section is always handled directly, regardless of the budget.
             if (section.files.size() == 1) {
                 rewriteSection(
@@ -933,8 +923,7 @@ public class ManifestFileSorter {
         }
         // Flush tail only if delete entries exist or file count >= minCount.
         if (!candidates.isEmpty()) {
-            if ((ctx.fullCompaction && ctx.hasDeleteEntries)
-                    || candidates.size() >= suggestedMinMetaCount) {
+            if (!ctx.deleteEntries.isEmpty() || candidates.size() >= suggestedMinMetaCount) {
                 rewriteSection(
                         candidates,
                         output,
@@ -987,23 +976,6 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        if (ctx.hasDeleteEntries) {
-            List<ManifestFileMeta> sorted =
-                    ManifestEntryExternalSort.cancelAndWriteEntries(
-                                    section,
-                                    ctx.sortKey,
-                                    ctx.externalSortConfig,
-                                    manifestFile,
-                                    manifestReadParallelism,
-                                    ManifestEntryExternalSort.CancelMode.FULL)
-                            .getLeft();
-            if (!sorted.isEmpty()) {
-                output.addSortedFiles(sorted);
-                sortNewFiles.addAll(sorted);
-            }
-            return;
-        }
-
         // Read ADD entries and write them through the external sorter.
         Function<ManifestFileMeta, List<ManifestEntry>> reader =
                 meta -> {
@@ -1014,7 +986,9 @@ public class ManifestFileSorter {
                                     meta.fileSize(),
                                     FileEntry.addFilter(),
                                     Filter.alwaysTrue())) {
-                        batch.add(entry);
+                        if (!ctx.deleteEntries.contains(entry.identifier())) {
+                            batch.add(entry);
+                        }
                     }
                     return batch;
                 };
