@@ -116,6 +116,26 @@ class CommitScanner:
                 entries.append(entry)
         return entries
 
+    def read_incremental_changes(self, from_snapshot: Snapshot, to_snapshot: Snapshot,
+                                 commit_entries: List[ManifestEntry]):
+        """Read delta entries (including DELETEs) for snapshots in the range
+        ``(from_snapshot, to_snapshot]``, filtered to the changed partitions.
+
+        Lets a commit retry reuse the base entries computed by the previous
+        attempt and only read what concurrent writers committed since, instead
+        of re-scanning the whole changed partitions. Mirrors Java
+        ``CommitScanner#readIncrementalChanges``.
+        """
+        snapshot_manager = self.table.snapshot_manager()
+        entries = []
+        for snapshot_id in range(from_snapshot.id + 1, to_snapshot.id + 1):
+            snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                continue
+            entries.extend(
+                self.read_incremental_raw_entries_from_changed_partitions(snapshot, commit_entries))
+        return entries
+
     def _build_partition_filter_from_entries(self, entries: List[ManifestEntry]):
         """Build a partition predicate that matches all partitions present in the given entries.
 
