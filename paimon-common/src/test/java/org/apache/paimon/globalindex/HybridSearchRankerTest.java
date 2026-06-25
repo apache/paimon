@@ -128,6 +128,26 @@ public class HybridSearchRankerTest {
     }
 
     @Test
+    public void testWeightedScoreTopKBreaksBoundaryTiesByRowId() {
+        ScoredGlobalIndexResult tied =
+                result(
+                        new long[] {4, 3, 2, 1},
+                        new float[] {5.0f, 5.0f, 5.0f, 5.0f},
+                        new long[] {4, 3, 2, 1});
+
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.weightedScore(
+                        Collections.singletonList(
+                                new HybridSearchRanker.WeightedResult(tied, 2.0f)),
+                        2);
+
+        assertThat(ranked.results()).contains(1L, 2L);
+        assertThat(ranked.results()).doesNotContain(3L, 4L);
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(2.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(2L)).isCloseTo(2.0f, within(0.000001f));
+    }
+
+    @Test
     public void testRejectNonFiniteWeights() {
         ScoredGlobalIndexResult result = result(new long[] {1}, new float[] {1.0f});
 

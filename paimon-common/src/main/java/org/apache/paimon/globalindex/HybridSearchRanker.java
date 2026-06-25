@@ -22,9 +22,11 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 
 /** Ranker utilities for hybrid search results. */
 public class HybridSearchRanker {
@@ -151,24 +153,42 @@ public class HybridSearchRanker {
     }
 
     private static ScoredGlobalIndexResult topK(Map<Long, Float> scores, int limit) {
-        if (scores.isEmpty()) {
+        if (scores.isEmpty() || limit <= 0) {
             return ScoredGlobalIndexResult.createEmpty();
         }
-        List<Map.Entry<Long, Float>> ranked = new ArrayList<>(scores.entrySet());
-        ranked.sort(
+        if (scores.size() <= limit) {
+            return toScoredResult(scores.entrySet());
+        }
+
+        // The heap head is the weakest kept row: lowest score, then largest rowId.
+        Comparator<Map.Entry<Long, Float>> weakestFirst =
                 (left, right) -> {
-                    int scoreCompare = Float.compare(right.getValue(), left.getValue());
+                    int scoreCompare = Float.compare(left.getValue(), right.getValue());
                     if (scoreCompare != 0) {
                         return scoreCompare;
                     }
-                    return Long.compare(left.getKey(), right.getKey());
-                });
+                    return Long.compare(right.getKey(), left.getKey());
+                };
 
-        int size = Math.min(limit, ranked.size());
+        PriorityQueue<Map.Entry<Long, Float>> topEntries =
+                new PriorityQueue<>(limit + 1, weakestFirst);
+        for (Map.Entry<Long, Float> entry : scores.entrySet()) {
+            if (topEntries.size() < limit) {
+                topEntries.offer(entry);
+            } else if (weakestFirst.compare(entry, topEntries.peek()) > 0) {
+                topEntries.poll();
+                topEntries.offer(entry);
+            }
+        }
+
+        return toScoredResult(topEntries);
+    }
+
+    private static ScoredGlobalIndexResult toScoredResult(
+            Iterable<Map.Entry<Long, Float>> entries) {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         Map<Long, Float> topScores = new HashMap<>();
-        for (int i = 0; i < size; i++) {
-            Map.Entry<Long, Float> entry = ranked.get(i);
+        for (Map.Entry<Long, Float> entry : entries) {
             bitmap.add(entry.getKey());
             topScores.put(entry.getKey(), entry.getValue());
         }
