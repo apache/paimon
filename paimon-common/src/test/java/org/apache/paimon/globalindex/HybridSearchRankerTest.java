@@ -148,6 +148,29 @@ public class HybridSearchRankerTest {
     }
 
     @Test
+    public void testMrrFavorsRowsWithStrongRanksAcrossRoutes() {
+        ScoredGlobalIndexResult first = result(new long[] {1, 2}, new float[] {0.9f, 0.8f});
+        ScoredGlobalIndexResult second = result(new long[] {2, 3}, new float[] {0.7f, 0.6f});
+
+        assertThat(HybridSearchRanker.normalizeRanker("mrr"))
+                .isEqualTo(HybridSearchRanker.MRR_RANKER);
+
+        ScoredGlobalIndexResult ranked =
+                HybridSearchRanker.rank(
+                        HybridSearchRanker.MRR_RANKER,
+                        Arrays.asList(
+                                new HybridSearchRanker.WeightedResult(first, 1.0f),
+                                new HybridSearchRanker.WeightedResult(second, 2.0f)),
+                        2);
+
+        assertThat(ranked.results()).contains(1L, 2L);
+        assertThat(ranked.results()).doesNotContain(3L);
+        assertThat(ranked.scoreGetter().score(2L)).isCloseTo(2.5f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(1L)).isCloseTo(1.0f, within(0.000001f));
+        assertThat(ranked.scoreGetter().score(2L)).isGreaterThan(ranked.scoreGetter().score(1L));
+    }
+
+    @Test
     public void testRejectNonFiniteWeights() {
         ScoredGlobalIndexResult result = result(new long[] {1}, new float[] {1.0f});
 
