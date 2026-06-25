@@ -72,6 +72,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VectorSearchBuilder} using test-only brute-force vector index. */
 public class VectorSearchBuilderTest extends TableTestBase {
@@ -477,6 +478,73 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(result.results().isEmpty()).isFalse();
+    }
+
+    @Test
+    public void testVectorSearchRefineFactorReranksIndexCandidates() throws Exception {
+        catalog.createTable(
+                identifier("refine_factor_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(TestVectorGlobalIndexer.OPT_REVERSE_SCORE, "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("refine_factor_table"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {10.0f, 0.0f}, {20.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        GlobalIndexResult approximate =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertThat(approximate.results()).containsExactly(2L);
+
+        GlobalIndexResult refined =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withOption(
+                                TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3")
+                        .executeLocal();
+        assertThat(refined.results()).containsExactly(0L);
+        assertThat(readIds(table, refined)).containsExactly(0);
+
+        List<GlobalIndexResult> batchRefined =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.0f, 0.0f}, {20.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withOption(
+                                TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3")
+                        .executeBatchLocal();
+        assertThat(batchRefined).hasSize(2);
+        assertThat(batchRefined.get(0).results()).containsExactly(0L);
+        assertThat(batchRefined.get(1).results()).containsExactly(2L);
+    }
+
+    @Test
+    public void testVectorSearchRefineFactorValidation() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        assertThatThrownBy(
+                        () ->
+                                table.newVectorSearchBuilder()
+                                        .withVector(new float[] {0.0f, 0.0f})
+                                        .withLimit(1)
+                                        .withVectorColumn(VECTOR_FIELD_NAME)
+                                        .withOption("refine_factor", "0")
+                                        .executeLocal())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("refine factor must be positive");
     }
 
     @Test

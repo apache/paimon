@@ -156,6 +156,7 @@ Search-time options are passed with each vector search request:
 | Option | Default | Description |
 |---|---|---|
 | `ivf.nprobe` | `16` | Number of IVF clusters to probe during search. Higher values usually improve recall but increase latency. |
+| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is disabled by default for every IVF variant and is most useful for compressed indexes such as `ivf-pq` and `ivf-hnsw-sq` when recall is more important than latency. |
 | `hnsw.ef_search` | `0` | HNSW search width during search. Higher values usually improve recall but increase latency. `0` uses the native library default. |
 | `diskann.search.list_size` | `max(1.5x top_k, 16)` | Lumina DiskANN search list size. Higher values usually improve recall but increase latency. |
 | `diskann.search.beam_width` | `4` | Lumina DiskANN search beam width. |
@@ -165,6 +166,10 @@ Use the same distance metric at build time and query time. Search options can be
 so you can use a larger `ivf.nprobe` or `hnsw.ef_search` for higher recall queries and a smaller
 value for latency-sensitive queries. Lumina query-time options use the native keys shown above; when
 the same options are configured as table or index options, use the `lumina.` prefix.
+
+`ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
+spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector
+rerank for the indexed candidates; leaving it unset skips the rerank stage.
 
 <Tabs groupId="vector-search">
 

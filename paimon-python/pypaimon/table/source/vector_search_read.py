@@ -197,7 +197,7 @@ class AbstractVectorSearchReadImpl:
         return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
 
     def _eval(self, row_range_start, row_range_end, vector_index_files,
-              query_vector, include_row_ids):
+              query_vector, search_limit, include_row_ids):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -205,7 +205,7 @@ class AbstractVectorSearchReadImpl:
 
         vector_search = VectorSearch(
             vector=query_vector,
-            limit=self._limit,
+            limit=search_limit,
             field_name=self._vector_column.name,
             options=self._options,
         )
@@ -262,7 +262,7 @@ class AbstractVectorSearchReadImpl:
         return DictBasedScoredIndexResult(scores).top_k(self._limit)
 
     def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
-                    query_vectors, include_row_ids):
+                    query_vectors, search_limit, include_row_ids):
         from pypaimon.globalindex.global_index_reader import _completed_future
 
         if not vector_index_files:
@@ -270,7 +270,7 @@ class AbstractVectorSearchReadImpl:
 
         batch_vector_search = BatchVectorSearch(
             vectors=query_vectors,
-            limit=self._limit,
+            limit=search_limit,
             field_name=self._vector_column.name,
             options=self._options,
         )
@@ -282,6 +282,42 @@ class AbstractVectorSearchReadImpl:
         future = offset_reader.visit_batch_vector_search(batch_vector_search)
         future.add_done_callback(lambda _: reader.close())
         return future
+
+    def _indexed_search_limit(self, index_type):
+        refine_factor = self._configured_refine_factor(index_type)
+        if refine_factor == 0:
+            return self._limit
+        return self._limit * refine_factor
+
+    def _maybe_rerank_indexed_result(self, result, index_type, query_vector):
+        if (self._configured_refine_factor(index_type) == 0 or
+                result.results().is_empty()):
+            return result
+        candidates = result.top_k(self._indexed_search_limit(index_type))
+        return self._read_raw_search(
+            candidates.results().to_range_list(),
+            candidates.results(),
+            query_vector,
+            index_type,
+        )
+
+    def _configured_refine_factor(self, index_type):
+        value = _configured_refine_factor(
+            self._options, self._vector_column.name, index_type)
+        if value is None:
+            value = _configured_refine_factor(
+                _table_options_map(self._table), self._vector_column.name, index_type)
+        if value is None:
+            return 0
+        try:
+            factor = int(value)
+        except ValueError as e:
+            raise ValueError(
+                "Invalid vector refine factor: %s. Must be an integer." % value
+            ) from e
+        if factor <= 0:
+            raise ValueError("Vector refine factor must be positive, got: %s" % value)
+        return factor
 
 
 class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
@@ -315,12 +351,15 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
         return indexed.or_(raw_result).top_k(self._limit)
 
     def _read_indexed(self, splits, query_vector):
+        index_type = _vector_index_type(splits)
+        search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(splits)
         futures = [
             self._eval(
                 split.row_range_start, split.row_range_end,
                 split.vector_index_files,
                 query_vector,
+                search_limit,
                 None if not pre_filters else pre_filters[i]
             )
             for i, split in enumerate(splits)
@@ -337,7 +376,8 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
                     if row_id not in merged_scores:
                         merged_scores[row_id] = score_getter(row_id)
 
-        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
+        indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
+        return self._maybe_rerank_indexed_result(indexed, index_type, query_vector)
 
 
 class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
@@ -361,11 +401,14 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
 
         # One native batch call per INDEX split (all query vectors at once),
         # passing that split's pre-filter. Each future returns n per-query results.
+        index_type = _vector_index_type(index_splits)
+        search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(index_splits)
         futures = [
             self._eval_batch(
                 split.row_range_start, split.row_range_end,
                 split.vector_index_files, self._query_vectors,
+                search_limit,
                 None if not pre_filters else pre_filters[i],
             )
             for i, split in enumerate(index_splits)
@@ -392,7 +435,9 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         raw_index_type = _raw_search_index_type(raw_splits)
         results = []
         for i in range(n):
-            indexed = DictBasedScoredIndexResult(merged_scores[i])
+            indexed = DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
+            indexed = self._maybe_rerank_indexed_result(
+                indexed, index_type, self._query_vectors[i])
             raw = self._read_raw_search(
                 raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type)
             results.append(indexed.or_(raw).top_k(self._limit))
@@ -445,6 +490,13 @@ def _raw_search_index_type(raw_splits):
     return None
 
 
+def _vector_index_type(index_splits):
+    for split in index_splits:
+        if split.vector_index_files:
+            return split.vector_index_files[0].index_type
+    return None
+
+
 def _empty_bitmaps(size):
     return [RoaringBitmap64() for _ in range(size)]
 
@@ -470,6 +522,45 @@ def _to_vector_list(value):
     return list(value)
 
 
+def _configured_refine_factor(options, vector_column_name, index_type):
+    prefixes = []
+    field_prefix = "fields.%s." % vector_column_name
+    _add_refine_prefixes(prefixes, field_prefix, index_type)
+    _add_refine_prefixes(prefixes, "", index_type)
+
+    for prefix in prefixes:
+        for suffix in (
+            "refine_factor",
+            "refine-factor",
+            "rerank_factor",
+            "rerank-factor",
+        ):
+            value = options.get(prefix + suffix)
+            if value is not None:
+                return str(value).strip()
+    return None
+
+
+def _add_refine_prefixes(prefixes, base, index_type):
+    if index_type:
+        prefixes.append(base + index_type + ".")
+        normalized = _normalize_index_type(index_type)
+        if normalized != index_type:
+            prefixes.append(base + normalized + ".")
+        if normalized.startswith("ivf"):
+            prefixes.append(base + "ivf.")
+    prefixes.append(base)
+
+
+def _normalize_index_type(index_type):
+    return str(index_type).lower().replace("-", "_")
+
+
+def _table_options_map(table):
+    table_options = getattr(getattr(table, "options", None), "options", None)
+    return table_options.to_map() if table_options is not None else {}
+
+
 def _raw_search_metric(table, vector_column, options, index_type=None):
     candidates = []
     field_prefix = "fields.%s." % vector_column.name
@@ -488,8 +579,7 @@ def _raw_search_metric(table, vector_column, options, index_type=None):
     ]:
         if key in options:
             candidates.append(options[key])
-    table_options = getattr(getattr(table, "options", None), "options", None)
-    table_map = table_options.to_map() if table_options is not None else {}
+    table_map = _table_options_map(table)
     for key in [
         field_prefix + "distance.metric",
         field_prefix + "metric",
