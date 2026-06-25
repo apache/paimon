@@ -19,21 +19,33 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.shredding.MapSharedShreddingContext;
+import org.apache.paimon.data.shredding.MapSharedShreddingCoreUtils;
+import org.apache.paimon.data.shredding.MapSharedShreddingDefine;
+import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
+import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SupportsReaderFieldMetadata;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,6 +57,8 @@ import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsConverter;
@@ -54,6 +68,7 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -66,6 +81,8 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -74,10 +91,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -407,6 +427,838 @@ public class AppendOnlyWriterTest {
                 });
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testWriteSharedShreddingMapFieldContent(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(1, "a", 10L, "b", 20L),
+                                sharedShreddingRow(2, "c", 30L, "a", 40L, "b", 50L),
+                                sharedShreddingRow(3, "a", 60L)),
+                        shreddingColumns("tags", 3),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, -1),
+                                                values(10L, 20L, null),
+                                                null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(2, 0, 1),
+                                                values(30L, 40L, 50L),
+                                                null)),
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, -1, -1),
+                                                values(60L, null, null),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1, "c", 2),
+                                        fieldToColumns(
+                                                0, columns(0, 1),
+                                                1, columns(1, 2),
+                                                2, columns(0)),
+                                        overflowFields(),
+                                        3,
+                                        3))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testWriteSharedShreddingWithFileIndex(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        rawOptions.setString("file-index.bloom-filter.columns", "id");
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, writeType, rawOptions);
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(context.options));
+
+        writer.write(sharedShreddingRow(1, "a", 10L));
+        writer.write(sharedShreddingRow(2, "b", 20L));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        DataFileMeta file = assertSingleNewFile(increment);
+        assertThat(file.embeddedIndex() != null || !file.extraFiles().isEmpty()).isTrue();
+        assertSharedShreddingDataFile(
+                context,
+                writeType,
+                file,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(1, "a", 10L), sharedShreddingRow(2, "b", 20L)),
+                        shreddingColumns("tags", 3),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, -1, -1),
+                                                values(10L, null, null),
+                                                null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(1, -1, -1),
+                                                values(20L, null, null),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1),
+                                        fieldToColumns(
+                                                0, columns(0),
+                                                1, columns(0)),
+                                        overflowFields(),
+                                        3,
+                                        1))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingMapAllEmptyFirstFile(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(sharedShreddingRow(1), sharedShreddingRow(2)),
+                        shreddingColumns("tags", 3),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(-1, -1, -1),
+                                                values(null, null, null),
+                                                null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(-1, -1, -1),
+                                                values(null, null, null),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId(), fieldToColumns(), overflowFields(), 3, 0))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingMapAllNullThenAllEmptyFiles(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingLogicalRow(1, null),
+                                sharedShreddingLogicalRow(2, null)),
+                        shreddingColumns("tags", 3),
+                        Arrays.asList(
+                                expectedPhysicalRow(1, sharedShreddingNullField("tags")),
+                                expectedPhysicalRow(2, sharedShreddingNullField("tags"))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId(), fieldToColumns(), overflowFields(), 3, 0))),
+                expectedSharedShreddingFile(
+                        Arrays.asList(sharedShreddingRow(3), sharedShreddingRow(4)),
+                        shreddingColumns("tags", 1),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags", mapping(-1), values((Object) null), null)),
+                                expectedPhysicalRow(
+                                        4,
+                                        sharedShreddingField(
+                                                "tags", mapping(-1), values((Object) null), null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId(), fieldToColumns(), overflowFields(), 1, 0))),
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(5, "a", null),
+                                sharedShreddingRow(6, "b", null),
+                                sharedShreddingRow(7, "c", 7L, "d", null)),
+                        shreddingColumns("tags", 1),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        5,
+                                        sharedShreddingField(
+                                                "tags", mapping(0), values((Object) null), null)),
+                                expectedPhysicalRow(
+                                        6,
+                                        sharedShreddingField(
+                                                "tags", mapping(1), values((Object) null), null)),
+                                expectedPhysicalRow(
+                                        7,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(2),
+                                                values(7L),
+                                                overflow(3, null)))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1, "c", 2, "d", 3),
+                                        fieldToColumns(
+                                                0, columns(0),
+                                                1, columns(0),
+                                                2, columns(0)),
+                                        overflowFields(3),
+                                        1,
+                                        2))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testWriteSharedShreddingMapWithOverflow(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 2);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(1, "a", 1L, "b", 2L),
+                                sharedShreddingRow(2, "c", 3L, "a", 4L, "b", 5L),
+                                sharedShreddingRow(3, "d", 6L, "e", 7L, "f", 8L, "a", 9L)),
+                        shreddingColumns("tags", 2),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags", mapping(0, 1), values(1L, 2L), null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(2, 0),
+                                                values(3L, 4L),
+                                                overflow(1, 5L))),
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(3, 4),
+                                                values(6L, 7L),
+                                                overflow(5, 8L, 0, 9L)))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1, "c", 2, "d", 3, "e", 4, "f", 5),
+                                        fieldToColumns(
+                                                0, columns(0, 1),
+                                                1, columns(1),
+                                                2, columns(0),
+                                                3, columns(0),
+                                                4, columns(1)),
+                                        overflowFields(0, 1, 5),
+                                        2,
+                                        4))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingMapKAdaptationAcrossFiles(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 10);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(1, "a", 10L, "b", 20L),
+                                sharedShreddingRow(2, "c", 30L, "a", 40L, "b", 50L)),
+                        shreddingColumns("tags", 10),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, -1, -1, -1, -1, -1, -1, -1, -1),
+                                                paddedValues(10, 10L, 20L),
+                                                null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(2, 0, 1, -1, -1, -1, -1, -1, -1, -1),
+                                                paddedValues(10, 30L, 40L, 50L),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1, "c", 2),
+                                        fieldToColumns(
+                                                0, columns(0, 1),
+                                                1, columns(1, 2),
+                                                2, columns(0)),
+                                        overflowFields(),
+                                        10,
+                                        3))),
+                expectedSharedShreddingFile(
+                        Collections.singletonList(
+                                sharedShreddingRow(
+                                        3, "x", 100L, "y", 200L, "z", 300L, "w", 400L, "v", 500L)),
+                        shreddingColumns("tags", 3),
+                        Collections.singletonList(
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, 2),
+                                                values(100L, 200L, 300L),
+                                                overflow(3, 400L, 4, 500L)))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("x", 0, "y", 1, "z", 2, "w", 3, "v", 4),
+                                        fieldToColumns(
+                                                0, columns(0),
+                                                1, columns(1),
+                                                2, columns(2)),
+                                        overflowFields(3, 4),
+                                        3,
+                                        5))),
+                expectedSharedShreddingFile(
+                        Collections.singletonList(
+                                sharedShreddingRow(
+                                        4, "p", 1000L, "q", 2000L, "r", 3000L, "s", 4000L)),
+                        shreddingColumns("tags", 5),
+                        Collections.singletonList(
+                                expectedPhysicalRow(
+                                        4,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, 2, 3, -1),
+                                                paddedValues(5, 1000L, 2000L, 3000L, 4000L),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("p", 0, "q", 1, "r", 2, "s", 3),
+                                        fieldToColumns(
+                                                0, columns(0),
+                                                1, columns(1),
+                                                2, columns(2),
+                                                3, columns(3)),
+                                        overflowFields(),
+                                        5,
+                                        4))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testMultipleSharedShreddingMapFieldsWithKAdaptation(String fileFormat)
+            throws Exception {
+        RowType writeType = sharedShreddingTagsAndAttrsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 8, "attrs", 4);
+
+        assertSharedShreddingAppendWrite(
+                fileFormat,
+                writeType,
+                rawOptions,
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingLogicalRow(
+                                        1, map("a", 10L, "b", 20L), map("x", "v1")),
+                                sharedShreddingLogicalRow(2, map("a", 30L), map("x", "v2"))),
+                        shreddingColumns("tags", 8, "attrs", 4),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, -1, -1, -1, -1, -1, -1),
+                                                paddedValues(8, 10L, 20L),
+                                                null),
+                                        sharedShreddingField(
+                                                "attrs",
+                                                mapping(0, -1, -1, -1),
+                                                paddedValues(4, "v1"),
+                                                null)),
+                                expectedPhysicalRow(
+                                        2,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, -1, -1, -1, -1, -1, -1, -1),
+                                                paddedValues(8, 30L),
+                                                null),
+                                        sharedShreddingField(
+                                                "attrs",
+                                                mapping(0, -1, -1, -1),
+                                                paddedValues(4, "v2"),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1),
+                                        fieldToColumns(0, columns(0), 1, columns(1)),
+                                        overflowFields(),
+                                        8,
+                                        2),
+                                "attrs",
+                                sharedShreddingMeta(
+                                        nameToId("x", 0),
+                                        fieldToColumns(0, columns(0)),
+                                        overflowFields(),
+                                        4,
+                                        1))),
+                expectedSharedShreddingFile(
+                        Collections.singletonList(
+                                sharedShreddingLogicalRow(
+                                        3,
+                                        map("c", 100L, "d", 200L, "e", 300L),
+                                        map("p", "a1", "q", "a2", "r", "a3"))),
+                        shreddingColumns("tags", 2, "attrs", 1),
+                        Collections.singletonList(
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1),
+                                                values(100L, 200L),
+                                                overflow(2, 300L)),
+                                        sharedShreddingField(
+                                                "attrs",
+                                                mapping(0),
+                                                values("a1"),
+                                                overflow(1, "a2", 2, "a3")))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("c", 0, "d", 1, "e", 2),
+                                        fieldToColumns(0, columns(0), 1, columns(1)),
+                                        overflowFields(2),
+                                        2,
+                                        3),
+                                "attrs",
+                                sharedShreddingMeta(
+                                        nameToId("p", 0, "q", 1, "r", 2),
+                                        fieldToColumns(0, columns(0)),
+                                        overflowFields(1, 2),
+                                        1,
+                                        3))),
+                expectedSharedShreddingFile(
+                        Collections.singletonList(
+                                sharedShreddingLogicalRow(
+                                        4, map("f", 400L, "g", 500L), map("s", "b1", "t", "b2"))),
+                        shreddingColumns("tags", 3, "attrs", 3),
+                        Collections.singletonList(
+                                expectedPhysicalRow(
+                                        4,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, -1),
+                                                paddedValues(3, 400L, 500L),
+                                                null),
+                                        sharedShreddingField(
+                                                "attrs",
+                                                mapping(0, 1, -1),
+                                                paddedValues(3, "b1", "b2"),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("f", 0, "g", 1),
+                                        fieldToColumns(0, columns(0), 1, columns(1)),
+                                        overflowFields(),
+                                        3,
+                                        2),
+                                "attrs",
+                                sharedShreddingMeta(
+                                        nameToId("s", 0, "t", 1),
+                                        fieldToColumns(0, columns(0), 1, columns(1)),
+                                        overflowFields(),
+                                        3,
+                                        2))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingMapDataFileMetaInfo(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        rawOptions.setString("metadata.stats-mode", "full");
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, writeType, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context, 5L, 9L);
+        ExpectedSharedShreddingFile expectedFile =
+                expectedSharedShreddingFile(
+                        Arrays.asList(
+                                sharedShreddingRow(1, "a", 10L, "b", 20L),
+                                sharedShreddingLogicalRow(2, null),
+                                sharedShreddingRow(3, "a", 40L, "b", 50L, "c", 60L)),
+                        shreddingColumns("tags", 3),
+                        Arrays.asList(
+                                expectedPhysicalRow(
+                                        1,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, -1),
+                                                values(10L, 20L, null),
+                                                null)),
+                                expectedPhysicalRow(2, sharedShreddingNullField("tags")),
+                                expectedPhysicalRow(
+                                        3,
+                                        sharedShreddingField(
+                                                "tags",
+                                                mapping(0, 1, 2),
+                                                values(40L, 50L, 60L),
+                                                null))),
+                        shreddingMetas(
+                                "tags",
+                                sharedShreddingMeta(
+                                        nameToId("a", 0, "b", 1, "c", 2),
+                                        fieldToColumns(
+                                                0, columns(0),
+                                                1, columns(1),
+                                                2, columns(2)),
+                                        overflowFields(),
+                                        3,
+                                        3)));
+
+        for (InternalRow row : expectedFile.rows) {
+            writer.write(row);
+        }
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        DataFileMeta file = assertSingleNewFile(increment);
+        assertThat(file.rowCount()).isEqualTo(3L);
+        assertThat(file.schemaId()).isEqualTo(5L);
+        assertThat(file.minSequenceNumber()).isEqualTo(10L);
+        assertThat(file.maxSequenceNumber()).isEqualTo(12L);
+        assertThat(file.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
+        assertThat(file.minKey()).isEqualTo(EMPTY_ROW);
+        assertThat(file.maxKey()).isEqualTo(EMPTY_ROW);
+        assertThat(file.keyStats()).isEqualTo(EMPTY_STATS);
+        assertThat(file.valueStats().minValues().getInt(0)).isEqualTo(1);
+        assertThat(file.valueStats().maxValues().getInt(0)).isEqualTo(3);
+        assertThat(file.valueStats().nullCounts().getLong(0)).isEqualTo(0L);
+        assertThat(file.valueStats().minValues().isNullAt(1)).isTrue();
+        assertThat(file.valueStats().maxValues().isNullAt(1)).isTrue();
+        if ("orc".equals(fileFormat)) {
+            assertThat(file.valueStats().nullCounts().getLong(1)).isEqualTo(1L);
+        } else {
+            assertThat(file.valueStats().nullCounts().isNullAt(1)).isTrue();
+        }
+        assertThat(file.fileSource()).hasValue(FileSource.APPEND);
+        assertThat(file.fileFormat()).isEqualTo(fileFormat);
+        assertSharedShreddingDataFile(context, writeType, file, expectedFile);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingMapDoesNotSupportBlob(String fileFormat) throws Exception {
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
+                        DataTypes.FIELD(2, "payload", new BlobType()));
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, writeType, rawOptions);
+        BlobFileContext blobContext =
+                BlobFileContext.create(writeType, new CoreOptions(rawOptions));
+        assertThat(blobContext).isNotNull();
+
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(), blobContext);
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                writer.write(
+                                        sharedShreddingLogicalRow(
+                                                1,
+                                                map("a", 10L),
+                                                new BlobData(new byte[] {1, 2, 3}))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "MAP shared-shredding does not support blob or vector file writes yet.");
+        writer.close();
+    }
+
+    private void assertSharedShreddingAppendWrite(
+            String fileFormat,
+            RowType writeType,
+            Options rawOptions,
+            ExpectedSharedShreddingFile... expectedFiles)
+            throws Exception {
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, writeType, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+        for (ExpectedSharedShreddingFile expectedFile : expectedFiles) {
+            for (InternalRow row : expectedFile.rows) {
+                writer.write(row);
+            }
+            CommitIncrement increment = writer.prepareCommit(true);
+            DataFileMeta file = assertSingleNewFile(increment);
+            assertSharedShreddingDataFile(context, writeType, file, expectedFile);
+        }
+        writer.close();
+    }
+
+    private SharedShreddingAppendContext createSharedShreddingAppendContext(
+            String fileFormat, RowType writeType, Options rawOptions) {
+        CoreOptions options = new CoreOptions(rawOptions);
+        DataFilePathFactory pathFactory = createPathFactory(fileFormat);
+        LocalFileIO fileIO = LocalFileIO.create();
+        return new SharedShreddingAppendContext(
+                options,
+                pathFactory,
+                fileIO,
+                FileFormat.fromIdentifier(fileFormat, new Options()),
+                MapSharedShreddingCoreUtils.createAndRestoreContext(
+                        writeType, Collections.emptyList(), pathFactory, options, fileIO));
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType, SharedShreddingAppendContext context) {
+        return createSharedShreddingAppendWriter(writeType, context, SCHEMA_ID, -1L);
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber) {
+        return createSharedShreddingAppendWriter(
+                writeType, context, schemaId, maxSequenceNumber, new FileIndexOptions());
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber,
+            FileIndexOptions fileIndexOptions) {
+        return createSharedShreddingAppendWriter(
+                writeType, context, schemaId, maxSequenceNumber, fileIndexOptions, null);
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber,
+            FileIndexOptions fileIndexOptions,
+            BlobFileContext blobContext) {
+        return new AppendOnlyWriter(
+                context.fileIO,
+                null,
+                schemaId,
+                context.format,
+                null,
+                1024 * 1024L,
+                1024 * 1024L,
+                1024 * 1024L,
+                writeType,
+                null,
+                maxSequenceNumber,
+                new NoopCompactManager(),
+                null,
+                false,
+                context.pathFactory,
+                null,
+                false,
+                false,
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                CompressOptions.defaultOptions(),
+                new StatsCollectorFactories(context.options),
+                MemorySize.MAX_VALUE,
+                fileIndexOptions,
+                true,
+                false,
+                false,
+                null,
+                blobContext,
+                context.sharedShreddingContext);
+    }
+
+    private DataFileMeta assertSingleNewFile(CommitIncrement increment) {
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        return increment.newFilesIncrement().newFiles().get(0);
+    }
+
+    private void assertSharedShreddingDataFile(
+            SharedShreddingAppendContext context,
+            RowType writeType,
+            DataFileMeta file,
+            ExpectedSharedShreddingFile expectedFile)
+            throws IOException {
+        Path path = context.pathFactory.toPath(file);
+        RowType physicalType =
+                MapSharedShreddingUtils.logicalToPhysicalSchema(
+                        writeType, expectedFile.shreddingColumns);
+        assertSharedShreddingPhysicalRows(
+                context.format,
+                context.fileIO,
+                path,
+                file.fileSize(),
+                physicalType,
+                expectedFile.expectedRows);
+        assertSharedShreddingFileSchema(
+                context, path, file.fileSize(), physicalType, expectedFile.expectedMetas);
+    }
+
+    private void assertSharedShreddingFileSchema(
+            SharedShreddingAppendContext context,
+            Path path,
+            long fileSize,
+            RowType expectedPhysicalType,
+            Map<String, MapSharedShreddingFieldMeta> expectedMetas)
+            throws IOException {
+        RowType emptyRowType = new RowType(Collections.emptyList());
+        try (FileRecordReader<InternalRow> reader =
+                context.format
+                        .createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
+                        .createReader(new FormatReaderContext(context.fileIO, path, fileSize))) {
+            Map<String, Map<String, String>> fieldMetadata =
+                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
+            for (Map.Entry<String, MapSharedShreddingFieldMeta> entry : expectedMetas.entrySet()) {
+                String fieldName = entry.getKey();
+                assertThat(expectedPhysicalType.containsField(fieldName)).isTrue();
+                assertThat(readSharedShreddingFieldMeta(fieldMetadata, fieldName))
+                        .isEqualTo(entry.getValue());
+            }
+        }
+    }
+
+    private void assertSharedShreddingPhysicalRows(
+            FileFormat format,
+            LocalFileIO fileIO,
+            Path path,
+            long fileSize,
+            RowType physicalType,
+            List<ExpectedPhysicalRow> expectedRows)
+            throws IOException {
+        InternalRowSerializer serializer = new InternalRowSerializer(physicalType);
+        List<InternalRow> rows = new ArrayList<>();
+        try (FileRecordReader<InternalRow> reader =
+                format.createReaderFactory(physicalType, physicalType, Collections.emptyList())
+                        .createReader(new FormatReaderContext(fileIO, path, fileSize))) {
+            FileRecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                InternalRow row;
+                while ((row = batch.next()) != null) {
+                    rows.add(serializer.copy(row));
+                }
+                batch.releaseBatch();
+            }
+        }
+
+        assertThat(rows).hasSize(expectedRows.size());
+        for (int i = 0; i < expectedRows.size(); i++) {
+            assertSharedShreddingPhysicalRow(rows.get(i), physicalType, expectedRows.get(i));
+        }
+    }
+
+    private MapSharedShreddingFieldMeta readSharedShreddingFieldMeta(
+            Map<String, Map<String, String>> fieldMetadata, String fieldName) {
+        return MapSharedShreddingUtils.deserializeMetadata(
+                fieldMetadata.get(fieldName), MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION);
+    }
+
+    private void assertSharedShreddingPhysicalRow(
+            InternalRow row, RowType physicalType, ExpectedPhysicalRow expectedRow) {
+        assertThat(row.getInt(physicalType.getFieldIndex("id"))).isEqualTo(expectedRow.id);
+        for (ExpectedShreddingField expectedField : expectedRow.shreddingFields) {
+            int fieldIndex = physicalType.getFieldIndex(expectedField.fieldName);
+            if (expectedField.fieldIsNull) {
+                assertThat(row.isNullAt(fieldIndex)).isTrue();
+                continue;
+            }
+            RowType fieldType = (RowType) physicalType.getTypeAt(fieldIndex);
+            InternalRow field = row.getRow(fieldIndex, fieldType.getFieldCount());
+            assertThat(field.getArray(0).toIntArray()).containsExactly(expectedField.fieldMapping);
+            for (int i = 0; i < expectedField.columnValues.length; i++) {
+                assertFieldValue(field, i + 1, expectedField.columnValues[i]);
+            }
+            if (expectedField.overflow == null) {
+                assertThat(field.isNullAt(fieldType.getFieldCount() - 1)).isTrue();
+            } else {
+                MapType overflowType = (MapType) fieldType.getTypeAt(fieldType.getFieldCount() - 1);
+                assertInternalMap(
+                        field.getMap(fieldType.getFieldCount() - 1),
+                        expectedField.overflow,
+                        overflowType);
+            }
+        }
+    }
+
+    private void assertFieldValue(InternalRow row, int pos, Object expected) {
+        if (expected == null) {
+            assertThat(row.isNullAt(pos)).isTrue();
+        } else if (expected instanceof Long) {
+            assertThat(row.getLong(pos)).isEqualTo(expected);
+        } else if (expected instanceof Integer) {
+            assertThat(row.getInt(pos)).isEqualTo(expected);
+        } else if (expected instanceof String) {
+            assertThat(row.getString(pos)).isEqualTo(BinaryString.fromString((String) expected));
+        } else if (expected instanceof BinaryString) {
+            assertThat(row.getString(pos)).isEqualTo(expected);
+        } else {
+            assertThat(row.getRow(pos, ((InternalRow) expected).getFieldCount()))
+                    .isEqualTo(expected);
+        }
+    }
+
+    private void assertInternalMap(InternalMap actual, InternalMap expected, MapType mapType) {
+        assertThat(toJavaMap(actual, mapType)).isEqualTo(toJavaMap(expected, mapType));
+    }
+
+    private Map<Object, Object> toJavaMap(InternalMap map, MapType mapType) {
+        InternalArray.ElementGetter keyGetter =
+                InternalArray.createElementGetter(mapType.getKeyType());
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(mapType.getValueType());
+        Map<Object, Object> result = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(
+                    keyGetter.getElementOrNull(keys, i), valueGetter.getElementOrNull(values, i));
+        }
+        return result;
+    }
+
     @Test
     public void testNoSpillWhenMeetBlobType() throws Exception {
         // Create a schema with BLOB type
@@ -647,6 +1499,172 @@ public class AppendOnlyWriterTest {
         return GenericRow.of(id, BinaryString.fromString(name), BinaryString.fromString(dt));
     }
 
+    private RowType sharedShreddingTagsWriteType() {
+        return DataTypes.ROW(
+                DataTypes.FIELD(0, "id", DataTypes.INT()),
+                DataTypes.FIELD(1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
+    }
+
+    private RowType sharedShreddingTagsAndAttrsWriteType() {
+        return DataTypes.ROW(
+                DataTypes.FIELD(0, "id", DataTypes.INT()),
+                DataTypes.FIELD(1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
+                DataTypes.FIELD(2, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())));
+    }
+
+    private Options sharedShreddingOptions(Object... fieldToMaxColumns) {
+        Options options = new Options();
+        for (int i = 0; i < fieldToMaxColumns.length; i += 2) {
+            String fieldName = (String) fieldToMaxColumns[i];
+            options.setString("fields." + fieldName + ".map.storage-layout", "shared-shredding");
+            options.setString(
+                    "fields." + fieldName + ".map.shared-shredding.max-columns",
+                    String.valueOf(fieldToMaxColumns[i + 1]));
+        }
+        options.setString("metadata.stats-mode", "none");
+        return options;
+    }
+
+    private InternalRow sharedShreddingRow(int id, Object... keyValues) {
+        return sharedShreddingLogicalRow(id, map(keyValues));
+    }
+
+    private InternalRow sharedShreddingLogicalRow(int id, Object... fields) {
+        if (fields == null) {
+            fields = new Object[] {null};
+        }
+        GenericRow row = new GenericRow(fields.length + 1);
+        row.setField(0, id);
+        for (int i = 0; i < fields.length; i++) {
+            row.setField(i + 1, fields[i]);
+        }
+        return row;
+    }
+
+    private InternalMap map(Object... keyValues) {
+        Map<BinaryString, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            map.put(
+                    BinaryString.fromString((String) keyValues[i]),
+                    internalValue(keyValues[i + 1]));
+        }
+        return new GenericMap(map);
+    }
+
+    private InternalMap overflow(Object... idValues) {
+        Map<Integer, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < idValues.length; i += 2) {
+            map.put((Integer) idValues[i], internalValue(idValues[i + 1]));
+        }
+        return new GenericMap(map);
+    }
+
+    private Object internalValue(Object value) {
+        if (value instanceof String) {
+            return BinaryString.fromString((String) value);
+        }
+        return value;
+    }
+
+    private MapSharedShreddingFieldMeta sharedShreddingMeta(
+            Map<String, Integer> nameToId,
+            Map<Integer, List<Integer>> fieldToColumns,
+            Set<Integer> overflowFields,
+            int numColumns,
+            int maxRowWidth) {
+        return new MapSharedShreddingFieldMeta(
+                new TreeMap<>(nameToId),
+                new TreeMap<>(fieldToColumns),
+                new TreeSet<>(overflowFields),
+                numColumns,
+                maxRowWidth);
+    }
+
+    private Map<String, Integer> shreddingColumns(Object... pairs) {
+        Map<String, Integer> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((String) pairs[i], (Integer) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    private Map<String, MapSharedShreddingFieldMeta> shreddingMetas(Object... pairs) {
+        Map<String, MapSharedShreddingFieldMeta> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((String) pairs[i], (MapSharedShreddingFieldMeta) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    private Map<String, Integer> nameToId(Object... pairs) {
+        Map<String, Integer> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((String) pairs[i], (Integer) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<Integer, List<Integer>> fieldToColumns(Object... pairs) {
+        Map<Integer, List<Integer>> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((Integer) pairs[i], (List<Integer>) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    private int[] mapping(int... fieldIds) {
+        return fieldIds;
+    }
+
+    private Object[] values(Object... values) {
+        return values;
+    }
+
+    private Object[] paddedValues(int length, Object... values) {
+        Object[] result = new Object[length];
+        System.arraycopy(values, 0, result, 0, values.length);
+        return result;
+    }
+
+    private List<Integer> columns(int... columns) {
+        List<Integer> result = new ArrayList<>();
+        for (int column : columns) {
+            result.add(column);
+        }
+        return result;
+    }
+
+    private Set<Integer> overflowFields(int... fieldIds) {
+        Set<Integer> result = new TreeSet<>();
+        for (int fieldId : fieldIds) {
+            result.add(fieldId);
+        }
+        return result;
+    }
+
+    private ExpectedPhysicalRow expectedPhysicalRow(
+            int id, ExpectedShreddingField... shreddingFields) {
+        return new ExpectedPhysicalRow(id, shreddingFields);
+    }
+
+    private ExpectedSharedShreddingFile expectedSharedShreddingFile(
+            List<InternalRow> rows,
+            Map<String, Integer> shreddingColumns,
+            List<ExpectedPhysicalRow> expectedRows,
+            Map<String, MapSharedShreddingFieldMeta> expectedMetas) {
+        return new ExpectedSharedShreddingFile(rows, shreddingColumns, expectedRows, expectedMetas);
+    }
+
+    private ExpectedShreddingField sharedShreddingNullField(String fieldName) {
+        return new ExpectedShreddingField(fieldName);
+    }
+
+    private ExpectedShreddingField sharedShreddingField(
+            String fieldName, int[] fieldMapping, Object[] columnValues, InternalMap overflow) {
+        return new ExpectedShreddingField(fieldName, fieldMapping, columnValues, overflow);
+    }
+
     private InternalRow rowWithVectors(int id, String name, float[]... vectors) {
         GenericRow row = new GenericRow(vectors.length + 2);
         row.setField(0, id);
@@ -658,14 +1676,96 @@ public class AppendOnlyWriterTest {
     }
 
     private DataFilePathFactory createPathFactory() {
+        return createPathFactory(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
+    private DataFilePathFactory createPathFactory(String fileFormat) {
         return new DataFilePathFactory(
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
-                CoreOptions.FILE_FORMAT_AVRO,
+                fileFormat,
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null);
+    }
+
+    private static class SharedShreddingAppendContext {
+
+        private final CoreOptions options;
+        private final DataFilePathFactory pathFactory;
+        private final LocalFileIO fileIO;
+        private final FileFormat format;
+        private final MapSharedShreddingContext sharedShreddingContext;
+
+        private SharedShreddingAppendContext(
+                CoreOptions options,
+                DataFilePathFactory pathFactory,
+                LocalFileIO fileIO,
+                FileFormat format,
+                MapSharedShreddingContext sharedShreddingContext) {
+            this.options = options;
+            this.pathFactory = pathFactory;
+            this.fileIO = fileIO;
+            this.format = format;
+            this.sharedShreddingContext = sharedShreddingContext;
+        }
+    }
+
+    private static class ExpectedSharedShreddingFile {
+
+        private final List<InternalRow> rows;
+        private final Map<String, Integer> shreddingColumns;
+        private final List<ExpectedPhysicalRow> expectedRows;
+        private final Map<String, MapSharedShreddingFieldMeta> expectedMetas;
+
+        private ExpectedSharedShreddingFile(
+                List<InternalRow> rows,
+                Map<String, Integer> shreddingColumns,
+                List<ExpectedPhysicalRow> expectedRows,
+                Map<String, MapSharedShreddingFieldMeta> expectedMetas) {
+            this.rows = rows;
+            this.shreddingColumns = shreddingColumns;
+            this.expectedRows = expectedRows;
+            this.expectedMetas = expectedMetas;
+        }
+    }
+
+    private static class ExpectedPhysicalRow {
+
+        private final int id;
+        private final ExpectedShreddingField[] shreddingFields;
+
+        private ExpectedPhysicalRow(int id, ExpectedShreddingField[] shreddingFields) {
+            this.id = id;
+            this.shreddingFields = shreddingFields;
+        }
+    }
+
+    private static class ExpectedShreddingField {
+
+        private final String fieldName;
+        private final boolean fieldIsNull;
+        private final int[] fieldMapping;
+        private final Object[] columnValues;
+        private final InternalMap overflow;
+
+        private ExpectedShreddingField(String fieldName) {
+            this.fieldName = fieldName;
+            this.fieldIsNull = true;
+            this.fieldMapping = null;
+            this.columnValues = null;
+            this.overflow = null;
+        }
+
+        private ExpectedShreddingField(
+                String fieldName, int[] fieldMapping, Object[] columnValues, InternalMap overflow) {
+            this.fieldName = fieldName;
+            this.fieldIsNull = false;
+            this.fieldMapping = fieldMapping;
+            this.columnValues = columnValues;
+            this.overflow = overflow;
+        }
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
@@ -828,7 +1928,8 @@ public class AppendOnlyWriterTest {
                         false,
                         options.dataEvolutionEnabled(),
                         null,
-                        BlobFileContext.create(writeSchema, options));
+                        BlobFileContext.create(writeSchema, options),
+                        null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

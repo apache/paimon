@@ -23,6 +23,9 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.shredding.MapSharedShreddingContext;
+import org.apache.paimon.data.shredding.MapSharedShreddingCoreUtils;
+import org.apache.paimon.data.shredding.MapSharedShreddingWritePlanFactory;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
@@ -87,6 +90,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final boolean statsDenseStore;
     @Nullable private final FileFormat rowSidecarFileFormat;
     @Nullable private final BlobFileContext blobContext;
+    @Nullable private final MapSharedShreddingContext sharedShreddingContext;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -131,7 +135,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean statsDenseStore,
             boolean dataEvolutionEnabled,
             @Nullable FileFormat rowSidecarFileFormat,
-            @Nullable BlobFileContext blobContext) {
+            @Nullable BlobFileContext blobContext,
+            @Nullable MapSharedShreddingContext sharedShreddingContext) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -149,6 +154,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsDenseStore = statsDenseStore;
         this.rowSidecarFileFormat = dataEvolutionEnabled ? rowSidecarFileFormat : null;
         this.blobContext = blobContext;
+        this.sharedShreddingContext = sharedShreddingContext;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -211,6 +217,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public void writeBundle(BundleRecords bundle) throws Exception {
+        if (sharedShreddingContext != null && !sharedShreddingContext.isEmpty()) {
+            // TODO (xinyu.lxy): Support bundle writes for MAP shared-shredding.
+            throw new UnsupportedOperationException(
+                    "Bundle write is not supported for MAP shared-shredding.");
+        }
         if (sinkWriter instanceof BufferedSinkWriter) {
             for (InternalRow row : bundle) {
                 write(row);
@@ -313,8 +324,15 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
+        boolean sharedShredding =
+                sharedShreddingContext != null && !sharedShreddingContext.isEmpty();
         if (blobContext != null
                 || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty()) {
+            if (sharedShredding) {
+                // TODO (xinyu.lxy): Support blob with MAP shared-shredding.
+                throw new UnsupportedOperationException(
+                        "MAP shared-shredding does not support blob or vector file writes yet.");
+            }
             return new DedicatedFormatRollingFileWriter(
                     fileIO,
                     schemaId,
@@ -348,7 +366,13 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 asyncFileWrite,
                 statsDenseStore,
                 writeCols,
-                rowSidecarFileFormat);
+                rowSidecarFileFormat,
+                sharedShredding
+                        ? new MapSharedShreddingWritePlanFactory(
+                                writeSchema,
+                                sharedShreddingContext,
+                                MapSharedShreddingCoreUtils.sharedShreddingFieldIdKey(fileFormat))
+                        : null);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

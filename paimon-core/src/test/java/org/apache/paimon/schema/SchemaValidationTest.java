@@ -573,6 +573,14 @@ class SchemaValidationTest {
                     .hasMessageContaining(
                             "Column 'mi' is configured as nested column in 'file-index.<index-type>.columns', but its map key type is INT. Only CHAR/VARCHAR/STRING is supported.");
         }
+
+        Map<String, String> sharedShreddingOptions = new HashMap<>();
+        sharedShreddingOptions.put("file-index.bloom-filter.columns", "m[k]");
+        sharedShreddingOptions.put("fields.m.map.storage-layout", "shared-shredding");
+        assertThatThrownBy(() -> validateTableSchemaWithMapField(sharedShreddingOptions))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Column 'm' is configured with map.storage-layout=shared-shredding, but MAP shared-shredding does not support nested file index.");
     }
 
     private void validateTableSchemaWithMapField(Map<String, String> options) {

@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -56,6 +57,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final FileSource fileSource;
     @Nullable private final List<String> writeCols;
     private final RowDataFileSequenceNumberTracker sequenceNumberTracker;
+    private final RowDataFileWritePlan writePlan;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -75,6 +77,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 context,
                 path,
                 writeSchema,
+                RowDataFileWritePlan.direct(writeSchema),
                 schemaId,
                 seqNumCounterSupplier,
                 fileIndexOptions,
@@ -91,7 +94,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FileIO fileIO,
             FileWriterContext context,
             Path path,
-            RowType writeSchema,
+            RowType logicalWriteSchema,
+            RowDataFileWritePlan writePlan,
             long schemaId,
             Supplier<LongCounter> seqNumCounterSupplier,
             FileIndexOptions fileIndexOptions,
@@ -102,18 +106,20 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             @Nullable List<String> writeCols,
             @Nullable FileFormat rowSidecarFormat,
             @Nullable Path rowSidecarPath) {
-        super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
+        super(fileIO, context, path, Function.identity(), writePlan.physicalType(), asyncFileWrite);
         if ((rowSidecarFormat == null) != (rowSidecarPath == null)) {
             throw new IllegalArgumentException(
                     "Row sidecar format and path should be both null or both non-null.");
         }
         this.schemaId = schemaId;
         this.isExternalPath = isExternalPath;
-        this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
+        this.statsArraySerializer =
+                new SimpleStatsConverter(writePlan.physicalType(), statsDenseStore);
         List<DataFileAuxiliaryWriter> auxiliaryFileWriters = new ArrayList<>();
         Path fileIndexPath = dataFileToFileIndexPath(path);
         DataFileIndexWriter dataFileIndexWriter =
-                DataFileIndexWriter.create(fileIO, fileIndexPath, writeSchema, fileIndexOptions);
+                DataFileIndexWriter.create(
+                        fileIO, fileIndexPath, logicalWriteSchema, fileIndexOptions);
         if (dataFileIndexWriter != null) {
             auxiliaryFileWriters.add(
                     new DataFileIndexAuxiliaryWriter(dataFileIndexWriter, fileIO, fileIndexPath));
@@ -122,7 +128,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             auxiliaryFileWriters.add(
                     new RowSidecarAuxiliaryWriter(
                             fileIO,
-                            rowSidecarFormat.createWriterFactory(writeSchema),
+                            rowSidecarFormat.createWriterFactory(logicalWriteSchema),
                             rowSidecarPath,
                             context.compression(),
                             asyncFileWrite));
@@ -130,14 +136,17 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.auxiliaryFileWriters = Collections.unmodifiableList(auxiliaryFileWriters);
         this.fileSource = fileSource;
         this.writeCols = writeCols;
+        this.writePlan = writePlan;
         this.sequenceNumberTracker =
                 new RowDataFileSequenceNumberTracker(
-                        writeSchema, seqNumCounterSupplier, super::recordCount);
+                        logicalWriteSchema, seqNumCounterSupplier, super::recordCount);
     }
 
     @Override
     public void write(InternalRow row) throws IOException {
-        super.write(row);
+        RowDataTransform rowTransform = writePlan.rowTransform();
+        InternalRow physicalRow = rowTransform == null ? row : rowTransform.transform(row);
+        super.write(physicalRow);
         for (DataFileAuxiliaryWriter auxiliaryFileWriter : auxiliaryFileWriters) {
             auxiliaryFileWriter.write(row);
         }
@@ -146,6 +155,12 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
+        if (writePlan.rowTransform() != null) {
+            // TODO (xinyu.lxy): Support transformed bundle writes by applying row transformation to
+            // bundles.
+            throw new UnsupportedOperationException(
+                    "Bundle write is not supported for transformed row data writer.");
+        }
         for (InternalRow row : bundle) {
             write(row);
         }
@@ -186,6 +201,14 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             return Optional.of(abortExecutors.get(0));
         }
         return Optional.of(new CompoundFileWriterAbortExecutor(fileIO, path, abortExecutors));
+    }
+
+    @Override
+    protected void beforeCloseFormatWriter(FormatWriter writer) throws IOException {
+        FileMetadataFinalizer metadataFinalizer = writePlan.metadataFinalizer();
+        if (metadataFinalizer != null) {
+            metadataFinalizer.beforeClose(writer);
+        }
     }
 
     @Override

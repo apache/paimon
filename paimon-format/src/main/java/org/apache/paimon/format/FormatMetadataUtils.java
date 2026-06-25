@@ -33,6 +33,7 @@ public class FormatMetadataUtils {
 
     public static final String ARROW_SCHEMA_METADATA_KEY = "ARROW:schema";
     public static final String PARQUET_FIELD_ID_KEY = "PARQUET:field_id";
+    public static final String ORC_FIELD_ID_KEY = "paimon.id";
 
     private FormatMetadataUtils() {}
 

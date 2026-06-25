@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -106,6 +107,7 @@ public class FormatMetadataUtilsTest {
                                                 4, "scores", DataTypes.ARRAY(DataTypes.INT())))));
         Map<String, String> tagsMetadata = new LinkedHashMap<>();
         tagsMetadata.put("paimon.test.tags", "enabled");
+        tagsMetadata.put("PARQUET:field_id", "999");
 
         Map<String, Map<String, String>> fieldMetadata = new LinkedHashMap<>();
         fieldMetadata.put("tags", tagsMetadata);
@@ -118,7 +120,7 @@ public class FormatMetadataUtilsTest {
                 FormatMetadataUtils.readFieldMetadata(schemaBytes);
         assertThat(metadata).containsOnlyKeys("id", "tags", "nested");
         assertThat(metadata.get("id")).containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
-        assertThat(metadata.get("tags")).containsAllEntriesOf(tagsMetadata);
+        assertThat(metadata.get("tags")).containsEntry("paimon.test.tags", "enabled");
         assertThat(metadata.get("tags"))
                 .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
         assertThat(metadata.get("nested")).doesNotContainKey("paimon.test.tags");
@@ -144,5 +146,23 @@ public class FormatMetadataUtilsTest {
         assertThat(metadata.get("name")).containsAllEntriesOf(nameMetadata);
         assertThat(metadata.get("name"))
                 .doesNotContainKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
+    }
+
+    @Test
+    public void testBuildArrowSchemaWithOrcFieldIdMetadata() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(1, "name", DataTypes.STRING()));
+
+        byte[] schemaBytes =
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType, Collections.emptyMap(), FormatMetadataUtils.ORC_FIELD_ID_KEY);
+
+        Map<String, Map<String, String>> metadata =
+                FormatMetadataUtils.readFieldMetadata(schemaBytes);
+        assertThat(metadata).containsOnlyKeys("id", "name");
+        assertThat(metadata.get("id")).containsEntry(FormatMetadataUtils.ORC_FIELD_ID_KEY, "0");
+        assertThat(metadata.get("name")).containsEntry(FormatMetadataUtils.ORC_FIELD_ID_KEY, "1");
     }
 }

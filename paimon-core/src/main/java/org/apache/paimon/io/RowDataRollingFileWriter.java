@@ -50,32 +50,140 @@ public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow,
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
+            @Nullable List<String> writeCols) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                null,
+                null);
+    }
+
+    public RowDataRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
             @Nullable List<String> writeCols,
             @Nullable FileFormat rowSidecarFormat) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileCompression,
+                statsCollectors,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                writeCols,
+                rowSidecarFormat,
+                null);
+    }
+
+    public RowDataRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            long targetFileSize,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat,
+            @Nullable RowDataFileWritePlanFactory writePlanFactory) {
         super(
-                () -> {
-                    Path dataPath = pathFactory.newPath();
-                    Path rowSidecarPath =
-                            rowSidecarFormat == null
-                                    ? null
-                                    : new Path(dataPath.getParent(), dataPath.getName() + ".row");
-                    return new RowDataFileWriter(
-                            fileIO,
-                            RollingFileWriter.createFileWriterContext(
-                                    fileFormat, writeSchema, statsCollectors, fileCompression),
-                            dataPath,
-                            writeSchema,
-                            schemaId,
-                            seqNumCounterSupplier,
-                            fileIndexOptions,
-                            fileSource,
-                            asyncFileWrite,
-                            statsDenseStore,
-                            pathFactory.isExternalPath(),
-                            writeCols,
-                            rowSidecarFormat,
-                            rowSidecarPath);
-                },
+                () ->
+                        createFileWriter(
+                                fileIO,
+                                schemaId,
+                                fileFormat,
+                                writeSchema,
+                                pathFactory,
+                                seqNumCounterSupplier,
+                                fileCompression,
+                                statsCollectors,
+                                fileIndexOptions,
+                                fileSource,
+                                asyncFileWrite,
+                                statsDenseStore,
+                                writeCols,
+                                rowSidecarFormat,
+                                writePlanFactory),
                 targetFileSize);
+    }
+
+    private static RowDataFileWriter createFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            SimpleColStatsCollector.Factory[] statsCollectors,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat,
+            @Nullable RowDataFileWritePlanFactory writePlanFactory) {
+        RowDataFileWritePlan writePlan =
+                writePlanFactory == null
+                        ? RowDataFileWritePlan.direct(writeSchema)
+                        : writePlanFactory.create();
+        Path dataPath = pathFactory.newPath();
+        Path rowSidecarPath =
+                rowSidecarFormat == null
+                        ? null
+                        : new Path(dataPath.getParent(), dataPath.getName() + ".row");
+        return new RowDataFileWriter(
+                fileIO,
+                RollingFileWriter.createFileWriterContext(
+                        fileFormat, writePlan.physicalType(), statsCollectors, fileCompression),
+                dataPath,
+                writeSchema,
+                writePlan,
+                schemaId,
+                seqNumCounterSupplier,
+                fileIndexOptions,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                pathFactory.isExternalPath(),
+                writeCols,
+                rowSidecarFormat,
+                rowSidecarPath);
     }
 }

@@ -695,6 +695,11 @@ public class SchemaValidation {
                                 + "Only CHAR/VARCHAR/STRING is supported.",
                         columnName,
                         keyType);
+                checkArgument(
+                        options.mapStorageLayout(columnName) != MapStorageLayout.SHARED_SHREDDING,
+                        "Column '%s' is configured with map.storage-layout=shared-shredding, "
+                                + "but MAP shared-shredding does not support nested file index.",
+                        columnName);
             }
 
             for (String indexType : entry.getValue().keySet()) {

@@ -193,6 +193,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             if (writer != null) {
+                beforeCloseFormatWriter(writer);
                 writer.close();
                 writerMetadata = writer.writerMetadata();
                 writer = null;
@@ -218,6 +219,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
         return outputBytes;
     }
+
+    protected void beforeCloseFormatWriter(FormatWriter writer) throws IOException {}
 
     /**
      * Returns cached writer metadata from the format writer. Available after {@link #close()} is
