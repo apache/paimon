@@ -206,6 +206,113 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
 
+    def _overwrite_partition(self, part_val, f1_val):
+        wb = self.table.new_batch_write_builder().overwrite({'f0': part_val})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [part_val], 'f1': [f1_val]}))
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
+    def _run_with_conflicts(self, c, messages, K, concurrent_fn):
+        # Run an overwrite commit, forcing K CAS conflicts (each calls
+        # concurrent_fn(i) to advance the latest snapshot). Returns this commit's
+        # own OverwriteChangesProvider so the caller can read its counters
+        # (only this provider, not any concurrent writer's).
+        fsc = c.file_store_commit
+        captured = {}
+        orig_factory = fsc._overwrite_changes_provider
+
+        def capturing_factory(*a, **k):
+            captured['provider'] = orig_factory(*a, **k)
+            return captured['provider']
+
+        fsc._overwrite_changes_provider = capturing_factory
+
+        orig_cas = fsc.snapshot_commit.commit
+        cas = {'fails': 0}
+
+        def patched_cas(snapshot, statistics):
+            if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
+                cas['fails'] += 1
+                concurrent_fn(cas['fails'])
+                return False
+            return orig_cas(snapshot, statistics)
+
+        fsc.snapshot_commit.commit = patched_cas
+
+        c.commit(messages)
+        c.close()
+
+        self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
+        return captured['provider']
+
+    def test_cache_rebuilt_on_non_append_snapshot(self):
+        # A non-APPEND (OVERWRITE) snapshot between retries forces a rebuild even
+        # though it only touches an unrelated partition.
+        K = 2
+        wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        provider = self._run_with_conflicts(
+            c, w.prepare_commit(), K,
+            lambda i: self._overwrite_partition(99, f'z{i}'))
+
+        self.assertEqual(provider.full_scan_count, K + 1)   # rebuilt every retry
+        self.assertEqual(provider.delta_probe_count, K)     # probed, bailed at kind check
+
+    def test_whole_table_overwrite_always_full_scans(self):
+        # Whole-table overwrite (no partition filter) can never reuse the cache.
+        K = 2
+        wb = self.table.new_batch_write_builder().overwrite()
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        provider = self._run_with_conflicts(
+            c, w.prepare_commit(), K,
+            lambda i: self._append(pd.DataFrame({'f0': [99], 'f1': [f'x{i}']})))
+
+        self.assertEqual(provider.full_scan_count, K + 1)   # null filter -> always full scan
+        self.assertEqual(provider.delta_probe_count, 0)     # never enters the probe loop
+
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual['f1'].tolist()), ['new'])
+
+    def test_dynamic_partition_overwrite_reuses_cache(self):
+        # Dynamic-partition overwrite is scoped to the data's partitions, so an
+        # unrelated concurrent append lets the cache be reused.
+        pa_schema = pa.schema([('f0', pa.int32()), ('f1', pa.string())])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['f0'])
+        self.catalog.create_table('test_db.t_dyn', schema, False)
+        table = self.catalog.get_table('test_db.t_dyn')
+
+        def append(df):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            c = wb.new_commit()
+            w.write_pandas(df)
+            c.commit(w.prepare_commit())
+            w.close()
+            c.close()
+
+        append(pd.DataFrame({'f0': [1, 1, 2], 'f1': ['a', 'b', 'c']}))
+
+        K = 3
+        wb = table.new_batch_write_builder().overwrite()  # dynamic: filter from data (f0=1)
+        w = wb.new_write()
+        c = wb.new_commit()
+        w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
+        provider = self._run_with_conflicts(
+            c, w.prepare_commit(), K,
+            lambda i: append(pd.DataFrame({'f0': [99], 'f1': [f'x{i}']})))
+
+        self.assertEqual(provider.full_scan_count, 1)   # target f0=1 untouched -> reuse
+        self.assertEqual(provider.delta_probe_count, K)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,7 +17,6 @@
 
 from typing import List, Optional
 
-from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
@@ -103,14 +102,13 @@ class OverwriteChangesProvider:
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)
         if not delta_manifests:
             return False
-        mfm = ManifestFileManager(self.table)
-        for mf in delta_manifests:
-            for entry in mfm.read(mf.file_name):
-                # _can_use_cache already returned False for a null filter, so
-                # partition_filter is always set here.
-                if self.partition_filter.test(entry.partition):
-                    return True
-        return False
+        # Only APPEND snapshots are probed (see _can_use_cache), so the delta has
+        # no standalone DELETEs; FileScanner's partition predicate prunes at the
+        # manifest-file level before reading entries.
+        entries = (FileScanner(self.table, lambda: ([], None),
+                               partition_predicate=self.partition_filter)
+                   .read_manifest_entries(delta_manifests))
+        return len(entries) > 0
 
     def _build_result(self, existing_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         entries = []
