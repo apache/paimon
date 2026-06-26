@@ -959,7 +959,9 @@ public class ManifestFileSorter {
             return;
         }
 
-        if (ctx.fullCompaction) {
+        // Add-only minor sections can use the full rewrite path to avoid keeping DELETE entries in
+        // memory.
+        if (ctx.fullCompaction || containsNoDeleteEntries(section)) {
             rewriteFull(section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
         } else {
             rewriteMinor(section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
@@ -1020,11 +1022,6 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        if (containsNoDeleteEntries(section)) {
-            rewriteFull(section, output, sortNewFiles, ctx, manifestFile, manifestReadParallelism);
-            return;
-        }
-
         Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> sorted =
                 ManifestEntryExternalSort.sortAndWriteMinorEntries(
                         section,

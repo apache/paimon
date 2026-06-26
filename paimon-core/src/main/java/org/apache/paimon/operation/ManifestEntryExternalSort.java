@@ -89,9 +89,6 @@ public class ManifestEntryExternalSort {
             for (ManifestEntry entry : entries) {
                 sorter.write(entry);
             }
-            if (sorter.isEmpty()) {
-                return Collections.emptyList();
-            }
             return sorter.writeToManifest(manifestFile);
         }
     }
@@ -169,6 +166,10 @@ public class ManifestEntryExternalSort {
         }
 
         private List<ManifestFileMeta> writeToManifest(ManifestFile manifestFile) throws Exception {
+            if (isEmpty()) {
+                return Collections.emptyList();
+            }
+
             RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                     manifestFile.createRollingWriter();
             Exception exception = null;
@@ -198,7 +199,8 @@ public class ManifestEntryExternalSort {
                 return Collections.emptyList();
             }
 
-            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = null;
+            RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+                    manifestFile.createRollingWriter();
             Exception exception = null;
             try {
                 MutableObjectIterator<BinaryRow> iterator = sortBuffer.sortedIterator();
@@ -210,25 +212,18 @@ public class ManifestEntryExternalSort {
                     if (deleteEntries.remove(entry.identifier()) != null) {
                         continue;
                     }
-                    if (writer == null) {
-                        writer = manifestFile.createRollingWriter();
-                    }
                     writer.write(entry);
                 }
             } catch (Exception e) {
                 exception = e;
             } finally {
                 if (exception != null) {
-                    if (writer != null) {
-                        writer.abort();
-                    }
+                    writer.abort();
                     throw exception;
                 }
-                if (writer != null) {
-                    writer.close();
-                }
+                writer.close();
             }
-            return writer == null ? Collections.emptyList() : writer.result();
+            return writer.result();
         }
 
         @Override
