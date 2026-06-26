@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Pair;
 
@@ -44,6 +45,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
@@ -87,13 +89,31 @@ public class ManifestEntryExternalSort {
     }
 
     static List<ManifestFileMeta> sortAndWriteFullEntries(
-            Iterable<ManifestEntry> entries,
+            List<ManifestFileMeta> section,
             ManifestFileSorter.ManifestSortKey sortKey,
             ExternalSortConfig config,
-            ManifestFile manifestFile)
+            ManifestFile manifestFile,
+            Set<FileEntry.Identifier> deleteEntries,
+            @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
-            for (ManifestEntry entry : entries) {
+            Function<ManifestFileMeta, List<ManifestEntry>> reader =
+                    meta -> {
+                        List<ManifestEntry> batch = new ArrayList<>();
+                        for (ManifestEntry entry :
+                                manifestFile.read(
+                                        meta.fileName(),
+                                        meta.fileSize(),
+                                        FileEntry.addFilter(),
+                                        Filter.alwaysTrue())) {
+                            if (!deleteEntries.contains(entry.identifier())) {
+                                batch.add(entry);
+                            }
+                        }
+                        return batch;
+                    };
+            for (ManifestEntry entry :
+                    sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
                 sorter.write(entry);
             }
             return sorter.writeToManifest(manifestFile);

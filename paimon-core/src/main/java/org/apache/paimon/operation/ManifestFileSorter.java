@@ -34,7 +34,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
@@ -55,9 +54,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.function.Function;
-
-import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
 
 /**
  * Manifest file sorter that sorts and rewrites manifest files by a configured partition field, or
@@ -980,29 +976,14 @@ public class ManifestFileSorter {
             ManifestFile manifestFile,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
-        // Read ADD entries and write them through the external sorter.
-        Function<ManifestFileMeta, List<ManifestEntry>> reader =
-                meta -> {
-                    List<ManifestEntry> batch = new ArrayList<>();
-                    for (ManifestEntry entry :
-                            manifestFile.read(
-                                    meta.fileName(),
-                                    meta.fileSize(),
-                                    FileEntry.addFilter(),
-                                    Filter.alwaysTrue())) {
-                        if (!ctx.deleteEntries.contains(entry.identifier())) {
-                            batch.add(entry);
-                        }
-                    }
-                    return batch;
-                };
-
         List<ManifestFileMeta> sorted =
                 ManifestEntryExternalSort.sortAndWriteFullEntries(
-                        sequentialBatchedExecute(reader, section, manifestReadParallelism),
+                        section,
                         ctx.sortKey,
                         ctx.externalSortConfig,
-                        manifestFile);
+                        manifestFile,
+                        ctx.deleteEntries,
+                        manifestReadParallelism);
         if (!sorted.isEmpty()) {
             output.addSortedFiles(sorted);
             sortNewFiles.addAll(sorted);
