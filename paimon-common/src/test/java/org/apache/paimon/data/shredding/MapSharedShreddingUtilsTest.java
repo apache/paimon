@@ -31,7 +31,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -187,6 +189,80 @@ class MapSharedShreddingUtilsTest {
     }
 
     @Test
+    void testGetPhysicalColumnIndices() {
+        MapSharedShreddingFieldMeta fieldMeta =
+                new MapSharedShreddingFieldMeta(
+                        nameToId("age", 0, "name", 1),
+                        fieldToColumns(0, Arrays.asList(0, 2), 1, Arrays.asList(1)),
+                        new HashSet<>(),
+                        3,
+                        2);
+
+        assertThat(MapSharedShreddingUtils.getPhysicalColumnIndices(fieldMeta, "age"))
+                .containsExactly(0, 2);
+        assertThat(MapSharedShreddingUtils.getPhysicalColumnIndices(fieldMeta, "name"))
+                .containsExactly(1);
+
+        assertThatThrownBy(
+                        () -> MapSharedShreddingUtils.getPhysicalColumnIndices(fieldMeta, "score"))
+                .hasMessageContaining("cannot find field score in map shared shredding meta");
+
+        MapSharedShreddingFieldMeta missingColumnsMeta =
+                new MapSharedShreddingFieldMeta(
+                        nameToId("age", 0), new TreeMap<>(), new HashSet<>(), 3, 2);
+        assertThatThrownBy(
+                        () ->
+                                MapSharedShreddingUtils.getPhysicalColumnIndices(
+                                        missingColumnsMeta, "age"))
+                .hasMessageContaining(
+                        "cannot find field id 0 in field_to_columns in map shared shredding meta");
+    }
+
+    @Test
+    void testIsOverflowField() {
+        MapSharedShreddingFieldMeta fieldMeta =
+                new MapSharedShreddingFieldMeta(
+                        nameToId("age", 0, "name", 1),
+                        fieldToColumns(0, Arrays.asList(0), 1, Arrays.asList(1)),
+                        new TreeSet<>(Arrays.asList(1)),
+                        2,
+                        2);
+
+        assertThat(MapSharedShreddingUtils.isOverflowField(fieldMeta, "age")).isFalse();
+        assertThat(MapSharedShreddingUtils.isOverflowField(fieldMeta, "name")).isTrue();
+        assertThatThrownBy(() -> MapSharedShreddingUtils.isOverflowField(fieldMeta, "score"))
+                .hasMessageContaining("cannot find field score in map shared shredding meta");
+    }
+
+    @Test
+    void testBuildSpecificPhysicalStructType() {
+        Set<Integer> physicalColumnIds = new HashSet<>(Arrays.asList(3, 1));
+
+        RowType physicalType =
+                (RowType)
+                        MapSharedShreddingUtils.buildSpecificPhysicalStructType(
+                                DataTypes.BIGINT().notNull(), physicalColumnIds, true);
+        assertThat(physicalType.getFieldNames())
+                .containsExactly("__field_mapping", "__col_1", "__col_3", "__overflow");
+        assertThat(physicalType.getFields()).extracting(DataField::id).containsExactly(0, 1, 2, 3);
+        assertThat(physicalType.getField("__field_mapping").type())
+                .isEqualTo(DataTypes.ARRAY(DataTypes.INT()));
+        assertThat(physicalType.getField("__col_1").type())
+                .isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(physicalType.getField("__col_3").type())
+                .isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(physicalType.getField("__overflow").type())
+                .isEqualTo(DataTypes.MAP(DataTypes.INT(), DataTypes.BIGINT().notNull()));
+
+        RowType physicalTypeWithoutOverflow =
+                (RowType)
+                        MapSharedShreddingUtils.buildSpecificPhysicalStructType(
+                                DataTypes.BIGINT(), physicalColumnIds, false);
+        assertThat(physicalTypeWithoutOverflow.getFieldNames())
+                .containsExactly("__field_mapping", "__col_1", "__col_3");
+    }
+
+    @Test
     void testMetadataRoundtrip() {
         Map<String, Integer> nameToId = new TreeMap<>();
         nameToId.put("age", 0);
@@ -329,5 +405,27 @@ class MapSharedShreddingUtilsTest {
         assertThat(MapSharedShreddingDefine.physicalColumnName(0)).isEqualTo("__col_0");
         assertThat(MapSharedShreddingDefine.physicalColumnName(1)).isEqualTo("__col_1");
         assertThat(MapSharedShreddingDefine.physicalColumnName(99)).isEqualTo("__col_99");
+    }
+
+    private static Map<String, Integer> nameToId(Object... kvs) {
+        Map<String, Integer> map = new TreeMap<>();
+        for (int i = 0; i < kvs.length; i += 2) {
+            map.put((String) kvs[i], (Integer) kvs[i + 1]);
+        }
+        return map;
+    }
+
+    private static Map<Integer, List<Integer>> fieldToColumns(
+            int fieldId, List<Integer> columns) {
+        Map<Integer, List<Integer>> map = new TreeMap<>();
+        map.put(fieldId, columns);
+        return map;
+    }
+
+    private static Map<Integer, List<Integer>> fieldToColumns(
+            int fieldId0, List<Integer> columns0, int fieldId1, List<Integer> columns1) {
+        Map<Integer, List<Integer>> map = fieldToColumns(fieldId0, columns0);
+        map.put(fieldId1, columns1);
+        return map;
     }
 }

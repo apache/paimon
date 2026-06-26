@@ -111,6 +111,45 @@ public class MapSharedShreddingUtils {
         return fieldToNumColumns;
     }
 
+    public static List<Integer> getPhysicalColumnIndices(
+            MapSharedShreddingFieldMeta fieldMeta, String fieldName) {
+        Integer fieldId = fieldMeta.nameToId().get(fieldName);
+        if (fieldId == null) {
+            throw new IllegalArgumentException(
+                    "cannot find field " + fieldName + " in map shared shredding meta");
+        }
+        List<Integer> columns = fieldMeta.fieldToColumns().get(fieldId);
+        if (columns == null) {
+            throw new IllegalArgumentException(
+                    "cannot find field id "
+                            + fieldId
+                            + " in field_to_columns in map shared shredding meta");
+        }
+        return columns;
+    }
+
+    public static boolean isOverflowField(MapSharedShreddingFieldMeta fieldMeta, String fieldName) {
+        Integer fieldId = fieldMeta.nameToId().get(fieldName);
+        if (fieldId == null) {
+            throw new IllegalArgumentException(
+                    "cannot find field " + fieldName + " in map shared shredding meta");
+        }
+        return fieldMeta.overflowFieldSet().contains(fieldId);
+    }
+
+    public static DataType buildSpecificPhysicalStructType(
+            DataType valueType, Set<Integer> physicalColumnIds, boolean includeOverflow) {
+        RowType.Builder builder = RowType.builder();
+        builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));
+        for (Integer physicalColumnId : new TreeSet<>(physicalColumnIds)) {
+            builder.field(MapSharedShreddingDefine.physicalColumnName(physicalColumnId), valueType);
+        }
+        if (includeOverflow) {
+            builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        }
+        return builder.build();
+    }
+
     public static void serializeMetadata(
             MapSharedShreddingFieldMeta fieldMeta,
             String compression,
