@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
@@ -51,6 +52,7 @@ import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SinkWriter;
 import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
 import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
+import org.apache.paimon.utils.SinkWriter.SortedBufferedSinkWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
@@ -97,6 +99,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
+    private final CoreOptions coreOptions;
+    private final boolean sortEnabled;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -129,7 +133,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean dataEvolutionEnabled,
-            @Nullable BlobFileContext blobContext) {
+            @Nullable BlobFileContext blobContext,
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -159,11 +164,18 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
+        this.coreOptions = coreOptions;
 
-        this.sinkWriter =
-                useWriteBuffer
-                        ? createBufferedSinkWriter(spillable)
-                        : new DirectSinkWriter<>(this::createRollingRowWriter);
+        // Determine if we need to enable sorting based on clustering configuration
+        List<String> clusteringColumns = coreOptions.clusteringColumns();
+        this.sortEnabled =
+                coreOptions.clusteringIncrementalEnabled()
+                        && coreOptions.clusteringIncrementalOptimizeWrite()
+                        && coreOptions.clusteringIncrementalMode()
+                                == CoreOptions.ClusteringIncrementalMode.LOCAL_SORT
+                        && !clusteringColumns.isEmpty();
+
+        this.sinkWriter = createSinkWriter(useWriteBuffer, spillable);
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -174,16 +186,31 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         }
     }
 
-    private BufferedSinkWriter<InternalRow> createBufferedSinkWriter(boolean spillable) {
-        return new BufferedSinkWriter<>(
-                this::createRollingRowWriter,
-                t -> t,
-                t -> t,
-                ioManager,
-                writeSchema,
-                spillable,
-                maxDiskSize,
-                spillCompression);
+    private SinkWriter<InternalRow> createSinkWriter(boolean useWriteBuffer, boolean spillable) {
+        if (useWriteBuffer) {
+            if (sortEnabled) {
+                return new SortedBufferedSinkWriter<>(
+                        this::createRollingRowWriter,
+                        t -> t,
+                        t -> t,
+                        ioManager,
+                        writeSchema,
+                        coreOptions,
+                        spillable);
+            } else {
+                return new BufferedSinkWriter<>(
+                        this::createRollingRowWriter,
+                        t -> t,
+                        t -> t,
+                        ioManager,
+                        writeSchema,
+                        spillable,
+                        maxDiskSize,
+                        spillCompression);
+            }
+        } else {
+            return new DirectSinkWriter<>(this::createRollingRowWriter);
+        }
     }
 
     @Override
@@ -209,9 +236,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Override
     public void writeBundle(BundleRecords bundle) throws Exception {
         if (sinkWriter instanceof BufferedSinkWriter) {
-            for (InternalRow row : bundle) {
-                write(row);
-            }
+            ((BufferedSinkWriter<InternalRow>) sinkWriter).writeBundle(bundle);
+        } else if (sinkWriter instanceof SortedBufferedSinkWriter) {
+            ((SortedBufferedSinkWriter<InternalRow>) sinkWriter).writeBundle(bundle);
         } else {
             ((DirectSinkWriter<?>) sinkWriter).writeBundle(bundle);
         }
@@ -292,7 +319,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             List<DataFileMeta> files = sinkWriter.flush();
 
             sinkWriter.close();
-            sinkWriter = createBufferedSinkWriter(true);
+            sinkWriter = createSinkWriter(true, true);
             sinkWriter.setMemoryPool(memorySegmentPool);
 
             // rewrite small files

@@ -155,7 +155,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 options.dataEvolutionEnabled(),
-                blobContext);
+                blobContext,
+                options);
     }
 
     @Override
