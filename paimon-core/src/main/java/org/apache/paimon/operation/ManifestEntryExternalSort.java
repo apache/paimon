@@ -56,6 +56,7 @@ public class ManifestEntryExternalSort {
             ManifestFileSorter.ManifestSortKey sortKey,
             ExternalSortConfig config,
             ManifestFile manifestFile,
+            List<ManifestFileMeta> newFilesForAbort,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
@@ -73,8 +74,14 @@ public class ManifestEntryExternalSort {
 
             List<ManifestFileMeta> addFiles =
                     sorter.writeSurvivingAddsToManifest(manifestFile, deleteEntries);
+            // Register ADD files for abort cleanup right after they are written, before the
+            // DELETE files below. Otherwise, if sortAndWriteDeleteEntries throws, the already
+            // written ADD manifest files would not be in newFilesForAbort and would leak as
+            // orphan files on commit abort.
+            newFilesForAbort.addAll(addFiles);
             List<ManifestFileMeta> deleteFiles =
                     sortAndWriteDeleteEntries(deleteEntries.values(), sortKey, manifestFile);
+            newFilesForAbort.addAll(deleteFiles);
             return Pair.of(addFiles, deleteFiles);
         }
     }

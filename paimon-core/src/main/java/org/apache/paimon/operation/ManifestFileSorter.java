@@ -1028,16 +1028,15 @@ public class ManifestFileSorter {
                         ctx.sortKey,
                         ctx.externalSortConfig,
                         manifestFile,
+                        sortNewFiles,
                         manifestReadParallelism);
 
         if (!sorted.getLeft().isEmpty()) {
             output.addSortedFiles(sorted.getLeft());
-            sortNewFiles.addAll(sorted.getLeft());
         }
 
         if (!sorted.getRight().isEmpty()) {
             output.addDeleteFiles(sorted.getRight());
-            sortNewFiles.addAll(sorted.getRight());
         }
     }
 
