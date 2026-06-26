@@ -177,10 +177,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownTopN() {
-        if (topN == null
-                || pushDownLimit != null
-                || !schema.primaryKeys().isEmpty()
-                || options().deletionVectorsEnabled()) {
+        if (topN == null || pushDownLimit != null || !schema.primaryKeys().isEmpty()) {
             return Optional.empty();
         }
 
