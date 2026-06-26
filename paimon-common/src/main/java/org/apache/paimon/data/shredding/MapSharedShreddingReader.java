@@ -272,8 +272,15 @@ public class MapSharedShreddingReader implements FileRecordReader<InternalRow> {
         }
         InternalArray fieldMapping = physicalRow.getArray(0);
         Map<Object, Object> result = new LinkedHashMap<>();
-        int numMappedColumns = Math.min(context.numColumns, fieldMapping.size());
-        for (int column = 0; column < numMappedColumns; column++) {
+        if (fieldMapping.size() != context.numColumns) {
+            throw new IllegalArgumentException(
+                    "Shared-shredding field mapping size "
+                            + fieldMapping.size()
+                            + " does not match metadata num columns "
+                            + context.numColumns
+                            + ".");
+        }
+        for (int column = 0; column < context.numColumns; column++) {
             if (fieldMapping.isNullAt(column)) {
                 throw new IllegalArgumentException(
                         "Shared-shredding field mapping element cannot be null.");
@@ -294,7 +301,7 @@ public class MapSharedShreddingReader implements FileRecordReader<InternalRow> {
                                 + MapSharedShreddingDefine.physicalColumnName(column)
                                 + ".");
             }
-            // TODO Support rebuilding in the user requested selected-key order once key-level
+            // TODO(lisizhuo.lsz): Support rebuilding in the user requested selected-key order once key-level
             // projection is pushed down. Full map reads currently follow the physical/metadata
             // layout order.
             result.put(fieldName, context.valueGetters[column].getFieldOrNull(physicalRow));

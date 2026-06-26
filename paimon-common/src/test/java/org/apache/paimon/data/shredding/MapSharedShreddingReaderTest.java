@@ -123,6 +123,82 @@ class MapSharedShreddingReaderTest {
     }
 
     @Test
+    void testRebuildMultipleLogicalMaps() throws IOException {
+        RowType logicalType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "tags",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
+                        DataTypes.FIELD(
+                                2,
+                                "plain",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
+                        DataTypes.FIELD(
+                                3,
+                                "attrs",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())));
+        Map<String, MapSharedShreddingFieldMeta> metas = new TreeMap<>();
+        metas.put(
+                "tags",
+                new MapSharedShreddingFieldMeta(
+                        nameToId("a", 0, "b", 1, "c", 2),
+                        fieldToColumns(
+                                0, Collections.singletonList(0),
+                                1, Collections.singletonList(1)),
+                        new TreeSet<>(Collections.singletonList(2)),
+                        2,
+                        3));
+        metas.put(
+                "attrs",
+                new MapSharedShreddingFieldMeta(
+                        nameToId("x", 10, "y", 11),
+                        fieldToColumns(
+                                10, Collections.singletonList(0),
+                                11, Collections.singletonList(1)),
+                        new TreeSet<Integer>(),
+                        2,
+                        2));
+
+        List<InternalRow> physicalRows =
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                GenericRow.of(
+                                        new GenericArray(new int[] {0, -1}),
+                                        10L,
+                                        null,
+                                        intKeyMap(2, 30L)),
+                                stringKeyMap("plain-key", BinaryString.fromString("plain-value")),
+                                GenericRow.of(
+                                        new GenericArray(new int[] {11, 10}),
+                                        BinaryString.fromString("value-y"),
+                                        null)));
+
+        try (MapSharedShreddingReader reader =
+                new MapSharedShreddingReader(
+                        new InMemoryReader(physicalRows), logicalType, metas)) {
+            FileRecordIterator<InternalRow> batch = reader.readBatch();
+            assertThat(batch).isNotNull();
+
+            InternalRow row = batch.next();
+            assertThat(row.getInt(0)).isEqualTo(1);
+            assertThat(row.getMap(1)).isEqualTo(stringKeyMap("a", 10L, "c", 30L));
+            assertThat(row.getMap(2))
+                    .isEqualTo(
+                            stringKeyMap(
+                                    "plain-key", BinaryString.fromString("plain-value")));
+            assertThat(row.getMap(3))
+                    .isEqualTo(stringKeyMap("y", BinaryString.fromString("value-y"), "x", null));
+
+            assertThat(batch.next()).isNull();
+            batch.releaseBatch();
+            assertThat(reader.readBatch()).isNull();
+        }
+    }
+
+    @Test
     void testInvalidNullFieldMapping() throws IOException {
         assertInvalidPhysicalTags(
                 GenericRow.of(null, 10L, 20L, null),
@@ -134,6 +210,13 @@ class MapSharedShreddingReaderTest {
         assertInvalidPhysicalTags(
                 GenericRow.of(new GenericArray(new Object[] {0, null}), 10L, 20L, null),
                 "Shared-shredding field mapping element cannot be null");
+    }
+
+    @Test
+    void testInvalidFieldMappingSize() throws IOException {
+        assertInvalidPhysicalTags(
+                GenericRow.of(new GenericArray(new int[] {0}), 10L, null, null),
+                "Shared-shredding field mapping size 1 does not match metadata num columns 2");
     }
 
     @Test

@@ -137,7 +137,7 @@ public class MapSharedShreddingUtils {
         return fieldMeta.overflowFieldSet().contains(fieldId);
     }
 
-    public static DataType buildSpecificPhysicalStructType(
+    public static RowType buildSpecificPhysicalRowType(
             DataType valueType, Set<Integer> physicalColumnIds, boolean includeOverflow) {
         RowType.Builder builder = RowType.builder();
         builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));

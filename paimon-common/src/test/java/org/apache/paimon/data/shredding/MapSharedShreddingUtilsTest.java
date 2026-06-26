@@ -235,13 +235,12 @@ class MapSharedShreddingUtilsTest {
     }
 
     @Test
-    void testBuildSpecificPhysicalStructType() {
+    void testBuildSpecificPhysicalRowType() {
         Set<Integer> physicalColumnIds = new HashSet<>(Arrays.asList(3, 1));
 
         RowType physicalType =
-                (RowType)
-                        MapSharedShreddingUtils.buildSpecificPhysicalStructType(
-                                DataTypes.BIGINT().notNull(), physicalColumnIds, true);
+                MapSharedShreddingUtils.buildSpecificPhysicalRowType(
+                        DataTypes.BIGINT().notNull(), physicalColumnIds, true);
         assertThat(physicalType.getFieldNames())
                 .containsExactly("__field_mapping", "__col_1", "__col_3", "__overflow");
         assertThat(physicalType.getFields()).extracting(DataField::id).containsExactly(0, 1, 2, 3);
@@ -255,9 +254,8 @@ class MapSharedShreddingUtilsTest {
                 .isEqualTo(DataTypes.MAP(DataTypes.INT(), DataTypes.BIGINT().notNull()));
 
         RowType physicalTypeWithoutOverflow =
-                (RowType)
-                        MapSharedShreddingUtils.buildSpecificPhysicalStructType(
-                                DataTypes.BIGINT(), physicalColumnIds, false);
+                MapSharedShreddingUtils.buildSpecificPhysicalRowType(
+                        DataTypes.BIGINT(), physicalColumnIds, false);
         assertThat(physicalTypeWithoutOverflow.getFieldNames())
                 .containsExactly("__field_mapping", "__col_1", "__col_3");
     }
