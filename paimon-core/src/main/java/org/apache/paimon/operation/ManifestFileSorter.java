@@ -982,11 +982,11 @@ public class ManifestFileSorter {
                         ctx.sortKey,
                         ctx.externalSortConfig,
                         manifestFile,
+                        sortNewFiles,
                         ctx.deleteEntries,
                         manifestReadParallelism);
         if (!sorted.isEmpty()) {
             output.addSortedFiles(sorted);
-            sortNewFiles.addAll(sorted);
         }
     }
 

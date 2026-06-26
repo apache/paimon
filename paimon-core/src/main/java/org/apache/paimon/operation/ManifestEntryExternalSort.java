@@ -93,6 +93,7 @@ public class ManifestEntryExternalSort {
             ManifestFileSorter.ManifestSortKey sortKey,
             ExternalSortConfig config,
             ManifestFile manifestFile,
+            List<ManifestFileMeta> newFilesForAbort,
             Set<FileEntry.Identifier> deleteEntries,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
@@ -116,7 +117,9 @@ public class ManifestEntryExternalSort {
                     sequentialBatchedExecute(reader, section, manifestReadParallelism)) {
                 sorter.write(entry);
             }
-            return sorter.writeToManifest(manifestFile);
+            List<ManifestFileMeta> files = sorter.writeToManifest(manifestFile);
+            newFilesForAbort.addAll(files);
+            return files;
         }
     }
 
