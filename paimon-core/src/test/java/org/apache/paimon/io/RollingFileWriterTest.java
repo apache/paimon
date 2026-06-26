@@ -223,7 +223,8 @@ public class RollingFileWriterTest {
         assertThat(file.extraFiles()).hasSize(1);
         assertThat(
                         readIntsFromRowFile(
-                                rowFormat, pathFactory.toAlignedPath(file.extraFiles().get(0), file)))
+                                rowFormat,
+                                pathFactory.toAlignedPath(file.extraFiles().get(0), file)))
                 .containsExactly(1, 2);
     }
 
@@ -232,7 +233,8 @@ public class RollingFileWriterTest {
         LocalFileIO fileIO = LocalFileIO.create();
         List<Integer> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                rowFormat.createReaderFactory(SCHEMA, SCHEMA, Collections.emptyList())
+                rowFormat
+                        .createReaderFactory(SCHEMA, SCHEMA, Collections.emptyList())
                         .createReader(
                                 new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
             reader.forEachRemaining(row -> result.add(row.getInt(0)));
