@@ -121,7 +121,10 @@ public class FormatTableScan implements InnerTableScan {
                         new Path(table.location()),
                         table.partitionKeys().size(),
                         table.partitionKeys(),
-                        coreOptions.formatTablePartitionOnlyValueInPath());
+                        coreOptions.formatTablePartitionOnlyValueInPath(),
+                        null,
+                        table.partitionType(),
+                        table.defaultPartName());
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());

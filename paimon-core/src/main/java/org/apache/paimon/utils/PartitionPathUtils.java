@@ -320,8 +320,7 @@ public class PartitionPathUtils {
                         defaultPartValue);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
-            // ignore hidden file
-            if (isHiddenFile(part)) {
+            if (isHiddenFile(part, onlyValueInPath, defaultPartValue)) {
                 continue;
             }
             if (onlyValueInPath) {
@@ -403,7 +402,7 @@ public class PartitionPathUtils {
             int levelOffset,
             @Nullable GenericRow values)
             throws IOException {
-        if (isHiddenFile(fileStatus.getPath())) {
+        if (isHiddenFile(fileStatus, onlyValueInPath, defaultPartValue)) {
             return;
         }
 
@@ -524,12 +523,17 @@ public class PartitionPathUtils {
         return true;
     }
 
-    private static boolean isHiddenFile(FileStatus fileStatus) {
-        return isHiddenFile(fileStatus.getPath());
+    private static boolean isHiddenFile(
+            FileStatus fileStatus, boolean onlyValueInPath, @Nullable String defaultPartValue) {
+        return isHiddenFile(fileStatus.getPath(), onlyValueInPath, defaultPartValue);
     }
 
-    private static boolean isHiddenFile(Path path) {
+    private static boolean isHiddenFile(
+            Path path, boolean onlyValueInPath, @Nullable String defaultPartValue) {
         String name = path.getName();
+        if (onlyValueInPath && defaultPartValue != null && defaultPartValue.equals(name)) {
+            return false;
+        }
         return name.startsWith("_") || name.startsWith(".");
     }
 }
