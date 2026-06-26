@@ -477,6 +477,24 @@ under the License.
             <td>Whether enable data evolution for row tracking table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.row-sidecar.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to generate row-store sidecar files for normal data files on data evolution tables. The sidecar files are used to accelerate sparse row-id reads.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selected-rows</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Long</td>
+            <td>Maximum selected row count for reading a row-store sidecar file. The sidecar is used only when the selected rows are no more than this value and the selected row ratio is no more than data-evolution.row-sidecar.max-selection-ratio.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.row-sidecar.max-selection-ratio</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Maximum selected row ratio for reading a row-store sidecar file. The value must be in (0, 1]. The sidecar is used only when the selected row ratio is no more than this value and the selected row count is no more than data-evolution.row-sidecar.max-selected-rows.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.merge-into.file-pruning</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
