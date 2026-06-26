@@ -130,10 +130,31 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     protected void waitForResult(
             List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
             throws Exception {
-        waitForResult(false, expected, table, rowType, primaryKeys);
+        waitForResult(null, false, expected, table, rowType, primaryKeys);
     }
 
     protected void waitForResult(
+            JobClient client,
+            List<String> expected,
+            FileStoreTable table,
+            RowType rowType,
+            List<String> primaryKeys)
+            throws Exception {
+        waitForResult(client, false, expected, table, rowType, primaryKeys);
+    }
+
+    protected void waitForResult(
+            boolean withRegx,
+            List<String> expected,
+            FileStoreTable table,
+            RowType rowType,
+            List<String> primaryKeys)
+            throws Exception {
+        waitForResult(null, withRegx, expected, table, rowType, primaryKeys);
+    }
+
+    protected void waitForResult(
+            @Nullable JobClient client,
             boolean withRegx,
             List<String> expected,
             FileStoreTable table,
@@ -158,6 +179,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     break;
                 }
             }
+            checkJobNotTerminated(client);
             table = table.copyWithLatestSchema();
             Thread.sleep(1000);
         }
@@ -179,6 +201,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     || sortedExpected.equals(sortedActual)) {
                 break;
             }
+            checkJobNotTerminated(client);
             LOG.info("actual: " + sortedActual);
             LOG.info("expected: " + sortedExpected);
             Thread.sleep(1000);
@@ -261,8 +284,31 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             if (status == JobStatus.RUNNING) {
                 break;
             }
+            if (status.isGloballyTerminalState()) {
+                throwJobTerminated(client, status);
+            }
             Thread.sleep(1000);
         }
+    }
+
+    protected void checkJobNotTerminated(@Nullable JobClient client) throws Exception {
+        if (client == null) {
+            return;
+        }
+
+        JobStatus status = client.getJobStatus().get();
+        if (status.isGloballyTerminalState()) {
+            throwJobTerminated(client, status);
+        }
+    }
+
+    private void throwJobTerminated(JobClient client, JobStatus status) throws Exception {
+        try {
+            client.getJobExecutionResult().get();
+        } catch (Exception e) {
+            throw new AssertionError("CDC job terminated with status " + status + ".", e);
+        }
+        throw new AssertionError("CDC job terminated with status " + status + ".");
     }
 
     private <T> String getActionName(Class<T> clazz) {
