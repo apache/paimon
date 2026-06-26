@@ -616,6 +616,7 @@ public class SchemaValidation {
             fieldMap.put(field.name(), field);
         }
 
+        boolean hasSharedShredding = false;
         for (String key : options.toMap().keySet()) {
             if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
                 continue;
@@ -644,6 +645,7 @@ public class SchemaValidation {
             if (layout != MapStorageLayout.SHARED_SHREDDING) {
                 continue;
             }
+            hasSharedShredding = true;
 
             if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
@@ -653,6 +655,38 @@ public class SchemaValidation {
             }
             options.mapSharedShreddingMaxColumns(fieldName);
         }
+        if (hasSharedShredding) {
+            validateMapSharedShreddingFileFormats(options);
+        }
+    }
+
+    private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.FILE_FORMAT.key(), options.fileFormatString());
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            validateMapSharedShreddingFileFormat(
+                    CoreOptions.FILE_FORMAT_PER_LEVEL.key() + "[" + entry.getKey() + "]",
+                    entry.getValue());
+        }
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
+        if (options.withVectorFormat()) {
+            validateMapSharedShreddingFileFormat(
+                    CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
+        }
+    }
+
+    private static void validateMapSharedShreddingFileFormat(String optionKey, String fileFormat) {
+        if (fileFormat == null
+                || CoreOptions.FILE_FORMAT_PARQUET.equals(fileFormat)
+                || CoreOptions.FILE_FORMAT_ORC.equals(fileFormat)) {
+            return;
+        }
+        throw new IllegalArgumentException(
+                String.format(
+                        "MAP shared-shredding only supports ORC and Parquet file formats, "
+                                + "but '%s' is configured as '%s'.",
+                        optionKey, fileFormat));
     }
 
     private static void validateFileIndex(TableSchema schema) {

@@ -311,6 +311,94 @@ class SchemaValidationTest {
                                                 options,
                                                 "")))
                 .hasMessageContaining("options map.shared-shredding.max-columns must > 0");
+
+        options.remove("fields.metrics.map.shared-shredding.max-columns");
+        options.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")));
+
+        options.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports ORC and Parquet file formats")
+                .hasMessageContaining("'" + CoreOptions.FILE_FORMAT.key() + "'")
+                .hasMessageContaining("'avro'");
+
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports ORC and Parquet file formats")
+                .hasMessageContaining("'" + CoreOptions.FILE_FORMAT_PER_LEVEL.key() + "[0]'")
+                .hasMessageContaining("'avro'");
+
+        options.remove(CoreOptions.FILE_FORMAT_PER_LEVEL.key());
+        options.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports ORC and Parquet file formats")
+                .hasMessageContaining("'" + CoreOptions.CHANGELOG_FILE_FORMAT.key() + "'")
+                .hasMessageContaining("'avro'");
+
+        options.remove(CoreOptions.CHANGELOG_FILE_FORMAT.key());
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(VECTOR_FILE_FORMAT.key(), "json");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports ORC and Parquet file formats")
+                .hasMessageContaining("'" + VECTOR_FILE_FORMAT.key() + "'")
+                .hasMessageContaining("'json'");
     }
 
     @Test

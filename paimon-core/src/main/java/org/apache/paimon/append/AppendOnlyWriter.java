@@ -371,7 +371,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                         ? new MapSharedShreddingWritePlanFactory(
                                 writeSchema,
                                 sharedShreddingContext,
-                                MapSharedShreddingCoreUtils.sharedShreddingFieldIdKey(fileFormat))
+                                MapSharedShreddingCoreUtils.fieldIdMetadataKey(fileFormat))
                         : null);
     }
 

@@ -54,6 +54,7 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_APPEND_ORDERED;
 import static org.apache.paimon.CoreOptions.WRITE_MAX_WRITERS_TO_SPILL;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.io.DataFileTestUtils.newFile;
 
 /** Tests for {@link BucketedAppendFileStoreWrite}. */
 public class BucketedAppendFileStoreWriteTest {
@@ -174,6 +175,58 @@ public class BucketedAppendFileStoreWriteTest {
         catalog.createDatabase("default", false);
         catalog.createTable(identifier, schema, false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    @Test
+    public void testSharedShreddingDoesNotSupportRewrite() throws Exception {
+        Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()));
+        catalog.createDatabase("default", false);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
+                        .option("bucket", "1")
+                        .option("bucket-key", "id")
+                        .option("fields.tags.map.storage-layout", "shared-shredding")
+                        .build();
+        Identifier compactIdentifier = Identifier.create("default", "compact_test");
+        Identifier clusterIdentifier = Identifier.create("default", "cluster_test");
+        catalog.createTable(compactIdentifier, schema, false);
+        catalog.createTable(clusterIdentifier, schema, false);
+
+        BaseAppendFileStoreWrite compactWrite =
+                (BaseAppendFileStoreWrite)
+                        ((FileStoreTable) catalog.getTable(compactIdentifier))
+                                .store()
+                                .newWrite("ss");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                compactWrite.compactRewrite(
+                                        BinaryRow.EMPTY_ROW,
+                                        0,
+                                        null,
+                                        Collections.singletonList(
+                                                newFile("data-0.orc", 0, 0, 1, 1))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(
+                        "Compaction rewrite is not supported for MAP shared-shredding.");
+
+        BaseAppendFileStoreWrite clusterWrite =
+                (BaseAppendFileStoreWrite)
+                        ((FileStoreTable) catalog.getTable(clusterIdentifier))
+                                .store()
+                                .newWrite("ss");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                clusterWrite.clusterRewrite(
+                                        BinaryRow.EMPTY_ROW,
+                                        0,
+                                        Collections.singletonList(
+                                                newFile("data-0.orc", 0, 0, 1, 1))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cluster rewrite is not supported for MAP shared-shredding.");
     }
 
     @Test

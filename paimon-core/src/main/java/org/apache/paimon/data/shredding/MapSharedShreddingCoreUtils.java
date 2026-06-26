@@ -50,7 +50,7 @@ public class MapSharedShreddingCoreUtils {
     private MapSharedShreddingCoreUtils() {}
 
     @Nullable
-    public static String sharedShreddingFieldIdKey(FileFormat fileFormat) {
+    public static String fieldIdMetadataKey(FileFormat fileFormat) {
         switch (fileFormat.getFormatIdentifier()) {
             case "parquet":
                 return FormatMetadataUtils.PARQUET_FIELD_ID_KEY;
