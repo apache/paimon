@@ -174,7 +174,7 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
 
     def _extract_partition_predicate(self, commit):
         entries_plan = commit._try_commit.call_args[1]['commit_entries_plan']
-        with patch('pypaimon.write.file_store_commit.FileScanner') as mock_cls:
+        with patch('pypaimon.write.commit.overwrite_changes_provider.FileScanner') as mock_cls:
             mock_cls.return_value.read_manifest_entries.return_value = []
             commit.manifest_list_manager.read_all.return_value = []
             entries_plan(Mock(id=1))
