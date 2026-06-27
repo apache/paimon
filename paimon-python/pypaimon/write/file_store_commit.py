@@ -27,6 +27,7 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_file_merger import ManifestFileMerger
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -63,9 +64,13 @@ class SuccessResult(CommitResult):
 
 class RetryResult(CommitResult):
 
-    def __init__(self, latest_snapshot, exception: Optional[Exception] = None):
+    def __init__(self, latest_snapshot, exception: Optional[Exception] = None,
+                 base_data_files: Optional[List[ManifestEntry]] = None):
         self.latest_snapshot = latest_snapshot
         self.exception = exception
+        # Base entries as of latest_snapshot, carried so the next attempt reuses
+        # them and reads only the incremental changes.
+        self.base_data_files = base_data_files
 
     def is_success(self) -> bool:
         return False
@@ -374,17 +379,36 @@ class FileStoreCommit:
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
-        # Conflict detection: read base entries from latest snapshot, then check conflicts
+        # Base entries for conflict detection. On retry, reuse the previous
+        # attempt's base + read only the incremental changes (mirrors Java).
+        base_data_files = None
         if detect_conflicts and latest_snapshot is not None:
-            base_entries = self.commit_scanner.read_all_entries_from_changed_partitions(
-                latest_snapshot, commit_entries)
+            incremental = None
+            if (retry_result is not None
+                    and retry_result.latest_snapshot is not None
+                    and retry_result.base_data_files is not None):
+                incremental = self.commit_scanner.read_incremental_changes(
+                    retry_result.latest_snapshot, latest_snapshot, commit_entries)
+            if incremental is not None:
+                base_data_files = list(retry_result.base_data_files)
+                if incremental:
+                    base_data_files.extend(incremental)
+                    base_data_files = FileEntry.merge_entries(base_data_files)
+            else:
+                # First attempt, or incremental could not be built (missing
+                # snapshot): scan the changed partitions in full.
+                base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
+                    latest_snapshot, commit_entries)
+
             conflict_exception = self.conflict_detection.check_conflicts(
-                latest_snapshot, base_entries, commit_entries, commit_kind)
+                latest_snapshot, base_data_files, commit_entries, commit_kind)
 
             if conflict_exception is not None:
                 if allow_rollback and self.rollback is not None:
                     if self.rollback.try_to_rollback(latest_snapshot):
-                        return RetryResult(latest_snapshot, conflict_exception)
+                        # Rolled back: base/snapshot no longer valid; next attempt
+                        # re-scans from scratch (matches Java RollbackRetryResult).
+                        return RetryResult(None, conflict_exception)
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
@@ -492,11 +516,11 @@ class FileStoreCommit:
                         commit_kind,
                         commit_time_s,
                     )
-                    return RetryResult(latest_snapshot, None)
+                    return RetryResult(latest_snapshot, None, base_data_files=base_data_files)
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception.", exc_info=True)
-            return RetryResult(latest_snapshot, e)
+            return RetryResult(latest_snapshot, e, base_data_files=base_data_files)
 
         logger.info(
             "Successfully commit snapshot %d to table %s by user %s "
