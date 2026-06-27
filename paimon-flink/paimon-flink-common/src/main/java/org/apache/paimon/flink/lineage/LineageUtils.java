@@ -138,6 +138,10 @@ public class LineageUtils {
 
     @VisibleForTesting
     static String resolveNameByMetastore(Table table, @Nullable String defaultName) {
+        if (defaultName != null) {
+            return defaultName;
+        }
+
         CatalogContext ctx = catalogContext(table);
         if (ctx != null) {
             Options catalogOptions = ctx.options();
@@ -150,9 +154,7 @@ public class LineageUtils {
                 }
             }
         }
-        return defaultName != null
-                ? defaultName
-                : DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
+        return DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
     }
 
     /**

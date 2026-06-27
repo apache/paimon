@@ -170,8 +170,12 @@ class LineageUtilsTest {
         catalogOptions.put("catalog-key", "jdbc-warehouse");
         FileStoreTable table = createTableWithCatalogOptions(catalogOptions);
 
-        assertThat(LineageUtils.resolveNameByMetastore(table, "paimon.db.src"))
+        // catalog-key is only used when no explicit name is provided (DataStream path)
+        assertThat(LineageUtils.resolveNameByMetastore(table, null))
                 .isEqualTo("jdbc-warehouse." + table.fullName());
+        // when explicit name is provided (Table API path), it takes precedence
+        assertThat(LineageUtils.resolveNameByMetastore(table, "my_catalog.db.src"))
+                .isEqualTo("my_catalog.db.src");
     }
 
     @Test
