@@ -17,6 +17,8 @@
 
 from typing import List, Optional
 
+from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
@@ -28,11 +30,9 @@ class OverwriteChangesProvider:
     caching the existing files of the target partitions across commit retries
     to avoid repeated full scans.
 
-    On retry, if the latest snapshot advanced, the cache is reused only when the
-    snapshots in between are all APPEND and have not touched the target
-    partitions; otherwise it is rebuilt by a full scan. A whole-table overwrite
-    (``partition_filter is None``) always rebuilds. Mirrors Java
-    ``OverwriteChangesProvider`` (#7894).
+    On retry, if the latest snapshot advanced, the cached state is updated by
+    applying the target-partition delta manifests. Missing snapshots or
+    unreadable deltas fall back to a full scan.
     """
 
     def __init__(self, table, manifest_list_manager, snapshot_manager,
@@ -46,9 +46,10 @@ class OverwriteChangesProvider:
         self._cached_snapshot: Optional[Snapshot] = None
         self._cached_entries: List[ManifestEntry] = []
 
-        # Counters for tests / observability (mirrors Java @VisibleForTesting).
+        # Counters for tests / observability.
         self.full_scan_count = 0
         self.delta_probe_count = 0
+        self.delta_apply_count = 0
 
     def provide(self, latest_snapshot: Optional[Snapshot]) -> List[ManifestEntry]:
         if latest_snapshot is None:
@@ -63,7 +64,7 @@ class OverwriteChangesProvider:
                 f"Cached snapshot id {self._cached_snapshot.id} is greater than "
                 f"latest snapshot id {latest_snapshot.id}")
         elif self._cached_snapshot.id < latest_snapshot.id:
-            if not self._can_use_cache(latest_snapshot):
+            if not self._advance_cache(latest_snapshot):
                 self._cached_entries = self._full_scan(latest_snapshot)
             self._cached_snapshot = latest_snapshot
         # cached_snapshot.id == latest_snapshot.id -> reuse cache as-is
@@ -76,39 +77,45 @@ class OverwriteChangesProvider:
                             partition_predicate=self.partition_filter)
                 .read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
 
-    def _can_use_cache(self, latest_snapshot: Snapshot) -> bool:
-        if self.partition_filter is None:
-            # Whole-table overwrite: any concurrent commit touches the target,
-            # so skip the delta probe and force a full scan.
-            return False
-        for snapshot_id in range(self._cached_snapshot.id + 1, latest_snapshot.id + 1):
-            self.delta_probe_count += 1
-            try:
+    def _advance_cache(self, latest_snapshot: Snapshot) -> bool:
+        pending_entries = []
+        applied_count = 0
+        manifest_file_manager = ManifestFileManager(self.table)
+        try:
+            for snapshot_id in range(self._cached_snapshot.id + 1, latest_snapshot.id + 1):
+                self.delta_probe_count += 1
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if snapshot is None:
                     return False
-                if snapshot.commit_kind != "APPEND":
-                    # Only APPEND snapshots produce a reliable DELTA manifest for
-                    # probing; other kinds may rewrite/reorganize manifests.
-                    return False
-                if self._delta_touches_target(snapshot):
-                    return False
-            except Exception:
-                # e.g. the snapshot is being expired; a full scan is always safe.
-                return False
+                entries = self._read_delta_entries(snapshot, manifest_file_manager)
+                if entries:
+                    pending_entries.extend(entries)
+                    applied_count += 1
+            if pending_entries:
+                self._cached_entries = list(
+                    FileEntry.merge_entries(self._cached_entries + pending_entries))
+            self.delta_apply_count += applied_count
+        except Exception:
+            # e.g. the snapshot is being expired; a full scan is always safe.
+            return False
         return True
 
-    def _delta_touches_target(self, snapshot: Snapshot) -> bool:
+    def _read_delta_entries(
+            self, snapshot: Snapshot,
+            manifest_file_manager: ManifestFileManager) -> List[ManifestEntry]:
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)
         if not delta_manifests:
-            return False
-        # Only APPEND snapshots are probed (see _can_use_cache), so the delta has
-        # no standalone DELETEs; FileScanner's partition predicate prunes at the
-        # manifest-file level before reading entries.
-        entries = (FileScanner(self.table, lambda: ([], None),
-                               partition_predicate=self.partition_filter)
-                   .read_manifest_entries(delta_manifests))
-        return len(entries) > 0
+            return []
+        # Read raw delta entries so DELETE entries from OVERWRITE / COMPACT
+        # snapshots are applied instead of being discarded by FileScanner.
+        entries = []
+        for manifest_file in delta_manifests:
+            for entry in manifest_file_manager.read(manifest_file.file_name):
+                if (self.partition_filter is not None
+                        and not self.partition_filter.test(entry.partition)):
+                    continue
+                entries.append(entry)
+        return entries
 
     def _build_result(self, existing_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         entries = []
