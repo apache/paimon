@@ -680,6 +680,129 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchPartitionFilterAndExtractedFilterAreConjunctive() throws Exception {
+        catalog.createTable(
+                identifier("partitioned_filter_table"),
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("pt", DataTypes.INT())
+                                        .column("id", DataTypes.INT())
+                                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                                        .partitionKeys("pt"))
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("partitioned_filter_table"));
+
+        float[][] pt1Vectors = {{1.0f, 0.0f}, {0.95f, 0.1f}};
+        float[][] pt2Vectors = {{0.0f, 1.0f}, {0.1f, 0.95f}};
+
+        writePartitionedVectors(table, 1, pt1Vectors);
+        writePartitionedVectors(table, 2, pt2Vectors);
+
+        RowType partitionType = RowType.of(DataTypes.INT());
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        BinaryRow partition1 = serializer.toBinaryRow(GenericRow.of(1)).copy();
+        BinaryRow partition2 = serializer.toBinaryRow(GenericRow.of(2)).copy();
+
+        buildAndCommitPartitionedIndex(table, pt1Vectors, partition1, new Range(0, 1));
+        buildAndCommitPartitionedIndex(table, pt2Vectors, partition2, new Range(2, 3));
+
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(partition1));
+        Predicate matchingPartitionFilter = new PredicateBuilder(table.rowType()).equal(0, 1);
+        Predicate extractedPartitionFilter = new PredicateBuilder(table.rowType()).equal(0, 2);
+
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(extractedPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.splits()).isEmpty();
+
+        VectorScan.Plan reverseOrderPlan =
+                table.newVectorSearchBuilder()
+                        .withFilter(extractedPartitionFilter)
+                        .withPartitionFilter(partitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(reverseOrderPlan.splits()).isEmpty();
+
+        VectorScan.Plan batchPlan =
+                table.newBatchVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(extractedPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(batchPlan.splits()).isEmpty();
+
+        VectorScan.Plan reverseOrderBatchPlan =
+                table.newBatchVectorSearchBuilder()
+                        .withFilter(extractedPartitionFilter)
+                        .withPartitionFilter(partitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(reverseOrderBatchPlan.splits()).isEmpty();
+
+        GlobalIndexResult matchingResult =
+                table.newVectorSearchBuilder()
+                        .withFilter(matchingPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertResultRowsBetween(matchingResult, 0, 1);
+
+        GlobalIndexResult matchingResultWithPartitionFilter =
+                table.newVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(matchingPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertResultRowsBetween(matchingResultWithPartitionFilter, 0, 1);
+
+        List<GlobalIndexResult> matchingBatchResults =
+                table.newBatchVectorSearchBuilder()
+                        .withFilter(matchingPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(matchingBatchResults).hasSize(1);
+        assertResultRowsBetween(matchingBatchResults.get(0), 0, 1);
+
+        List<GlobalIndexResult> matchingBatchResultsWithPartitionFilter =
+                table.newBatchVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(matchingPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(matchingBatchResultsWithPartitionFilter).hasSize(1);
+        assertResultRowsBetween(matchingBatchResultsWithPartitionFilter.get(0), 0, 1);
+    }
+
+    @Test
     public void testScanPartialRangeIntersection() throws Exception {
         catalog.createTable(
                 identifier("full_search_partial_scalar_table"),
@@ -1161,6 +1284,13 @@ public class VectorSearchBuilderTest extends TableTestBase {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         return ids;
+    }
+
+    private void assertResultRowsBetween(GlobalIndexResult result, long start, long end) {
+        assertThat(result.results().isEmpty()).isFalse();
+        for (long rowId : result.results()) {
+            assertThat(rowId).isBetween(start, end);
+        }
     }
 
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
