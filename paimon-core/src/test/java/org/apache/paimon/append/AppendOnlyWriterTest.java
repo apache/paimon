@@ -1147,8 +1147,7 @@ public class AppendOnlyWriterTest {
             throws IOException {
         Map<String, Map<String, String>> fieldMetadata =
                 ((SupportsFieldMetadata) context.format)
-                        .readFieldMetadata(
-                                new FormatReaderContext(context.fileIO, path, fileSize));
+                        .readFieldMetadata(new FormatReaderContext(context.fileIO, path, fileSize));
         for (Map.Entry<String, MapSharedShreddingFieldMeta> entry : expectedMetas.entrySet()) {
             String fieldName = entry.getKey();
             assertThat(expectedPhysicalType.containsField(fieldName)).isTrue();

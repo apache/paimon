@@ -319,8 +319,7 @@ public class MapSharedShreddingReader implements FileRecordReader<InternalRow> {
             }
             this.valueGetters = new InternalRow.FieldGetter[fieldMeta.numColumns()];
             for (int i = 0; i < fieldMeta.numColumns(); i++) {
-                this.valueGetters[i] =
-                        InternalRow.createFieldGetter(mapType.getValueType(), i + 1);
+                this.valueGetters[i] = InternalRow.createFieldGetter(mapType.getValueType(), i + 1);
             }
             this.overflowValueGetter = InternalArray.createElementGetter(mapType.getValueType());
             this.numColumns = fieldMeta.numColumns();

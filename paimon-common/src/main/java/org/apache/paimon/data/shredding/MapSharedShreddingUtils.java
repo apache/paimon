@@ -237,7 +237,9 @@ public class MapSharedShreddingUtils {
             physicalReadFields.add(logicalReadField.newType(physicalType));
             converted = true;
         }
-        return converted ? new RowType(logicalReadType.isNullable(), physicalReadFields) : logicalReadType;
+        return converted
+                ? new RowType(logicalReadType.isNullable(), physicalReadFields)
+                : logicalReadType;
     }
 
     private static RowType buildPhysicalStructType(DataType valueType, int numColumns) {

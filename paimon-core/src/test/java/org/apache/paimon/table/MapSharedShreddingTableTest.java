@@ -174,9 +174,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                         Arrays.asList("metrics", "labels"),
                         Arrays.asList("labels"));
 
-        write(
-                table,
-                GenericRow.of(1, mapOf("a", 11L, "b", 12L), mapOf("x", 21L)));
+        write(table, GenericRow.of(1, mapOf("a", 11L, "b", 12L), mapOf("x", 21L)));
 
         catalog.alterTable(
                 identifier(format),
@@ -189,9 +187,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 false);
         table = catalog.getTable(identifier(format));
 
-        write(
-                table,
-                GenericRow.of(2, mapOf("c", 31L), mapOf("y", 41L, "z", 42L)));
+        write(table, GenericRow.of(2, mapOf("c", 31L), mapOf("y", 41L, "z", 42L)));
 
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         List<DataFileWithSplit> files = currentDataFiles(fileStoreTable);
@@ -213,14 +209,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         }
 
         assertThat(actual)
+                .containsEntry(1, Arrays.asList(javaMapOf("a", 11L, "b", 12L), javaMapOf("x", 21L)))
                 .containsEntry(
-                        1,
-                        Arrays.asList(
-                                javaMapOf("a", 11L, "b", 12L), javaMapOf("x", 21L)))
-                .containsEntry(
-                        2,
-                        Arrays.asList(
-                                javaMapOf("c", 31L), javaMapOf("y", 41L, "z", 42L)));
+                        2, Arrays.asList(javaMapOf("c", 31L), javaMapOf("y", 41L, "z", 42L)));
     }
 
     @ParameterizedTest
@@ -293,11 +284,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
 
         assertThat(actual)
                 .containsEntry(
-                        101,
-                        Arrays.asList(javaMapOf("new-a", 111L), javaMapOf("label-a", 101L)))
+                        101, Arrays.asList(javaMapOf("new-a", 111L), javaMapOf("label-a", 101L)))
                 .containsEntry(
-                        102,
-                        Arrays.asList(javaMapOf("new-b", 222L), javaMapOf("label-b", 102L)));
+                        102, Arrays.asList(javaMapOf("new-b", 222L), javaMapOf("label-b", 102L)));
 
         Map<Integer, List<Map<String, Long>>> partialActual = new LinkedHashMap<>();
         ReadBuilder readBuilder =
@@ -316,8 +305,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         assertThat(partialActual)
                 .containsOnlyKeys(102)
                 .containsEntry(
-                        102,
-                        Arrays.asList(javaMapOf("new-b", 222L), javaMapOf("label-b", 102L)));
+                        102, Arrays.asList(javaMapOf("new-b", 222L), javaMapOf("label-b", 102L)));
     }
 
     private Table createTable(String format, String... sharedShreddingFields) throws Exception {
@@ -465,9 +453,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
     private MapSharedShreddingFieldMeta readSharedShreddingFieldMeta(
             FileStoreTable table, DataFileWithSplit file, String fieldName) throws Exception {
         DataFilePathFactory pathFactory =
-                table.store()
-                        .pathFactory()
-                        .createDataFilePathFactory(file.partition, file.bucket);
+                table.store().pathFactory().createDataFilePathFactory(file.partition, file.bucket);
         FileFormat fileFormat =
                 FileFormatDiscover.of(new CoreOptions(table.options()))
                         .discover(file.dataFile.fileFormat());

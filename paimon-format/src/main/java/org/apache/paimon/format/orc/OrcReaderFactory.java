@@ -127,11 +127,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             }
             Pool<OrcReaderBatch> poolOfBatches =
                     createPoolOfBatches(
-                            context.filePath(),
-                            poolSize,
-                            context.fileIO(),
-                            readSchema,
-                            readType);
+                            context.filePath(), poolSize, context.fileIO(), readSchema, readType);
 
             OrcRecordReader orcReader =
                     createRecordReader(

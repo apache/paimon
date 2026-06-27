@@ -34,7 +34,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -113,9 +112,7 @@ public class MapSharedShreddingCoreUtils {
                         ((SupportsFieldMetadata) fileFormat)
                                 .readFieldMetadata(
                                         new FormatReaderContext(
-                                                fileIO,
-                                                pathFactory.toPath(file),
-                                                file.fileSize()));
+                                                fileIO, pathFactory.toPath(file), file.fileSize()));
                 for (String fieldName : candidateFields) {
                     Map<String, String> metadata = fieldMetadata.get(fieldName);
                     if (!MapSharedShreddingUtils.hasShreddingMetadata(metadata)) {
