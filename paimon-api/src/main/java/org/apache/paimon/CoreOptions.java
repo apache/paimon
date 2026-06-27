@@ -2354,6 +2354,36 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_ROW_SIDECAR_ENABLED =
+            key("data-evolution.row-sidecar.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to generate row-store sidecar files for normal data files "
+                                    + "on data evolution tables. The sidecar files are used to "
+                                    + "accelerate sparse row-id reads.");
+
+    public static final ConfigOption<Long> DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS =
+            key("data-evolution.row-sidecar.max-selected-rows")
+                    .longType()
+                    .defaultValue(4096L)
+                    .withDescription(
+                            "Maximum selected row count for reading a row-store sidecar file. "
+                                    + "The sidecar is used only when the selected rows are no more "
+                                    + "than this value and the selected row ratio is no more than "
+                                    + "data-evolution.row-sidecar.max-selection-ratio.");
+
+    public static final ConfigOption<Double> DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO =
+            key("data-evolution.row-sidecar.max-selection-ratio")
+                    .doubleType()
+                    .defaultValue(0.05d)
+                    .withDescription(
+                            "Maximum selected row ratio for reading a row-store sidecar file. "
+                                    + "The value must be in (0, 1]. The sidecar is used only when "
+                                    + "the selected row ratio is no more than this value and the "
+                                    + "selected row count is no more than "
+                                    + "data-evolution.row-sidecar.max-selected-rows.");
+
     public static final ConfigOption<Boolean> DATA_EVOLUTION_MERGE_INTO_FILE_PRUNING =
             key("data-evolution.merge-into.file-pruning")
                     .booleanType()
@@ -3926,6 +3956,28 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionRowSidecarEnabled() {
+        return options.get(DATA_EVOLUTION_ROW_SIDECAR_ENABLED);
+    }
+
+    public long dataEvolutionRowSidecarMaxSelectedRows() {
+        long maxSelectedRows = options.get(DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS);
+        checkArgument(
+                maxSelectedRows > 0,
+                "The option %s must be greater than 0.",
+                DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.key());
+        return maxSelectedRows;
+    }
+
+    public double dataEvolutionRowSidecarMaxSelectionRatio() {
+        double maxSelectionRatio = options.get(DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO);
+        checkArgument(
+                maxSelectionRatio > 0 && maxSelectionRatio <= 1,
+                "The option %s must be in (0, 1].",
+                DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.key());
+        return maxSelectionRatio;
     }
 
     public boolean dataEvolutionMergeIntoFilePruning() {

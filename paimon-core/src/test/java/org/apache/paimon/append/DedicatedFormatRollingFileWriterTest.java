@@ -148,6 +148,31 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
+    public void testDoesNotWriteRowSidecar() throws IOException {
+        // Tests that: dedicated blob files do not create row-store sidecars.
+        // Kills mutation: adding row sidecar writing to DedicatedFormatRollingFileWriter.
+        writer.write(GenericRow.of(1, BinaryString.fromString("test"), new BlobData(testBlobData)));
+        writer.close();
+
+        List<DataFileMeta> metasResult = writer.result();
+        assertThat(metasResult).hasSize(2);
+        assertThat(metasResult).anyMatch(file -> "parquet".equals(file.fileFormat()));
+        assertThat(metasResult).anyMatch(file -> "blob".equals(file.fileFormat()));
+        assertThat(metasResult)
+                .allSatisfy(
+                        file ->
+                                assertThat(file.extraFiles())
+                                        .noneMatch(extraFile -> extraFile.endsWith(".row")));
+        try (Stream<java.nio.file.Path> files = Files.walk(tempDir)) {
+            assertThat(
+                            files.filter(Files::isRegularFile)
+                                    .noneMatch(
+                                            file -> file.getFileName().toString().endsWith(".row")))
+                    .isTrue();
+        }
+    }
+
+    @Test
     public void testBundleWritingPreservesMainFileIndexSideEffects() throws IOException {
         Options options = new Options();
         options.set("file-index.bloom-filter.columns", "f0");

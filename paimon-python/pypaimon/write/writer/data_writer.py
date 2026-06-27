@@ -34,6 +34,8 @@ from pypaimon.table.row.generic_row import GenericRow
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
+    ROW_SIDECAR_SUFFIX = ".row"
+
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
                  write_cols: Optional[List[str]] = None,
                  changelog_producer: ChangelogProducer = ChangelogProducer.NONE):
@@ -152,6 +154,8 @@ class DataWriter(ABC):
                 if path_to_delete:
                     path_str = str(path_to_delete)
                     self.file_io.delete_quietly(path_str)
+                for extra_file in file_meta.extra_files:
+                    self.file_io.delete_quietly(self._aligned_extra_file_path(file_meta, extra_file))
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -198,27 +202,46 @@ class DataWriter(ABC):
         is_external_path = self.external_path_provider is not None
         external_path_str = file_path if is_external_path else None
 
+        logical_data = data
+        extra_files = []
+        row_sidecar_path = None
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
 
-        if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
-        elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
-            self.file_io.write_blob(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
-            self.file_io.write_lance(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            self.file_io.write_vortex(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
-            self.file_io.write_mosaic(file_path, data)
-        elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
-            self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
-        else:
-            raise ValueError(f"Unsupported file format: {self.file_format}")
+        try:
+            if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
+                self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
+                self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
+                self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
+            elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
+                self.file_io.write_blob(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
+                self.file_io.write_lance(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
+                self.file_io.write_vortex(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_MOSAIC:
+                self.file_io.write_mosaic(file_path, data)
+            elif self.file_format == CoreOptions.FILE_FORMAT_ROW:
+                self.file_io.write_row(file_path, data, zstd_level=self.zstd_level)
+            else:
+                raise ValueError(f"Unsupported file format: {self.file_format}")
+
+            if self._should_write_row_sidecar():
+                row_sidecar_name = f"{file_name}{self.ROW_SIDECAR_SUFFIX}"
+                row_sidecar_path = f"{file_path}{self.ROW_SIDECAR_SUFFIX}"
+                self.file_io.write_row(
+                    row_sidecar_path,
+                    logical_data,
+                    fields=self._row_sidecar_fields(logical_data),
+                    zstd_level=self.zstd_level)
+                extra_files.append(row_sidecar_name)
+        except Exception:
+            self.file_io.delete_quietly(file_path)
+            if row_sidecar_path is not None:
+                self.file_io.delete_quietly(row_sidecar_path)
+            raise
 
         # min key & max key
 
@@ -264,7 +287,7 @@ class DataWriter(ABC):
             max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
             level=0,
-            extra_files=[],
+            extra_files=extra_files,
             creation_time=creation_time,
             delete_row_count=0,
             file_source=0,
@@ -358,6 +381,27 @@ class DataWriter(ABC):
 
         bucket_path = self.path_factory.bucket_path(self.partition, self.bucket)
         return f"{bucket_path.rstrip('/')}/{file_name}"
+
+    def _should_write_row_sidecar(self) -> bool:
+        return (
+            self.options.data_evolution_enabled(False)
+            and self.options.data_evolution_row_sidecar_enabled(False)
+        )
+
+    def _row_sidecar_fields(self, data: pa.Table) -> List:
+        if self.write_cols:
+            field_map = {field.name: field for field in self.table.table_schema.fields}
+            return [field_map[name] for name in self.write_cols if name in field_map]
+        return PyarrowFieldParser.to_paimon_schema(data.schema)
+
+    @staticmethod
+    def _aligned_extra_file_path(file_meta: DataFileMeta, extra_file: str) -> str:
+        if "://" in extra_file or extra_file.startswith("/"):
+            return extra_file
+        file_path = file_meta.external_path if file_meta.external_path else file_meta.file_path
+        if not file_path or "/" not in file_path:
+            return extra_file
+        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
 
     @staticmethod
     def _find_optimal_split_point(data: pa.RecordBatch, target_size: int) -> int:

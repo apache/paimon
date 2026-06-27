@@ -827,6 +827,7 @@ public class AppendOnlyWriterTest {
                         true,
                         false,
                         options.dataEvolutionEnabled(),
+                        null,
                         BlobFileContext.create(writeSchema, options));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

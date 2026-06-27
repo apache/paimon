@@ -581,6 +581,33 @@ class CoreOptions:
         .default_value(False)
         .with_description("Whether to enable data evolution.")
     )
+
+    DATA_EVOLUTION_ROW_SIDECAR_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("data-evolution.row-sidecar.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to generate row-store sidecar files for normal data files on data evolution tables."
+        )
+    )
+
+    DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS: ConfigOption[int] = (
+        ConfigOptions.key("data-evolution.row-sidecar.max-selected-rows")
+        .long_type()
+        .default_value(4096)
+        .with_description(
+            "Maximum selected row count for reading a row-store sidecar file."
+        )
+    )
+
+    DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO: ConfigOption[float] = (
+        ConfigOptions.key("data-evolution.row-sidecar.max-selection-ratio")
+        .double_type()
+        .default_value(0.05)
+        .with_description(
+            "Maximum selected row ratio for reading a row-store sidecar file."
+        )
+    )
     # External paths options
     DATA_FILE_EXTERNAL_PATHS: ConfigOption[str] = (
         ConfigOptions.key("data-file.external-paths")
@@ -1020,6 +1047,25 @@ class CoreOptions:
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
+
+    def data_evolution_row_sidecar_enabled(self, default=None):
+        return self.options.get(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED, default)
+
+    def data_evolution_row_sidecar_max_selected_rows(self, default=None):
+        max_selected_rows = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS, default)
+        if max_selected_rows <= 0:
+            raise ValueError(
+                "data-evolution.row-sidecar.max-selected-rows must be greater than 0.")
+        return max_selected_rows
+
+    def data_evolution_row_sidecar_max_selection_ratio(self, default=None):
+        max_selection_ratio = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO, default)
+        if max_selection_ratio <= 0 or max_selection_ratio > 1:
+            raise ValueError(
+                "data-evolution.row-sidecar.max-selection-ratio must be in (0, 1].")
+        return max_selection_ratio
 
     def global_index_column_update_action(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION, default)
