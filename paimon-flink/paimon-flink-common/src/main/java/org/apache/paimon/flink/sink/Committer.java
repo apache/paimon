@@ -94,6 +94,11 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
         int getParallelism();
 
         int getSubtaskIndex();
+
+        @Nullable
+        default String[] tempDirs() {
+            return null;
+        }
     }
 
     static Context createContext(
@@ -104,6 +109,26 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             StateStore stateStore,
             int parallelism,
             int subtaskIndex) {
+        return createContext(
+                commitUser,
+                metricGroup,
+                streamingCheckpointEnabled,
+                isRestored,
+                stateStore,
+                parallelism,
+                subtaskIndex,
+                null);
+    }
+
+    static Context createContext(
+            String commitUser,
+            @Nullable MetricGroup metricGroup,
+            boolean streamingCheckpointEnabled,
+            boolean isRestored,
+            StateStore stateStore,
+            int parallelism,
+            int subtaskIndex,
+            @Nullable String[] tempDirs) {
         return new Committer.Context() {
             @Override
             public String commitUser() {
@@ -138,6 +163,12 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             @Override
             public int getSubtaskIndex() {
                 return subtaskIndex;
+            }
+
+            @Override
+            @Nullable
+            public String[] tempDirs() {
+                return tempDirs;
             }
         };
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
@@ -174,6 +175,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl withOperation(Snapshot.Operation operation) {
         commit.withOperation(operation);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withIOManager(IOManager ioManager) {
+        commit.withIOManager(ioManager);
         return this;
     }
 

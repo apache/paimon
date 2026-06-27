@@ -142,7 +142,11 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                         context.isRestored(),
                         new OperatorBackendStateStore(context.getOperatorStateStore()),
                         parallelism,
-                        index);
+                        index,
+                        getContainingTask()
+                                .getEnvironment()
+                                .getIOManager()
+                                .getSpillingDirectoriesPaths());
         committer = committerFactory.create(committerContext);
 
         committableStateManager.initializeState(committerContext, committer);

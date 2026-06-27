@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
 
@@ -35,6 +36,11 @@ import java.util.List;
  */
 @Public
 public interface TableCommit extends AutoCloseable {
+
+    /** With {@link IOManager}, this is needed if commit-time external sort is used. */
+    default TableCommit withIOManager(IOManager ioManager) {
+        return this;
+    }
 
     /** Set {@link MetricRegistry} to table commit. */
     TableCommit withMetricRegistry(MetricRegistry registry);
