@@ -205,10 +205,14 @@ public class ChainTableFileStoreTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            if (split instanceof FallbackSplit) {
+                // FallbackSplit (including FallbackDataSplit): use inherited fallback read logic
+                return fallbackRead.createReader(split);
+            }
             if (split instanceof ChainSplit || split instanceof DataSplit) {
                 return chainGroupRead.createReader(split);
             }
-            // FallbackSplit and other types: use inherited fallback read logic
+            // Other split types: use inherited fallback read logic
             return fallbackRead.createReader(split);
         }
     }
