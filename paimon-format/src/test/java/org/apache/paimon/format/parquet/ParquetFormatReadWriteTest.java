@@ -27,7 +27,7 @@ import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -110,20 +110,14 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
 
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        RowType emptyRowType = new RowType(Collections.emptyList());
-        try (FileRecordReader<InternalRow> reader =
-                format.createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
-                        .createReader(context)) {
-            Map<String, Map<String, String>> readFieldMetadata =
-                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-            Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");
-            Assertions.assertThat(readFieldMetadata.get("id"))
-                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
-            Assertions.assertThat(readFieldMetadata.get("name"))
-                    .containsAllEntriesOf(fieldMetadata);
-            Assertions.assertThat(readFieldMetadata.get("name"))
-                    .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
-        }
+        Map<String, Map<String, String>> readFieldMetadata =
+                ((SupportsFieldMetadata) format).readFieldMetadata(context);
+        Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");
+        Assertions.assertThat(readFieldMetadata.get("id"))
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
+        Assertions.assertThat(readFieldMetadata.get("name")).containsAllEntriesOf(fieldMetadata);
+        Assertions.assertThat(readFieldMetadata.get("name"))
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1");
     }
 
     @ParameterizedTest

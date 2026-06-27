@@ -23,12 +23,10 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderContext;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -44,8 +42,6 @@ import java.util.Set;
 
 /** Core utilities for shared-shredding MAP write and restore flows. */
 public class MapSharedShreddingCoreUtils {
-
-    private static final RowType METADATA_READER_ROW_TYPE = new RowType(Collections.emptyList());
 
     private MapSharedShreddingCoreUtils() {}
 
@@ -108,21 +104,18 @@ public class MapSharedShreddingCoreUtils {
                 continue;
             }
 
-            FormatReaderFactory readerFactory =
-                    fileFormatDiscover
-                            .discover(file.fileFormat())
-                            .createReaderFactory(
-                                    METADATA_READER_ROW_TYPE, METADATA_READER_ROW_TYPE, null);
-            try (FileRecordReader<?> reader =
-                    readerFactory.createReader(
-                            new FormatReaderContext(
-                                    fileIO, pathFactory.toPath(file), file.fileSize()))) {
-                if (!(reader instanceof SupportsReaderFieldMetadata)) {
-                    continue;
-                }
-
+            FileFormat fileFormat = fileFormatDiscover.discover(file.fileFormat());
+            if (!(fileFormat instanceof SupportsFieldMetadata)) {
+                continue;
+            }
+            try {
                 Map<String, Map<String, String>> fieldMetadata =
-                        ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
+                        ((SupportsFieldMetadata) fileFormat)
+                                .readFieldMetadata(
+                                        new FormatReaderContext(
+                                                fileIO,
+                                                pathFactory.toPath(file),
+                                                file.fileSize()));
                 for (String fieldName : candidateFields) {
                     Map<String, String> metadata = fieldMetadata.get(fieldName);
                     if (!MapSharedShreddingUtils.hasShreddingMetadata(metadata)) {

@@ -45,7 +45,7 @@ import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.SimpleColStats;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -1145,19 +1145,15 @@ public class AppendOnlyWriterTest {
             RowType expectedPhysicalType,
             Map<String, MapSharedShreddingFieldMeta> expectedMetas)
             throws IOException {
-        RowType emptyRowType = new RowType(Collections.emptyList());
-        try (FileRecordReader<InternalRow> reader =
-                context.format
-                        .createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
-                        .createReader(new FormatReaderContext(context.fileIO, path, fileSize))) {
-            Map<String, Map<String, String>> fieldMetadata =
-                    ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-            for (Map.Entry<String, MapSharedShreddingFieldMeta> entry : expectedMetas.entrySet()) {
-                String fieldName = entry.getKey();
-                assertThat(expectedPhysicalType.containsField(fieldName)).isTrue();
-                assertThat(readSharedShreddingFieldMeta(fieldMetadata, fieldName))
-                        .isEqualTo(entry.getValue());
-            }
+        Map<String, Map<String, String>> fieldMetadata =
+                ((SupportsFieldMetadata) context.format)
+                        .readFieldMetadata(
+                                new FormatReaderContext(context.fileIO, path, fileSize));
+        for (Map.Entry<String, MapSharedShreddingFieldMeta> entry : expectedMetas.entrySet()) {
+            String fieldName = entry.getKey();
+            assertThat(expectedPhysicalType.containsField(fieldName)).isTrue();
+            assertThat(readSharedShreddingFieldMeta(fieldMetadata, fieldName))
+                    .isEqualTo(entry.getValue());
         }
     }
 

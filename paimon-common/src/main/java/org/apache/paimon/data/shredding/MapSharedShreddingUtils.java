@@ -188,6 +188,58 @@ public class MapSharedShreddingUtils {
                         metadata.get(MapShreddingDefine.STORAGE_LAYOUT));
     }
 
+    public static RowType buildSpecificPhysicalStructType(
+            DataType valueType, Set<Integer> physicalColumnIds, boolean includeOverflow) {
+        RowType.Builder builder = RowType.builder();
+        builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));
+        for (Integer columnId : new TreeSet<>(physicalColumnIds)) {
+            builder.field(MapSharedShreddingDefine.physicalColumnName(columnId), valueType);
+        }
+        if (includeOverflow) {
+            builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        }
+        return builder.build();
+    }
+
+    public static RowType buildPhysicalReadType(
+            RowType logicalReadType,
+            Map<String, MapSharedShreddingFieldMeta> sharedShreddingFieldMetas) {
+        if (sharedShreddingFieldMetas.isEmpty()) {
+            return logicalReadType;
+        }
+
+        List<DataField> physicalReadFields = new ArrayList<>();
+        boolean converted = false;
+        for (DataField logicalReadField : logicalReadType.getFields()) {
+            MapSharedShreddingFieldMeta fieldMeta =
+                    sharedShreddingFieldMetas.get(logicalReadField.name());
+            if (fieldMeta == null) {
+                physicalReadFields.add(logicalReadField);
+                continue;
+            }
+
+            if (!(logicalReadField.type() instanceof MapType)) {
+                physicalReadFields.add(logicalReadField);
+                continue;
+            }
+
+            MapType mapType = (MapType) logicalReadField.type();
+            Set<Integer> physicalColumnIds = new TreeSet<>();
+            for (int columnId = 0; columnId < fieldMeta.numColumns(); columnId++) {
+                physicalColumnIds.add(columnId);
+            }
+            DataType physicalType =
+                    buildSpecificPhysicalStructType(
+                                    mapType.getValueType(),
+                                    physicalColumnIds,
+                                    !fieldMeta.overflowFieldSet().isEmpty())
+                            .copy(logicalReadField.type().isNullable());
+            physicalReadFields.add(logicalReadField.newType(physicalType));
+            converted = true;
+        }
+        return converted ? new RowType(logicalReadType.isNullable(), physicalReadFields) : logicalReadType;
+    }
+
     private static RowType buildPhysicalStructType(DataType valueType, int numColumns) {
         RowType.Builder builder = RowType.builder();
         builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));

@@ -21,8 +21,8 @@ package org.apache.paimon.format;
 import java.io.IOException;
 import java.util.Map;
 
-/** Reader capability for formats that can recover top-level field metadata. */
-public interface SupportsReaderFieldMetadata {
+/** Format capability for recovering top-level field metadata from a file footer or schema. */
+public interface SupportsFieldMetadata {
 
     /**
      * Reads metadata from top-level file fields.
@@ -31,5 +31,6 @@ public interface SupportsReaderFieldMetadata {
      * attached to that field. Implementations return an empty map when the file does not contain
      * field metadata.
      */
-    Map<String, Map<String, String>> readFieldMetadata() throws IOException;
+    Map<String, Map<String, String>> readFieldMetadata(FormatReaderFactory.Context context)
+            throws IOException;
 }
