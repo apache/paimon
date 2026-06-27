@@ -22,12 +22,14 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.io.DataInputView;
@@ -37,6 +39,8 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import javax.annotation.Nullable;
@@ -164,6 +168,7 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
     }
 
     public Comparator<MemorySlice> createSliceComparator() {
+        checkComparableFields(rowType);
         return new SliceComparator(rowType);
     }
 
@@ -234,6 +239,18 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                                 writer.writeArray(
                                         (InternalArray) value,
                                         (InternalArraySerializer) arraySerializer);
+                break;
+            case VECTOR:
+                VectorType vectorType = (VectorType) fieldType;
+                InternalVectorSerializer vectorSerializer =
+                        new InternalVectorSerializer(
+                                vectorType.getElementType(), vectorType.getLength());
+                fieldWriter =
+                        (writer, pos, value) -> {
+                            InternalVector vector = (InternalVector) value;
+                            checkVectorLength(vector, vectorType.getLength());
+                            writer.writeVector(vector, vectorSerializer);
+                        };
                 break;
             case MULTISET:
             case MAP:
@@ -329,6 +346,10 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
             case ARRAY:
                 fieldReader = (reader, pos) -> reader.readArray();
                 break;
+            case VECTOR:
+                VectorType vectorType = (VectorType) fieldType;
+                fieldReader = (reader, pos) -> reader.readVector(vectorType.getLength());
+                break;
             case MULTISET:
             case MAP:
                 fieldReader = (reader, pos) -> reader.readMap();
@@ -354,6 +375,27 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
             }
             return fieldReader.readField(reader, pos);
         };
+    }
+
+    private static void checkVectorLength(InternalVector vector, int expectedLength) {
+        if (vector.size() != expectedLength) {
+            throw new IllegalArgumentException(
+                    "Vector length mismatch: expected "
+                            + expectedLength
+                            + " but got "
+                            + vector.size());
+        }
+    }
+
+    private static void checkComparableFields(RowType rowType) {
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            DataType type = rowType.getTypeAt(i);
+            checkArgument(
+                    TypeCheckUtils.isComparable(type),
+                    "Field %s with type %s is not comparable in slice comparator.",
+                    rowType.getFields().get(i).name(),
+                    type);
+        }
     }
 
     private interface FieldWriter extends Serializable {
@@ -464,6 +506,11 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
 
         private void writeArray(InternalArray value, InternalArraySerializer serializer) {
             BinaryArray binary = serializer.toBinaryArray(value);
+            writeSegments(binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+        }
+
+        private void writeVector(InternalVector value, InternalVectorSerializer serializer) {
+            BinaryVector binary = serializer.toBinaryVector(value);
             writeSegments(binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
         }
 
@@ -653,6 +700,14 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
 
         private InternalArray readArray() {
             BinaryArray value = new BinaryArray();
+            int length = readUnsignedInt();
+            value.pointTo(segments, position, length);
+            position += length;
+            return value;
+        }
+
+        private InternalVector readVector(int vectorLength) {
+            BinaryVector value = new BinaryVector(vectorLength);
             int length = readUnsignedInt();
             value.pointTo(segments, position, length);
             position += length;
