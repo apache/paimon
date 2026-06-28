@@ -37,6 +37,8 @@ from pypaimon.table.row.binary_row import BinaryRow
 class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
+    _AVRO_SYNC_INTERVAL = 16000
+
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -220,7 +222,7 @@ class ManifestFileManager:
 
         from fastavro.write import Writer
 
-        sync_interval = min(16000, suggested_file_size)
+        sync_interval = min(self._AVRO_SYNC_INTERVAL, suggested_file_size)
         result = []
         chunk_start = 0
         buf = BytesIO()
