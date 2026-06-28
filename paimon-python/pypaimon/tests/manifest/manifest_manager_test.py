@@ -361,7 +361,8 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             f"{len(oversized)} manifest file(s) exceed 2x target ({max_allowed} bytes): "
             f"{[(m.file_name, m.file_size) for m in oversized]}. "
             f"Java uses RollingFileWriter to split; Python writes one file.")
-        self.assertGreater(len(metas), 1,
+        self.assertGreater(
+            len(metas), 1,
             f"Expected multiple manifest files but got {len(metas)} "
             f"with total {sum(m.file_size for m in metas)} bytes")
 
@@ -389,7 +390,8 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
         max_allowed = target_size * 2
         oversized = [m for m in metas if m.file_size > max_allowed]
-        self.assertEqual(len(oversized), 0,
+        self.assertEqual(
+            len(oversized), 0,
             f"Skewed entries: {len(oversized)} file(s) exceed 2x target: "
             f"{[(m.file_name, m.file_size) for m in oversized]}")
         total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
