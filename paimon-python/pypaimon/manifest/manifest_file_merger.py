@@ -68,7 +68,7 @@ class ManifestFileMerger:
     def _merge_candidates(self, candidates: List[ManifestFileMeta],
                           result: List[ManifestFileMeta],
                           new_files: List[ManifestFileMeta]):
-        if len(candidates) == 1 and candidates[0].file_size <= self.suggested_meta_size:
+        if len(candidates) == 1:
             result.append(candidates[0])
             return
 

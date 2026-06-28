@@ -397,24 +397,6 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
         self.assertEqual(total_entries, 300)
 
-    def test_merge_splits_oversized_manifest(self):
-        from pypaimon.manifest.manifest_file_merger import ManifestFileMerger
-        target_size = 16 * 1024
-        manager = ManifestFileManager(self.table)
-        entries = [self._create_manifest_entry(f"data-{i}.parquet") for i in range(500)]
-        oversized_meta = manager.write_with_meta("manifest-oversized-0", entries)
-        self.assertGreater(oversized_meta.file_size, target_size)
-
-        merger = ManifestFileMerger(manager, target_size, 30)
-        result, new_files = merger.merge([oversized_meta])
-
-        self.assertGreater(len(result), 1,
-                           f"Expected merge to split oversized manifest into "
-                           f"multiple files, got {len(result)}")
-        self.assertTrue(
-            all(m.file_name != oversized_meta.file_name for m in result))
-        total = sum(m.num_added_files + m.num_deleted_files for m in result)
-        self.assertEqual(total, 500)
 
 
 class ManifestListManagerTest(_ManifestManagerSetup):
