@@ -195,7 +195,10 @@ public class ManifestFileMerger {
         // 1. should trigger full compaction
 
         Filter<ManifestFileMeta> mustChange =
-                file -> file.numDeletedFiles() > 0 || file.fileSize() < suggestedMetaSize;
+                file ->
+                        file.numDeletedFiles() > 0
+                                || file.fileSize() < suggestedMetaSize
+                                || file.fileSize() > suggestedMetaSize;
         long totalManifestSize = 0;
         long deltaDeleteFileNum = 0;
         long totalDeltaFileSize = 0;
