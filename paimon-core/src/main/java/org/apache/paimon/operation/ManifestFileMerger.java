@@ -194,11 +194,12 @@ public class ManifestFileMerger {
 
         // 1. should trigger full compaction
 
+        long oversizedThreshold = Math.max(2 * suggestedMetaSize, 16 * 1024 * 1024);
         Filter<ManifestFileMeta> mustChange =
                 file ->
                         file.numDeletedFiles() > 0
                                 || file.fileSize() < suggestedMetaSize
-                                || file.fileSize() > suggestedMetaSize;
+                                || file.fileSize() > oversizedThreshold;
         long totalManifestSize = 0;
         long deltaDeleteFileNum = 0;
         long totalDeltaFileSize = 0;
