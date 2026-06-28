@@ -55,6 +55,9 @@ public class PartitionIndex {
 
     public final ConcurrentHashMap<Integer, Long> nonFullBucketInformation;
 
+    // Disk row count per bucket at the last reconciliation; sessionDelta = inMemory - this.
+    private final ConcurrentHashMap<Integer, Long> diskRowCountAtLastRefresh;
+
     public final Set<Integer> totalBucketSet;
     public final List<Integer> totalBucketArray;
 
@@ -81,6 +84,7 @@ public class PartitionIndex {
             BinaryRow partition) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
+        this.diskRowCountAtLastRefresh = new ConcurrentHashMap<>(bucketInformation);
         this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
         this.totalBucketArray = new ArrayList<>(totalBucketSet);
         this.targetBucketRowNumber = targetBucketRowNumber;
@@ -127,6 +131,7 @@ public class PartitionIndex {
                 return bucket;
             } else {
                 iterator.remove();
+                diskRowCountAtLastRefresh.remove(bucket);
             }
         }
 
@@ -227,6 +232,23 @@ public class PartitionIndex {
         }
     }
 
+    // Merges disk row count into nonFullBucketInformation, keeping uncommitted increments.
+    private void reconcileBucketWithDisk(int bucket, long diskNow) {
+        if (!totalBucketSet.contains(bucket)) {
+            return;
+        }
+        nonFullBucketInformation.compute(
+                bucket,
+                (b, inMemory) ->
+                        inMemory == null
+                                ? diskNow
+                                : diskNow
+                                        + (inMemory
+                                                - diskRowCountAtLastRefresh.getOrDefault(
+                                                        b, inMemory)));
+        diskRowCountAtLastRefresh.put(bucket, diskNow);
+    }
+
     private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
         // Only start refresh if not already in progress
         if (refreshFuture == null || refreshFuture.isDone()) {
@@ -279,29 +301,18 @@ public class PartitionIndex {
                                                                                     replacement) ->
                                                                                     existing));
 
-                                            // Use putIfAbsent to avoid race conditions
-                                            int newBucketsFound = 0;
-                                            for (Map.Entry<Integer, Long> entry :
-                                                    tempBucketInfo.entrySet()) {
-                                                Long previous =
-                                                        nonFullBucketInformation.putIfAbsent(
-                                                                entry.getKey(), entry.getValue());
-                                                if (previous == null) {
-                                                    newBucketsFound++;
-                                                }
-                                            }
+                                            tempBucketInfo.forEach(this::reconcileBucketWithDisk);
 
                                             lastRefreshTime = Instant.now();
 
                                             if (LOG.isDebugEnabled()) {
                                                 LOG.debug(
                                                         "Async refresh completed for partition {}. "
-                                                                + "Scanned {} files, found {} non-full buckets ({} new). "
+                                                                + "Scanned {} files, found {} non-full buckets. "
                                                                 + "Current non-full buckets: {}",
                                                         partition,
                                                         files.size(),
                                                         tempBucketInfo.size(),
-                                                        newBucketsFound,
                                                         nonFullBucketInformation.size());
                                             }
                                         } catch (Exception e) {
