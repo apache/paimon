@@ -58,8 +58,6 @@ class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
     spark.sql(s"INSERT OVERWRITE T2 VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
     spark.sql(s"INSERT OVERWRITE T2 VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
 
-    Thread.sleep(10000)
-
     var rows = spark.sql("SELECT sum(num_deleted_files) FROM `T2$manifests`").collectAsList()
     val deletedBefore = rows.get(0).getLong(0)
     Assertions.assertThat(deletedBefore).isGreaterThan(0L)
