@@ -621,8 +621,11 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         2,
                         Duration.ofMillis(1));
 
-        // Simulate compaction: bucket 0 now has only 2 rows (freed by compaction). The assigner
-        // does not learn about this until it refreshes from disk.
+        // Force loadIndex now, while bucket 0 is still full (5 rows): it is loaded as full and
+        // kept out of nonFullBucketInformation. This must happen before the compaction commit.
+        assertThat(assigner.assign(row(1), 5)).isEqualTo(1);
+
+        // Compaction (after load): bucket 0 drops to 2 rows. Only the refresh can see this.
         commit.commit(
                 1,
                 Collections.singletonList(
@@ -632,9 +635,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 2,
                                 fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
 
-        // Push bucket 1 to its near-full threshold (3 rows >= 5-2). This must schedule the
-        // async refresh before returning; otherwise the freed bucket 0 stays invisible.
-        assertThat(assigner.assign(row(1), 5)).isEqualTo(1);
+        // Push bucket 1 to its near-full threshold (3 rows >= 5-2), scheduling the refresh.
+        assertThat(assigner.assign(row(1), 7)).isEqualTo(1);
 
         // Poll until bucket 0 (freed by compaction) becomes assignable again. Without the fix
         // the refresh never runs and the loop exhausts the timeout.
@@ -660,13 +662,12 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Refresh must update a bucket already present in nonFullBucketInformation when compaction
-     * lowers its on-disk row count, not only re-add removed buckets. Bucket 0 is loaded near full
-     * (4/5); compaction drops it to 1; after refresh it must accept many more rows.
+     * Refresh must reconcile a bucket still present in nonFullBucketInformation, not only re-add
+     * removed ones. With putIfAbsent present bucket 0 keeps its stale count and this times out.
      */
     @Test
     public void testRefreshUpdatesPresentBucketAfterCompaction() throws IOException {
-        // Bucket 0 loaded with 4 rows (present, near full); bucket 1 reserved for assigner 1.
+        // Buckets 0 and 2 loaded near full (4/5) -> both stay in nonFullBucketInformation.
         commit.commit(
                 0,
                 Arrays.asList(
@@ -677,24 +678,15 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1, 2, 3})),
                         createCommitMessage(
                                 row(1),
-                                1,
                                 2,
-                                fileHandler.hashIndex(row(1), 1).write(new int[] {5}))));
+                                2,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 5, 6, 7}))));
 
-        HashBucketAssigner assigner =
-                new HashBucketAssigner(
-                        table.snapshotManager(),
-                        commitUser,
-                        fileHandler,
-                        1,
-                        1,
-                        0,
-                        5,
-                        -1,
-                        2,
-                        Duration.ofMillis(1));
+        PartitionIndex index =
+                PartitionIndex.loadIndex(fileHandler, row(1), 5, hash -> true, bucket -> true);
+        assertThat(index.nonFullBucketInformation).containsEntry(0, 4L);
 
-        // Compaction drops bucket 0 to 1 row on disk.
+        // Compaction after load: bucket 0 drops to 1 on disk.
         commit.commit(
                 1,
                 Collections.singletonList(
@@ -704,18 +696,13 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                 2,
                                 fileHandler.hashIndex(row(1), 0).write(new int[] {0}))));
 
-        // First fresh hash (bucket 0 at 4/5) schedules the refresh and fills bucket 0 to 5.
-        assertThat(assigner.assign(row(1), 100)).isEqualTo(0);
+        // Fresh hash crosses the near-full threshold and schedules the refresh; it also assigns
+        // one uncommitted row to bucket 0 (4 -> 5). Reconciled value = disk 1 + 1 in-flight = 2.
+        index.assign(999, bucket -> true, -1, 2, 2, Duration.ofMillis(1));
 
-        // With the stale count (5) bucket 0 would be removed and never returned again. After the
-        // refresh reconciles it to 1, bucket 0 must accept several more rows before filling up.
         long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
-        int hash = 200;
-        int hitsOnBucket0 = 0;
-        while (System.nanoTime() < deadline && hitsOnBucket0 < 3) {
-            if (assigner.assign(row(1), hash++) == 0) {
-                hitsOnBucket0++;
-            }
+        while (System.nanoTime() < deadline
+                && !Long.valueOf(2L).equals(index.nonFullBucketInformation.get(0))) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -723,9 +710,9 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 break;
             }
         }
-        assertThat(hitsOnBucket0)
+        assertThat(index.nonFullBucketInformation)
                 .as(
-                        "present bucket 0 should regain capacity after compaction lowers its disk count")
-                .isGreaterThanOrEqualTo(3);
+                        "present bucket 0 reconciled to disk count while keeping the in-flight increment")
+                .containsEntry(0, 2L);
     }
 }
