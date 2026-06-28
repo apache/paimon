@@ -208,15 +208,9 @@ class ManifestFileManager:
         return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
-        manifest_path = f"{self.manifest_path}/{file_name}"
-        try:
-            buffer = BytesIO()
-            fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
-            with self.file_io.new_output_stream(manifest_path) as output_stream:
-                output_stream.write(buffer.getvalue())
-        except Exception as e:
-            self.file_io.delete_quietly(manifest_path)
-            raise RuntimeError(f"Failed to write manifest file: {e}") from e
+        buf = BytesIO()
+        fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
+        self._flush(file_name, buf.getvalue())
 
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
@@ -230,19 +224,27 @@ class ManifestFileManager:
         total_size = buf.tell()
 
         if total_size <= suggested_file_size:
-            return [self._flush_and_build_meta(base_name, entries, buf.getvalue())]
+            self._flush(base_name, buf.getvalue())
+            return [self._build_meta(base_name, entries)]
 
-        num_files = max(1, (total_size + suggested_file_size - 1) // suggested_file_size)
-        chunk_size = max(1, (len(entries) + num_files - 1) // num_files)
-        result = []
+        # Estimate chunk size from average entry size to avoid a second full serialization.
+        avg_entry_size = total_size / len(entries)
+        entries_per_file = max(1, int(suggested_file_size / avg_entry_size))
         name_prefix = base_name.rsplit('-', 1)[0] if base_name[-1].isdigit() and '-' in base_name else base_name
-        for i in range(0, len(entries), chunk_size):
-            chunk_entries = entries[i:i + chunk_size]
-            chunk_records = avro_records[i:i + chunk_size]
-            file_name = f"{name_prefix}-{len(result)}"
-            chunk_buf = BytesIO()
-            fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, chunk_records)
-            result.append(self._flush_and_build_meta(file_name, chunk_entries, chunk_buf.getvalue()))
+        result = []
+        try:
+            for i in range(0, len(entries), entries_per_file):
+                chunk_records = avro_records[i:i + entries_per_file]
+                chunk_entries = entries[i:i + entries_per_file]
+                file_name = f"{name_prefix}-{len(result)}"
+                chunk_buf = BytesIO()
+                fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, chunk_records)
+                self._flush(file_name, chunk_buf.getvalue())
+                result.append(self._build_meta(file_name, chunk_entries))
+        except Exception:
+            for meta in result:
+                self.file_io.delete_quietly(f"{self.manifest_path}/{meta.file_name}")
+            raise
         return result
 
     def _to_avro_records(self, entries: List[ManifestEntry]) -> List[dict]:
@@ -287,8 +289,7 @@ class ManifestFileManager:
             })
         return records
 
-    def _flush_and_build_meta(self, file_name: str, entries: List[ManifestEntry],
-                              avro_bytes: bytes) -> ManifestFileMeta:
+    def _flush(self, file_name: str, avro_bytes: bytes):
         manifest_path = f"{self.manifest_path}/{file_name}"
         try:
             with self.file_io.new_output_stream(manifest_path) as output_stream:
@@ -296,7 +297,6 @@ class ManifestFileManager:
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
-        return self._build_meta(file_name, entries)
 
     def _build_meta(self, file_name: str, entries: List[ManifestEntry]) -> ManifestFileMeta:
         added_file_count = 0
