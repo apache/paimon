@@ -406,7 +406,6 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(total_entries, 300)
 
 
-
 class ManifestListManagerTest(_ManifestManagerSetup):
     """Tests for ManifestListManager."""
 
