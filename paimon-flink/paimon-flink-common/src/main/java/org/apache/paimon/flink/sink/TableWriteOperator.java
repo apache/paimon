@@ -31,12 +31,15 @@ import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
+import org.apache.flink.runtime.operators.coordination.OperatorEvent;
+import org.apache.flink.runtime.operators.coordination.OperatorEventHandler;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.CoordinatedOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
+import org.apache.flink.streaming.api.watermark.Watermark;
 
 import javax.annotation.Nullable;
 
@@ -44,11 +47,13 @@ import java.io.IOException;
 import java.util.List;
 
 /** An abstract class for table write operator. */
-public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, Committable> {
+public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, Committable>
+        implements OperatorEventHandler {
 
     private static final long serialVersionUID = 1L;
 
     protected FileStoreTable table;
+    protected CommitHandler commitHandler = CommitHandler.EMPTY;
 
     protected final StoreSinkWrite.Provider storeSinkWriteProvider;
     protected final String initialCommitUser;
@@ -77,6 +82,12 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         int numTasks = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
         int subtaskId = RuntimeContextUtils.getIndexOfThisSubtask(getRuntimeContext());
+        String currentCommitUser = getCommitUser(context);
+        commitHandler.initialize(
+                context,
+                subtaskId,
+                RuntimeContextUtils.getAttemptNumber(getRuntimeContext()),
+                currentCommitUser);
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) ->
                         subtaskId == ChannelComputer.select(partition, bucket, numTasks);
@@ -85,7 +96,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         write =
                 storeSinkWriteProvider.provide(
                         table,
-                        getCommitUser(context),
+                        currentCommitUser,
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPoolFactory,
@@ -98,6 +109,16 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
     public void setWriteRestore(@Nullable WriteRestore writeRestore) {
         this.writeRestore = writeRestore;
+    }
+
+    public void setCommitHandler(CommitHandler commitHandler) {
+        this.commitHandler = commitHandler;
+    }
+
+    @Override
+    public void processWatermark(Watermark mark) throws Exception {
+        super.processWatermark(mark);
+        commitHandler.processWatermark(mark.getTimestamp());
     }
 
     protected StoreSinkWriteState createState(
@@ -127,6 +148,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         write.snapshotState();
         state.snapshotState();
+        commitHandler.snapshot(context);
     }
 
     @Override
@@ -141,6 +163,26 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         return write.prepareCommit(waitCompaction, checkpointId);
+    }
+
+    @Override
+    protected void handleCommittables(long checkpointId) {
+        commitHandler.handleCommittables(checkpointId);
+    }
+
+    @Override
+    protected void collect(Committable committable) {
+        if (!commitHandler.collect(committable)) {
+            super.collect(committable);
+        }
+    }
+
+    @Override
+    public void handleOperatorEvent(OperatorEvent event) {
+        if (commitHandler.handleOperatorEvent(event)) {
+            return;
+        }
+        throw new IllegalArgumentException("Unsupported operator event: " + event.getClass());
     }
 
     @VisibleForTesting

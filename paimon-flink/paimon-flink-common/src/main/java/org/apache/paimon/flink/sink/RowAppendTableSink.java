@@ -20,11 +20,16 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED;
 
 /** An {@link AppendTableSink} which handles {@link InternalRow}. */
 public class RowAppendTableSink extends AppendTableSink<InternalRow> {
@@ -45,5 +50,25 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return createRestoreOnlyCommittableStateManager(table);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteCoordinatorFactory(
+            StoreSinkWrite.Provider writeProvider, String commitUser, boolean isStreaming) {
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled =
+                options.get(SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED)
+                        && !options.get(PRECOMMIT_COMPACT);
+        return coordinatorEnabled
+                ? new CommitterCoordinatedFactory(
+                        isStreaming,
+                        (TableWriteOperator.Factory<InternalRow>)
+                                createNoStateRowWriteOperatorFactory(
+                                        table, writeProvider, commitUser),
+                        createCommitterFactory(),
+                        commitUser,
+                        options.get(END_INPUT_WATERMARK))
+                : createWriteOperatorFactory(writeProvider, commitUser);
     }
 }

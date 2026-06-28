@@ -47,7 +47,11 @@ public class StatelessRowDataStoreWriteOperator extends RowDataStoreWriteOperato
     }
 
     @Override
-    protected String getCommitUser(StateInitializationContext context) {
+    protected String getCommitUser(StateInitializationContext context) throws Exception {
+        if (commitHandler.requiresStableCommitUser()) {
+            // PWC requires the commit user to remain stable across recovery.
+            return super.getCommitUser(context);
+        }
         // No conflicts will occur in append only unaware bucket writer, so
         // commitUser does not matter.
         return commitUser == null ? initialCommitUser : commitUser;

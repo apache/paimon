@@ -365,6 +365,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Allow sink committer and writer operator to be chained together");
 
+    public static final ConfigOption<Boolean> SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED =
+            key("sink.committer-coordinator-operator.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Allow coordinator replace committer operator, only support for append table now.");
+
     public static final ConfigOption<PartitionMarkDoneActionMode> PARTITION_MARK_DONE_MODE =
             key("partition.mark-done-action.mode")
                     .enumType(PartitionMarkDoneActionMode.class)

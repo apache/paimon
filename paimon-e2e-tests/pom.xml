@@ -269,6 +269,7 @@ under the License.
                                 <unzip src="/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar" dest="target/temp"/>
                                 <!-- Delete the conflicting file -->
                                 <delete file="target/temp/org/apache/commons/cli/CommandLine.class"/>
+                                <delete file="/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar"/>
                                 <!-- Repackage the modified content -->
                                 <zip destfile="/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar" basedir="target/temp"/>
                                 <!-- Delete the extracted temporary folder -->
