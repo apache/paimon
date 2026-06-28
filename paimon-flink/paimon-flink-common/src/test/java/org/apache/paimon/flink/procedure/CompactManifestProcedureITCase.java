@@ -166,7 +166,8 @@ public class CompactManifestProcedureITCase extends CatalogITCaseBase {
                         .toString();
 
         Assertions.assertThat(dryRunResult).startsWith("Dry run:");
-        Assertions.assertThat(dryRunResult).contains("deleted entries to eliminate");
+        Assertions.assertThat(dryRunResult).contains("deleted entries in");
+        Assertions.assertThat(dryRunResult).contains("would trigger: true");
 
         // verify dry run did not actually compact
         Assertions.assertThat(

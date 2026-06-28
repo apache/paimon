@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -26,37 +27,72 @@ import org.apache.paimon.table.FileStoreTable;
 
 import java.util.List;
 
-/** Dry run for manifest compaction. Reads only existing metadata, never writes files. */
+/**
+ * Dry run for manifest compaction. Reads only existing metadata, never writes files. Replicates the
+ * trigger logic from {@link ManifestFileMerger#tryFullCompaction} to predict whether compaction
+ * would actually fire.
+ */
 public class ManifestCompactDryRun {
 
     public static String execute(FileStoreTable table) {
         Snapshot latestSnapshot = table.store().snapshotManager().latestSnapshot();
         if (latestSnapshot == null) {
-            return "Dry run: no snapshot exists, nothing to compact.";
+            return "Dry run: no snapshot exists.";
         }
 
         ManifestList manifestList = table.store().manifestListFactory().create();
         List<ManifestFileMeta> manifests = manifestList.readDataManifests(latestSnapshot);
 
-        long manifestFileCount = manifests.size();
-        long totalSize = manifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
-        long totalAddedEntries =
-                manifests.stream().mapToLong(ManifestFileMeta::numAddedFiles).sum();
-        long totalDeletedEntries =
-                manifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
-
-        if (totalDeletedEntries == 0) {
-            return String.format(
-                    "Dry run: %d manifest files (%s), 0 deleted entries. Nothing to compact.",
-                    manifestFileCount, MemorySize.ofBytes(totalSize));
+        if (manifests.isEmpty()) {
+            return "Dry run: 0 manifest files.";
         }
+
+        CoreOptions options = new CoreOptions(table.options());
+        long suggestedMetaSize = options.manifestTargetSize().getBytes();
+
+        long totalFiles = manifests.size();
+        long totalSize = 0;
+        long totalDeletedEntries = 0;
+        long filesWithDeletedEntries = 0;
+        long smallFiles = 0;
+        long filesToCompact = 0;
+        long totalDeltaFileSize = 0;
+
+        for (ManifestFileMeta file : manifests) {
+            totalSize += file.fileSize();
+            totalDeletedEntries += file.numDeletedFiles();
+
+            boolean hasDeleted = file.numDeletedFiles() > 0;
+            boolean isSmall = file.fileSize() < suggestedMetaSize;
+
+            if (hasDeleted) {
+                filesWithDeletedEntries++;
+            }
+            if (isSmall) {
+                smallFiles++;
+            }
+            if (hasDeleted || isSmall) {
+                filesToCompact++;
+                totalDeltaFileSize += file.fileSize();
+            }
+        }
+
+        // compactManifestOnce forces sizeTrigger = 1 byte
+        boolean wouldTrigger = totalDeltaFileSize >= 1;
 
         return String.format(
                 "Dry run: %d manifest files (%s), "
-                        + "%d added entries, %d deleted entries to eliminate.",
-                manifestFileCount,
+                        + "%d deleted entries in %d files, "
+                        + "%d undersized files (< %s), "
+                        + "%d files to compact, "
+                        + "would trigger: %s.",
+                totalFiles,
                 MemorySize.ofBytes(totalSize),
-                totalAddedEntries,
-                totalDeletedEntries);
+                totalDeletedEntries,
+                filesWithDeletedEntries,
+                smallFiles,
+                MemorySize.ofBytes(suggestedMetaSize),
+                filesToCompact,
+                wouldTrigger);
     }
 }
