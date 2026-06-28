@@ -18,17 +18,15 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.util.List;
 
-/** Dry run for manifest compaction, computing before/after statistics without committing. */
+/** Dry run for manifest compaction. Reads only existing metadata, never writes files. */
 public class ManifestCompactDryRun {
 
     public static String execute(FileStoreTable table) {
@@ -38,38 +36,27 @@ public class ManifestCompactDryRun {
         }
 
         ManifestList manifestList = table.store().manifestListFactory().create();
-        List<ManifestFileMeta> beforeManifests = manifestList.readDataManifests(latestSnapshot);
+        List<ManifestFileMeta> manifests = manifestList.readDataManifests(latestSnapshot);
 
-        Options compactOptions = Options.fromMap(table.options());
-        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        long manifestFileCount = manifests.size();
+        long totalSize = manifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
+        long totalAddedEntries =
+                manifests.stream().mapToLong(ManifestFileMeta::numAddedFiles).sum();
+        long totalDeletedEntries =
+                manifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
 
-        List<ManifestFileMeta> afterManifests =
-                ManifestFileMerger.merge(
-                        beforeManifests,
-                        table.store().manifestFileFactory().create(),
-                        table.schema().logicalPartitionType(),
-                        new CoreOptions(compactOptions),
-                        null);
-
-        long beforeFileCount = beforeManifests.size();
-        long afterFileCount = afterManifests.size();
-        long beforeTotalSize = beforeManifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
-        long afterTotalSize = afterManifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
-        long beforeDeletedEntries =
-                beforeManifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
-        long afterDeletedEntries =
-                afterManifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
-        long eliminatedDeletedEntries = beforeDeletedEntries - afterDeletedEntries;
+        if (totalDeletedEntries == 0) {
+            return String.format(
+                    "Dry run: %d manifest files (%s), 0 deleted entries. Nothing to compact.",
+                    manifestFileCount, MemorySize.ofBytes(totalSize));
+        }
 
         return String.format(
-                "Dry run: manifest compaction would reduce %d manifest files to %d, "
-                        + "total file size from %s to %s, "
-                        + "eliminating %d deleted entries.",
-                beforeFileCount,
-                afterFileCount,
-                MemorySize.ofBytes(beforeTotalSize),
-                MemorySize.ofBytes(afterTotalSize),
-                eliminatedDeletedEntries);
+                "Dry run: %d manifest files (%s), "
+                        + "%d added entries, %d deleted entries to eliminate.",
+                manifestFileCount,
+                MemorySize.ofBytes(totalSize),
+                totalAddedEntries,
+                totalDeletedEntries);
     }
 }
