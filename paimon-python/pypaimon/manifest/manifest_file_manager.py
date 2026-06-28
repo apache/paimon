@@ -212,6 +212,8 @@ class ManifestFileManager:
         fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
         self._flush(file_name, buf.getvalue())
 
+    _ROLLING_SAMPLE_SIZE = 64
+
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
                       name_prefix: str) -> List[ManifestFileMeta]:
@@ -219,15 +221,23 @@ class ManifestFileManager:
             return []
 
         avro_records = self._to_avro_records(entries)
-        buf = BytesIO()
-        fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, avro_records)
-        total_size = buf.tell()
 
-        if total_size <= suggested_file_size:
-            file_name = f"{name_prefix}-0"
-            self._flush(file_name, buf.getvalue())
-            return [self._build_meta(file_name, entries)]
-        entries_per_chunk = max(1, int(len(entries) * suggested_file_size / total_size))
+        sample_n = min(self._ROLLING_SAMPLE_SIZE, len(entries))
+        sample_buf = BytesIO()
+        fastavro.writer(sample_buf, MANIFEST_ENTRY_SCHEMA, avro_records[:sample_n])
+        avg_entry_size = max(1, sample_buf.tell() / sample_n)
+
+        if avg_entry_size * len(entries) <= suggested_file_size:
+            # Likely fits in one file — serialize all and verify
+            buf = BytesIO()
+            fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, avro_records)
+            if buf.tell() <= suggested_file_size:
+                file_name = f"{name_prefix}-0"
+                self._flush(file_name, buf.getvalue())
+                return [self._build_meta(file_name, entries)]
+            avg_entry_size = buf.tell() / len(entries)
+
+        entries_per_chunk = max(1, int(suggested_file_size / avg_entry_size))
         pos = 0
         result = []
         try:
