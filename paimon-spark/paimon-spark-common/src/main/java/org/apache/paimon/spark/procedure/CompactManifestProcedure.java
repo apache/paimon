@@ -18,6 +18,14 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.ManifestFileMerger;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -29,9 +37,12 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.unsafe.types.UTF8String;
 
 import java.util.HashMap;
+import java.util.List;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -39,6 +50,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *
  * <pre><code>
  *  CALL sys.compact_manifest(table => 'tableId')
+ *  CALL sys.compact_manifest(table => 'tableId', dry_run => true)
  * </code></pre>
  */
 public class CompactManifestProcedure extends BaseProcedure {
@@ -46,13 +58,14 @@ public class CompactManifestProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("options", StringType)
+                ProcedureParameter.optional("options", StringType),
+                ProcedureParameter.optional("dry_run", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
+                        new StructField("result", DataTypes.StringType, true, Metadata.empty())
                     });
 
     protected CompactManifestProcedure(TableCatalog tableCatalog) {
@@ -74,11 +87,17 @@ public class CompactManifestProcedure extends BaseProcedure {
 
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String options = args.isNullAt(1) ? null : args.getString(1);
+        boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
 
         Table table = loadSparkTable(tableIdent).getTable();
         HashMap<String, String> dynamicOptions = new HashMap<>();
         ProcedureUtils.putAllOptions(dynamicOptions, options);
         table = table.copy(dynamicOptions);
+
+        if (dryRun) {
+            String result = dryRunCompactManifest((FileStoreTable) table);
+            return new InternalRow[] {newInternalRow(UTF8String.fromString(result))};
+        }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();
@@ -86,7 +105,49 @@ public class CompactManifestProcedure extends BaseProcedure {
             throw new RuntimeException(e);
         }
 
-        return new InternalRow[] {newInternalRow(true)};
+        return new InternalRow[] {newInternalRow(UTF8String.fromString("success"))};
+    }
+
+    private String dryRunCompactManifest(FileStoreTable table) {
+        Snapshot latestSnapshot = table.store().snapshotManager().latestSnapshot();
+        if (latestSnapshot == null) {
+            return "Dry run: no snapshot exists, nothing to compact.";
+        }
+
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        List<ManifestFileMeta> beforeManifests = manifestList.readDataManifests(latestSnapshot);
+
+        Options compactOptions = Options.fromMap(table.options());
+        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+
+        List<ManifestFileMeta> afterManifests =
+                ManifestFileMerger.merge(
+                        beforeManifests,
+                        table.store().manifestFileFactory().create(),
+                        table.schema().logicalPartitionType(),
+                        new CoreOptions(compactOptions),
+                        null);
+
+        long beforeFileCount = beforeManifests.size();
+        long afterFileCount = afterManifests.size();
+        long beforeTotalSize = beforeManifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
+        long afterTotalSize = afterManifests.stream().mapToLong(ManifestFileMeta::fileSize).sum();
+        long beforeDeletedEntries =
+                beforeManifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
+        long afterDeletedEntries =
+                afterManifests.stream().mapToLong(ManifestFileMeta::numDeletedFiles).sum();
+        long eliminatedDeletedEntries = beforeDeletedEntries - afterDeletedEntries;
+
+        return String.format(
+                "Dry run: manifest compaction would reduce %d manifest files to %d, "
+                        + "total file size from %s to %s, "
+                        + "eliminating %d deleted entries.",
+                beforeFileCount,
+                afterFileCount,
+                MemorySize.ofBytes(beforeTotalSize),
+                MemorySize.ofBytes(afterTotalSize),
+                eliminatedDeletedEntries);
     }
 
     @Override
