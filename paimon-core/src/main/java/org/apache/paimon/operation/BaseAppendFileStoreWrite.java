@@ -125,7 +125,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -154,6 +155,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 options.dataEvolutionEnabled(),
+                rowSidecarFileFormat(),
                 blobContext);
     }
 
@@ -280,7 +282,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.statsDenseStore(),
                 // use the same dotted-leaf-path encoding as withWriteType so a partial nested
                 // writeType records its real sub-field content consistently across write paths
-                rowType.equals(writeType) ? null : writeType.leafPaths(rowType));
+                rowType.equals(writeType) ? null : writeType.leafPaths(rowType),
+                rowSidecarFileFormat());
+    }
+
+    @Nullable
+    private FileFormat rowSidecarFileFormat() {
+        return options.dataEvolutionEnabled() && options.dataEvolutionRowSidecarEnabled()
+                ? FileFormat.fromIdentifier("row", options.toConfiguration())
+                : null;
     }
 
     private RecordReaderIterator<InternalRow> createFilesIterator(

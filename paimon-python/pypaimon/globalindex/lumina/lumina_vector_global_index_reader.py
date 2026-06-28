@@ -50,6 +50,21 @@ def _merge_options(base_options, index_options, query_options):
     return options
 
 
+def _collect_scored_result(distances, labels, base, k, index_metric):
+    """Convert one query's [base, base+k) slice of distances/labels into a result."""
+    from lumina_data import MetricType
+
+    SENTINEL = 0xFFFFFFFFFFFFFFFF
+    id_to_scores = {}
+    for i in range(k):
+        row_id = labels[base + i]
+        if row_id == SENTINEL:
+            continue
+        id_to_scores[int(row_id)] = MetricType.convert_distance_to_score(
+            float(distances[base + i]), index_metric)
+    return DictBasedScoredIndexResult(id_to_scores)
+
+
 class LuminaVectorGlobalIndexReader(GlobalIndexReader):
     """Vector global index reader using Lumina."""
 
@@ -66,57 +81,69 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._load_lock = threading.Lock()
 
     def visit_vector_search(self, vector_search):
+        # Single-vector search is just the n == 1 case of the batch path.
+        results = self._run_search(
+            [vector_search.vector],
+            vector_search.limit,
+            vector_search.include_row_ids,
+            vector_search.options,
+        )
+        return _completed_future(results[0])
+
+    def visit_batch_vector_search(self, batch_vector_search):
+        results = self._run_search(
+            batch_vector_search.vectors,
+            batch_vector_search.limit,
+            batch_vector_search.include_row_ids,
+            batch_vector_search.options,
+        )
+        return _completed_future(results)
+
+    def _run_search(self, vectors, limit, include_row_ids, query_options):
+        """Run one native batch search; result ``i`` maps to ``vectors[i]`` (``None`` if
+        no hits). Single search is the n == 1 case, shared by both visit paths.
+        """
         self._ensure_loaded()
 
-        from lumina_data import MetricType
-        query_flat = [float(v) for v in np.asarray(vector_search.vector).tolist()]
+        n = len(vectors)
         expected_dim = self._index_meta.dim
-        if len(query_flat) != expected_dim:
-            raise ValueError(
-                "Query vector dimension mismatch: expected %d, got %d"
-                % (expected_dim, len(query_flat)))
+        query_flat = []
+        for vector in vectors:
+            flat = [float(v) for v in np.asarray(vector).tolist()]
+            if len(flat) != expected_dim:
+                raise ValueError(
+                    "Query vector dimension mismatch: expected %d, got %d"
+                    % (expected_dim, len(flat)))
+            query_flat.extend(flat)
 
-        limit = vector_search.limit
         index_metric = self._index_meta.metric
-
         count = self._searcher.get_count()
         effective_k = min(limit, count)
         if effective_k <= 0:
-            return _completed_future(None)
-
-        include_row_ids = vector_search.include_row_ids
-        query_options = vector_search.options
+            return [None] * n
 
         if include_row_ids is not None:
             filter_id_list = list(include_row_ids)
             if len(filter_id_list) == 0:
-                return _completed_future(None)
+                return [None] * n
             effective_k = min(effective_k, len(filter_id_list))
-            search_opts = _merge_options(
-                self._options, {}, query_options)
+            search_opts = _merge_options(self._options, {}, query_options)
             search_opts["search.thread_safe_filter"] = "true"
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_with_filter_list(
-                query_flat, 1, effective_k, filter_id_list, search_opts)
+                query_flat, n, effective_k, filter_id_list, search_opts)
         else:
-            search_opts = _merge_options(
-                self._options, {}, query_options)
+            search_opts = _merge_options(self._options, {}, query_options)
             _ensure_search_list_size(search_opts, effective_k)
             distances, labels = self._searcher.search_list(
-                query_flat, 1, effective_k, search_opts)
+                query_flat, n, effective_k, search_opts)
 
-        # Collect results with score conversion (same as Java collectResults)
-        SENTINEL = 0xFFFFFFFFFFFFFFFF
-        id_to_scores = {}
-        for i in range(effective_k):
-            row_id = labels[i]
-            if row_id == SENTINEL:
-                continue
-            score = MetricType.convert_distance_to_score(
-                float(distances[i]), index_metric)
-            id_to_scores[int(row_id)] = score
-
-        return _completed_future(DictBasedScoredIndexResult(id_to_scores))
+        # Each query's results occupy a contiguous [q * k, q * k + k) slice.
+        return [
+            _collect_scored_result(
+                distances, labels, q * effective_k, effective_k, index_metric)
+            for q in range(n)
+        ]
 
     def _ensure_loaded(self):
         if self._searcher is not None:

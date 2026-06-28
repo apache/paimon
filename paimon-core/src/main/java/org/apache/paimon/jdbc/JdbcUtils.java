@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 
@@ -40,6 +41,27 @@ import java.util.stream.Stream;
 /** Util for jdbc catalog. */
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
+    private static final String UNIQUE_CONSTRAINT_VIOLATION_STATE = "23505";
+
+    enum JdbcViewConflictKind {
+        ALREADY_EXISTS,
+        NOT_EXISTS
+    }
+
+    /** Internal exception for JDBC view conflict (unique constraint violation or not-found). */
+    static class JdbcViewConflictException extends RuntimeException {
+        private final JdbcViewConflictKind kind;
+
+        JdbcViewConflictException(JdbcViewConflictKind kind, String message) {
+            super(message);
+            this.kind = kind;
+        }
+
+        JdbcViewConflictKind kind() {
+            return kind;
+        }
+    }
+
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
     public static final String CATALOG_KEY = "catalog_key";
     public static final String TABLE_DATABASE = "database_name";
@@ -331,6 +353,137 @@ public class JdbcUtils {
     static final String ACQUIRED_AT = "acquired_at";
     static final String EXPIRE_TIME = "expire_time_seconds";
 
+    // View table
+    public static final String VIEW_TABLE_NAME = "paimon_views";
+    public static final String VIEW_DATABASE = "database_name";
+    public static final String VIEW_NAME = "view_name";
+    public static final String VIEW_SCHEMA = "view_schema";
+
+    static final String CREATE_VIEW_TABLE =
+            "CREATE TABLE "
+                    + VIEW_TABLE_NAME
+                    + "("
+                    + CATALOG_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_DATABASE
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_NAME
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_SCHEMA
+                    + " TEXT NOT NULL,"
+                    + " PRIMARY KEY ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ")"
+                    + ")";
+
+    static final String GET_VIEW_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String GET_VIEW_DATABASE_SQL =
+            "SELECT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? LIMIT 1";
+
+    static final String LIST_VIEWS_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ?";
+
+    static final String INSERT_VIEW_SQL =
+            "INSERT INTO "
+                    + VIEW_TABLE_NAME
+                    + " ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ", "
+                    + VIEW_SCHEMA
+                    + ") "
+                    + " VALUES (?,?,?,?)";
+
+    static final String DROP_VIEW_SQL =
+            "DELETE FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String DELETE_VIEWS_SQL =
+            "DELETE FROM  "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ?";
+
+    static final String RENAME_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_DATABASE
+                    + " = ? , "
+                    + VIEW_NAME
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String UPDATE_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_SCHEMA
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String LIST_ALL_VIEW_DATABASES_SQL =
+            "SELECT DISTINCT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ?";
+
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {
         Properties result = new Properties();
@@ -372,9 +525,7 @@ public class JdbcUtils {
         int updatedRecords =
                 execute(
                         err -> {
-                            if (err instanceof SQLIntegrityConstraintViolationException
-                                    || (err.getMessage() != null
-                                            && err.getMessage().contains("constraint failed"))) {
+                            if (isUniqueConstraintViolation(err)) {
                                 throw new RuntimeException(
                                         String.format("Table already exists: %s", toTable));
                             }
@@ -406,6 +557,9 @@ public class JdbcUtils {
         }
 
         if (exists(connections, JdbcUtils.GET_DATABASE_PROPERTIES_SQL, storeKey, databaseName)) {
+            return true;
+        }
+        if (exists(connections, JdbcUtils.GET_VIEW_DATABASE_SQL, storeKey, databaseName)) {
             return true;
         }
         return false;
@@ -467,6 +621,7 @@ public class JdbcUtils {
             sqlErrorHandler.accept(e);
             throw new RuntimeException(String.format("Failed to execute: %s", sql), e);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in SQL command", e);
         }
     }
@@ -677,5 +832,132 @@ public class JdbcUtils {
         sqlStatement.append("(").append(values).append(")");
 
         return sqlStatement.toString();
+    }
+
+    /** Check if view exists. */
+    public static boolean viewExists(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName) {
+        return exists(connections, JdbcUtils.GET_VIEW_SQL, storeKey, databaseName, viewName);
+    }
+
+    /** Get view schema JSON. */
+    public static String getViewSchema(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName)
+            throws SQLException, InterruptedException {
+        return connections.run(
+                conn -> {
+                    try (PreparedStatement sql = conn.prepareStatement(JdbcUtils.GET_VIEW_SQL)) {
+                        sql.setString(1, storeKey);
+                        sql.setString(2, databaseName);
+                        sql.setString(3, viewName);
+                        try (ResultSet rs = sql.executeQuery()) {
+                            if (rs.next()) {
+                                return rs.getString(VIEW_SCHEMA);
+                            }
+                        }
+                        return null;
+                    }
+                });
+    }
+
+    /** Insert view. */
+    public static void insertView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int insertedRecords =
+                execute(
+                        err -> {
+                            if (isUniqueConstraintViolation(err)) {
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
+                                        String.format(
+                                                "View already exists: %s.%s",
+                                                databaseName, viewName));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.INSERT_VIEW_SQL,
+                        storeKey,
+                        databaseName,
+                        viewName,
+                        viewSchemaJson);
+
+        if (insertedRecords != 1) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to insert view %s.%s: affected %d rows",
+                            databaseName, viewName, insertedRecords));
+        }
+    }
+
+    /** Update view. */
+    public static void updateView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int updatedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.UPDATE_VIEW_SQL,
+                        viewSchemaJson,
+                        storeKey,
+                        databaseName,
+                        viewName);
+
+        if (updatedRecords == 0) {
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
+                    String.format("View does not exist: %s.%s", databaseName, viewName));
+        } else if (updatedRecords != 1) {
+            LOG.warn(
+                    "Update operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
+    }
+
+    /** Rename view. */
+    public static void renameView(
+            JdbcClientPool connections, String storeKey, Identifier fromView, Identifier toView) {
+        int updatedRecords =
+                execute(
+                        err -> {
+                            if (isUniqueConstraintViolation(err)) {
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
+                                        String.format("View already exists: %s", toView));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.RENAME_VIEW_SQL,
+                        toView.getDatabaseName(),
+                        toView.getObjectName(),
+                        storeKey,
+                        fromView.getDatabaseName(),
+                        fromView.getObjectName());
+
+        if (updatedRecords == 1) {
+            LOG.info("Renamed view from {}, to {}", fromView, toView);
+        } else if (updatedRecords == 0) {
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
+                    String.format("View does not exist: %s", fromView));
+        } else {
+            LOG.warn(
+                    "Rename operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
+    }
+
+    @VisibleForTesting
+    static boolean isUniqueConstraintViolation(SQLException err) {
+        String message = err.getMessage();
+        return err instanceof SQLIntegrityConstraintViolationException
+                || UNIQUE_CONSTRAINT_VIOLATION_STATE.equals(err.getSQLState())
+                || (message != null && message.contains("constraint failed"));
     }
 }

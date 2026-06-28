@@ -139,6 +139,82 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
         )
         self.assertEqual([(1, 'Alice'), (2, 'Bob_new'), (3, 'Carol')], rows)
 
+    def test_upsert_for_existing_table_duplicate_keys(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_A'], 'age': [10], 'city': ['X'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_B'], 'age': [20], 'city': ['Y'],
+        }, schema=self.pa_schema))
+
+        self._upsert(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['UPDATED'], 'age': [99], 'city': ['Z'],
+        }, schema=self.pa_schema), upsert_keys=['id'])
+
+        result = self._read_all(table)
+        names = sorted(n for i, n in zip(result['id'].to_pylist(),
+                                         result['name'].to_pylist()) if i == 1)
+        self.assertEqual(['UPDATED', 'UPDATED'], names)
+
+    def test_existing_duplicate_keys_partial_update_cols(self):
+        """update_cols restricts which columns are rewritten; every matching
+        row is still updated, other columns keep each row's own value."""
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_A'], 'age': [10], 'city': ['X'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['old_B'], 'age': [20], 'city': ['Y'],
+        }, schema=self.pa_schema))
+
+        self._upsert(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['UPDATED'], 'age': [99], 'city': ['Z'],
+        }, schema=self.pa_schema), upsert_keys=['id'], update_cols=['name'])
+
+        result = self._read_all(table)
+        rows = sorted(zip(result['id'].to_pylist(), result['name'].to_pylist(),
+                          result['age'].to_pylist(), result['city'].to_pylist()))
+        self.assertEqual([(1, 'UPDATED', 10, 'X'), (1, 'UPDATED', 20, 'Y')], rows)
+
+    def test_existing_duplicate_keys_partitioned(self):
+        """Duplicate keys within a partition are all updated; rows in other
+        partitions are untouched."""
+        table = self._create_table(
+            pa_schema=self.partitioned_pa_schema, partition_keys=['region'])
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 1], 'name': ['a1', 'a2'], 'age': [10, 20], 'region': ['A', 'A'],
+        }, schema=self.partitioned_pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['b1'], 'age': [30], 'region': ['B'],
+        }, schema=self.partitioned_pa_schema))
+
+        self._upsert(table, pa.Table.from_pydict({
+            'id': [1], 'name': ['UPDATED'], 'age': [99], 'region': ['A'],
+        }, schema=self.partitioned_pa_schema), upsert_keys=['id'])
+
+        result = self._read_all(table)
+        rows = sorted(zip(result['id'].to_pylist(), result['name'].to_pylist(),
+                          result['region'].to_pylist()))
+        self.assertEqual(
+            [(1, 'UPDATED', 'A'), (1, 'UPDATED', 'A'), (1, 'b1', 'B')], rows)
+
+    def test_multiple_keys_each_with_duplicates(self):
+        """One upsert updates every matching row across several keys."""
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 1, 2, 2], 'name': ['a', 'b', 'c', 'd'],
+            'age': [1, 2, 3, 4], 'city': ['p', 'q', 'r', 's'],
+        }, schema=self.pa_schema))
+
+        self._upsert(table, pa.Table.from_pydict({
+            'id': [1, 2], 'name': ['U1', 'U2'], 'age': [10, 20], 'city': ['X', 'Y'],
+        }, schema=self.pa_schema), upsert_keys=['id'])
+
+        result = self._read_all(table)
+        names = sorted(zip(result['id'].to_pylist(), result['name'].to_pylist()))
+        self.assertEqual([(1, 'U1'), (1, 'U1'), (2, 'U2'), (2, 'U2')], names)
+
     def test_composite_key_upsert(self):
         """Upsert with a multi-column composite key."""
         table = self._create_table()
@@ -149,8 +225,7 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             'city': ['NYC', 'LA', 'Chicago'],
         }, schema=self.pa_schema))
 
-        # (id, name) = (1, Alice) appears twice in the table → matches the
-        # first occurrence; (2, Carol) is new.
+        # (id, name) = (1, Alice) appears twice → both are updated; (2, Carol) is new.
         self._upsert(table, pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['Alice', 'Carol'],
@@ -165,7 +240,12 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             result['name'].to_pylist(),
             result['city'].to_pylist(),
         ))
-        self.assertIn((2, 'Carol', 'Dallas'), rows)
+        self.assertEqual([
+            (1, 'Alice', 'Updated'),
+            (1, 'Alice', 'Updated'),
+            (2, 'Bob', 'Chicago'),
+            (2, 'Carol', 'Dallas'),
+        ], rows)
 
     def test_sequential_upserts(self):
         """A second upsert sees the rows inserted by the first."""

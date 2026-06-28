@@ -27,6 +27,7 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 class FullTextSearchSplit:
     """Split of full-text search."""
 
+    column_name: str
     row_range_start: int
     row_range_end: int
     full_text_index_files: List[IndexFileMeta]
@@ -35,17 +36,23 @@ class FullTextSearchSplit:
         if not isinstance(other, FullTextSearchSplit):
             return False
         return (
-            self.row_range_start == other.row_range_start
+            self.column_name == other.column_name
+            and self.row_range_start == other.row_range_start
             and self.row_range_end == other.row_range_end
             and self.full_text_index_files == other.full_text_index_files
         )
 
     def __hash__(self):
-        return hash((self.row_range_start, self.row_range_end, tuple(self.full_text_index_files)))
+        return hash((
+            self.column_name,
+            self.row_range_start,
+            self.row_range_end,
+            tuple(self.full_text_index_files)))
 
     def __repr__(self):
         return (
             f"FullTextSearchSplit("
+            f"column_name={self.column_name}, "
             f"row_range_start={self.row_range_start}, "
             f"row_range_end={self.row_range_end}, "
             f"full_text_index_files={self.full_text_index_files})"

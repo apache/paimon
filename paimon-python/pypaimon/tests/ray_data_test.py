@@ -834,6 +834,41 @@ class RayDataTest(unittest.TestCase):
             "Blob data column should match"
         )
 
+    def test_to_ray_with_nested_projection(self):
+        """to_ray() respects a nested-leaf projection.
+
+        Sibling of the read_paimon() nested-projection test: this exercises
+        the PreResolvedSplitProvider entry point (TableRead.to_ray), which
+        must also forward nested_name_paths to the worker TableRead. Without
+        it the worker treats the flattened leaf name as a missing top-level
+        column and reads the projected leaf as NULL.
+        """
+        inner = pa.struct([('a', pa.int64()), ('b', pa.string())])
+        pa_schema = pa.schema([('id', pa.int64()), ('payload', inner)])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_nested_proj', schema, False)
+        table = self.catalog.get_table('default.test_ray_nested_proj')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'payload': {'a': 10, 'b': 'x'}},
+             {'id': 2, 'payload': {'a': 20, 'b': 'y'}}],
+            schema=pa_schema))
+        commit = write_builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+
+        read_builder = table.new_read_builder().with_projection(['id', 'payload.a'])
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
+        rows = {r['id']: r for r in ray_dataset.take_all()}
+        self.assertEqual(set(rows.keys()), {1, 2})
+        self.assertEqual(rows[1]['payload_a'], 10)
+        self.assertEqual(rows[2]['payload_a'], 20)
+
 
 if __name__ == '__main__':
     unittest.main()

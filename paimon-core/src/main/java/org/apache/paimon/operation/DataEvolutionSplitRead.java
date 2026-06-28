@@ -28,6 +28,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.IndexedSplitRecordReader;
 import org.apache.paimon.io.DataFileMeta;
@@ -73,6 +74,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 
 import static java.lang.String.format;
 import static java.util.Collections.reverseOrder;
@@ -91,6 +93,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * <p>TODO: Optimize implementation of this class.
  */
 public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
+
+    private static final String ROW_SIDECAR_FORMAT = "row";
 
     private final FileIO fileIO;
     private final TableSchema schema;
@@ -466,7 +470,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
             FieldBunch bunch = fieldsFiles.get(i);
             DataFileMeta firstFile = bunch.files().get(0);
-            String formatIdentifier = DataFilePathFactory.formatIdentifier(firstFile.fileName());
+            FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
+            String formatIdentifier = readTarget.formatIdentifier;
             long schemaId = bunchSchemaId[i];
             TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
             RowType partialReadRowType = new RowType(readFields);
@@ -649,7 +654,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType)
             throws IOException {
-        String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+        FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
+        String formatIdentifier = readTarget.formatIdentifier;
         long schemaId = file.schemaId();
         FormatReaderMapping formatReaderMapping =
                 formatReaderMappings.computeIfAbsent(
@@ -662,7 +668,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                                 ? schema
                                                 : schemaFetcher.apply(schemaId)));
         return createFileReader(
-                partition, file, dataFilePathFactory, formatReaderMapping, rowRanges, readRowType);
+                partition, file, formatReaderMapping, rowRanges, readRowType, readTarget);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -673,10 +679,26 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType)
             throws IOException {
+        return createFileReader(
+                partition,
+                file,
+                formatReaderMapping,
+                rowRanges,
+                readRowType,
+                readTarget(file, dataFilePathFactory, rowRanges));
+    }
+
+    private FileRecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            FormatReaderMapping formatReaderMapping,
+            List<Range> rowRanges,
+            RowType readRowType,
+            FileReadTarget readTarget)
+            throws IOException {
         RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(
-                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
+                new FormatReaderContext(fileIO, readTarget.path, readTarget.fileSize, selection);
         return new DataFileRecordReader(
                 readRowType,
                 formatReaderMapping.getReaderFactory(),
@@ -690,6 +712,111 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 file.firstRowId(),
                 file.maxSequenceNumber(),
                 formatReaderMapping.getSystemFields());
+    }
+
+    private FileReadTarget readTarget(
+            DataFileMeta file, DataFilePathFactory dataFilePathFactory, List<Range> rowRanges)
+            throws IOException {
+        String rowSidecar = rowSidecarFileName(file);
+        if (rowSidecar != null
+                && shouldReadRowSidecar(
+                        file,
+                        rowRanges,
+                        coreOptions.dataEvolutionRowSidecarMaxSelectedRows(),
+                        coreOptions.dataEvolutionRowSidecarMaxSelectionRatio())) {
+            Path rowPath = dataFilePathFactory.toAlignedPath(rowSidecar, file);
+            try {
+                return new FileReadTarget(
+                        ROW_SIDECAR_FORMAT, rowPath, fileIO.getFileStatus(rowPath).getLen());
+            } catch (IOException e) {
+                if (!coreOptions.scanIgnoreLostFile()) {
+                    throw e;
+                }
+            }
+        }
+        return new FileReadTarget(
+                DataFilePathFactory.formatIdentifier(file.fileName()),
+                dataFilePathFactory.toPath(file),
+                file.fileSize());
+    }
+
+    @Nullable
+    @VisibleForTesting
+    static String rowSidecarFileName(DataFileMeta file) {
+        List<String> rowFiles =
+                file.extraFiles().stream()
+                        .filter(DataEvolutionSplitRead::isRowSidecarFile)
+                        .collect(Collectors.toList());
+        return rowFiles.size() == 1 ? rowFiles.get(0) : null;
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(DataFileMeta file, @Nullable List<Range> rowRanges) {
+        return shouldReadRowSidecar(
+                file,
+                rowRanges,
+                CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS.defaultValue(),
+                CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO.defaultValue());
+    }
+
+    @VisibleForTesting
+    static boolean shouldReadRowSidecar(
+            DataFileMeta file,
+            @Nullable List<Range> rowRanges,
+            long maxSelectedRows,
+            double maxSelectionRatio) {
+        if (rowRanges == null
+                || rowRanges.isEmpty()
+                || file.rowCount() <= 0
+                || isBlobFile(file.fileName())
+                || isVectorStoreFile(file.fileName())
+                || rowSidecarFileName(file) == null) {
+            return false;
+        }
+
+        long selectedRowCount = selectedRowCount(file, rowRanges);
+        if (selectedRowCount <= 0 || selectedRowCount >= file.rowCount()) {
+            return false;
+        }
+
+        double selectionRatio = (double) selectedRowCount / file.rowCount();
+        return selectedRowCount <= maxSelectedRows && selectionRatio <= maxSelectionRatio;
+    }
+
+    @VisibleForTesting
+    static long selectedRowCount(DataFileMeta file, List<Range> rowRanges) {
+        Range fileRange = file.nonNullRowIdRange();
+        List<Range> intersections = new ArrayList<>();
+        for (Range range : rowRanges) {
+            Range intersection = Range.intersection(fileRange, range);
+            if (intersection != null) {
+                intersections.add(intersection);
+            }
+        }
+        return Range.sortAndMergeOverlap(intersections, true).stream()
+                .mapToLong(Range::count)
+                .sum();
+    }
+
+    private static boolean isRowSidecarFile(String fileName) {
+        try {
+            return ROW_SIDECAR_FORMAT.equals(DataFilePathFactory.formatIdentifier(fileName));
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static class FileReadTarget {
+
+        private final String formatIdentifier;
+        private final Path path;
+        private final long fileSize;
+
+        private FileReadTarget(String formatIdentifier, Path path, long fileSize) {
+            this.formatIdentifier = formatIdentifier;
+            this.path = path;
+            this.fileSize = fileSize;
+        }
     }
 
     @VisibleForTesting

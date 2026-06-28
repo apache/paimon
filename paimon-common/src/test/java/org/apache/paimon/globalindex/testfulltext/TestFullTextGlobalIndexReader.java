@@ -25,6 +25,7 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -72,21 +73,18 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
             throw new RuntimeException("Failed to load test full-text index", e);
         }
 
-        String queryText = fullTextSearch.queryText();
         int limit = fullTextSearch.limit();
         int effectiveK = Math.min(limit, count);
         if (effectiveK <= 0) {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        String[] queryTerms = queryText.toLowerCase(Locale.ROOT).split("\\s+");
-
         // Min-heap: smallest score at head, so we evict the weakest candidate.
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
 
         for (int i = 0; i < count; i++) {
-            float score = computeScore(documents[i], queryTerms);
+            float score = computeScore(documents[i], fullTextSearch.query());
             if (score <= 0) {
                 continue;
             }
@@ -113,15 +111,75 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 Optional.of(ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get)));
     }
 
-    private static float computeScore(String document, String[] queryTerms) {
+    private static float computeScore(String document, FullTextQuery query) {
+        if (query instanceof FullTextQuery.Match) {
+            FullTextQuery.Match match = (FullTextQuery.Match) query;
+            return computeMatchScore(
+                            document, match.terms(), match.operator() == FullTextQuery.Operator.AND)
+                    * match.boost();
+        }
+        if (query instanceof FullTextQuery.Phrase) {
+            FullTextQuery.Phrase phrase = (FullTextQuery.Phrase) query;
+            return document.toLowerCase(Locale.ROOT)
+                            .contains(phrase.terms().toLowerCase(Locale.ROOT))
+                    ? 1.0f
+                    : 0.0f;
+        }
+        if (query instanceof FullTextQuery.Boost) {
+            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
+            float score = computeScore(document, boost.positive());
+            if (computeScore(document, boost.negative()) > 0) {
+                score *= boost.negativeBoost();
+            }
+            return score;
+        }
+        if (query instanceof FullTextQuery.MultiMatch) {
+            throw new IllegalArgumentException(
+                    "multi_match is not supported by single-column full-text indexes");
+        }
+        if (query instanceof FullTextQuery.BooleanQuery) {
+            return computeBooleanScore(document, (FullTextQuery.BooleanQuery) query);
+        }
+        throw new IllegalArgumentException("Unsupported full-text query: " + query);
+    }
+
+    private static float computeMatchScore(
+            String document, String queryText, boolean requireAllTerms) {
+        String[] queryTerms = queryText.toLowerCase(Locale.ROOT).split("\\s+");
         String lowerDoc = document.toLowerCase(Locale.ROOT);
         float score = 0;
         for (String term : queryTerms) {
             if (lowerDoc.contains(term)) {
                 score += 1.0f / queryTerms.length;
+            } else if (requireAllTerms) {
+                return 0;
             }
         }
         return score;
+    }
+
+    private static float computeBooleanScore(String document, FullTextQuery.BooleanQuery query) {
+        float score = 0;
+        for (FullTextQuery child : query.must()) {
+            float childScore = computeScore(document, child);
+            if (childScore <= 0) {
+                return 0;
+            }
+            score += childScore;
+        }
+        for (FullTextQuery child : query.mustNot()) {
+            if (computeScore(document, child) > 0) {
+                return 0;
+            }
+        }
+        float shouldScore = 0;
+        for (FullTextQuery child : query.should()) {
+            shouldScore += computeScore(document, child);
+        }
+        if (query.must().isEmpty() && !query.should().isEmpty() && shouldScore <= 0) {
+            return 0;
+        }
+        return score + shouldScore;
     }
 
     private void ensureLoaded() throws IOException {

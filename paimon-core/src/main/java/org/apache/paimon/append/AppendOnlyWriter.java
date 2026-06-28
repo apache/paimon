@@ -85,6 +85,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
     private final boolean statsDenseStore;
+    @Nullable private final FileFormat rowSidecarFileFormat;
     @Nullable private final BlobFileContext blobContext;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
@@ -129,6 +130,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             boolean dataEvolutionEnabled,
+            @Nullable FileFormat rowSidecarFileFormat,
             @Nullable BlobFileContext blobContext) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
@@ -145,6 +147,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
         this.statsDenseStore = statsDenseStore;
+        this.rowSidecarFileFormat = dataEvolutionEnabled ? rowSidecarFileFormat : null;
         this.blobContext = blobContext;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
@@ -344,7 +347,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 FileSource.APPEND,
                 asyncFileWrite,
                 statsDenseStore,
-                writeCols);
+                writeCols,
+                rowSidecarFileFormat);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

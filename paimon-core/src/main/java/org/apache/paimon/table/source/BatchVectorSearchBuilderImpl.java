@@ -24,11 +24,15 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
-import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicate;
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -52,20 +56,39 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public BatchVectorSearchBuilder withPartitionFilter(PartitionPredicate partitionFilter) {
-        this.partitionFilter = partitionFilter;
+        addPartitionFilter(partitionFilter);
         return this;
     }
 
     @Override
     public BatchVectorSearchBuilder withFilter(Predicate predicate) {
-        if (this.filter == null) {
-            this.filter = predicate;
-        } else {
-            this.filter = PredicateBuilder.and(this.filter, predicate);
+        Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                splitPartitionPredicatesAndDataPredicates(
+                        predicate, table.rowType(), table.partitionKeys());
+        if (pair.getLeft().isPresent()) {
+            addPartitionFilter(pair.getLeft().get());
         }
-        splitPartitionPredicate(predicate, table.rowType(), table.partitionKeys())
-                .ifPresent(value -> this.partitionFilter = value);
+        if (!pair.getRight().isEmpty()) {
+            Predicate dataFilter = PredicateBuilder.and(pair.getRight());
+            if (this.filter == null) {
+                this.filter = dataFilter;
+            } else {
+                this.filter = PredicateBuilder.and(this.filter, dataFilter);
+            }
+        }
         return this;
+    }
+
+    private void addPartitionFilter(PartitionPredicate partitionFilter) {
+        if (partitionFilter == null) {
+            return;
+        }
+        if (this.partitionFilter == null) {
+            this.partitionFilter = partitionFilter;
+        } else {
+            this.partitionFilter =
+                    PartitionPredicate.and(Arrays.asList(this.partitionFilter, partitionFilter));
+        }
     }
 
     @Override
@@ -102,7 +125,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public VectorScan newVectorScan() {
-        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn);
+        return new VectorScanImpl(table, partitionFilter, filter, vectorColumn, options);
     }
 
     @Override
@@ -114,6 +137,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
         for (float[] vector : vectors) {
             checkNotNull(vector, "Search vector element cannot be null");
         }
-        return new BatchVectorReadImpl(table, filter, limit, vectorColumn, vectors, options);
+        return new BatchVectorReadImpl(
+                table, partitionFilter, filter, limit, vectorColumn, vectors, options);
     }
 }

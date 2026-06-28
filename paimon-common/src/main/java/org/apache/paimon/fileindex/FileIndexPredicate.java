@@ -42,7 +42,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -115,24 +114,7 @@ public class FileIndexPredicate implements Closeable {
     }
 
     private Set<String> getRequiredNames(Predicate filePredicate) {
-        return filePredicate.visit(
-                new PredicateVisitor<Set<String>>() {
-
-                    @Override
-                    public Set<String> visit(LeafPredicate predicate) {
-                        return new HashSet<>(predicate.fieldNames());
-                    }
-
-                    @Override
-                    public Set<String> visit(CompoundPredicate predicate) {
-                        Set<String> result = new HashSet<>();
-                        for (Predicate child : predicate.children()) {
-                            child.visit(this);
-                            result.addAll(child.visit(this));
-                        }
-                        return result;
-                    }
-                });
+        return PredicateVisitor.collectFieldNames(filePredicate);
     }
 
     @Override

@@ -30,14 +30,21 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.LeafFunction;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -60,10 +67,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link VectorSearchBuilder} using test-only brute-force vector index. */
 public class VectorSearchBuilderTest extends TableTestBase {
@@ -240,6 +249,181 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullModeRawOnlyUsesConfiguredMetric() throws Exception {
+        catalog.createTable(
+                identifier("full_search_raw_only_cosine_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option("test.vector.metric", "cosine")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_raw_only_cosine_table"));
+
+        float[][] vectors = {{100.0f, 0.0f}, {0.9f, 0.1f}};
+        writeVectors(table, vectors);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(0L);
+    }
+
+    @Test
+    public void testVectorSearchFullModeScansUnindexedData() throws Exception {
+        catalog.createTable(
+                identifier("full_search_cosine_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .option("test.vector.dimension", String.valueOf(DIMENSION))
+                        .option("test.vector.metric", "cosine")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_cosine_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {0.5f, 0.0f},
+            {0.99f, 0.01f}
+        };
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+
+        TestVectorGlobalIndexer.resetMetricCalls();
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+        assertThat(indexVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(2, 3));
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactlyInAnyOrder(2L, 3L);
+        assertThat(TestVectorGlobalIndexer.metricCalls()).isGreaterThan(0);
+    }
+
+    @Test
+    public void testVectorSearchFastModeSkipsUnindexedDataByDefault() throws Exception {
+        catalog.createTable(
+                identifier("fast_search_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME).build(),
+                false);
+        FileStoreTable table = getTable(identifier("fast_search_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {1.0f, 0.0f},
+            {0.95f, 0.05f}
+        };
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).doesNotContain(2L, 3L);
+    }
+
+    @Test
+    public void testVectorSearchFullModeScansFilteredUnindexedData() throws Exception {
+        catalog.createTable(
+                identifier("full_search_filtered_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_filtered_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {1.0f, 0.0f},
+            {0.95f, 0.05f}
+        };
+        writeVectors(table, vectors);
+
+        Range indexedRange = new Range(0, 1);
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, indexedRange);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1}, indexedRange);
+
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 2);
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .executeLocal();
+
+        assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(result.results()).containsExactlyInAnyOrder(2L, 3L);
+    }
+
+    @Test
+    public void testVectorSearchRawSearchUsesScalarPreFilter() throws Exception {
+        catalog.createTable(
+                identifier("raw_search_scalar_prefilter_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("raw_search_scalar_prefilter_table"));
+
+        float[][] vectors = {
+            {100.0f, 0.0f},
+            {200.0f, 0.0f},
+            {1.0f, 0.0f},
+            {2.0f, 0.0f}
+        };
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+        buildAndCommitBTreeIndex(table, new int[] {2, 3}, new Range(2, 3));
+
+        // Let scalar global index evaluate id >= 3, but let the final raw row filter pass through.
+        // Without raw pre-filtering, raw topK would pick row 2 because it is closer to the query.
+        Predicate filter = globalIndexOnlyIdGreaterOrEqual(table, 3);
+        VectorSearchBuilder builder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter);
+        VectorScan.Plan plan = builder.newVectorScan().scan();
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).scalarIndexFiles()).isNotEmpty();
+
+        GlobalIndexResult result = builder.newVectorRead().read(plan);
+        assertThat(result.results()).containsExactly(3L);
+    }
+
+    @Test
     public void testVectorSearchTopKLimit() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -294,6 +478,73 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .executeLocal();
 
         assertThat(result.results().isEmpty()).isFalse();
+    }
+
+    @Test
+    public void testVectorSearchRefineFactorReranksIndexCandidates() throws Exception {
+        catalog.createTable(
+                identifier("refine_factor_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(TestVectorGlobalIndexer.OPT_REVERSE_SCORE, "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("refine_factor_table"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {10.0f, 0.0f}, {20.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        GlobalIndexResult approximate =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertThat(approximate.results()).containsExactly(2L);
+
+        GlobalIndexResult refined =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withOption(
+                                TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3")
+                        .executeLocal();
+        assertThat(refined.results()).containsExactly(0L);
+        assertThat(readIds(table, refined)).containsExactly(0);
+
+        List<GlobalIndexResult> batchRefined =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.0f, 0.0f}, {20.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withOption(
+                                TestVectorGlobalIndexerFactory.IDENTIFIER + ".refine_factor", "3")
+                        .executeBatchLocal();
+        assertThat(batchRefined).hasSize(2);
+        assertThat(batchRefined.get(0).results()).containsExactly(0L);
+        assertThat(batchRefined.get(1).results()).containsExactly(2L);
+    }
+
+    @Test
+    public void testVectorSearchRefineFactorValidation() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+
+        assertThatThrownBy(
+                        () ->
+                                table.newVectorSearchBuilder()
+                                        .withVector(new float[] {0.0f, 0.0f})
+                                        .withLimit(1)
+                                        .withVectorColumn(VECTOR_FIELD_NAME)
+                                        .withOption("refine_factor", "0")
+                                        .executeLocal())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("refine factor must be positive");
     }
 
     @Test
@@ -429,9 +680,137 @@ public class VectorSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testVectorSearchPartitionFilterAndExtractedFilterAreConjunctive() throws Exception {
+        catalog.createTable(
+                identifier("partitioned_filter_table"),
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("pt", DataTypes.INT())
+                                        .column("id", DataTypes.INT())
+                                        .column(VECTOR_FIELD_NAME, new ArrayType(DataTypes.FLOAT()))
+                                        .partitionKeys("pt"))
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("partitioned_filter_table"));
+
+        float[][] pt1Vectors = {{1.0f, 0.0f}, {0.95f, 0.1f}};
+        float[][] pt2Vectors = {{0.0f, 1.0f}, {0.1f, 0.95f}};
+
+        writePartitionedVectors(table, 1, pt1Vectors);
+        writePartitionedVectors(table, 2, pt2Vectors);
+
+        RowType partitionType = RowType.of(DataTypes.INT());
+        InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+        BinaryRow partition1 = serializer.toBinaryRow(GenericRow.of(1)).copy();
+        BinaryRow partition2 = serializer.toBinaryRow(GenericRow.of(2)).copy();
+
+        buildAndCommitPartitionedIndex(table, pt1Vectors, partition1, new Range(0, 1));
+        buildAndCommitPartitionedIndex(table, pt2Vectors, partition2, new Range(2, 3));
+
+        PartitionPredicate partitionFilter =
+                PartitionPredicate.fromMultiple(
+                        partitionType, Collections.singletonList(partition1));
+        Predicate matchingPartitionFilter = new PredicateBuilder(table.rowType()).equal(0, 1);
+        Predicate extractedPartitionFilter = new PredicateBuilder(table.rowType()).equal(0, 2);
+
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(extractedPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.splits()).isEmpty();
+
+        VectorScan.Plan reverseOrderPlan =
+                table.newVectorSearchBuilder()
+                        .withFilter(extractedPartitionFilter)
+                        .withPartitionFilter(partitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(reverseOrderPlan.splits()).isEmpty();
+
+        VectorScan.Plan batchPlan =
+                table.newBatchVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(extractedPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(batchPlan.splits()).isEmpty();
+
+        VectorScan.Plan reverseOrderBatchPlan =
+                table.newBatchVectorSearchBuilder()
+                        .withFilter(extractedPartitionFilter)
+                        .withPartitionFilter(partitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(reverseOrderBatchPlan.splits()).isEmpty();
+
+        GlobalIndexResult matchingResult =
+                table.newVectorSearchBuilder()
+                        .withFilter(matchingPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertResultRowsBetween(matchingResult, 0, 1);
+
+        GlobalIndexResult matchingResultWithPartitionFilter =
+                table.newVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(matchingPartitionFilter)
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertResultRowsBetween(matchingResultWithPartitionFilter, 0, 1);
+
+        List<GlobalIndexResult> matchingBatchResults =
+                table.newBatchVectorSearchBuilder()
+                        .withFilter(matchingPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(matchingBatchResults).hasSize(1);
+        assertResultRowsBetween(matchingBatchResults.get(0), 0, 1);
+
+        List<GlobalIndexResult> matchingBatchResultsWithPartitionFilter =
+                table.newBatchVectorSearchBuilder()
+                        .withPartitionFilter(partitionFilter)
+                        .withFilter(matchingPartitionFilter)
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(matchingBatchResultsWithPartitionFilter).hasSize(1);
+        assertResultRowsBetween(matchingBatchResultsWithPartitionFilter.get(0), 0, 1);
+    }
+
+    @Test
     public void testScanPartialRangeIntersection() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
+        catalog.createTable(
+                identifier("full_search_partial_scalar_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_partial_scalar_table"));
 
         // Write 10 rows
         float[][] allVectors = new float[10][];
@@ -457,15 +836,19 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .newVectorScan()
                         .scan();
 
-        assertThat(plan.splits()).hasSize(1);
-        VectorSearchSplit split = plan.splits().get(0);
+        assertThat(indexVectorSearchSplits(plan.splits())).hasSize(1);
+        assertThat(rawVectorSearchSplits(plan.splits())).hasSize(1);
+        IndexVectorSearchSplit split = indexVectorSearchSplits(plan.splits()).get(0);
         assertThat(split.rowRangeStart()).isEqualTo(0);
         assertThat(split.rowRangeEnd()).isEqualTo(9);
         assertThat(split.vectorIndexFiles()).isNotEmpty();
-        // Scalar index [3,7] intersects vector range [0,9] → attached
+        // Scalar index [3,7] intersects vector range [0,9], so it is attached.
         assertThat(split.scalarIndexFiles()).isNotEmpty();
+        assertThat(rawVectorSearchSplits(plan.splits()).get(0).rowRanges())
+                .containsExactly(new Range(0, 2), new Range(8, 9));
 
-        // Read with pre-filter: id >= 5, btree covers [3,7] so rows 5,6,7 from btree
+        // Read with pre-filter: btree covers [3,7], while rows outside that scalar index coverage
+        // are searched through raw splits and filtered by the raw table read.
         GlobalIndexResult result =
                 table.newVectorSearchBuilder()
                         .withVector(new float[] {1.0f, 0.0f})
@@ -477,10 +860,9 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
         assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(result.results().isEmpty()).isFalse();
-        // Pre-filter restricts to rows matching id >= 5 from btree [3,7]
-        for (long rowId : result.results()) {
-            assertThat(rowId).isBetween(5L, 7L);
-        }
+
+        assertThat(result.results()).containsAnyOf(5L, 6L, 7L);
+        assertThat(result.results()).doesNotContain(0L, 1L, 2L);
     }
 
     @Test
@@ -512,11 +894,141 @@ public class VectorSearchBuilderTest extends TableTestBase {
         VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
         assertThat(plan.splits()).hasSize(1);
         // Scalar index is attached since field matches filter
-        assertThat(plan.splits().get(0).scalarIndexFiles()).isNotEmpty();
+        assertThat(((IndexVectorSearchSplit) plan.splits().get(0)).scalarIndexFiles()).isNotEmpty();
 
-        // Read: preFilter returns empty bitmap → vector search returns no results
+        // Read: preFilter returns empty bitmap, so vector search returns no results.
         GlobalIndexResult result = searchBuilder.newVectorRead().read(plan);
         assertThat(result.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testPartialScalarPreFilterMustNotDropUnindexedScalarRows() throws Exception {
+        catalog.createTable(
+                identifier("full_search_partial_scalar_unindexed_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_partial_scalar_unindexed_table"));
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i - 8), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, vectors, new Range(0, 9));
+        buildAndCommitBTreeIndex(table, new int[] {3, 4, 5, 6, 7}, new Range(3, 7));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 8);
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter);
+
+        VectorScan.Plan vectorPlan = searchBuilder.newVectorScan().scan();
+        GlobalIndexResult result = searchBuilder.newVectorRead().read(vectorPlan);
+        assertThat(result.results()).contains(8L);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(idFilter);
+        TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(readPlan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactly(8);
+    }
+
+    @Test
+    public void testFullModeFilterWithoutScalarIndexMustNotLetVectorIndexPolluteTopK()
+            throws Exception {
+        catalog.createTable(
+                identifier("full_search_no_scalar_index_filter_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_search_no_scalar_index_filter_table"));
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, vectors, new Range(0, 9));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 8);
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter);
+
+        GlobalIndexResult result =
+                searchBuilder.newVectorRead().read(searchBuilder.newVectorScan().scan());
+
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(idFilter);
+        TableScan.Plan readPlan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+        List<Integer> ids = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(readPlan)) {
+            reader.forEachRemaining(row -> ids.add(row.getInt(0)));
+        }
+        assertThat(ids).containsExactly(8);
+    }
+
+    @Test
+    public void testFastModePartialScalarPreFilterOnlyUsesIndexedRows() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = new float[10][];
+        for (int i = 0; i < vectors.length; i++) {
+            vectors[i] = new float[] {Math.abs(i - 8), 0.0f};
+        }
+        writeVectors(table, vectors);
+
+        buildAndCommitVectorIndex(table, vectors, new Range(0, 9));
+        buildAndCommitBTreeIndex(table, new int[] {3, 4, 5, 6, 7}, new Range(3, 7));
+
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 8);
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter);
+
+        GlobalIndexResult result =
+                searchBuilder.newVectorRead().read(searchBuilder.newVectorScan().scan());
+        assertThat(result.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testVectorSearchRequiresVectorColumnAsPrimaryField() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                new Range(0, 1),
+                Arrays.asList(table.rowType().getField("id"), table.rowType().getField("vec")));
+
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME);
+
+        VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
+        assertThat(plan.splits()).isEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isTrue();
     }
 
     @Test
@@ -542,7 +1054,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         .scan();
 
         assertThat(plan.splits()).hasSize(1);
-        VectorSearchSplit original = plan.splits().get(0);
+        IndexVectorSearchSplit original = (IndexVectorSearchSplit) plan.splits().get(0);
 
         // Serialize
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -551,10 +1063,10 @@ public class VectorSearchBuilderTest extends TableTestBase {
         }
 
         // Deserialize
-        VectorSearchSplit deserialized;
+        IndexVectorSearchSplit deserialized;
         try (ObjectInputStream in =
                 new ObjectInputStream(new ByteArrayInputStream(bos.toByteArray()))) {
-            deserialized = (VectorSearchSplit) in.readObject();
+            deserialized = (IndexVectorSearchSplit) in.readObject();
         }
 
         // Verify all fields match
@@ -627,6 +1139,37 @@ public class VectorSearchBuilderTest extends TableTestBase {
             reader.forEachRemaining(row -> ids1.add(row.getInt(0)));
         }
         assertThat(ids1).contains(4);
+    }
+
+    @Test
+    public void testBatchVectorSearchFullModeScansUnindexedData() throws Exception {
+        catalog.createTable(
+                identifier("batch_full_search_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("batch_full_search_table"));
+
+        float[][] vectors = {
+            {0.0f, 1.0f},
+            {0.1f, 0.9f},
+            {1.0f, 0.0f},
+            {0.95f, 0.05f}
+        };
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndex(table, new float[][] {vectors[0], vectors[1]}, new Range(0, 1));
+
+        List<GlobalIndexResult> results =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{1.0f, 0.0f}, {0.0f, 1.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).results()).containsExactly(2L);
+        assertThat(results.get(1).results()).containsExactly(0L);
     }
 
     @Test
@@ -741,6 +1284,13 @@ public class VectorSearchBuilderTest extends TableTestBase {
             reader.forEachRemaining(row -> ids.add(row.getInt(0)));
         }
         return ids;
+    }
+
+    private void assertResultRowsBetween(GlobalIndexResult result, long start, long end) {
+        assertThat(result.results().isEmpty()).isFalse();
+        for (long rowId : result.results()) {
+            assertThat(rowId).isBetween(start, end);
+        }
     }
 
     private void buildAndCommitIndex(FileStoreTable table, float[][] vectors) throws Exception {
@@ -925,12 +1475,14 @@ public class VectorSearchBuilderTest extends TableTestBase {
         VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
         assertThat(plan.splits()).isNotEmpty();
         // Every split should have vector index files
-        for (VectorSearchSplit split : plan.splits()) {
+        for (IndexVectorSearchSplit split : indexVectorSearchSplits(plan.splits())) {
             assertThat(split.vectorIndexFiles()).isNotEmpty();
         }
         // At least one split should have scalar (btree) index files
         long scalarCount =
-                plan.splits().stream().filter(s -> !s.scalarIndexFiles().isEmpty()).count();
+                indexVectorSearchSplits(plan.splits()).stream()
+                        .filter(s -> !s.scalarIndexFiles().isEmpty())
+                        .count();
         assertThat(scalarCount).isGreaterThan(0);
 
         // --- Test VectorReadImpl: pre-filter should narrow results ---
@@ -957,6 +1509,16 @@ public class VectorSearchBuilderTest extends TableTestBase {
 
     private void buildAndCommitVectorIndex(FileStoreTable table, float[][] vectors, Range rowRange)
             throws Exception {
+        buildAndCommitVectorIndexWithFields(
+                table,
+                vectors,
+                rowRange,
+                Collections.singletonList(table.rowType().getField(VECTOR_FIELD_NAME)));
+    }
+
+    private void buildAndCommitVectorIndexWithFields(
+            FileStoreTable table, float[][] vectors, Range rowRange, List<DataField> indexFields)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
 
@@ -978,7 +1540,7 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        vectorField.id(),
+                        indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
                         entries);
 
@@ -1067,6 +1629,55 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private List<IndexVectorSearchSplit> indexVectorSearchSplits(List<VectorSearchSplit> splits) {
+        List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
+        for (VectorSearchSplit split : splits) {
+            if (split instanceof IndexVectorSearchSplit) {
+                indexSplits.add((IndexVectorSearchSplit) split);
+            }
+        }
+        return indexSplits;
+    }
+
+    private List<RawVectorSearchSplit> rawVectorSearchSplits(List<VectorSearchSplit> splits) {
+        List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
+        for (VectorSearchSplit split : splits) {
+            if (split instanceof RawVectorSearchSplit) {
+                rawSplits.add((RawVectorSearchSplit) split);
+            }
+        }
+        return rawSplits;
+    }
+
+    private Predicate globalIndexOnlyIdGreaterOrEqual(FileStoreTable table, int literal) {
+        DataField idField = table.rowType().getField("id");
+        return new GlobalIndexOnlyLeafPredicate(
+                new FieldTransform(new FieldRef(0, idField.name(), idField.type())),
+                GreaterOrEqual.INSTANCE,
+                Collections.singletonList(literal));
+    }
+
+    private static class GlobalIndexOnlyLeafPredicate extends LeafPredicate {
+
+        private static final long serialVersionUID = 1L;
+
+        private GlobalIndexOnlyLeafPredicate(
+                Transform transform, LeafFunction function, List<Object> literals) {
+            super(transform, function, literals);
+        }
+
+        @Override
+        public boolean test(InternalRow row) {
+            return true;
+        }
+
+        @Override
+        public LeafPredicate copyWithNewInputs(List<Object> newInputs) {
+            return new GlobalIndexOnlyLeafPredicate(
+                    transform().copyWithNewInputs(newInputs), function(), literals());
         }
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.{GenericVariant, Variant}
 import org.apache.paimon.spark.catalyst.analysis.Spark4ResolutionRules
 import org.apache.paimon.spark.catalyst.parser.extensions.PaimonSpark4SqlExtensionsParser
@@ -193,8 +194,15 @@ class Spark4Shim extends SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite =
-    new PaimonBatchWrite(table, writeSchema, dataSchema, overwritePartitions, copyOnWriteScan)
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation]): BatchWrite =
+    new PaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
@@ -319,6 +327,18 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+
+  // SQL UDFs (CREATE FUNCTION ... RETURN ...).
+  override def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan] =
+    org.apache.spark.sql.catalyst.parser.extensions.RewritePaimonSQLFunctionCommands(spark)
+
+  override def resolvePaimonSQLFunction(
+      funcIdent: org.apache.spark.sql.catalyst.FunctionIdentifier,
+      function: org.apache.paimon.function.Function,
+      arguments: Seq[Expression],
+      parser: org.apache.spark.sql.catalyst.parser.ParserInterface): Expression =
+    org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
+      .toSQLFunctionExpression(funcIdent, function, arguments, parser)
 }
 
 object Spark4Shim {

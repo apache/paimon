@@ -64,11 +64,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
     @Override
-    public String identifier() {
-        return "default";
-    }
-
-    @Override
     public List<CommitMessage> buildIndex(
             SparkSession spark,
             DataSourceV2Relation relation,

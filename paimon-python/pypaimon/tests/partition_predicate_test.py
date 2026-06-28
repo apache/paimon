@@ -65,7 +65,7 @@ def _mock_scanner_table():
     table.options.data_evolution_enabled.return_value = False
     table.options.deletion_vectors_enabled.return_value = False
     table.options.scan_manifest_parallelism.return_value = 1
-    table.table_schema = Mock(id=0)
+    table.table_schema = Mock(id=0, fields=TABLE_FIELDS)
     table.schema_manager = Mock()
     table.schema_manager.get_schema.return_value = Mock(fields=TABLE_FIELDS)
     return table
@@ -174,7 +174,7 @@ class TestOverwritePartitionPredicate(unittest.TestCase):
 
     def _extract_partition_predicate(self, commit):
         entries_plan = commit._try_commit.call_args[1]['commit_entries_plan']
-        with patch('pypaimon.write.file_store_commit.FileScanner') as mock_cls:
+        with patch('pypaimon.write.commit.overwrite_changes_provider.FileScanner') as mock_cls:
             mock_cls.return_value.read_manifest_entries.return_value = []
             commit.manifest_list_manager.read_all.return_value = []
             entries_plan(Mock(id=1))

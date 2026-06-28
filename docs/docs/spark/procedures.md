@@ -80,6 +80,18 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>compact_chain_table</td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: The target chain table identifier. Cannot be empty.</li>
+            <li>partition: Partition specification format (e.g., 'dt="20250810",hour="22"'). Cannot be empty.</li>
+            <li>overwrite: Whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(table => 'default.T', partition => 'dt="20250810",hour="22"')<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>expire_snapshots</td>
       <td>
          To expire snapshots. Argument:
@@ -517,12 +529,13 @@ This section introduce all available spark procedures about paimon.
          To create global index files for a given column. The table must have <code>row-tracking.enabled=true</code>. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>index_column: the name of the column to index. Cannot be empty.</li>
-            <li>index_type: type of the index to build, e.g. 'btree'. Cannot be empty.</li>
+            <li>index_type: type of the index to build, e.g. 'btree' or 'bitmap'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions on which to build the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
             <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>
       <td>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree')<br/><br/>
+         CALL sys.create_global_index(table => 'default.T', index_column => 'tag', index_type => 'bitmap', options => 'sorted-index.records-per-range=1000000')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1;pt=p2')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
          CALL sys.create_global_index(table => 'default.T', index_column => 'content', index_type => 'tantivy-fulltext', options => 'tantivy.tokenizer=jieba')<br/><br/>
@@ -537,9 +550,12 @@ This section introduce all available spark procedures about paimon.
             <li>index_column: the name of the indexed column. Cannot be empty.</li>
             <li>index_type: type of the index to drop, e.g. 'btree'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions from which to drop the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+            <li>dry_run: when true, return the number of index files that would be dropped without committing any change. Default is false.</li>
       </td>
       <td>
-         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')<br/><br/>
+         -- Preview what would be dropped without deleting<br/>
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', dry_run => true)
       </td>
    </tr>
    <tr>

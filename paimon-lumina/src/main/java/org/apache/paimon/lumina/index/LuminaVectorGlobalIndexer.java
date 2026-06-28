@@ -21,7 +21,7 @@ package org.apache.paimon.lumina.index;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
@@ -31,7 +31,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 /** Lumina vector global indexer. */
-public class LuminaVectorGlobalIndexer implements GlobalIndexer {
+public class LuminaVectorGlobalIndexer implements VectorGlobalIndexer {
 
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
@@ -52,5 +52,10 @@ public class LuminaVectorGlobalIndexer implements GlobalIndexer {
             List<GlobalIndexIOMeta> files,
             ExecutorService executor) {
         return new LuminaVectorGlobalIndexReader(fileReader, files, fieldType, options, executor);
+    }
+
+    @Override
+    public String metric() {
+        return options.metric().getLuminaName();
     }
 }

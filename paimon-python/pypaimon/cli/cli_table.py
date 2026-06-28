@@ -271,15 +271,13 @@ def cmd_table_full_text_search(args):
         print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Build full-text search
-    text_column = args.column
-    query_text = args.query
     limit = args.limit
 
     try:
+        from pypaimon.globalindex.full_text_query import FullTextQuery
+
         builder = table.new_full_text_search_builder()
-        builder.with_text_column(text_column)
-        builder.with_query_text(query_text)
+        builder.with_query(FullTextQuery.from_json(args.query))
         builder.with_limit(limit)
         result = builder.execute_local()
     except Exception as e:
@@ -1072,14 +1070,9 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     fts_parser.add_argument(
-        '--column', '-c',
-        required=True,
-        help='Text column to search on'
-    )
-    fts_parser.add_argument(
         '--query', '-q',
         required=True,
-        help='Query text to search for'
+        help='LanceDB-style full-text query JSON to search for'
     )
     fts_parser.add_argument(
         '--limit', '-l',

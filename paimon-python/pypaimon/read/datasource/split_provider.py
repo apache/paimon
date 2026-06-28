@@ -67,6 +67,17 @@ class SplitProvider(ABC):
         """
         return None
 
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        """Parallel name paths for a nested-leaf projection, or ``None``.
+
+        Forwarded to the per-task ``TableRead`` so a projection like
+        ``['mv.latest_value.x']`` is read by widening to the parent struct and
+        extracting the requested leaves. Without it the worker treats the
+        flattened leaf names as missing top-level columns and reads every
+        projected leaf as NULL.
+        """
+        return None
+
 
 class CatalogSplitProvider(SplitProvider):
     """Plan splits from a fully-qualified table identifier and catalog options.
@@ -124,6 +135,7 @@ class CatalogSplitProvider(SplitProvider):
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
+        self._nested_name_paths_cached = None
 
     def _ensure_table(self):
         if self._table_cached is None:
@@ -154,6 +166,7 @@ class CatalogSplitProvider(SplitProvider):
         if self._limit is not None:
             rb = rb.with_limit(self._limit)
         self._read_type_cached = rb.read_type()
+        self._nested_name_paths_cached = rb._nested_name_paths()
         self._splits_cached = rb.new_scan().plan().splits()
 
     @property
@@ -170,6 +183,10 @@ class CatalogSplitProvider(SplitProvider):
     def read_type(self):
         self._ensure_planned()
         return self._read_type_cached
+
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        self._ensure_planned()
+        return self._nested_name_paths_cached
 
     def predicate(self):
         return self._predicate
@@ -190,12 +207,13 @@ class PreResolvedSplitProvider(SplitProvider):
     """
 
     def __init__(self, table, splits: List[Split], read_type, predicate=None,
-                 limit: Optional[int] = None):
+                 limit: Optional[int] = None, nested_name_paths=None):
         self._table = table
         self._splits = splits
         self._read_type = read_type
         self._predicate = predicate
         self._limit = limit
+        self._nested_name_paths = nested_name_paths
 
     def table(self):
         return self._table
@@ -205,6 +223,9 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def read_type(self):
         return self._read_type
+
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        return self._nested_name_paths
 
     def predicate(self):
         return self._predicate

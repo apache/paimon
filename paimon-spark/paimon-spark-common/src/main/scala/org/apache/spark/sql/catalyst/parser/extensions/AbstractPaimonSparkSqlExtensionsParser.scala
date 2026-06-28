@@ -33,6 +33,7 @@ import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.internal.VariableSubstitution
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, StructType}
 
 import java.util.Locale
@@ -112,6 +113,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
     Seq(
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
+      SparkShimLoader.shim.rewritePaimonSQLFunctionCommands(sparkSession),
       RewriteCreateTableLikeCommand(sparkSession),
       RewriteSparkDDLCommands(sparkSession)
     )

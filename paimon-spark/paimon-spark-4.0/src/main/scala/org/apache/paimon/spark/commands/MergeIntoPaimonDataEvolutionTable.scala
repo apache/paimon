@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.index.GlobalIndexMeta
@@ -236,7 +237,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       if (plan.snapshotId() != null) {
         writer.rowIdCheckConflict(plan.snapshotId())
       }
-      writer.commit(updateCommit ++ insertCommit)
+      writer.commit(updateCommit ++ insertCommit, Snapshot.Operation.MERGE)
     } finally {
       if (persistSourceDss.isDefined) {
         persistSourceDss.get.unpersist(blocking = false)

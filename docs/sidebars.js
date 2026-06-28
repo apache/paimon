@@ -124,6 +124,7 @@ const sidebars = {
         },
         "items": [
           "multimodal-table/global-index/btree",
+          "multimodal-table/global-index/bitmap",
           "multimodal-table/global-index/vector",
           "multimodal-table/global-index/full-text",
           "multimodal-table/global-index/hybrid-search"

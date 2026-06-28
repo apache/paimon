@@ -83,10 +83,19 @@ Snapshot expiration is controlled by the following table properties.
       <td>Integer</td>
       <td>The maximum number of snapshots allowed to expire at a time.</td>
     </tr>
+    <tr>
+      <td><h5>snapshot.clean-empty-directories</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>false</td>
+      <td>Boolean</td>
+      <td>Whether to try to delete empty directories (e.g. partition and bucket directories) left behind after the data files are deleted during snapshot expiration. Defaults to <code>false</code>: empty directories are kept. Enabling it has caveats: HDFS may print exceptions in NameNode, and object stores (OSS/S3) may suffer performance issues due to the extra prefix operations required to list and delete directory markers.</td>
+    </tr>
     </tbody>
 </table>
 
 When the number of snapshots is less than `snapshot.num-retained.min`, no snapshots will be expired(even the condition `snapshot.time-retained` meet), after which `snapshot.num-retained.max` and `snapshot.time-retained` will be used to control the snapshot expiration until the remaining snapshot meets the condition.
+
+Note that snapshot expiration is also what physically deletes data files dropped by [partition expiration](./manage-partitions#expiring-partitions). However, the empty partition and bucket directories left behind after the data files are deleted are **not** removed by default. To clean them up, enable `snapshot.clean-empty-directories` (see the option above). This is off by default because on object stores (OSS/S3) the prefix operations needed to delete directory markers can be expensive.
 
 The following example show more details(`snapshot.num-retained.min` is 2, `snapshot.time-retained` is 1h, `snapshot.num-retained.max` is 5):
 

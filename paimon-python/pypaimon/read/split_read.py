@@ -72,6 +72,7 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
 NULL_FIELD_INDEX = -1
+ROW_SIDECAR_FORMAT = CoreOptions.FILE_FORMAT_ROW
 
 _COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
 
@@ -167,6 +168,14 @@ class SplitRead(ABC):
     def _nested_path_by_name(self) -> Optional[Dict[str, List[str]]]:
         return self._cached_nested_path_by_name
 
+    def _resolve_schema(self, schema_id: int):
+        """Resolve schema, short-circuiting current table schema id to avoid
+        filesystem access (REST catalog would get 403).
+        """
+        if schema_id == self.table.table_schema.id:
+            return self.table.table_schema
+        return self.table.schema_manager.get_schema(schema_id)
+
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
             return None
@@ -196,12 +205,25 @@ class SplitRead(ABC):
 
         batch_size = self.table.options.read_batch_size()
 
-        # Convert global row_ranges (IndexedSplit) to local row_indices for native pushdown.
-        row_indices = None
+        effective_row_ranges = None
         if row_ranges is not None:
             effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
             if len(effective_row_ranges) == 0:
                 return EmptyRecordBatchReader()
+
+        row_sidecar_file = self._row_sidecar_file_name(file)
+        if row_sidecar_file is not None and self._should_read_row_sidecar(
+                file,
+                effective_row_ranges,
+                row_sidecar_file,
+                self.table.options.data_evolution_row_sidecar_max_selected_rows(),
+                self.table.options.data_evolution_row_sidecar_max_selection_ratio()):
+            file_path = self._aligned_extra_file_path(file, row_sidecar_file)
+            file_format = ROW_SIDECAR_FORMAT
+
+        # Convert global row_ranges (IndexedSplit) to local row_indices for native pushdown.
+        row_indices = None
+        if effective_row_ranges is not None:
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
                                  CoreOptions.FILE_FORMAT_VORTEX,
                                  CoreOptions.FILE_FORMAT_LANCE,
@@ -304,8 +326,7 @@ class SplitRead(ABC):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on ROW files")
-            file_schema = self.table.schema_manager.get_schema(
-                file.schema_id)
+            file_schema = self._resolve_schema(file.schema_id)
             if file.write_cols:
                 field_map = {f.name: f for f in file_schema.fields}
                 row_full_fields = [field_map[n] for n in file.write_cols
@@ -385,11 +406,59 @@ class SplitRead(ABC):
 
         return reader
 
+    @staticmethod
+    def _row_sidecar_file_name(file: DataFileMeta) -> Optional[str]:
+        row_files = [
+            extra_file for extra_file in file.extra_files
+            if SplitRead._is_row_sidecar_file(extra_file)
+        ]
+        return row_files[0] if len(row_files) == 1 else None
+
+    @staticmethod
+    def _should_read_row_sidecar(file: DataFileMeta,
+                                 effective_row_ranges: Optional[List[Range]],
+                                 row_sidecar_file: Optional[str],
+                                 max_selected_rows: int,
+                                 max_selection_ratio: float) -> bool:
+        if (not effective_row_ranges
+                or file.row_count <= 0
+                or DataFileMeta.is_blob_file(file.file_name)
+                or DataFileMeta.is_vector_file(file.file_name)
+                or row_sidecar_file is None):
+            return False
+
+        selected_row_count = sum(
+            r.count()
+            for r in Range.sort_and_merge_overlap(effective_row_ranges, True)
+        )
+        if selected_row_count <= 0 or selected_row_count >= file.row_count:
+            return False
+
+        selection_ratio = float(selected_row_count) / float(file.row_count)
+        return (selected_row_count <= max_selected_rows
+                and selection_ratio <= max_selection_ratio)
+
+    @staticmethod
+    def _is_row_sidecar_file(file_name: str) -> bool:
+        try:
+            return format_identifier(file_name) == ROW_SIDECAR_FORMAT
+        except Exception:
+            return False
+
+    @staticmethod
+    def _aligned_extra_file_path(file: DataFileMeta, extra_file: str) -> str:
+        if "://" in extra_file or extra_file.startswith("/"):
+            return extra_file
+        file_path = file.external_path if file.external_path else file.file_path
+        if not file_path or "/" not in file_path:
+            return extra_file
+        return f"{file_path.rsplit('/', 1)[0]}/{extra_file}"
+
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
         if key not in self.schema_id_2_fields:
             nested_path_by_name = self._nested_path_by_name()
-            schema = self.table.schema_manager.get_schema(schema_id)
+            schema = self._resolve_schema(schema_id)
             schema_fields = (
                 SpecialFields.row_type_with_row_tracking(schema.fields)
                 if self.row_tracking_enabled else schema.fields
@@ -461,7 +530,7 @@ class SplitRead(ABC):
         nested-projection reads."""
         if self._nested_path_by_name() is not None:
             return None
-        file_schema = self.table.schema_manager.get_schema(file.schema_id)
+        file_schema = self._resolve_schema(file.schema_id)
         if file_schema is None:
             return None
         return self._final_data_fields_from(
@@ -1091,7 +1160,7 @@ class DataEvolutionSplitRead(SplitRead):
                 # For regular files without write_cols, derive field IDs from
                 # the file's schema version, not the current table schema.
                 # The file only contains columns from when it was written.
-                file_schema = self.table.schema_manager.get_schema(first_file.schema_id)
+                file_schema = self._resolve_schema(first_file.schema_id)
                 field_ids = [field.id for field in file_schema.fields]
                 field_ids.append(SpecialFields.ROW_ID.id)
                 field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)

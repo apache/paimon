@@ -84,6 +84,75 @@ class HybridSearchTest extends PaimonSparkTestBase {
     }
   }
 
+  test("weighted_score exposes per-route min-max normalized fused scores") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, vec_a ARRAY<FLOAT>, vec_b ARRAY<FLOAT>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'test.vector.dimension' = '2',
+                  |  'test.vector.required-option.key' = 'ivf.nprobe',
+                  |  'test.vector.required-option.value' = '16')
+                  |""".stripMargin)
+
+      // Both columns hold identical vectors, so each route ranks id0 best and id2 worst.
+      // Scores vs query [1, 0] are strictly ordered id0 > id1 > id2 under every supported
+      // metric, so min-max maps id0 -> 1.0 and id2 -> 0.0 in BOTH routes regardless of metric.
+      // id2's raw score is > 0, so a fused 0.0 can only come from normalization, not a raw sum.
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (0, array(1.0f, 0.0f), array(1.0f, 0.0f)),
+                  |  (1, array(0.8f, 0.6f), array(0.8f, 0.6f)),
+                  |  (2, array(0.6f, 0.8f), array(0.6f, 0.8f))
+                  |""".stripMargin)
+
+      spark
+        .sql(s"CALL sys.create_global_index(table => 'test.T', index_column => 'vec_a', " +
+          s"index_type => '${TestVectorGlobalIndexerFactory.IDENTIFIER}')")
+        .collect()
+      spark
+        .sql(s"CALL sys.create_global_index(table => 'test.T', index_column => 'vec_b', " +
+          s"index_type => '${TestVectorGlobalIndexerFactory.IDENTIFIER}')")
+        .collect()
+
+      val scores = spark
+        .sql("""
+               |SELECT id, __paimon_search_score
+               |FROM hybrid_search(
+               |  'T',
+               |  array(
+               |    named_struct(
+               |      'field', 'vec_a',
+               |      'query_vector', array(1.0f, 0.0f),
+               |      'limit', 3,
+               |      'weight', 2.0f,
+               |      'options', map('ivf.nprobe', '16')),
+               |    named_struct(
+               |      'field', 'vec_b',
+               |      'query_vector', array(1.0f, 0.0f),
+               |      'limit', 3,
+               |      'weight', 1.0f,
+               |      'options', map('ivf.nprobe', '16'))),
+               |  array(),
+               |  3,
+               |  'weighted_score')
+               |""".stripMargin)
+        .collect()
+        .map(row => row.getInt(0) -> row.getFloat(1))
+        .toMap
+
+      // id0 is the top hit in both routes -> 1.0 each -> 2.0 * 1.0 + 1.0 * 1.0 = sum(weights).
+      assert(math.abs(scores(0) - 3.0f) < 1e-5)
+      // id2 is the worst hit in both routes -> min-max maps it to 0.0 each -> fused 0.0.
+      // Without normalization this would be 2.0 * raw_a + 1.0 * raw_b > 0.
+      assert(math.abs(scores(2) - 0.0f) < 1e-5)
+      assert(scores(0) > scores(2))
+    }
+  }
+
   test("hybrid search ranks vector and full-text routes") {
     withTable("T") {
       spark.sql("""
@@ -126,9 +195,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                |      'options', map())),
                |  array(
                |    named_struct(
-               |      'field', 'content',
-               |      'query_text', 'paimon',
-               |      'query_operator', 'or',
+               |      'query', '{"match":{"column":"content","terms":"paimon"}}',
                |      'limit', 2,
                |      'weight', 1.0f,
                |      'options', map())),
@@ -175,9 +242,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                |  array(),
                |  array(
                |    named_struct(
-               |      'field', 'content',
-               |      'query_text', 'paimon search',
-               |      'query_operator', 'or',
+               |      'query', '{"match":{"column":"content","terms":"paimon search"}}',
                |      'limit', 1,
                |      'weight', 1.0f,
                |      'options', map())),
@@ -221,9 +286,7 @@ class HybridSearchTest extends PaimonSparkTestBase {
                  |  array(),
                  |  array(
                  |    named_struct(
-                 |      'field', 'content',
-                 |      'query_text', 'paimon',
-                 |      'query_operator', 'or',
+                 |      'query', '{"match":{"column":"content","terms":"paimon"}}',
                  |      'limit', 1,
                  |      'weight', 1.0f,
                  |      'options', map())),

@@ -414,6 +414,10 @@ case class PaimonSparkWriter(
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
+    commit(commitMessages, null)
+  }
+
+  def commit(commitMessages: Seq[CommitMessage], operation: Snapshot.Operation): Unit = {
     val finalWriteBuilder = if (postponeBatchWriteFixedBucket) {
       writeBuilder
         .asInstanceOf[BatchWriteBuilderImpl]
@@ -424,6 +428,9 @@ case class PaimonSparkWriter(
       writeBuilder
     }
     val tableCommit = finalWriteBuilder.newCommit()
+    if (operation != null) {
+      tableCommit.withOperation(operation)
+    }
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {

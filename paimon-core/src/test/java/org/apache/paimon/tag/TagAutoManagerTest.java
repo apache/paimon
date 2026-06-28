@@ -410,6 +410,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null);
         tagManager.createTag(
                 snapshot1,
@@ -435,6 +436,7 @@ public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
                         1000,
                         0L,
                         0L,
+                        null,
                         null,
                         null,
                         null,

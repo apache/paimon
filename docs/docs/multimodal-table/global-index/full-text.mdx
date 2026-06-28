@@ -1,6 +1,6 @@
 ---
 title: "Full-Text Index"
-sidebar_position: 3
+sidebar_position: 4
 ---
 
 import Tabs from '@theme/Tabs';
@@ -113,20 +113,49 @@ Set `tantivy.with-position=false` to reduce index size when phrase queries are n
 
 ## Full-Text Search
 
-The query operator controls how multiple query terms are matched:
-
-| Operator | Meaning |
-|---|---|
-| `or` | Return rows matching any query term. |
-| `and` | Return rows matching all query terms. |
+Full-text search accepts a JSON query DSL. The root JSON object should contain one query type.
+Paimon supports `match`, `match_phrase` / `phrase`, `boost`, `multi_match`, and `boolean`.
+The same JSON DSL is used by Spark SQL `full_text_search(...)`, Java `FullTextQuery.fromJson(...)`,
+Python `FullTextQuery.from_json(...)`, and full-text routes in Hybrid Search.
 
 <Tabs groupId="fulltext-search">
 
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Search for top-10 documents matching the query
-SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10);
+-- Search for top-10 documents matching any query term. The default query operator is 'Or'.
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"match":{"column":"content","terms":"paimon lake format"}}',
+    10
+);
+
+-- Search for top-10 documents matching all query terms.
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"match":{"column":"content","terms":"paimon lake format","operator":"And"}}',
+    10
+);
+
+-- Structured query DSL. The JSON shape follows LanceDB full-text queries:
+-- match, match_phrase, boost, multi_match, and boolean.
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"match_phrase":{"column":"content","terms":"paimon lake","slop":1}}',
+    10
+);
+
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"boolean":{"must":[{"match":{"column":"content","terms":"paimon"}},{"match":{"column":"content","terms":"format"}}],"must_not":[{"match":{"column":"content","terms":"vector"}}]}}',
+    10
+);
+
+SELECT * FROM full_text_search(
+    'my_table',
+    '{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0],"operator":"Or"}}',
+    10
+);
 ```
 
 </TabItem>
@@ -138,10 +167,8 @@ Table table = catalog.getTable(identifier);
 
 // Step 1: Build full-text search
 GlobalIndexResult result = table.newFullTextSearchBuilder()
-        .withQueryText("paimon lake format")
-        .withQueryOperator("and")
+        .withQuery(FullTextQuery.phrase("paimon lake", "content", 1))
         .withLimit(10)
-        .withTextColumn("content")
         .executeLocal();
 
 // Step 2: Read matching rows using the search result
@@ -159,14 +186,14 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 <TabItem value="python-sdk" label="Python SDK">
 
 ```python
+from pypaimon.globalindex.full_text_query import MatchQuery
+
 table = catalog.get_table("db.my_table")
 
 # Step 1: Build full-text search
 result = (
     table.new_full_text_search_builder()
-    .with_text_column("content")
-    .with_query_text("paimon lake format")
-    .with_query_operator("and")
+    .with_query(MatchQuery("paimon lake format", "content", operator="And"))
     .with_limit(10)
     .execute_local()
 )
@@ -188,3 +215,198 @@ when the `jieba` package is installed.
 </TabItem>
 
 </Tabs>
+
+## Query DSL Reference
+
+### Match
+
+Use `match` to search terms in one text column. By default, a row matches if any query term
+matches.
+
+```json
+{
+  "match": {
+    "column": "content",
+    "terms": "paimon lake format",
+    "operator": "or",
+    "boost": 2.0,
+    "fuzziness": 1,
+    "max_expansions": 50,
+    "prefix_length": 0
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `column` | Yes |  | Text column to search. |
+| `terms` | Yes |  | Query text. `query` is also accepted as an alias. |
+| `operator` | No | `or` | How query terms are combined. Supported values are `or` and `and`. |
+| `boost` | No | `1.0` | Positive score multiplier for this query. |
+| `fuzziness` | No | `0` | Edit distance for fuzzy matching. Supported numeric values are `0`, `1`, and `2`. Use `null` or `auto` to leave fuzziness unset. |
+| `max_expansions` | No | `50` | Maximum fuzzy term expansions. `maxExpansions` is also accepted. |
+| `prefix_length` | No | `0` | Number of leading characters that must match exactly for fuzzy matching. `prefixLength` is also accepted. |
+
+### Phrase
+
+Use `match_phrase` to match terms in order. Phrase queries require the index to store positions,
+so keep `tantivy.with-position=true` when building indexes that need phrase search.
+
+```json
+{
+  "match_phrase": {
+    "column": "content",
+    "terms": "paimon lake",
+    "slop": 1
+  }
+}
+```
+
+`phrase` is accepted as an alias for `match_phrase`, and `query` is accepted as an alias for
+`terms`. Paimon serializes phrase queries as `match_phrase`.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `column` | Yes |  | Text column to search. |
+| `terms` | Yes |  | Phrase text. `query` is also accepted as an alias. |
+| `slop` | No | `0` | Maximum number of term-position moves allowed in the phrase. |
+
+### Multi Match
+
+Use `multi_match` to search the same query text across multiple columns in one full-text query.
+Column boosts are applied inside the full-text score before the final top-k is selected.
+
+```json
+{
+  "multi_match": {
+    "query": "paimon lake",
+    "columns": ["title", "content"],
+    "boost": [2.0, 1.0],
+    "operator": "or"
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `query` | Yes |  | Query text searched in every listed column. |
+| `columns` | Yes |  | Non-empty array of text columns. |
+| `boost` | No | all `1.0` | Per-column score multipliers. The array length must match `columns`. `boosts` is also accepted. |
+| `operator` | No | `or` | How query terms are combined within each column. Supported values are `or` and `and`. |
+
+### Boost
+
+Use `boost` to reduce the score of documents that also match a negative query.
+
+```json
+{
+  "boost": {
+    "positive": {
+      "match": {
+        "column": "content",
+        "terms": "paimon"
+      }
+    },
+    "negative": {
+      "match": {
+        "column": "content",
+        "terms": "vector"
+      }
+    },
+    "negative_boost": 0.3
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `positive` | Yes |  | Query that contributes the main score. |
+| `negative` | Yes |  | Query used to down-rank matching rows. |
+| `negative_boost` | No | `0.5` | Positive multiplier applied to rows that also match `negative`. `negativeBoost` is also accepted. |
+
+### Boolean
+
+Use `boolean` to combine nested queries. `must` clauses restrict matches, `should` clauses add
+matches and score, and `must_not` clauses exclude matches.
+
+```json
+{
+  "boolean": {
+    "must": [
+      {
+        "match": {
+          "column": "content",
+          "terms": "paimon"
+        }
+      }
+    ],
+    "should": [
+      {
+        "match_phrase": {
+          "column": "content",
+          "terms": "lake format"
+        }
+      }
+    ],
+    "must_not": [
+      {
+        "match": {
+          "column": "content",
+          "terms": "vector"
+        }
+      }
+    ]
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `must` | No | empty | Array of nested queries that every result must match. |
+| `should` | No | empty | Array of nested queries that can match and contribute score. |
+| `must_not` | No | empty | Array of nested queries that matching rows must not satisfy. |
+
+`boolean` also accepts a `queries` array for explicit occurrence labels:
+
+```json
+{
+  "boolean": {
+    "queries": [
+      {
+        "occur": "must",
+        "query": {
+          "match": {
+            "column": "content",
+            "terms": "paimon"
+          }
+        }
+      },
+      [
+        "must_not",
+        {
+          "match": {
+            "column": "content",
+            "terms": "vector"
+          }
+        }
+      ]
+    ]
+  }
+}
+```
+
+Supported `occur` values are `should`, `must`, and `must_not`.
+
+### Validation Notes
+
+- Query text and column names cannot be empty.
+- Boost values and `negative_boost` must be positive.
+- `max_expansions` must be positive.
+- `prefix_length` and `slop` must be non-negative.
+- `fuzziness` must be `0`, `1`, `2`, `null`, or `auto`.
+- `max_expansions` and `prefix_length` are part of the DSL for LanceDB compatibility. The current
+  Tantivy backend accepts the default values only: `max_expansions=50` and `prefix_length=0`.
+- PyPaimon can parse the same DSL, but its local Tantivy reader does not support every advanced
+  scoring option yet. Unsupported options fail fast instead of changing query semantics silently.
+- Multi-column queries such as `multi_match` require full-text indexes for every referenced
+  column.

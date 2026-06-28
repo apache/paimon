@@ -15,44 +15,44 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""FullTextSearch for performing full-text search on a text column."""
+"""FullTextSearch for performing full-text search with a structured query."""
 
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
+
+from pypaimon.globalindex.full_text_query import FullTextQuery
 
 
 @dataclass
 class FullTextSearch:
     """
-    FullTextSearch to perform full-text search on a text column.
+    FullTextSearch to perform full-text search with a structured query.
 
     Attributes:
-        query_text: The query text to search
+        query: The structured full-text query
         limit: Maximum number of results to return
-        field_name: Name of the text field to search
     """
 
-    query_text: str
+    query: FullTextQuery
     limit: int
-    field_name: str
-    query_operator: str = "or"
 
     def __post_init__(self):
-        if not self.query_text:
-            raise ValueError("Query text cannot be None or empty")
+        if self.query is None:
+            raise ValueError("Query cannot be None")
         if self.limit <= 0:
             raise ValueError(f"Limit must be positive, got: {self.limit}")
-        if not self.field_name:
-            raise ValueError("Field name cannot be null or empty")
-        query_operator = (
-            "or" if self.query_operator is None else self.query_operator.strip().lower()
-        )
-        if query_operator not in ("or", "and"):
-            raise ValueError(
-                "Query operator must be 'or' or 'and', got: %s" % self.query_operator
-            )
-        self.query_operator = query_operator
+
+    @property
+    def columns(self) -> List[str]:
+        return self.query.referenced_columns()
+
+    @property
+    def field_name(self) -> str:
+        return self.query.single_column()
+
+    def query_json(self) -> str:
+        return self.query.to_json()
 
     def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""
@@ -60,6 +60,6 @@ class FullTextSearch:
 
     def __repr__(self) -> str:
         return (
-            f"FullTextSearch(field={self.field_name}, query='{self.query_text}', "
-            f"limit={self.limit}, operator={self.query_operator})"
+            f"FullTextSearch(columns={self.columns}, limit={self.limit}, "
+            f"query_json={self.query_json()})"
         )

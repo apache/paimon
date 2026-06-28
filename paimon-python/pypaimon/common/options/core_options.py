@@ -90,6 +90,12 @@ class GlobalIndexColumnUpdateAction(str, Enum):
     DROP_PARTITION_INDEX = "DROP_PARTITION_INDEX"
 
 
+class GlobalIndexSearchMode(str, Enum):
+    FAST = "fast"
+    FULL = "full"
+    DETAIL = "detail"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -575,6 +581,33 @@ class CoreOptions:
         .default_value(False)
         .with_description("Whether to enable data evolution.")
     )
+
+    DATA_EVOLUTION_ROW_SIDECAR_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("data-evolution.row-sidecar.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to generate row-store sidecar files for normal data files on data evolution tables."
+        )
+    )
+
+    DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS: ConfigOption[int] = (
+        ConfigOptions.key("data-evolution.row-sidecar.max-selected-rows")
+        .long_type()
+        .default_value(4096)
+        .with_description(
+            "Maximum selected row count for reading a row-store sidecar file."
+        )
+    )
+
+    DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO: ConfigOption[float] = (
+        ConfigOptions.key("data-evolution.row-sidecar.max-selection-ratio")
+        .double_type()
+        .default_value(0.05)
+        .with_description(
+            "Maximum selected row ratio for reading a row-store sidecar file."
+        )
+    )
     # External paths options
     DATA_FILE_EXTERNAL_PATHS: ConfigOption[str] = (
         ConfigOptions.key("data-file.external-paths")
@@ -618,6 +651,16 @@ class CoreOptions:
         .with_description("Whether to enable global index for scan.")
     )
 
+    GLOBAL_INDEX_SEARCH_MODE: ConfigOption[GlobalIndexSearchMode] = (
+        ConfigOptions.key("global-index.search-mode")
+        .enum_type(GlobalIndexSearchMode)
+        .default_value(GlobalIndexSearchMode.FAST)
+        .with_description(
+            "Search mode for global index queries. "
+            "Supported values are 'fast', 'full', and 'detail'."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -635,6 +678,24 @@ class CoreOptions:
         .with_description(
             "Defines the action to take when an update modifies columns that "
             "are covered by a global index."
+        )
+    )
+
+    BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("btree-index.fallback-scan-max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "The maximum total BTree global index file size to allow fallback index scans."
+        )
+    )
+
+    BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("bitmap-index.fallback-scan-max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(256))
+        .with_description(
+            "The maximum total bitmap global index file size to allow fallback dictionary scans."
         )
     )
 
@@ -987,6 +1048,25 @@ class CoreOptions:
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)
 
+    def data_evolution_row_sidecar_enabled(self, default=None):
+        return self.options.get(CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_ENABLED, default)
+
+    def data_evolution_row_sidecar_max_selected_rows(self, default=None):
+        max_selected_rows = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTED_ROWS, default)
+        if max_selected_rows <= 0:
+            raise ValueError(
+                "data-evolution.row-sidecar.max-selected-rows must be greater than 0.")
+        return max_selected_rows
+
+    def data_evolution_row_sidecar_max_selection_ratio(self, default=None):
+        max_selection_ratio = self.options.get(
+            CoreOptions.DATA_EVOLUTION_ROW_SIDECAR_MAX_SELECTION_RATIO, default)
+        if max_selection_ratio <= 0 or max_selection_ratio > 1:
+            raise ValueError(
+                "data-evolution.row-sidecar.max-selection-ratio must be in (0, 1].")
+        return max_selection_ratio
+
     def global_index_column_update_action(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION, default)
 
@@ -1091,8 +1171,21 @@ class CoreOptions:
     def global_index_enabled(self, default=None):
         return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)
 
+    def global_index_search_mode(self):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
+
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def btree_index_fallback_scan_max_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
+        ).get_bytes()
+
+    def bitmap_index_fallback_scan_max_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE
+        ).get_bytes()
 
     def local_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)

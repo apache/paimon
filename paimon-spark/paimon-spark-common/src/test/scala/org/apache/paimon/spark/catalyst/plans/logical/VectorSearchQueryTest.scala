@@ -101,6 +101,28 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().get(0).options().isEmpty)
   }
 
+  test("create hybrid search with mrr ranker") {
+    val search = HybridSearchQuery(Seq.empty).createHybridSearch(
+      innerTable,
+      Seq(
+        CreateArray(
+          Seq(
+            CreateNamedStruct(
+              Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f)))
+              )))),
+        CreateArray(Seq.empty),
+        Literal(7),
+        Literal("mrr")
+      )
+    )
+
+    assert(search.ranker() == "mrr")
+  }
+
   test("create hybrid search with full-text route configs") {
     val search = HybridSearchQuery(Seq.empty).createHybridSearch(
       innerTable,
@@ -109,12 +131,8 @@ class VectorSearchQueryTest extends AnyFunSuite {
         CreateArray(
           Seq(
             CreateNamedStruct(Seq(
-              Literal("field"),
-              Literal("content"),
-              Literal("query_text"),
-              Literal("paimon lake"),
-              Literal("query_operator"),
-              Literal("and"),
+              Literal("query"),
+              Literal("""{"match":{"column":"content","terms":"paimon lake","operator":"And"}}"""),
               Literal("limit"),
               Literal(20),
               Literal("weight"),
@@ -131,10 +149,127 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().size() == 1)
     assert(search.routes().get(0).isFullText)
     assert(search.routes().get(0).fieldName() == "content")
-    assert(search.routes().get(0).queryText() == "paimon lake")
-    assert(search.routes().get(0).queryOperator() == "and")
+    assert(search.routes().get(0).fullTextQuery().queryText() == "paimon lake")
+    assert(search.routes().get(0).fullTextQuery().toJson.contains("\"operator\":\"And\""))
     assert(search.routes().get(0).limit() == 20)
     assert(search.routes().get(0).weight() == 1.5f)
+  }
+
+  test("reject hybrid full-text route with non-empty options") {
+    val exception = intercept[IllegalArgumentException] {
+      HybridSearchQuery(Seq.empty).createHybridSearch(
+        innerTable,
+        Seq(
+          CreateArray(Seq.empty),
+          CreateArray(
+            Seq(
+              CreateNamedStruct(Seq(
+                Literal("query"),
+                Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+                Literal("options"),
+                CreateMap(Seq(Literal("some.option"), Literal("x")))
+              ))
+            )),
+          Literal(5)
+        )
+      )
+    }
+
+    assert(exception.getMessage.contains("Full-text hybrid route options are not supported yet"))
+  }
+
+  test("reject hybrid route with non-finite weight") {
+    val vectorException = intercept[IllegalArgumentException] {
+      HybridSearchQuery(Seq.empty).createHybridSearch(
+        innerTable,
+        Seq(
+          CreateArray(
+            Seq(
+              CreateNamedStruct(Seq(
+                Literal("vector_column"),
+                Literal("title_vec"),
+                Literal("query_vector"),
+                CreateArray(Seq(Literal(1.0f), Literal(0.0f))),
+                Literal("weight"),
+                Literal(Float.NaN)
+              ))
+            )),
+          CreateArray(Seq.empty),
+          Literal(5)
+        )
+      )
+    }
+
+    assert(vectorException.getMessage.contains("Weight must be finite and positive"))
+
+    val fullTextException = intercept[IllegalArgumentException] {
+      HybridSearchQuery(Seq.empty).createHybridSearch(
+        innerTable,
+        Seq(
+          CreateArray(Seq.empty),
+          CreateArray(
+            Seq(
+              CreateNamedStruct(
+                Seq(
+                  Literal("query"),
+                  Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+                  Literal("weight"),
+                  Literal(Float.PositiveInfinity)
+                ))
+            )),
+          Literal(5)
+        )
+      )
+    }
+
+    assert(fullTextException.getMessage.contains("Weight must be finite and positive"))
+  }
+
+  test("create full-text search") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""), Literal(10)))
+
+    assert(search.fieldName() == "content")
+    assert(search.query().queryText() == "paimon lake")
+    assert(search.limit() == 10)
+  }
+
+  test("create full-text search with explicit query operator") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(
+        Literal("""{"match":{"column":"content","terms":"paimon lake","operator":"And"}}"""),
+        Literal(10)))
+
+    assert(search.fieldName() == "content")
+    assert(search.query().queryText() == "paimon lake")
+    assert(search.limit() == 10)
+    assert(search.query().toJson.contains("\"operator\":\"And\""))
+  }
+
+  test("create multi-column full-text search") {
+    val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
+      innerTable,
+      Seq(
+        Literal(
+          """{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0]}}"""),
+        Literal(10)))
+
+    assert(search.columns().size() == 2)
+    assert(search.columns().contains("title"))
+    assert(search.columns().contains("content"))
+    assert(search.query().toJson.contains("\"multi_match\""))
+  }
+
+  test("reject full-text search column that does not exist") {
+    val exception = intercept[RuntimeException] {
+      FullTextSearchQuery(Seq.empty).createFullTextSearch(
+        innerTable,
+        Seq(Literal("""{"match":{"column":"missing","terms":"paimon lake"}}"""), Literal(10)))
+    }
+
+    assert(exception.getMessage.contains("Column missing does not exist"))
   }
 
   test("reject hybrid search query map") {
@@ -195,8 +330,9 @@ class VectorSearchQueryTest extends AnyFunSuite {
                 new ArrayType(DataTypes.FLOAT()),
                 new ArrayType(DataTypes.FLOAT()),
                 new ArrayType(DataTypes.FLOAT()),
+                DataTypes.STRING(),
                 DataTypes.STRING()),
-              Array[String]("v", "title_vec", "body_vec", "content")
+              Array[String]("v", "title_vec", "body_vec", "title", "content")
             )
 
           override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {

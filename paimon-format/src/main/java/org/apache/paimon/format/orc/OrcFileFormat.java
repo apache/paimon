@@ -78,6 +78,8 @@ public class OrcFileFormat extends FileFormat {
         this.orcProperties = getOrcProperties(formatContext.options(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration(false);
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
+        OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.setBoolean(
+                readerConf, formatContext.caseSensitive());
         this.writerConf = new org.apache.hadoop.conf.Configuration(false);
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();

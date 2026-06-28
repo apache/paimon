@@ -185,9 +185,19 @@ public class CDCSourceSplitReader
     @Override
     public void close() throws Exception {
         currentSchemaChangeEvents.clear();
-        if (currentReader != null) {
-            if (currentReader.lazyRecordReader != null) {
-                currentReader.lazyRecordReader.close();
+        try {
+            if (currentFirstBatch != null) {
+                try {
+                    currentFirstBatch.releaseBatch();
+                } finally {
+                    currentFirstBatch = null;
+                }
+            }
+        } finally {
+            if (currentReader != null) {
+                if (currentReader.lazyRecordReader != null) {
+                    currentReader.lazyRecordReader.close();
+                }
             }
         }
     }
@@ -199,7 +209,7 @@ public class CDCSourceSplitReader
 
         final TableAwareFileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
-            return;
+            throw new IOException("Cannot fetch from another split - no split remaining");
         }
 
         // update metric when split changes
@@ -221,13 +231,31 @@ public class CDCSourceSplitReader
         currentReader = createLazyRecordReader(nextSplit.split());
         currentDataRowsRead = nextSplit.recordsToSkip();
         currentSchemaChangeEvents.clear();
-        if (currentDataRowsRead == 0) {
-            currentSchemaChangeEvents.addAll(schemaChangeEvents);
+        long schemaChangeEventsToSkip =
+                schemaChangeEventsToSkip(nextSplit, schemaChangeEvents.size());
+        for (int i = (int) schemaChangeEventsToSkip; i < schemaChangeEvents.size(); i++) {
+            currentSchemaChangeEvents.add(schemaChangeEvents.get(i));
         }
 
         if (currentDataRowsRead > 0) {
             seek(currentDataRowsRead);
         }
+    }
+
+    private long schemaChangeEventsToSkip(
+            TableAwareFileStoreSourceSplit split, int schemaChangeEventCount) throws IOException {
+        long schemaChangeEventsToSkip =
+                split.isLegacySchemaProgress() && split.recordsToSkip() > 0
+                        ? schemaChangeEventCount
+                        : split.schemaChangeEventsToSkip();
+        if (schemaChangeEventsToSkip < 0 || schemaChangeEventsToSkip > schemaChangeEventCount) {
+            throw new IOException(
+                    String.format(
+                            "Invalid schema change event skip count %s for split %s. "
+                                    + "The split has only %s schema change events.",
+                            schemaChangeEventsToSkip, split.splitId(), schemaChangeEventCount));
+        }
+        return schemaChangeEventsToSkip;
     }
 
     @VisibleForTesting
@@ -320,8 +348,11 @@ public class CDCSourceSplitReader
 
         @Override
         public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+            try {
+                this.iterator.releaseBatch();
+            } finally {
+                pool.recycler().recycle(this);
+            }
         }
     }
 
