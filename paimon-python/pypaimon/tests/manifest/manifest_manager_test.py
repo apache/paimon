@@ -388,9 +388,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         entries = [big if i % 5 == 0 else small for i in range(300)]
         metas = manager.rolling_write(entries, target_size, "manifest-skew")
 
-        # Streaming rolling checks size every N records after flush, so files
-        # may exceed target by up to one batch worth of large entries.
-        max_allowed = target_size * 5
+        max_allowed = target_size * 2
         oversized = [m for m in metas if m.file_size > max_allowed]
         self.assertEqual(
             len(oversized), 0,

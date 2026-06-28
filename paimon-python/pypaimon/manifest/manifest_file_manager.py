@@ -212,8 +212,6 @@ class ManifestFileManager:
         fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
         self._flush(file_name, buf.getvalue())
 
-    _CHECK_ROLLING_RECORD_CNT = 100
-
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
                       name_prefix: str) -> List[ManifestFileMeta]:
@@ -222,26 +220,25 @@ class ManifestFileManager:
 
         from fastavro.write import Writer
 
+        sync_interval = min(16000, suggested_file_size)
         result = []
         chunk_start = 0
         buf = BytesIO()
-        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA)
+        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
         try:
             for i, entry in enumerate(entries):
                 writer.write(self._to_avro_record(entry))
-                if (i + 1) % self._CHECK_ROLLING_RECORD_CNT == 0:
+                if buf.tell() >= suggested_file_size:
                     writer.flush()
-                    if buf.tell() >= suggested_file_size:
-                        writer.dump()
-                        file_name = f"{name_prefix}-{len(result)}"
-                        self._flush(file_name, buf.getvalue())
-                        result.append(self._build_meta(file_name, entries[chunk_start:i + 1]))
-                        chunk_start = i + 1
-                        buf = BytesIO()
-                        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA)
+                    file_name = f"{name_prefix}-{len(result)}"
+                    self._flush(file_name, buf.getvalue())
+                    result.append(self._build_meta(file_name, entries[chunk_start:i + 1]))
+                    chunk_start = i + 1
+                    buf = BytesIO()
+                    writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
 
             if chunk_start < len(entries):
-                writer.dump()
+                writer.flush()
                 file_name = f"{name_prefix}-{len(result)}"
                 self._flush(file_name, buf.getvalue())
                 result.append(self._build_meta(file_name, entries[chunk_start:]))
