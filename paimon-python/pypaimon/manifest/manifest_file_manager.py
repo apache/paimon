@@ -212,7 +212,7 @@ class ManifestFileManager:
         fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
         self._flush(file_name, buf.getvalue())
 
-    _ROLLING_SAMPLE_SIZE = 64
+    _CHECK_ROLLING_RECORD_CNT = 100
 
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
@@ -220,95 +220,79 @@ class ManifestFileManager:
         if not entries:
             return []
 
-        avro_records = self._to_avro_records(entries)
+        from fastavro.write import Writer
 
-        sample_n = min(self._ROLLING_SAMPLE_SIZE, len(entries))
-        sample_buf = BytesIO()
-        fastavro.writer(sample_buf, MANIFEST_ENTRY_SCHEMA, avro_records[:sample_n])
-        avg_entry_size = max(1, sample_buf.tell() / sample_n)
-
-        if avg_entry_size * len(entries) <= suggested_file_size:
-            # Likely fits in one file — serialize all and verify
-            buf = BytesIO()
-            fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, avro_records)
-            if buf.tell() <= suggested_file_size:
-                file_name = f"{name_prefix}-0"
-                self._flush(file_name, buf.getvalue())
-                return [self._build_meta(file_name, entries)]
-            avg_entry_size = buf.tell() / len(entries)
-
-        entries_per_chunk = max(1, int(suggested_file_size / avg_entry_size))
-        pos = 0
         result = []
+        chunk_start = 0
+        buf = BytesIO()
+        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA)
         try:
-            while pos < len(entries):
-                end = min(pos + entries_per_chunk, len(entries))
-                chunk_buf = BytesIO()
-                fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, avro_records[pos:end])
-                chunk_size = chunk_buf.tell()
+            for i, entry in enumerate(entries):
+                writer.write(self._to_avro_record(entry))
+                if (i + 1) % self._CHECK_ROLLING_RECORD_CNT == 0:
+                    writer.flush()
+                    if buf.tell() >= suggested_file_size:
+                        writer.dump()
+                        file_name = f"{name_prefix}-{len(result)}"
+                        self._flush(file_name, buf.getvalue())
+                        result.append(self._build_meta(file_name, entries[chunk_start:i + 1]))
+                        chunk_start = i + 1
+                        buf = BytesIO()
+                        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA)
 
-                # Adaptive: if chunk overshoots, shrink and re-serialize
-                if chunk_size > suggested_file_size and end - pos > 1:
-                    end = pos + max(1, int((end - pos) * suggested_file_size / chunk_size))
-                    chunk_buf = BytesIO()
-                    fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, avro_records[pos:end])
-                    chunk_size = chunk_buf.tell()
-
+            if chunk_start < len(entries):
+                writer.dump()
                 file_name = f"{name_prefix}-{len(result)}"
-                self._flush(file_name, chunk_buf.getvalue())
-                result.append(self._build_meta(file_name, entries[pos:end]))
-
-                # Adapt entries_per_chunk for next iteration based on actual size
-                if chunk_size > 0:
-                    entries_per_chunk = max(1, int((end - pos) * suggested_file_size / chunk_size))
-                pos = end
+                self._flush(file_name, buf.getvalue())
+                result.append(self._build_meta(file_name, entries[chunk_start:]))
         except Exception:
             for meta in result:
                 self.file_io.delete_quietly(f"{self.manifest_path}/{meta.file_name}")
             raise
         return result
 
+    @staticmethod
+    def _to_avro_record(entry: ManifestEntry) -> dict:
+        return {
+            "_VERSION": 2,
+            "_KIND": entry.kind,
+            "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
+            "_BUCKET": entry.bucket,
+            "_TOTAL_BUCKETS": entry.total_buckets,
+            "_FILE": {
+                "_FILE_NAME": entry.file.file_name,
+                "_FILE_SIZE": entry.file.file_size,
+                "_ROW_COUNT": entry.file.row_count,
+                "_MIN_KEY": GenericRowSerializer.to_bytes(entry.file.min_key),
+                "_MAX_KEY": GenericRowSerializer.to_bytes(entry.file.max_key),
+                "_KEY_STATS": {
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.max_values),
+                    "_NULL_COUNTS": entry.file.key_stats.null_counts,
+                },
+                "_VALUE_STATS": {
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.max_values),
+                    "_NULL_COUNTS": entry.file.value_stats.null_counts,
+                },
+                "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
+                "_MAX_SEQUENCE_NUMBER": entry.file.max_sequence_number,
+                "_SCHEMA_ID": entry.file.schema_id,
+                "_LEVEL": entry.file.level,
+                "_EXTRA_FILES": entry.file.extra_files,
+                "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
+                "_DELETE_ROW_COUNT": entry.file.delete_row_count,
+                "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
+                "_FILE_SOURCE": entry.file.file_source,
+                "_VALUE_STATS_COLS": entry.file.value_stats_cols,
+                "_EXTERNAL_PATH": entry.file.external_path,
+                "_FIRST_ROW_ID": entry.file.first_row_id,
+                "_WRITE_COLS": entry.file.write_cols,
+            }
+        }
+
     def _to_avro_records(self, entries: List[ManifestEntry]) -> List[dict]:
-        records = []
-        for entry in entries:
-            records.append({
-                "_VERSION": 2,
-                "_KIND": entry.kind,
-                "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
-                "_BUCKET": entry.bucket,
-                "_TOTAL_BUCKETS": entry.total_buckets,
-                "_FILE": {
-                    "_FILE_NAME": entry.file.file_name,
-                    "_FILE_SIZE": entry.file.file_size,
-                    "_ROW_COUNT": entry.file.row_count,
-                    "_MIN_KEY": GenericRowSerializer.to_bytes(entry.file.min_key),
-                    "_MAX_KEY": GenericRowSerializer.to_bytes(entry.file.max_key),
-                    "_KEY_STATS": {
-                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.min_values),
-                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.max_values),
-                        "_NULL_COUNTS": entry.file.key_stats.null_counts,
-                    },
-                    "_VALUE_STATS": {
-                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.min_values),
-                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.max_values),
-                        "_NULL_COUNTS": entry.file.value_stats.null_counts,
-                    },
-                    "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
-                    "_MAX_SEQUENCE_NUMBER": entry.file.max_sequence_number,
-                    "_SCHEMA_ID": entry.file.schema_id,
-                    "_LEVEL": entry.file.level,
-                    "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
-                    "_DELETE_ROW_COUNT": entry.file.delete_row_count,
-                    "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
-                    "_FILE_SOURCE": entry.file.file_source,
-                    "_VALUE_STATS_COLS": entry.file.value_stats_cols,
-                    "_EXTERNAL_PATH": entry.file.external_path,
-                    "_FIRST_ROW_ID": entry.file.first_row_id,
-                    "_WRITE_COLS": entry.file.write_cols,
-                }
-            })
-        return records
+        return [self._to_avro_record(e) for e in entries]
 
     def _flush(self, file_name: str, avro_bytes: bytes):
         manifest_path = f"{self.manifest_path}/{file_name}"
