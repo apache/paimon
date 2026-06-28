@@ -647,10 +647,11 @@ class FileStoreCommit:
                 ))
         return changelog_entries
 
-    def _clean_up_reuse_tmp_manifests(self,
-                                     delta_manifest_list: Optional[str],
-                                     changelog_manifest_list: Optional[str],
-                                     index_manifest: Optional[str] = None):
+    def _clean_up_reuse_tmp_manifests(
+            self,
+            delta_manifest_list: Optional[str],
+            changelog_manifest_list: Optional[str],
+            index_manifest: Optional[str] = None):
         """Clean up delta/changelog manifests and index manifest.
 
         Mirrors Java CommitCleaner.cleanUpReuseTmpManifests.
@@ -668,9 +669,10 @@ class FileStoreCommit:
         if index_manifest:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
 
-    def _clean_up_no_reuse_tmp_manifests(self,
-                                         base_manifest_list: Optional[str],
-                                         merge_new_files: List[ManifestFileMeta]):
+    def _clean_up_no_reuse_tmp_manifests(
+            self,
+            base_manifest_list: Optional[str],
+            merge_new_files: List[ManifestFileMeta]):
         """Clean up base manifest list and newly created merge manifests.
 
         Mirrors Java CommitCleaner.cleanUpNoReuseTmpManifests.
