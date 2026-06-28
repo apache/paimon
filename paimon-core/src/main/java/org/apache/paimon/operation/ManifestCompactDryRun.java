@@ -27,11 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 
 import java.util.List;
 
-/**
- * Dry run for manifest compaction. Reads only existing metadata, never writes files. Replicates the
- * trigger logic from {@link ManifestFileMerger#tryFullCompaction} to predict whether compaction
- * would actually fire.
- */
+/** Dry run for manifest compaction. Reads only existing metadata, never writes files. */
 public class ManifestCompactDryRun {
 
     public static String execute(FileStoreTable table) {
@@ -55,44 +51,27 @@ public class ManifestCompactDryRun {
         long totalDeletedEntries = 0;
         long filesWithDeletedEntries = 0;
         long smallFiles = 0;
-        long filesToCompact = 0;
-        long totalDeltaFileSize = 0;
 
         for (ManifestFileMeta file : manifests) {
             totalSize += file.fileSize();
             totalDeletedEntries += file.numDeletedFiles();
-
-            boolean hasDeleted = file.numDeletedFiles() > 0;
-            boolean isSmall = file.fileSize() < suggestedMetaSize;
-
-            if (hasDeleted) {
+            if (file.numDeletedFiles() > 0) {
                 filesWithDeletedEntries++;
             }
-            if (isSmall) {
+            if (file.fileSize() < suggestedMetaSize) {
                 smallFiles++;
             }
-            if (hasDeleted || isSmall) {
-                filesToCompact++;
-                totalDeltaFileSize += file.fileSize();
-            }
         }
-
-        // compactManifestOnce forces sizeTrigger = 1 byte
-        boolean wouldTrigger = totalDeltaFileSize >= 1;
 
         return String.format(
                 "Dry run: %d manifest files (%s), "
                         + "%d deleted entries in %d files, "
-                        + "%d undersized files (< %s), "
-                        + "%d files to compact, "
-                        + "would trigger: %s.",
+                        + "%d undersized files (< %s).",
                 totalFiles,
                 MemorySize.ofBytes(totalSize),
                 totalDeletedEntries,
                 filesWithDeletedEntries,
                 smallFiles,
-                MemorySize.ofBytes(suggestedMetaSize),
-                filesToCompact,
-                wouldTrigger);
+                MemorySize.ofBytes(suggestedMetaSize));
     }
 }
