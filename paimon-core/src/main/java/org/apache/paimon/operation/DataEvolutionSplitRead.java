@@ -38,7 +38,6 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
-import org.apache.paimon.reader.DataEvolutionRow;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
@@ -61,16 +60,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
@@ -254,216 +248,26 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        // Init all we need to create a compound reader
+        // Init all we need to create a compound reader: resolve each bunch's physically-provided
+        // (row-tracked) row type, then delegate the no-IO layout planning (leaf-level matching and
+        // nested sub-field assembly) to DataEvolutionReadPlanner; this class only builds readers.
         List<DataField> allReadFields = readRowType.getFields();
-        int numFields = allReadFields.size();
         int numBunches = fieldsFiles.size();
         RecordReader<InternalRow>[] fileRecordReaders = new RecordReader[numBunches];
 
-        // Step 1: for each bunch (file), gather its (possibly nested) data row type and the set of
-        // leaf field ids it physically provides. writeCols may carry nested dotted paths.
-        long[] bunchSchemaId = new long[numBunches];
-        List<Set<Integer>> bunchLeaves = new ArrayList<>();
+        List<RowType> bunchAvailTypes = new ArrayList<>();
+        for (FieldBunch fieldBunch : fieldsFiles) {
+            DataFileMeta first = fieldBunch.files().get(0);
+            TableSchema dataSchema =
+                    schemaFetcher.apply(first.schemaId()).project(first.writeCols());
+            bunchAvailTypes.add(rowTypeWithRowTracking(dataSchema.logicalRowType()));
+        }
+        DataEvolutionReadPlanner.DataEvolutionReadPlan plan =
+                new DataEvolutionReadPlanner(readRowType, bunchAvailTypes).plan();
+
+        // Build the per-bunch readers from the planned partial read row types.
         for (int i = 0; i < numBunches; i++) {
-            DataFileMeta firstFile = fieldsFiles.get(i).files().get(0);
-            long schemaId = firstFile.schemaId();
-            bunchSchemaId[i] = schemaId;
-            TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
-            RowType avail = rowTypeWithRowTracking(dataSchema.logicalRowType());
-            Set<Integer> leaves = new HashSet<>();
-            collectLeafIds(avail.getFields(), leaves);
-            bunchLeaves.add(leaves);
-        }
-
-        // Step 2: decide, per read field, whether it is taken whole from one file or composed from
-        // several files at sub-field granularity. Files are already sorted latest-first, so the
-        // first bunch providing a leaf wins (latest-wins semantics, now at sub-field level).
-        // selection per bunch: topFieldId -> null (whole) or set of selected sub-field ids
-        List<Map<Integer, Set<Integer>>> bunchSelection = new ArrayList<>();
-        for (int i = 0; i < numBunches; i++) {
-            bunchSelection.add(new LinkedHashMap<>());
-        }
-
-        int[] rowOffsets = new int[numFields];
-        int[] fieldOffsets = new int[numFields];
-        Arrays.fill(rowOffsets, -1);
-        Arrays.fill(fieldOffsets, -1);
-        DataEvolutionRow.NestedField[] nested = new DataEvolutionRow.NestedField[numFields];
-        boolean[] composite = new boolean[numFields];
-        int[] wholeBunch = new int[numFields];
-        Arrays.fill(wholeBunch, -1);
-
-        for (int j = 0; j < numFields; j++) {
-            DataField rf = allReadFields.get(j);
-            List<Integer> leaves = leafIdsOf(rf);
-            Map<Integer, Integer> leafProvider = new HashMap<>();
-            Set<Integer> providers = new HashSet<>();
-            for (int leaf : leaves) {
-                int p = providerOf(leaf, bunchLeaves);
-                if (p >= 0) {
-                    leafProvider.put(leaf, p);
-                    providers.add(p);
-                }
-            }
-            if (providers.isEmpty()) {
-                // no file provides this field; it stays null (nullability checked below)
-                continue;
-            }
-            // Only read a field whole from a single file when that file covers ALL of its leaves.
-            // If a single file provides only some leaves of a struct (the rest absent everywhere),
-            // we must prune to the provided sub-fields so the reader is not asked for sub-fields
-            // the
-            // file does not physically contain; the missing ones stay null via the composite plan.
-            boolean allLeavesCovered = leafProvider.size() == leaves.size();
-            if (providers.size() == 1 && allLeavesCovered) {
-                int b = providers.iterator().next();
-                bunchSelection.get(b).put(rf.id(), null);
-                wholeBunch[j] = b;
-            } else {
-                checkArgument(
-                        rf.type() instanceof RowType,
-                        "Field %s is split across files but is not a struct.",
-                        rf.name());
-                composite[j] = true;
-                for (DataField sub : ((RowType) rf.type()).getFields()) {
-                    List<Integer> subLeaves = leafIdsOf(sub);
-                    Set<Integer> subProviders = new HashSet<>();
-                    int coveredSubLeaves = 0;
-                    for (int leaf : subLeaves) {
-                        int p = leafProvider.getOrDefault(leaf, -1);
-                        if (p >= 0) {
-                            subProviders.add(p);
-                            coveredSubLeaves++;
-                        }
-                    }
-                    if (subProviders.size() > 1) {
-                        throw new UnsupportedOperationException(
-                                "Sub-field-level data evolution does not yet support splitting a "
-                                        + "nested sub-field ("
-                                        + rf.name()
-                                        + "."
-                                        + sub.name()
-                                        + ") across multiple files.");
-                    }
-                    if (subProviders.size() == 1) {
-                        if (sub.type() instanceof RowType && coveredSubLeaves < subLeaves.size()) {
-                            // the single provider holds only part of this nested sub-struct;
-                            // reading
-                            // it whole would request leaves it lacks, and one-level composition
-                            // cannot prune deeper than this level yet
-                            throw new UnsupportedOperationException(
-                                    "Sub-field-level data evolution does not yet support reading a "
-                                            + "partially-written nested sub-field ("
-                                            + rf.name()
-                                            + "."
-                                            + sub.name()
-                                            + ") deeper than one level.");
-                        }
-                        int b = subProviders.iterator().next();
-                        bunchSelection
-                                .get(b)
-                                .computeIfAbsent(rf.id(), k -> new LinkedHashSet<>())
-                                .add(sub.id());
-                    }
-                    // else: sub-field absent everywhere -> stays null
-                }
-            }
-        }
-
-        // Step 3: materialize each bunch's partial read row type and the offset maps.
-        List<List<DataField>> bunchReadFields = new ArrayList<>();
-        List<Map<Integer, Integer>> bunchTopOffset = new ArrayList<>();
-        List<Map<Integer, Map<Integer, Integer>>> bunchSubOffset = new ArrayList<>();
-        for (int i = 0; i < numBunches; i++) {
-            Map<Integer, Set<Integer>> sel = bunchSelection.get(i);
-            List<DataField> readFields = new ArrayList<>();
-            Map<Integer, Integer> topOffset = new HashMap<>();
-            Map<Integer, Map<Integer, Integer>> subOffset = new HashMap<>();
-            for (Map.Entry<Integer, Set<Integer>> e : sel.entrySet()) {
-                int topId = e.getKey();
-                Set<Integer> subs = e.getValue();
-                DataField readTop = readRowType.getField(topId);
-                if (subs == null) {
-                    readFields.add(readTop);
-                    topOffset.put(topId, readFields.size() - 1);
-                } else {
-                    RowType readStruct = (RowType) readTop.type();
-                    List<DataField> chosen = new ArrayList<>();
-                    Map<Integer, Integer> subToIdx = new HashMap<>();
-                    for (DataField s : readStruct.getFields()) {
-                        if (subs.contains(s.id())) {
-                            subToIdx.put(s.id(), chosen.size());
-                            chosen.add(s);
-                        }
-                    }
-                    RowType partial = new RowType(readStruct.isNullable(), chosen);
-                    readFields.add(readTop.newType(partial));
-                    topOffset.put(topId, readFields.size() - 1);
-                    subOffset.put(topId, subToIdx);
-                }
-            }
-            bunchReadFields.add(readFields);
-            bunchTopOffset.add(topOffset);
-            bunchSubOffset.add(subOffset);
-        }
-
-        // Step 4: wire output offsets (whole fields) and nested composition plans (split structs).
-        for (int j = 0; j < numFields; j++) {
-            DataField rf = allReadFields.get(j);
-            if (composite[j]) {
-                List<DataField> subFields = ((RowType) rf.type()).getFields();
-                int subCount = subFields.size();
-                int[] subRowOffsets = new int[subCount];
-                int[] subFieldOffsets = new int[subCount];
-                Arrays.fill(subRowOffsets, -1);
-                Arrays.fill(subFieldOffsets, -1);
-                Map<Integer, Integer> bunchToPartial = new LinkedHashMap<>();
-                List<int[]> partials = new ArrayList<>();
-                for (int s = 0; s < subCount; s++) {
-                    int subId = subFields.get(s).id();
-                    int b = findSubProvider(rf.id(), subId, bunchSubOffset);
-                    if (b < 0) {
-                        // no file provides this sub-field; it stays null, so it must be nullable
-                        checkArgument(
-                                subFields.get(s).type().isNullable(),
-                                "Sub-field %s.%s is not null but can't find any file contains it.",
-                                rf.name(),
-                                subFields.get(s).name());
-                        continue;
-                    }
-                    Integer pIdx = bunchToPartial.get(b);
-                    if (pIdx == null) {
-                        int topOff = bunchTopOffset.get(b).get(rf.id());
-                        int size = bunchSubOffset.get(b).get(rf.id()).size();
-                        pIdx = partials.size();
-                        bunchToPartial.put(b, pIdx);
-                        partials.add(new int[] {b, topOff, size});
-                    }
-                    subRowOffsets[s] = pIdx;
-                    subFieldOffsets[s] = bunchSubOffset.get(b).get(rf.id()).get(subId);
-                }
-                int p = partials.size();
-                int[] pr = new int[p];
-                int[] po = new int[p];
-                int[] ps = new int[p];
-                for (int k = 0; k < p; k++) {
-                    pr[k] = partials.get(k)[0];
-                    po[k] = partials.get(k)[1];
-                    ps[k] = partials.get(k)[2];
-                }
-                nested[j] =
-                        new DataEvolutionRow.NestedField(
-                                pr, po, ps, subRowOffsets, subFieldOffsets);
-            } else if (wholeBunch[j] >= 0) {
-                int b = wholeBunch[j];
-                rowOffsets[j] = b;
-                fieldOffsets[j] = bunchTopOffset.get(b).get(rf.id());
-            }
-        }
-
-        // Step 5: build the per-bunch readers from the materialized partial read row types.
-        for (int i = 0; i < numBunches; i++) {
-            List<DataField> readFields = bunchReadFields.get(i);
+            List<DataField> readFields = plan.bunchReadFields.get(i);
             if (readFields.isEmpty()) {
                 fileRecordReaders[i] = null;
                 continue;
@@ -472,7 +276,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFileMeta firstFile = bunch.files().get(0);
             FileReadTarget readTarget = readTarget(firstFile, dataFilePathFactory, rowRanges);
             String formatIdentifier = readTarget.formatIdentifier;
-            long schemaId = bunchSchemaId[i];
+            long schemaId = firstFile.schemaId();
             TableSchema dataSchema = schemaFetcher.apply(schemaId).project(firstFile.writeCols());
             RowType partialReadRowType = new RowType(readFields);
             // cache key must use paths relative to the full schema so that two files reading
@@ -501,8 +305,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     partialReadRowType));
         }
 
-        for (int j = 0; j < numFields; j++) {
-            if (rowOffsets[j] == -1 && nested[j] == null) {
+        for (int j = 0; j < allReadFields.size(); j++) {
+            if (plan.rowOffsets[j] == -1 && plan.nested[j] == null) {
                 checkArgument(
                         allReadFields.get(j).type().isNullable(),
                         format(
@@ -511,44 +315,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
 
-        return new DataEvolutionFileReader(rowOffsets, fieldOffsets, fileRecordReaders, nested);
-    }
-
-    /** Collect (recursively) the leaf field ids of {@code fields}; only ROW types recurse. */
-    private static void collectLeafIds(List<DataField> fields, java.util.Collection<Integer> out) {
-        for (DataField f : fields) {
-            if (f.type() instanceof RowType) {
-                collectLeafIds(((RowType) f.type()).getFields(), out);
-            } else {
-                out.add(f.id());
-            }
-        }
-    }
-
-    private static List<Integer> leafIdsOf(DataField field) {
-        List<Integer> result = new ArrayList<>();
-        collectLeafIds(Collections.singletonList(field), result);
-        return result;
-    }
-
-    private static int providerOf(int leafId, List<Set<Integer>> bunchLeaves) {
-        for (int i = 0; i < bunchLeaves.size(); i++) {
-            if (bunchLeaves.get(i).contains(leafId)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int findSubProvider(
-            int topId, int subId, List<Map<Integer, Map<Integer, Integer>>> bunchSubOffset) {
-        for (int b = 0; b < bunchSubOffset.size(); b++) {
-            Map<Integer, Integer> sm = bunchSubOffset.get(b).get(topId);
-            if (sm != null && sm.containsKey(subId)) {
-                return b;
-            }
-        }
-        return -1;
+        return new DataEvolutionFileReader(
+                plan.rowOffsets, plan.fieldOffsets, fileRecordReaders, plan.nested);
     }
 
     private RecordReader<InternalRow> createFieldBunchReader(
