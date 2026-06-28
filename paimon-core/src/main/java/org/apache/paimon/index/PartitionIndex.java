@@ -240,86 +240,48 @@ public class PartitionIndex {
 
     private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
         if (refreshFuture == null || refreshFuture.isDone()) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Triggering async refresh of bucket information for partition {}. "
-                                + "Current non-full buckets: {}",
-                        partition,
-                        nonFullBucketInformation.size());
-            }
-
             // Reuse the shared FileOperationThreadPool (I/O-bound scan) rather than a dedicated
             // executor, to avoid extra thread-pool resources and fan-out.
             refreshFuture =
                     CompletableFuture.runAsync(
-                                    () -> {
-                                        try {
-                                            List<IndexManifestEntry> files =
-                                                    indexFileHandler.scanEntries(
-                                                            HASH_INDEX, partition);
-
-                                            // bucketFilter keeps only buckets owned by this
-                                            // assigner, so assigners never race for the same one.
-                                            Map<Integer, Long> tempBucketInfo =
-                                                    files.parallelStream()
-                                                            .filter(
-                                                                    file ->
-                                                                            bucketFilter.test(
-                                                                                    file.bucket()))
-                                                            .filter(
-                                                                    file ->
-                                                                            file.indexFile()
-                                                                                            .rowCount()
-                                                                                    < targetBucketRowNumber)
-                                                            .collect(
-                                                                    Collectors.toMap(
-                                                                            IndexManifestEntry
-                                                                                    ::bucket,
-                                                                            file ->
-                                                                                    file.indexFile()
-                                                                                            .rowCount(),
-                                                                            (existing,
-                                                                                    replacement) ->
-                                                                                    existing));
-
-                                            tempBucketInfo.forEach(this::reconcileBucketWithDisk);
-
-                                            lastRefreshTime = Instant.now();
-
-                                            if (LOG.isDebugEnabled()) {
-                                                LOG.debug(
-                                                        "Async refresh completed for partition {}. "
-                                                                + "Scanned {} files, found {} non-full buckets. "
-                                                                + "Current non-full buckets: {}",
-                                                        partition,
-                                                        files.size(),
-                                                        tempBucketInfo.size(),
-                                                        nonFullBucketInformation.size());
-                                            }
-                                        } catch (Exception e) {
-                                            LOG.warn(
-                                                    "Error refreshing buckets from disk for partition {}: {}",
-                                                    partition,
-                                                    e.getMessage(),
-                                                    e);
-                                        }
-                                    },
+                                    () -> scanAndReconcile(bucketFilter),
                                     FileOperationThreadPool.getExecutorService(
                                             Runtime.getRuntime().availableProcessors()))
                             .exceptionally(
-                                    throwable -> {
+                                    t -> {
                                         LOG.warn(
-                                                "Error during bucket refresh for partition {}: {}",
+                                                "Bucket refresh failed for partition {}",
                                                 partition,
-                                                throwable.getMessage());
+                                                t);
                                         return null;
                                     });
-        } else {
+        }
+    }
+
+    private void scanAndReconcile(IntPredicate bucketFilter) {
+        try {
+            List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
+            // bucketFilter keeps only buckets owned by this assigner, so assigners never race.
+            Map<Integer, Long> tempBucketInfo =
+                    files.parallelStream()
+                            .filter(f -> bucketFilter.test(f.bucket()))
+                            .filter(f -> f.indexFile().rowCount() < targetBucketRowNumber)
+                            .collect(
+                                    Collectors.toMap(
+                                            IndexManifestEntry::bucket,
+                                            f -> f.indexFile().rowCount(),
+                                            (existing, replacement) -> existing));
+            tempBucketInfo.forEach(this::reconcileBucketWithDisk);
+            lastRefreshTime = Instant.now();
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
-                        "Skipping refresh for partition {} - refresh already in progress",
-                        partition);
+                        "Refreshed partition {}: scanned {} files, {} non-full buckets.",
+                        partition,
+                        files.size(),
+                        tempBucketInfo.size());
             }
+        } catch (Exception e) {
+            LOG.warn("Error refreshing buckets from disk for partition {}", partition, e);
         }
     }
 }
