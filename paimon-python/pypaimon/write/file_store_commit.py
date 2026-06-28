@@ -424,8 +424,7 @@ class FileStoreCommit:
         changelog_record_count = None
         delta_known_metas = []
         changelog_known_metas = []
-        merge_before_manifests = []
-        merge_after_manifests = []
+        merge_new_files = []
         try:
             delta_known_metas = self._write_manifest_files(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, delta_known_metas)
@@ -454,10 +453,8 @@ class FileStoreCommit:
                     total_record_count += previous_record_count
             else:
                 existing_manifest_files = []
-            merge_before_manifests = existing_manifest_files
             merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
                 existing_manifest_files)
-            merge_after_manifests = merged_manifest_files
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
 
             delta_record_count = 0
