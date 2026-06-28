@@ -424,17 +424,17 @@ class FileStoreCommit:
         changelog_record_count = None
         new_manifest_files_for_abort = []
         try:
-            new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
+            new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
                 changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog-0"
-                changelog_manifest_file_meta = self._write_manifest_file(
+                changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
                 self.manifest_list_manager.write(
-                    changelog_manifest_list_name, [changelog_manifest_file_meta])
+                    changelog_manifest_list_name, changelog_manifest_file_metas)
                 manifest_path = self.manifest_list_manager.manifest_path
                 changelog_manifest_list_size = self.table.file_io.get_file_size(
                     f"{manifest_path}/{changelog_manifest_list_name}")
@@ -543,8 +543,9 @@ class FileStoreCommit:
 
         return SuccessResult()
 
-    def _write_manifest_file(self, commit_entries, new_manifest_file):
-        return self.manifest_file_manager.write_with_meta(new_manifest_file, commit_entries)
+    def _write_manifest_files(self, commit_entries, base_name):
+        return self.manifest_file_manager.rolling_write(
+            commit_entries, self.manifest_target_size, base_name)
 
     def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
         if retry_result is not None and latest_snapshot is not None:
