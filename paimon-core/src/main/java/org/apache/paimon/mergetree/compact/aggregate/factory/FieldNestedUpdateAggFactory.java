@@ -70,6 +70,11 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
         return new FieldNestedUpdateAgg(
-                identifier(), arrayType, nestedKey, nestedKeyNullStrategy, nestedSequenceField, countLimit);
+                identifier(),
+                arrayType,
+                nestedKey,
+                nestedKeyNullStrategy,
+                nestedSequenceField,
+                countLimit);
     }
 }

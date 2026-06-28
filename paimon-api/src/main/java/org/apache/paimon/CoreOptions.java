@@ -5056,11 +5056,8 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /**
-     * Strategy for handling rows whose nested-key contains null values.
-     */
+    /** Strategy for handling rows whose nested-key contains null values. */
     public enum NestedKeyNullStrategy implements DescribedEnum {
-
         MERGE(
                 "merge",
                 "Merge rows even if the nested-key contains null values, without enforcing primary key semantics."),

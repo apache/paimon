@@ -1107,8 +1107,9 @@ public class FieldAggregatorTest {
                                         Collections.singletonList("seq"),
                                         Integer.MAX_VALUE))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Option 'fields.<field-name>.nested-sequence-field' requires "
-                        + "'fields.<field-name>.nested-key' to be configured.");
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-sequence-field' requires "
+                                + "'fields.<field-name>.nested-key' to be configured.");
     }
 
     @Test
@@ -1131,9 +1132,9 @@ public class FieldAggregatorTest {
                                         Collections.singletonList("seq"),
                                         2))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Option 'fields.<field-name>.nested-sequence-field' requires " +
-                        "'fields.<field-name>.nested-key' to be configured."
-                );
+                .hasMessage(
+                        "Option 'fields.<field-name>.nested-sequence-field' requires "
+                                + "'fields.<field-name>.nested-key' to be configured.");
     }
 
     @Test
@@ -1344,10 +1345,9 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        null,  // Preserve the previous behavior.
+                        null, // Preserve the previous behavior.
                         Collections.emptyList(),
                         Integer.MAX_VALUE);
-
 
         InternalArray accumulator;
         InternalArray.ElementGetter elementGetter =
@@ -1368,11 +1368,7 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                row(0, 0, "A", 1),
-                                row(0, 1, "B", 2),
-                                row(0, null, "C", 3)
-                        ));
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2), row(0, null, "C", 3)));
 
         current = row(null, null, "D", 4);
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
@@ -1382,8 +1378,7 @@ public class FieldAggregatorTest {
                                 row(0, 0, "A", 1),
                                 row(0, 1, "B", 2),
                                 row(0, null, "C", 3),
-                                row(null, null, "D", 4)
-                        ));
+                                row(null, null, "D", 4)));
     }
 
     @Test
@@ -1400,7 +1395,7 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        CoreOptions.NestedKeyNullStrategy.MERGE,  // use merge strategy
+                        CoreOptions.NestedKeyNullStrategy.MERGE, // use merge strategy
                         Collections.emptyList(),
                         Integer.MAX_VALUE);
 
@@ -1424,7 +1419,6 @@ public class FieldAggregatorTest {
         assertThat(unnest(accumulatorEmpty, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
 
-
         // ============================================================
         // when the accumulator is non-empty
         // ============================================================
@@ -1446,11 +1440,7 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                row(0, 0, "A", 1),
-                                row(0, 1, "B", 2),
-                                row(0, null, "C", 3)
-                        ));
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2), row(0, null, "C", 3)));
 
         // case 2: fully null nested key (all PK fields are null)
         current = row(null, null, "D", 4);
@@ -1461,8 +1451,7 @@ public class FieldAggregatorTest {
                                 row(0, 0, "A", 1),
                                 row(0, 1, "B", 2),
                                 row(0, null, "C", 3),
-                                row(null, null, "D", 4)
-                        ));
+                                row(null, null, "D", 4)));
     }
 
     @Test
@@ -1479,13 +1468,12 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        CoreOptions.NestedKeyNullStrategy.IGNORE,  // use ignore strategy
+                        CoreOptions.NestedKeyNullStrategy.IGNORE, // use ignore strategy
                         Collections.emptyList(),
                         Integer.MAX_VALUE);
 
         InternalArray.ElementGetter elementGetter =
                 InternalArray.createElementGetter(elementRowType);
-
 
         // ============================================================
         // when the accumulator is empty
@@ -1499,7 +1487,6 @@ public class FieldAggregatorTest {
         // case 2: fully null nested key (all PK fields are null)
         accumulatorEmpty = (InternalArray) agg.agg(null, singletonArray(row(null, null, "D", 4)));
         assertThat(unnest(accumulatorEmpty, elementGetter)).isEmpty();
-
 
         // ============================================================
         // when the accumulator is non-empty
@@ -1522,20 +1509,14 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                row(0, 0, "A", 1),
-                                row(0, 1, "B", 2)
-                        ));
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
 
         // case 2: fully null nested key (all PK fields are null)
         current = row(null, null, "D", 4);
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                row(0, 0, "A", 1),
-                                row(0, 1, "B", 2)
-                        ));
+                        Arrays.asList(row(0, 0, "A", 1), row(0, 1, "B", 2)));
     }
 
     @Test
@@ -1552,31 +1533,25 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        CoreOptions.NestedKeyNullStrategy.ERROR,  // use error strategy
+                        CoreOptions.NestedKeyNullStrategy.ERROR, // use error strategy
                         Collections.emptyList(),
                         Integer.MAX_VALUE);
-
 
         // ============================================================
         // when the accumulator is empty
         // ============================================================
 
         // case 1: partially null nested key (some PK fields are null)
-        assertThatThrownBy(() -> agg.agg(
-                null,
-                singletonArray(row(0, null, "C", 3))
-        ))
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(0, null, "C", 3))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
         // case 2: fully null nested key (all PK fields are null)
-        assertThatThrownBy(() -> agg.agg(
-                null,
-                singletonArray(row(null, null, "D", 4))
-        ))
+        assertThatThrownBy(() -> agg.agg(null, singletonArray(row(null, null, "D", 4))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
-
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
         // ============================================================
         // when the accumulator is non-empty
@@ -1598,12 +1573,10 @@ public class FieldAggregatorTest {
 
         // case 1: partially null nested key (some PK fields are null)
         InternalArray finalAccumulator1 = accumulator;
-        assertThatThrownBy(() -> agg.agg(
-                finalAccumulator1,
-                singletonArray(row(0, null, "C", 3))
-        ))
+        assertThatThrownBy(() -> agg.agg(finalAccumulator1, singletonArray(row(0, null, "C", 3))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
@@ -1611,11 +1584,11 @@ public class FieldAggregatorTest {
 
         // case 2: fully null nested key (all PK fields are null)
         InternalArray finalAccumulator2 = accumulator;
-        assertThatThrownBy(() -> agg.agg(
-                finalAccumulator2, singletonArray(row(null, null, "D", 4))
-        ))
+        assertThatThrownBy(
+                        () -> agg.agg(finalAccumulator2, singletonArray(row(null, null, "D", 4))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
@@ -1636,7 +1609,7 @@ public class FieldAggregatorTest {
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        CoreOptions.NestedKeyNullStrategy.MERGE,  // use merge strategy
+                        CoreOptions.NestedKeyNullStrategy.MERGE, // use merge strategy
                         Collections.singletonList("seq"),
                         3);
 
@@ -1645,8 +1618,11 @@ public class FieldAggregatorTest {
                 InternalArray.createElementGetter(elementRowType);
 
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
-        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
-        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
+        accumulator =
+                (InternalArray)
+                        agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 5)));
 
         accumulator =
@@ -1656,8 +1632,7 @@ public class FieldAggregatorTest {
                         Arrays.asList(
                                 row(0, 1, "B_updated", 4),
                                 row(null, 2, "NULL_2", 2),
-                                row(null, null, "NULL_NULL", 3)
-                                ));
+                                row(null, null, "NULL_NULL", 3)));
     }
 
     @Test
@@ -1669,12 +1644,12 @@ public class FieldAggregatorTest {
                         DataTypes.FIELD(2, "v", DataTypes.STRING()),
                         DataTypes.FIELD(3, "seq", DataTypes.INT()));
 
-            FieldNestedUpdateAgg agg =
+        FieldNestedUpdateAgg agg =
                 new FieldNestedUpdateAgg(
                         FieldNestedUpdateAggFactory.NAME,
                         DataTypes.ARRAY(elementRowType),
                         Arrays.asList("k0", "k1"),
-                        CoreOptions.NestedKeyNullStrategy.IGNORE,  // use ignore strategy
+                        CoreOptions.NestedKeyNullStrategy.IGNORE, // use ignore strategy
                         Collections.singletonList("seq"),
                         3);
 
@@ -1683,8 +1658,11 @@ public class FieldAggregatorTest {
                 InternalArray.createElementGetter(elementRowType);
 
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
-        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
-        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(null, 2, "NULL_2", 2)));
+        accumulator =
+                (InternalArray)
+                        agg.agg(accumulator, singletonArray(row(null, null, "NULL_NULL", 3)));
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
 
         accumulator =
@@ -1697,10 +1675,7 @@ public class FieldAggregatorTest {
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
                         Arrays.asList(
-                                row(0, 1, "B_updated", 4),
-                                row(1, 2, "C", 3),
-                                row(2, 3, "D", 5)
-                        ));
+                                row(0, 1, "B_updated", 4), row(1, 2, "C", 3), row(2, 3, "D", 5)));
     }
 
     @Test
@@ -1728,21 +1703,25 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B", 1)));
 
         InternalArray finalAccumulator = accumulator;
-        assertThatThrownBy(() ->
-                agg.agg(finalAccumulator, singletonArray(row(null, 2, "NULL_2", 2)))
-        )
+        assertThatThrownBy(
+                        () -> agg.agg(finalAccumulator, singletonArray(row(null, 2, "NULL_2", 2))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
-        assertThatThrownBy(() ->
-                agg.agg(finalAccumulator, singletonArray(row(null, null, "NULL_NULL", 3)))
-        )
+        assertThatThrownBy(
+                        () ->
+                                agg.agg(
+                                        finalAccumulator,
+                                        singletonArray(row(null, null, "NULL_NULL", 3))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Nested key contains null values. Primary key fields must not be null.");
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
 
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(1, 2, "C", 3)));
 
-        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "B_updated", 4)));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
                         Arrays.asList(row(0, 1, "B_updated", 4), row(1, 2, "C", 3)));
@@ -1751,10 +1730,7 @@ public class FieldAggregatorTest {
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(
                         Arrays.asList(
-                                row(0, 1, "B_updated", 4),
-                                row(1, 2, "C", 3),
-                                row(2, 3, "D", 5)
-                        ));
+                                row(0, 1, "B_updated", 4), row(1, 2, "C", 3), row(2, 3, "D", 5)));
     }
 
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
