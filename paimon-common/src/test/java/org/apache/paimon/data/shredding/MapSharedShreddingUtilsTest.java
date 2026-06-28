@@ -246,10 +246,8 @@ class MapSharedShreddingUtilsTest {
         assertThat(physicalType.getFields()).extracting(DataField::id).containsExactly(0, 1, 2, 3);
         assertThat(physicalType.getField("__field_mapping").type())
                 .isEqualTo(DataTypes.ARRAY(DataTypes.INT()));
-        assertThat(physicalType.getField("__col_1").type())
-                .isEqualTo(DataTypes.BIGINT().notNull());
-        assertThat(physicalType.getField("__col_3").type())
-                .isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(physicalType.getField("__col_1").type()).isEqualTo(DataTypes.BIGINT().notNull());
+        assertThat(physicalType.getField("__col_3").type()).isEqualTo(DataTypes.BIGINT().notNull());
         assertThat(physicalType.getField("__overflow").type())
                 .isEqualTo(DataTypes.MAP(DataTypes.INT(), DataTypes.BIGINT().notNull()));
 
@@ -413,8 +411,7 @@ class MapSharedShreddingUtilsTest {
         return map;
     }
 
-    private static Map<Integer, List<Integer>> fieldToColumns(
-            int fieldId, List<Integer> columns) {
+    private static Map<Integer, List<Integer>> fieldToColumns(int fieldId, List<Integer> columns) {
         Map<Integer, List<Integer>> map = new TreeMap<>();
         map.put(fieldId, columns);
         return map;

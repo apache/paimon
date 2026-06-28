@@ -72,11 +72,7 @@ class MapSharedShreddingReaderTest {
                 Arrays.asList(
                         GenericRow.of(
                                 1,
-                                GenericRow.of(
-                                        new GenericArray(new int[] {0, 1}),
-                                        10L,
-                                        20L,
-                                        null)),
+                                GenericRow.of(new GenericArray(new int[] {0, 1}), 10L, 20L, null)),
                         GenericRow.of(
                                 2,
                                 GenericRow.of(
@@ -87,10 +83,7 @@ class MapSharedShreddingReaderTest {
                         GenericRow.of(
                                 3,
                                 GenericRow.of(
-                                        new GenericArray(new int[] {1, -1}),
-                                        null,
-                                        null,
-                                        null)),
+                                        new GenericArray(new int[] {1, -1}), null, null, null)),
                         GenericRow.of(4, null));
 
         try (MapSharedShreddingReader reader =
@@ -128,17 +121,11 @@ class MapSharedShreddingReaderTest {
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "id", DataTypes.INT()),
                         DataTypes.FIELD(
-                                1,
-                                "tags",
-                                DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
+                                1, "tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())),
                         DataTypes.FIELD(
-                                2,
-                                "plain",
-                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
+                                2, "plain", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
                         DataTypes.FIELD(
-                                3,
-                                "attrs",
-                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())));
+                                3, "attrs", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())));
         Map<String, MapSharedShreddingFieldMeta> metas = new TreeMap<>();
         metas.put(
                 "tags",
@@ -186,9 +173,7 @@ class MapSharedShreddingReaderTest {
             assertThat(row.getInt(0)).isEqualTo(1);
             assertThat(row.getMap(1)).isEqualTo(stringKeyMap("a", 10L, "c", 30L));
             assertThat(row.getMap(2))
-                    .isEqualTo(
-                            stringKeyMap(
-                                    "plain-key", BinaryString.fromString("plain-value")));
+                    .isEqualTo(stringKeyMap("plain-key", BinaryString.fromString("plain-value")));
             assertThat(row.getMap(3))
                     .isEqualTo(stringKeyMap("y", BinaryString.fromString("value-y"), "x", null));
 
@@ -229,8 +214,7 @@ class MapSharedShreddingReaderTest {
     @Test
     void testInvalidUnknownOverflowFieldId() throws IOException {
         assertInvalidPhysicalTags(
-                GenericRow.of(
-                        new GenericArray(new int[] {0, -1}), 10L, null, intKeyMap(99, 20L)),
+                GenericRow.of(new GenericArray(new int[] {0, -1}), 10L, null, intKeyMap(99, 20L)),
                 "Cannot find shared-shredding field id 99 in metadata");
     }
 
