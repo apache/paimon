@@ -422,20 +422,22 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
+        delta_known_metas = []
+        changelog_known_metas = []
         merge_before_manifests = []
         merge_after_manifests = []
         try:
-            new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
+            delta_known_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            self.manifest_list_manager.write(delta_manifest_list, delta_known_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
                 changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
-                changelog_manifest_file_metas = self._write_manifest_files(
+                changelog_known_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
                 self.manifest_list_manager.write(
-                    changelog_manifest_list_name, changelog_manifest_file_metas)
+                    changelog_manifest_list_name, changelog_known_metas)
                 manifest_path = self.manifest_list_manager.manifest_path
                 changelog_manifest_list_size = self.table.file_io.get_file_size(
                     f"{manifest_path}/{changelog_manifest_list_name}")
@@ -499,7 +501,8 @@ class FileStoreCommit:
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
             self._clean_up_reuse_tmp_manifests(
-                delta_manifest_list, changelog_manifest_list_name, new_index_manifest)
+                delta_manifest_list, changelog_manifest_list_name, new_index_manifest,
+                delta_known_metas, changelog_known_metas)
             self._clean_up_no_reuse_tmp_manifests(
                 base_manifest_list, merge_before_manifests, merge_after_manifests)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
@@ -649,20 +652,25 @@ class FileStoreCommit:
     def _clean_up_reuse_tmp_manifests(self,
                                      delta_manifest_list: Optional[str],
                                      changelog_manifest_list: Optional[str],
-                                     index_manifest: Optional[str] = None):
+                                     index_manifest: Optional[str] = None,
+                                     delta_known_metas: Optional[List[ManifestFileMeta]] = None,
+                                     changelog_known_metas: Optional[List[ManifestFileMeta]] = None):
         """Clean up delta/changelog manifests and index manifest.
 
-        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests.
+        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests. Falls back to
+        known metas when manifest list is unreadable (e.g. write failed).
         """
         manifest_path = self.manifest_list_manager.manifest_path
-        for ml_name in (delta_manifest_list, changelog_manifest_list):
+        for ml_name, known in ((delta_manifest_list, delta_known_metas),
+                               (changelog_manifest_list, changelog_known_metas)):
             if ml_name:
                 try:
-                    for meta in self.manifest_list_manager.read(ml_name):
-                        self.table.file_io.delete_quietly(
-                            f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+                    metas = self.manifest_list_manager.read(ml_name)
                 except Exception:
-                    pass
+                    metas = known or []
+                for meta in metas:
+                    self.table.file_io.delete_quietly(
+                        f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
                 self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
         if index_manifest:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
