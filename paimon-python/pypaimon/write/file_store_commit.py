@@ -498,9 +498,6 @@ class FileStoreCommit:
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
-            for meta in new_manifest_files_for_abort:
-                self.table.file_io.delete_quietly(
-                    f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
             self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list,
                                               new_index_manifest, changelog_manifest_list_name,
                                               new_manifest_files_for_abort)
