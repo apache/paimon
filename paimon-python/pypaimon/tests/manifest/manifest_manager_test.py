@@ -366,6 +366,14 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             f"Expected multiple manifest files but got {len(metas)} "
             f"with total {sum(m.file_size for m in metas)} bytes")
 
+        mfm = ManifestFileManager(table)
+        all_entries = []
+        for meta in metas:
+            entries = mfm.read(meta.file_name)
+            self.assertEqual(len(entries), meta.num_added_files + meta.num_deleted_files)
+            all_entries.extend(entries)
+        self.assertEqual(len(all_entries), 200)
+
     def test_rolling_write_with_skewed_entries(self):
         target_size = 16 * 1024
         manager = ManifestFileManager(self.table)
