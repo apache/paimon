@@ -122,22 +122,23 @@ public class ChainPartitionPatternResolver {
 
     private Map<PatternToken, Pair<Integer, Integer>> calPatternSpanMappings() {
         int pos = 0;
-        Map<FormatToken, Pair<Integer, Integer>> formattedSpanMapping = new HashMap<>();
+        Map<FormatToken, Integer> startPositions = new LinkedHashMap<>();
         for (FormatToken token : formatTokens) {
-            formattedSpanMapping.put(token, Pair.of(pos, pos + token.getLength()));
+            startPositions.put(token, pos);
             pos += token.getLength();
         }
 
-        Map<PatternToken, Pair<Integer, Integer>> patternSpanMapping = new HashMap<>();
+        Map<PatternToken, Pair<Integer, Integer>> patternSpanMapping = new LinkedHashMap<>();
         for (PatternToken patternToken : patternTokens) {
             if (!patternToken.isVariable) {
                 continue;
             }
             List<FormatToken> tokens = patternFormatMappings.get(patternToken);
-            List<Pair<Integer, Integer>> spans =
-                    tokens.stream().map(formattedSpanMapping::get).collect(Collectors.toList());
-            int start = spans.stream().map(Pair::getLeft).min(Integer::compareTo).get();
-            int end = spans.stream().map(Pair::getRight).max(Integer::compareTo).get();
+            int start = startPositions.get(tokens.get(0));
+            int end = start;
+            for (FormatToken token : tokens) {
+                end += token.getLength();
+            }
             patternSpanMapping.put(patternToken, Pair.of(start, end));
         }
         return patternSpanMapping;
