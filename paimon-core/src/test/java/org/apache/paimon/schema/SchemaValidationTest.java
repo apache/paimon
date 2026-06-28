@@ -442,7 +442,7 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options,
                                                 "")))
-                .hasMessage("The vector-store columns can not be part of partition keys.");
+                .hasMessage("The type VectorType in partition field f1 is unsupported");
     }
 
     @Test
