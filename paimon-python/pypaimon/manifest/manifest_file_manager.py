@@ -369,6 +369,3 @@ class ManifestFileManager:
             max_row_id=max_row_id,
         )
 
-    def write_with_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
-        self.write(file_name, entries)
-        return self._build_meta(file_name, entries)

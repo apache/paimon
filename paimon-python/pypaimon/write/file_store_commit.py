@@ -455,7 +455,7 @@ class FileStoreCommit:
             else:
                 existing_manifest_files = []
             merge_before_manifests = existing_manifest_files
-            merged_manifest_files, _ = self.manifest_file_merger.merge(
+            merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
                 existing_manifest_files)
             merge_after_manifests = merged_manifest_files
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
@@ -500,11 +500,15 @@ class FileStoreCommit:
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
-            self._clean_up_reuse_tmp_manifests(
-                delta_manifest_list, changelog_manifest_list_name, new_index_manifest,
-                delta_known_metas, changelog_known_metas)
-            self._clean_up_no_reuse_tmp_manifests(
-                base_manifest_list, merge_before_manifests, merge_after_manifests)
+            try:
+                self._clean_up_reuse_tmp_manifests(
+                    delta_manifest_list, changelog_manifest_list_name, new_index_manifest,
+                    delta_known_metas, changelog_known_metas)
+                self._clean_up_no_reuse_tmp_manifests(
+                    base_manifest_list, merge_new_files)
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up temporary files: {cleanup_err}",
+                               exc_info=True)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
 
@@ -677,22 +681,17 @@ class FileStoreCommit:
 
     def _clean_up_no_reuse_tmp_manifests(self,
                                          base_manifest_list: Optional[str],
-                                         merge_before: List[ManifestFileMeta],
-                                         merge_after: List[ManifestFileMeta]):
-        """Clean up base manifest list and only the newly created merge manifests.
+                                         merge_new_files: List[ManifestFileMeta]):
+        """Clean up base manifest list and newly created merge manifests.
 
-        Mirrors Java CommitCleaner.cleanUpNoReuseTmpManifests: only deletes
-        manifests in merge_after that are not in merge_before (i.e. newly
-        created by the merger, not pre-existing).
+        Mirrors Java CommitCleaner.cleanUpNoReuseTmpManifests.
         """
         manifest_path = self.manifest_list_manager.manifest_path
         if base_manifest_list:
             self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
-        old_names = {m.file_name for m in merge_before}
-        for meta in merge_after:
-            if meta.file_name not in old_names:
-                self.table.file_io.delete_quietly(
-                    f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+        for meta in merge_new_files:
+            self.table.file_io.delete_quietly(
+                f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
