@@ -232,18 +232,22 @@ class ManifestFileManager:
                 writer.write(self._to_avro_record(entry))
                 if buf.tell() >= suggested_file_size:
                     writer.flush()
+                    avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
-                    self._flush(file_name, buf.getvalue())
-                    result.append(self._build_meta(file_name, entries[chunk_start:i + 1]))
+                    self._flush(file_name, avro_bytes)
+                    result.append(self._build_meta(
+                        file_name, entries[chunk_start:i + 1], len(avro_bytes)))
                     chunk_start = i + 1
                     buf = BytesIO()
                     writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
 
             if chunk_start < len(entries):
                 writer.flush()
+                avro_bytes = buf.getvalue()
                 file_name = f"{name_prefix}-{len(result)}"
-                self._flush(file_name, buf.getvalue())
-                result.append(self._build_meta(file_name, entries[chunk_start:]))
+                self._flush(file_name, avro_bytes)
+                result.append(self._build_meta(
+                    file_name, entries[chunk_start:], len(avro_bytes)))
         except Exception:
             for meta in result:
                 self.file_io.delete_quietly(f"{self.manifest_path}/{meta.file_name}")
@@ -302,7 +306,8 @@ class ManifestFileManager:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
 
-    def _build_meta(self, file_name: str, entries: List[ManifestEntry]) -> ManifestFileMeta:
+    def _build_meta(self, file_name: str, entries: List[ManifestEntry],
+                    file_size: int = None) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
@@ -337,10 +342,12 @@ class ManifestFileManager:
             if max_row_id is None or file_range.to > max_row_id:
                 max_row_id = file_range.to
 
-        manifest_file_path = f"{self.manifest_path}/{file_name}"
+        if file_size is None:
+            manifest_file_path = f"{self.manifest_path}/{file_name}"
+            file_size = self.table.file_io.get_file_size(manifest_file_path)
         return ManifestFileMeta(
             file_name=file_name,
-            file_size=self.table.file_io.get_file_size(manifest_file_path),
+            file_size=file_size,
             num_added_files=added_file_count,
             num_deleted_files=deleted_file_count,
             partition_stats=SimpleStats(
