@@ -368,4 +368,3 @@ class ManifestFileManager:
             min_row_id=min_row_id,
             max_row_id=max_row_id,
         )
-
