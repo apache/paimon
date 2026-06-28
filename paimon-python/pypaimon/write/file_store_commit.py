@@ -374,7 +374,7 @@ class FileStoreCommit:
         delta_manifest_list = f"manifest-list-{unique_id}-1"
 
         # process new_manifest
-        new_manifest_file = f"manifest-{str(uuid.uuid4())}-0"
+        new_manifest_file = f"manifest-{str(uuid.uuid4())}"
         new_index_manifest = None
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
@@ -429,7 +429,7 @@ class FileStoreCommit:
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
-                changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog-0"
+                changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
                 changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"

@@ -214,7 +214,7 @@ class ManifestFileManager:
 
     def rolling_write(self, entries: List[ManifestEntry],
                       suggested_file_size: int,
-                      base_name: str) -> List[ManifestFileMeta]:
+                      name_prefix: str) -> List[ManifestFileMeta]:
         if not entries:
             return []
 
@@ -224,10 +224,9 @@ class ManifestFileManager:
         total_size = buf.tell()
 
         if total_size <= suggested_file_size:
-            self._flush(base_name, buf.getvalue())
-            return [self._build_meta(base_name, entries)]
-
-        name_prefix = base_name.rsplit('-', 1)[0] if base_name[-1].isdigit() and '-' in base_name else base_name
+            file_name = f"{name_prefix}-0"
+            self._flush(file_name, buf.getvalue())
+            return [self._build_meta(file_name, entries)]
         entries_per_chunk = max(1, int(len(entries) * suggested_file_size / total_size))
         pos = 0
         result = []

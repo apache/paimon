@@ -385,7 +385,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             ),
         )
         entries = [big if i % 5 == 0 else small for i in range(300)]
-        metas = manager.rolling_write(entries, target_size, "manifest-skew-0")
+        metas = manager.rolling_write(entries, target_size, "manifest-skew")
 
         max_allowed = target_size * 2
         oversized = [m for m in metas if m.file_size > max_allowed]
