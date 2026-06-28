@@ -31,7 +31,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.unsafe.types.UTF8String;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 
@@ -48,6 +49,8 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  */
 public class CompactManifestProcedure extends BaseProcedure {
 
+    private static final Logger LOG = LoggerFactory.getLogger(CompactManifestProcedure.class);
+
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
@@ -58,8 +61,7 @@ public class CompactManifestProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty()),
-                        new StructField("message", DataTypes.StringType, true, Metadata.empty())
+                        new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
     protected CompactManifestProcedure(TableCatalog tableCatalog) {
@@ -90,7 +92,8 @@ public class CompactManifestProcedure extends BaseProcedure {
 
         if (dryRun) {
             String message = ManifestCompactDryRun.execute((FileStoreTable) table);
-            return new InternalRow[] {newInternalRow(true, UTF8String.fromString(message))};
+            LOG.info(message);
+            return new InternalRow[] {newInternalRow(true)};
         }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
@@ -99,7 +102,7 @@ public class CompactManifestProcedure extends BaseProcedure {
             throw new RuntimeException(e);
         }
 
-        return new InternalRow[] {newInternalRow(true, null)};
+        return new InternalRow[] {newInternalRow(true)};
     }
 
     @Override

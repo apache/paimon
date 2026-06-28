@@ -62,10 +62,10 @@ class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
     val deletedBefore = rows.get(0).getLong(0)
     Assertions.assertThat(deletedBefore).isGreaterThan(0L)
 
-    val dryRunRows = spark.sql("CALL sys.compact_manifest(table => 'T2', dry_run => true)")
+    val dryRunRows = spark
+      .sql("CALL sys.compact_manifest(table => 'T2', dry_run => true)")
       .collectAsList()
     Assertions.assertThat(dryRunRows.get(0).getBoolean(0)).isTrue
-    Assertions.assertThat(dryRunRows.get(0).getString(1)).startsWith("Dry run:")
 
     // verify dry run did not actually compact
     rows = spark.sql("SELECT sum(num_deleted_files) FROM `T2$manifests`").collectAsList()
