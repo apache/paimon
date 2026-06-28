@@ -422,21 +422,19 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
-        delta_known_metas = []
-        changelog_known_metas = []
         merge_new_files = []
         try:
-            delta_known_metas = self._write_manifest_files(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, delta_known_metas)
+            new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
                 changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
-                changelog_known_metas = self._write_manifest_files(
+                changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
                 self.manifest_list_manager.write(
-                    changelog_manifest_list_name, changelog_known_metas)
+                    changelog_manifest_list_name, changelog_manifest_file_metas)
                 manifest_path = self.manifest_list_manager.manifest_path
                 changelog_manifest_list_size = self.table.file_io.get_file_size(
                     f"{manifest_path}/{changelog_manifest_list_name}")
@@ -499,8 +497,7 @@ class FileStoreCommit:
         except Exception as e:
             try:
                 self._clean_up_reuse_tmp_manifests(
-                    delta_manifest_list, changelog_manifest_list_name, new_index_manifest,
-                    delta_known_metas, changelog_known_metas)
+                    delta_manifest_list, changelog_manifest_list_name, new_index_manifest)
                 self._clean_up_no_reuse_tmp_manifests(
                     base_manifest_list, merge_new_files)
             except Exception as cleanup_err:
@@ -653,25 +650,20 @@ class FileStoreCommit:
     def _clean_up_reuse_tmp_manifests(self,
                                      delta_manifest_list: Optional[str],
                                      changelog_manifest_list: Optional[str],
-                                     index_manifest: Optional[str] = None,
-                                     delta_known_metas: Optional[List[ManifestFileMeta]] = None,
-                                     changelog_known_metas: Optional[List[ManifestFileMeta]] = None):
+                                     index_manifest: Optional[str] = None):
         """Clean up delta/changelog manifests and index manifest.
 
-        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests. Falls back to
-        known metas when manifest list is unreadable (e.g. write failed).
+        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests.
         """
         manifest_path = self.manifest_list_manager.manifest_path
-        for ml_name, known in ((delta_manifest_list, delta_known_metas),
-                               (changelog_manifest_list, changelog_known_metas)):
+        for ml_name in (delta_manifest_list, changelog_manifest_list):
             if ml_name:
                 try:
-                    metas = self.manifest_list_manager.read(ml_name)
+                    for meta in self.manifest_list_manager.read(ml_name):
+                        self.table.file_io.delete_quietly(
+                            f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
                 except Exception:
-                    metas = known or []
-                for meta in metas:
-                    self.table.file_io.delete_quietly(
-                        f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
+                    pass
                 self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
         if index_manifest:
             self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
