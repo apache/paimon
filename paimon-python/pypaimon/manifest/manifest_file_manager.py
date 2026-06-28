@@ -224,6 +224,7 @@ class ManifestFileManager:
 
         sync_interval = min(self._AVRO_SYNC_INTERVAL, suggested_file_size)
         result = []
+        written_files = []
         chunk_start = 0
         buf = BytesIO()
         writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
@@ -235,6 +236,7 @@ class ManifestFileManager:
                     avro_bytes = buf.getvalue()
                     file_name = f"{name_prefix}-{len(result)}"
                     self._flush(file_name, avro_bytes)
+                    written_files.append(file_name)
                     result.append(self._build_meta(
                         file_name, entries[chunk_start:i + 1], len(avro_bytes)))
                     chunk_start = i + 1
@@ -246,11 +248,12 @@ class ManifestFileManager:
                 avro_bytes = buf.getvalue()
                 file_name = f"{name_prefix}-{len(result)}"
                 self._flush(file_name, avro_bytes)
+                written_files.append(file_name)
                 result.append(self._build_meta(
                     file_name, entries[chunk_start:], len(avro_bytes)))
         except Exception:
-            for meta in result:
-                self.file_io.delete_quietly(f"{self.manifest_path}/{meta.file_name}")
+            for fname in written_files:
+                self.file_io.delete_quietly(f"{self.manifest_path}/{fname}")
             raise
         return result
 
