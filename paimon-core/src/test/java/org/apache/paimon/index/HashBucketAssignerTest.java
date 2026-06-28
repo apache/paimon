@@ -715,4 +715,42 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         "present bucket 0 reconciled to disk count while keeping the in-flight increment")
                 .containsEntry(0, 2L);
     }
+
+    @Test
+    public void testRefreshDoesNotImportBucketCreatedAfterLoad() throws IOException {
+        commit.commit(
+                0,
+                Collections.singletonList(
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1, 2, 3}))));
+
+        PartitionIndex index =
+                PartitionIndex.loadIndex(fileHandler, row(1), 5, hash -> true, bucket -> true);
+
+        // Bucket 4 created after load: passes bucketFilter but is absent from totalBucketSet.
+        commit.commit(
+                1,
+                Collections.singletonList(
+                        createCommitMessage(
+                                row(1),
+                                4,
+                                2,
+                                fileHandler.hashIndex(row(1), 4).write(new int[] {40, 41}))));
+
+        index.assign(999, bucket -> true, -1, 2, 2, Duration.ofMillis(1));
+
+        long deadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        assertThat(index.nonFullBucketInformation).doesNotContainKey(4);
+    }
 }

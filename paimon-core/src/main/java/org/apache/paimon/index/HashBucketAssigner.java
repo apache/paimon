@@ -166,7 +166,6 @@ public class HashBucketAssigner implements BucketAssigner {
                     // We need a mechanism to clear index, otherwise there will be more and
                     // more such as yesterday's partition that no longer needs to be accessed.
 
-                    // Cancel any ongoing refresh before removing the index
                     index.cancelOngoingRefresh();
 
                     if (LOG.isDebugEnabled()) {

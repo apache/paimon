@@ -116,10 +116,7 @@ public class PartitionIndex {
             Map.Entry<Integer, Long> entry = iterator.next();
             Integer bucket = entry.getKey();
             Long number = entry.getValue();
-            // Trigger an async refresh as soon as we see a bucket at/over the near-full
-            // threshold, regardless of whether we end up assigning to it or removing it.
-            // The refresh is non-blocking and respects the minimum refresh interval, so
-            // subsequent assignments can see buckets freed by compaction.
+            // Non-blocking: lets later assignments see buckets freed by compaction.
             if (shouldRefreshWhenBucketNearFull(
                             number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)
                     && isReachedTheMinRefreshInterval(minRefreshInterval)) {
@@ -202,11 +199,6 @@ public class PartitionIndex {
             long currentBucketRowCount,
             long targetBucketRowNumber,
             int minEmptyBucketsBeforeAsyncCheck) {
-        // Only refresh if:
-        // 1. Feature is enabled (minEmptyBucketsBeforeAsyncCheck != -1)
-        // 2. Current bucket is approaching its target capacity
-        // When bucket reaches (targetBucketRowNumber - minEmptyBucketsBeforeAsyncCheck),
-        // trigger refresh to find buckets freed by compaction
         if (minEmptyBucketsBeforeAsyncCheck == -1) {
             return false;
         }
@@ -219,10 +211,7 @@ public class PartitionIndex {
         return lastRefreshTime == null || Instant.now().isAfter(lastRefreshTime.plus(duration));
     }
 
-    /**
-     * Cancel any ongoing refresh operation. Should be called when this PartitionIndex is no longer
-     * needed (e.g., during cleanup in prepareCommit).
-     */
+    /** Called when this PartitionIndex is dropped (e.g. cleanup in prepareCommit). */
     public void cancelOngoingRefresh() {
         if (refreshFuture != null && !refreshFuture.isDone()) {
             refreshFuture.cancel(false);
@@ -250,7 +239,6 @@ public class PartitionIndex {
     }
 
     private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
-        // Only start refresh if not already in progress
         if (refreshFuture == null || refreshFuture.isDone()) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
@@ -260,11 +248,8 @@ public class PartitionIndex {
                         nonFullBucketInformation.size());
             }
 
-            // Reuse the shared FileOperationThreadPool instead of creating a dedicated
-            // executor: refresh is an I/O-bound file operation (scanning index manifest
-            // entries) and the shared pool already exists for this purpose. This avoids
-            // duplicating thread-pool resources and aligns with how other file-scan paths
-            // in Paimon (FileDeletionBase, TableCommitImpl, ListUnexistingFiles) work.
+            // Reuse the shared FileOperationThreadPool (I/O-bound scan) rather than a dedicated
+            // executor, to avoid extra thread-pool resources and fan-out.
             refreshFuture =
                     CompletableFuture.runAsync(
                                     () -> {
@@ -273,12 +258,8 @@ public class PartitionIndex {
                                                     indexFileHandler.scanEntries(
                                                             HASH_INDEX, partition);
 
-                                            // Use parallel stream to scan multiple files
-                                            // concurrently
-                                            // This reduces latency when dealing with many buckets.
-                                            // Apply bucketFilter so we only surface buckets owned
-                                            // by this assigner; otherwise multiple assigners would
-                                            // race for buckets they do not own.
+                                            // bucketFilter keeps only buckets owned by this
+                                            // assigner, so assigners never race for the same one.
                                             Map<Integer, Long> tempBucketInfo =
                                                     files.parallelStream()
                                                             .filter(
