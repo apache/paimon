@@ -425,6 +425,7 @@ class FileStoreCommit:
         new_manifest_files_for_abort = []
         try:
             new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            new_manifest_files_for_abort.extend(new_manifest_file_metas)
             self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
@@ -432,6 +433,7 @@ class FileStoreCommit:
                 changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
                 changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
+                new_manifest_files_for_abort.extend(changelog_manifest_file_metas)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
                 self.manifest_list_manager.write(
                     changelog_manifest_list_name, changelog_manifest_file_metas)
@@ -451,8 +453,9 @@ class FileStoreCommit:
                     total_record_count += previous_record_count
             else:
                 existing_manifest_files = []
-            merged_manifest_files, new_manifest_files_for_abort = self.manifest_file_merger.merge(
+            merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
                 existing_manifest_files)
+            new_manifest_files_for_abort.extend(merge_new_files)
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
 
             delta_record_count = 0
