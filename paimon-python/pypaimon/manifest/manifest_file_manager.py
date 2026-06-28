@@ -227,20 +227,32 @@ class ManifestFileManager:
             self._flush(base_name, buf.getvalue())
             return [self._build_meta(base_name, entries)]
 
-        # Estimate chunk size from average entry size to avoid a second full serialization.
-        avg_entry_size = total_size / len(entries)
-        entries_per_file = max(1, int(suggested_file_size / avg_entry_size))
         name_prefix = base_name.rsplit('-', 1)[0] if base_name[-1].isdigit() and '-' in base_name else base_name
+        entries_per_chunk = max(1, int(len(entries) * suggested_file_size / total_size))
+        pos = 0
         result = []
         try:
-            for i in range(0, len(entries), entries_per_file):
-                chunk_records = avro_records[i:i + entries_per_file]
-                chunk_entries = entries[i:i + entries_per_file]
-                file_name = f"{name_prefix}-{len(result)}"
+            while pos < len(entries):
+                end = min(pos + entries_per_chunk, len(entries))
                 chunk_buf = BytesIO()
-                fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, chunk_records)
+                fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, avro_records[pos:end])
+                chunk_size = chunk_buf.tell()
+
+                # Adaptive: if chunk overshoots, shrink and re-serialize
+                if chunk_size > suggested_file_size and end - pos > 1:
+                    end = pos + max(1, int((end - pos) * suggested_file_size / chunk_size))
+                    chunk_buf = BytesIO()
+                    fastavro.writer(chunk_buf, MANIFEST_ENTRY_SCHEMA, avro_records[pos:end])
+                    chunk_size = chunk_buf.tell()
+
+                file_name = f"{name_prefix}-{len(result)}"
                 self._flush(file_name, chunk_buf.getvalue())
-                result.append(self._build_meta(file_name, chunk_entries))
+                result.append(self._build_meta(file_name, entries[pos:end]))
+
+                # Adapt entries_per_chunk for next iteration based on actual size
+                if chunk_size > 0:
+                    entries_per_chunk = max(1, int((end - pos) * suggested_file_size / chunk_size))
+                pos = end
         except Exception:
             for meta in result:
                 self.file_io.delete_quietly(f"{self.manifest_path}/{meta.file_name}")
