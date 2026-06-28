@@ -301,7 +301,7 @@ public class MapSharedShreddingReader implements FileRecordReader<InternalRow> {
                                 + MapSharedShreddingDefine.physicalColumnName(column)
                                 + ".");
             }
-            // TODO(lisizhuo.lsz): Support rebuilding in the user requested selected-key order once
+            // TODO: Support rebuilding in the user requested selected-key order once
             // key-level
             // projection is pushed down. Full map reads currently follow the physical/metadata
             // layout order.
