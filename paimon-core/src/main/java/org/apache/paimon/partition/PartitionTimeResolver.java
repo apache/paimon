@@ -16,12 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.partition;
+
+import org.apache.paimon.utils.Pair;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.Period;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
@@ -30,7 +35,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -40,7 +47,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * Resolves timestamp pattern and formatter to extract time step and compute partition values for
  * chain table partitions.
  */
-public class ChainPartitionPatternResolver {
+public class PartitionTimeResolver {
     private static final Map<Character, ChronoField> FIELD_MAP = new HashMap<>();
     private final List<String> partitionColumns;
     private final String pattern;
@@ -50,8 +57,7 @@ public class ChainPartitionPatternResolver {
     private List<PatternToken> patternTokens;
     private List<FormatToken> formatTokens;
 
-    public ChainPartitionPatternResolver(
-            List<String> partitionColumns, String pattern, String formatter) {
+    public PartitionTimeResolver(List<String> partitionColumns, String pattern, String formatter) {
         checkArgument(pattern != null, "pattern cannot be null");
         checkArgument(formatter != null, "formatter cannot be null");
         checkArgument(partitionColumns != null, "partitionColumns cannot be null");
@@ -106,7 +112,7 @@ public class ChainPartitionPatternResolver {
      * Computes partition column values by formatting the given datetime and extracting each
      * variable's segment according to the pattern-to-format mapping.
      */
-    public LinkedHashMap<String, String> calPartValues(LocalDateTime dateTime) {
+    public LinkedHashMap<String, String> resolvePartitionValues(LocalDateTime dateTime) {
         DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter);
         String formatted = dateTime.format(dateTimeFormatter);
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
@@ -118,6 +124,27 @@ public class ChainPartitionPatternResolver {
             result.put(variableName, formatted.substring(start, end));
         }
         return result;
+    }
+
+    public LocalDateTime parsePartitionValues(List<?> partitionValues) {
+        StringBuilder timestampString = new StringBuilder();
+        int valueIdx = 0;
+        for (PatternToken token : patternTokens) {
+            if (token.isVariable) {
+                timestampString.append(partitionValues.get(valueIdx).toString());
+                valueIdx++;
+            } else {
+                timestampString.append(token.token);
+            }
+        }
+        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
+        try {
+            return LocalDateTime.parse(timestampString, Objects.requireNonNull(dateTimeFormatter));
+        } catch (DateTimeParseException e) {
+            return LocalDateTime.of(
+                    LocalDate.parse(timestampString, Objects.requireNonNull(dateTimeFormatter)),
+                    LocalTime.MIDNIGHT);
+        }
     }
 
     private Map<PatternToken, Pair<Integer, Integer>> calPatternSpanMappings() {
