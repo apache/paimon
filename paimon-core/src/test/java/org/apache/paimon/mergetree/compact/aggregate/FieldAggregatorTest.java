@@ -1734,7 +1734,7 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldNestedUpdateAggRetractWithNullNestedKeyInAccumulator() {
+    public void testFieldNestedUpdateAggRetractAppliesNestedKeyNullStrategyToAccumulator() {
         DataType elementRowType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "k0", DataTypes.INT()),
