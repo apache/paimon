@@ -68,9 +68,9 @@ class ShreddingWritePlanFormatTest {
                         new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
 
         Map<String, Map<String, String>> fieldMetadata =
-                writeAndReadFieldMetadata(format, "parquet", "zstd");
+                writeAndReadFieldMetadata(format, "parquet", "none");
 
-        assertMapSharedShreddingMetadata(fieldMetadata, "zstd");
+        assertMapSharedShreddingMetadata(fieldMetadata, "none");
         assertThat(fieldMetadata.get("id"))
                 .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
         assertThat(fieldMetadata.get("tags"))
@@ -83,9 +83,9 @@ class ShreddingWritePlanFormatTest {
                 new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
 
         Map<String, Map<String, String>> fieldMetadata =
-                writeAndReadFieldMetadata(format, "orc", "zstd");
+                writeAndReadFieldMetadata(format, "orc", "none");
 
-        assertMapSharedShreddingMetadata(fieldMetadata, "zstd");
+        assertMapSharedShreddingMetadata(fieldMetadata, "none");
         assertThat(fieldMetadata.get("id")).containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "0");
         assertThat(fieldMetadata.get("tags"))
                 .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");

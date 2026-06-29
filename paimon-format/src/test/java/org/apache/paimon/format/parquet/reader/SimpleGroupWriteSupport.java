@@ -97,7 +97,8 @@ class SimpleGroupWriteSupport extends WriteSupport<SimpleGroupWriteSupport.Simpl
         }
 
         @Override
-        protected WriteSupport<SimpleGroupWriteSupport.SimpleGroup> getWriteSupport() {
+        protected WriteSupport<SimpleGroupWriteSupport.SimpleGroup> getWriteSupport(
+                Configuration conf) {
             return new SimpleGroupWriteSupport();
         }
     }

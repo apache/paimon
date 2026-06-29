@@ -61,7 +61,7 @@ public class ParquetRowDataBuilder
     }
 
     @Override
-    protected WriteSupport<InternalRow> getWriteSupport() {
+    protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
         return new ParquetWriteSupport();
     }
 

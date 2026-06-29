@@ -203,8 +203,11 @@ public class ParquetWriter<T> implements Closeable {
         /** @return this as the correct subclass of ParquetWriter.Builder. */
         protected abstract SELF self();
 
-        /** @return an appropriate WriteSupport for the object model. */
-        protected abstract WriteSupport<T> getWriteSupport();
+        /**
+         * @param conf a configuration
+         * @return an appropriate WriteSupport for the object model.
+         */
+        protected abstract WriteSupport<T> getWriteSupport(Configuration conf);
 
         /**
          * Set the {@link Configuration} used by the constructed writer.
@@ -667,7 +670,7 @@ public class ParquetWriter<T> implements Closeable {
             return new ParquetWriter<>(
                     file,
                     mode,
-                    getWriteSupport(),
+                    getWriteSupport(conf),
                     codecName,
                     codecFactory,
                     columnCodecNames,
