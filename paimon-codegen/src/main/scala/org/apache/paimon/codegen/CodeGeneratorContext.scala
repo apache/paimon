@@ -57,8 +57,9 @@ class CodeGeneratorContext {
   private var currentMethodNameForLocalVariables = "DEFAULT"
 
   // method_name -> local_variable_statements
-  private val reusableLocalVariableStatements = mutable.Map[String, mutable.LinkedHashSet[String]](
-    (currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]()))
+  private val reusableLocalVariableStatements = mutable.Map[String, mutable.LinkedHashSet[String]]()
+  reusableLocalVariableStatements(currentMethodNameForLocalVariables) =
+    new mutable.LinkedHashSet[String]()
 
   /**
    * Starts a new local variable statements for a generated class with the given method name.
@@ -68,7 +69,7 @@ class CodeGeneratorContext {
    */
   def startNewLocalVariableStatement(methodName: String): Unit = {
     currentMethodNameForLocalVariables = methodName
-    reusableLocalVariableStatements(methodName) = mutable.LinkedHashSet[String]()
+    reusableLocalVariableStatements(methodName) = new mutable.LinkedHashSet[String]()
   }
 
   /**
@@ -86,7 +87,7 @@ class CodeGeneratorContext {
   def addReusableLocalVariable(fieldTypeTerm: String, fieldName: String): String = {
     val fieldTerm = newName(fieldName)
     reusableLocalVariableStatements
-      .getOrElse(currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]())
+      .getOrElse(currentMethodNameForLocalVariables, new mutable.LinkedHashSet[String]())
       .add(s"$fieldTypeTerm $fieldTerm;")
     fieldTerm
   }
@@ -105,7 +106,7 @@ class CodeGeneratorContext {
     fieldTypeAndNames.map(_._1).zip(fieldTerms).foreach {
       case (fieldTypeTerm, fieldTerm) =>
         reusableLocalVariableStatements
-          .getOrElse(currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]())
+          .getOrElse(currentMethodNameForLocalVariables, new mutable.LinkedHashSet[String]())
           .add(s"$fieldTypeTerm $fieldTerm;")
     }
     fieldTerms
