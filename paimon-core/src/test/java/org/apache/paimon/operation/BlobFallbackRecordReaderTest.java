@@ -58,6 +58,17 @@ public class BlobFallbackRecordReaderTest {
                             new DataField(1, SpecialFields.ROW_ID.name(), DataTypes.BIGINT()),
                             new DataField(
                                     2, SpecialFields.SEQUENCE_NUMBER.name(), DataTypes.BIGINT())));
+    private static final RowType READ_ROW_TYPE_WITH_ROW_ID_ONLY =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(BLOB_INDEX, BLOB_FIELD, DataTypes.BLOB()),
+                            new DataField(1, SpecialFields.ROW_ID.name(), DataTypes.BIGINT())));
+    private static final RowType READ_ROW_TYPE_WITH_SEQUENCE_ONLY =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(BLOB_INDEX, BLOB_FIELD, DataTypes.BLOB()),
+                            new DataField(
+                                    1, SpecialFields.SEQUENCE_NUMBER.name(), DataTypes.BIGINT())));
 
     @Test
     public void testBlobSequenceGroupReaderWithRowRanges() throws Exception {
@@ -144,6 +155,48 @@ public class BlobFallbackRecordReaderTest {
                         placeholderRows(newFile, 0, oldFile, 0));
 
         assertThat(rows.rowIds).isEmpty();
+        assertThat(rows.nullBlobRowIds).containsExactly(0L);
+        assertThat(rows.nullBlobSequenceNumbers).containsExactly(-1L);
+        assertThat(rows.nullBlobRowCount).isEqualTo(1);
+        assertThat(rows.placeholderRowCount).isEqualTo(0);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderReturnsRowIdIfAllRowsArePlaceholders()
+            throws Exception {
+        DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);
+        DataFileMeta oldFile = blobFile("old-placeholder-file", 0, 1, 1);
+
+        ReadResult rows =
+                readFallback(
+                        Arrays.asList(newFile, oldFile),
+                        null,
+                        placeholderRows(newFile, 0, oldFile, 0),
+                        READ_ROW_TYPE_WITH_ROW_ID_ONLY);
+
+        assertThat(rows.rowIds).isEmpty();
+        assertThat(rows.nullBlobRowIds).containsExactly(0L);
+        assertThat(rows.nullBlobSequenceNumbers).isEmpty();
+        assertThat(rows.nullBlobRowCount).isEqualTo(1);
+        assertThat(rows.placeholderRowCount).isEqualTo(0);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderReturnsSequenceIfAllRowsArePlaceholders()
+            throws Exception {
+        DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);
+        DataFileMeta oldFile = blobFile("old-placeholder-file", 0, 1, 1);
+
+        ReadResult rows =
+                readFallback(
+                        Arrays.asList(newFile, oldFile),
+                        null,
+                        placeholderRows(newFile, 0, oldFile, 0),
+                        READ_ROW_TYPE_WITH_SEQUENCE_ONLY);
+
+        assertThat(rows.rowIds).isEmpty();
+        assertThat(rows.nullBlobRowIds).isEmpty();
+        assertThat(rows.nullBlobSequenceNumbers).containsExactly(-1L);
         assertThat(rows.nullBlobRowCount).isEqualTo(1);
         assertThat(rows.placeholderRowCount).isEqualTo(0);
     }
@@ -171,13 +224,23 @@ public class BlobFallbackRecordReaderTest {
     private static ReadResult readFallback(
             List<DataFileMeta> files, List<Range> rowRanges, Set<String> placeholderRows)
             throws Exception {
+        return readFallback(files, rowRanges, placeholderRows, READ_ROW_TYPE);
+    }
+
+    private static ReadResult readFallback(
+            List<DataFileMeta> files,
+            List<Range> rowRanges,
+            Set<String> placeholderRows,
+            RowType readRowType)
+            throws Exception {
         return ReadResult.read(
                 new BlobFallbackRecordReader(
                         files,
                         file -> oneRowPerBatchReader(fileRows(file, rowRanges, placeholderRows)),
                         rowRanges,
-                        READ_ROW_TYPE,
-                        BLOB_INDEX));
+                        readRowType,
+                        BLOB_INDEX),
+                readRowType);
     }
 
     private static ReadResult readSequenceGroup(
@@ -189,13 +252,17 @@ public class BlobFallbackRecordReaderTest {
             throws Exception {
         return ReadResult.read(
                 new BlobSequenceGroupRecordReader(
+                        sequenceNumber,
                         files,
                         file -> oneRowPerBatchReader(fileRows(file, rowRanges)),
                         rowRanges,
                         READ_ROW_TYPE,
                         BLOB_INDEX,
+                        READ_ROW_TYPE.getFieldIndex(SpecialFields.ROW_ID.name()),
+                        READ_ROW_TYPE.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name()),
                         firstRowId,
-                        lastRowId));
+                        lastRowId),
+                READ_ROW_TYPE);
     }
 
     private static DataFileMeta blobFile(
@@ -361,13 +428,20 @@ public class BlobFallbackRecordReaderTest {
     private static class ReadResult {
         final List<Long> rowIds = new ArrayList<>();
         final List<Long> sequenceNumbers = new ArrayList<>();
+        final List<Long> nullBlobRowIds = new ArrayList<>();
+        final List<Long> nullBlobSequenceNumbers = new ArrayList<>();
         final List<Integer> batchSizes = new ArrayList<>();
         int placeholderRowCount;
         int nullBlobRowCount;
 
         static ReadResult read(RecordReader<InternalRow> reader) throws Exception {
+            return read(reader, READ_ROW_TYPE);
+        }
+
+        static ReadResult read(RecordReader<InternalRow> reader, RowType readRowType)
+                throws Exception {
             try {
-                ReadResult result = new ReadResult();
+                ReadResult result = new ReadResult(readRowType);
                 RecordIterator<InternalRow> batch;
                 while ((batch = reader.readBatch()) != null) {
                     int batchSize = 0;
@@ -385,14 +459,32 @@ public class BlobFallbackRecordReaderTest {
             }
         }
 
+        private final int rowIdIndex;
+        private final int seqNumIndex;
+
+        private ReadResult(RowType readRowType) {
+            this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
+            this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
+        }
+
         private void add(InternalRow row) {
             if (row.isNullAt(BLOB_INDEX)) {
                 nullBlobRowCount++;
+                if (rowIdIndex >= 0) {
+                    nullBlobRowIds.add(row.getLong(rowIdIndex));
+                }
+                if (seqNumIndex >= 0) {
+                    nullBlobSequenceNumbers.add(row.getLong(seqNumIndex));
+                }
             } else if (row.getBlob(BLOB_INDEX) == BlobPlaceholder.INSTANCE) {
                 placeholderRowCount++;
             } else {
-                rowIds.add(row.getLong(1));
-                sequenceNumbers.add(row.getLong(2));
+                if (rowIdIndex >= 0) {
+                    rowIds.add(row.getLong(rowIdIndex));
+                }
+                if (seqNumIndex >= 0) {
+                    sequenceNumbers.add(row.getLong(seqNumIndex));
+                }
             }
         }
     }

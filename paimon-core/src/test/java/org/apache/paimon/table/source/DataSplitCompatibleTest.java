@@ -38,6 +38,7 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -88,6 +90,31 @@ public class DataSplitCompatibleTest {
         deletionFiles.add(new DeletionFile("p", 1, 2, 100L));
         split = newDataSplit(true, dataFiles, deletionFiles);
         assertThat(split.mergedRowCount()).hasValue(5700L);
+    }
+
+    @Test
+    public void testDataEvolutionDeletionFilesSerialize() throws Exception {
+        List<DataFileMeta> dataFiles =
+                Collections.singletonList(
+                        newDataFile(10, SimpleStats.EMPTY_STATS, null).assignFirstRowId(0));
+        Map<Range, DeletionFile> dataEvolutionDeletionFiles = new LinkedHashMap<>();
+        dataEvolutionDeletionFiles.put(new Range(0, 9), new DeletionFile("p", 1, 2, 3L));
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(1)
+                        .withBucketPath("my path")
+                        .rawConvertible(true)
+                        .withDataFiles(dataFiles)
+                        .withDataEvolutionDeletionFiles(dataEvolutionDeletionFiles)
+                        .build();
+
+        DataSplit actual = InstantiationUtil.clone(split);
+
+        assertThat(actual.rawConvertible()).isFalse();
+        assertThat(actual.dataEvolutionDeletionFiles()).hasValue(dataEvolutionDeletionFiles);
+        assertThat(actual.mergedRowCount()).hasValue(7L);
     }
 
     @Test

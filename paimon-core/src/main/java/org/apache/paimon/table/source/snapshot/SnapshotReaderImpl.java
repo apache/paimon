@@ -60,6 +60,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -76,6 +77,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
@@ -83,6 +85,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
+import static org.apache.paimon.utils.DeletionVectorUtils.retrieveAnchorFile;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {
@@ -435,12 +438,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             .rawConvertible(splitGroup.rawConvertible)
                             .withBucketPath(bucketPath);
                     if (deletionVectors && deletionFilesMap != null) {
-                        builder.withDataDeletionFiles(
-                                getDeletionFiles(
-                                        dataFiles,
-                                        deletionFilesMap.getOrDefault(
-                                                Pair.of(partition, bucket),
-                                                Collections.emptyMap())));
+                        Map<String, DeletionFile> deletionFiles =
+                                deletionFilesMap.getOrDefault(
+                                        Pair.of(partition, bucket), Collections.emptyMap());
+                        if (options.dataEvolutionEnabled()) {
+                            Map<Range, DeletionFile> dataEvolutionDeletionFiles =
+                                    getDataEvolutionDeletionFiles(dataFiles, deletionFiles);
+                            builder.withDataEvolutionDeletionFiles(dataEvolutionDeletionFiles);
+                        } else {
+                            builder.withDataDeletionFiles(
+                                    getDeletionFiles(dataFiles, deletionFiles));
+                        }
                     }
                     splits.add(builder.build());
                 }
@@ -615,6 +623,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .map(DataFileMeta::fileName)
                 .map(f -> deletionFilesMap == null ? null : deletionFilesMap.get(f))
                 .forEach(deletionFiles::add);
+        return deletionFiles;
+    }
+
+    private Map<Range, DeletionFile> getDataEvolutionDeletionFiles(
+            List<DataFileMeta> dataFiles, Map<String, DeletionFile> deletionFilesMap) {
+        if (deletionFilesMap.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Range, DeletionFile> deletionFiles = new LinkedHashMap<>();
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(dataFiles)) {
+            DataFileMeta anchor = retrieveAnchorFile(group, Function.identity());
+            DeletionFile deletionFile = deletionFilesMap.get(anchor.fileName());
+            if (deletionFile != null) {
+                deletionFiles.put(anchor.nonNullRowIdRange(), deletionFile);
+            }
+        }
         return deletionFiles;
     }
 
