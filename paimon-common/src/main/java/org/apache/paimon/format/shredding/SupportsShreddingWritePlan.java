@@ -16,33 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.variant;
+package org.apache.paimon.format.shredding;
 
+import org.apache.paimon.data.shredding.ShreddingWritePlan;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 
-/**
- * Interface for FormatWriterFactory implementations that support variant schema inference.
- *
- * <p>Writers implementing this interface can dynamically update their schema based on inferred
- * variant shredding schemas.
- */
-public interface SupportsVariantInference {
+/** Format writer factories that can create a writer for a shredded physical row layout. */
+public interface SupportsShreddingWritePlan {
 
-    /**
-     * Create the writer with the inferred shredding schema using the same output stream and
-     * compression settings.
-     *
-     * @param out The output stream to write to
-     * @param compression The compression codec
-     * @param inferredShreddingSchema The inferred shredding schema for variant fields
-     * @return A new FormatWriter configured with the inferred schema
-     * @throws IOException If the writer cannot be created
-     */
-    FormatWriter createWithShreddingSchema(
-            PositionOutputStream out, String compression, RowType inferredShreddingSchema)
+    FormatWriter createWithShreddingWritePlan(
+            PositionOutputStream out, String compression, ShreddingWritePlan writePlan)
             throws IOException;
+
+    default void commitShreddingMetadata(
+            FormatWriter writer, ShreddingWritePlan writePlan, String compression)
+            throws IOException {}
 }

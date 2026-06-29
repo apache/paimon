@@ -16,58 +16,46 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.variant;
+package org.apache.paimon.format.shredding;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.InferVariantShreddingSchema;
+import org.apache.paimon.data.shredding.ShreddingWritePlan;
 import org.apache.paimon.format.BundleFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-/**
- * A generic writer that infers the shredding schema from buffered rows before writing.
- *
- * <p>This writer buffers rows up to a threshold, infers the optimal schema from them, then writes
- * all data using the inferred schema. It works with any format that implements {@link
- * SupportsVariantInference}.
- */
-public class InferVariantShreddingWriter implements BundleFormatWriter {
+/** Buffers initial rows, infers a per-file shredding write plan, and writes physical rows. */
+public class InferShreddingWritePlanWriter implements BundleFormatWriter {
 
-    private final SupportsVariantInference writerFactory;
-    private final RowType rowType;
-    private final InferVariantShreddingSchema shreddingSchemaInfer;
-    private final int maxBufferRow;
+    private final SupportsShreddingWritePlan writerFactory;
+    private final ShreddingWritePlanFactory writePlanFactory;
     private final PositionOutputStream out;
     private final String compression;
 
     private final List<InternalRow> bufferedRows;
     private final List<BundleRecords> bufferedBundles;
 
-    private FormatWriter actualWriter;
-    private boolean schemaFinalized = false;
+    @Nullable private FormatWriter actualWriter;
+    private boolean planFinalized = false;
     private long totalBufferedRowCount = 0;
 
-    public InferVariantShreddingWriter(
-            SupportsVariantInference writerFactory,
-            RowType rowType,
-            InferVariantShreddingSchema shreddingSchemaInfer,
-            int maxBufferRow,
+    public InferShreddingWritePlanWriter(
+            SupportsShreddingWritePlan writerFactory,
+            ShreddingWritePlanFactory writePlanFactory,
             PositionOutputStream out,
             String compression) {
         this.writerFactory = writerFactory;
-        this.rowType = rowType;
-        this.shreddingSchemaInfer = shreddingSchemaInfer;
-        this.maxBufferRow = maxBufferRow;
+        this.writePlanFactory = writePlanFactory;
         this.out = out;
         this.compression = compression;
         this.bufferedRows = new ArrayList<>();
@@ -76,58 +64,56 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
 
     @Override
     public void addElement(InternalRow row) throws IOException {
-        if (!schemaFinalized) {
-            bufferedRows.add(InternalRowUtils.copyInternalRow(row, rowType));
+        if (!planFinalized) {
+            bufferedRows.add(
+                    InternalRowUtils.copyInternalRow(row, writePlanFactory.logicalRowType()));
             totalBufferedRowCount++;
-            if (totalBufferedRowCount >= maxBufferRow) {
-                finalizeSchemaAndFlush();
+            if (totalBufferedRowCount >= writePlanFactory.inferBufferRowCount()) {
+                finalizePlanAndFlush();
             }
-        } else {
-            actualWriter.addElement(row);
+            return;
         }
+
+        actualWriter.addElement(row);
     }
 
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
-        if (!schemaFinalized) {
+        if (!planFinalized) {
             final List<InternalRow> rows = new ArrayList<>();
-            bundle.forEach(row -> rows.add(InternalRowUtils.copyInternalRow(row, rowType)));
-            BundleRecords copiedBundle =
-                    new BundleRecords() {
-                        @Override
-                        @Nonnull
-                        public Iterator<InternalRow> iterator() {
-                            return rows.iterator();
-                        }
-
-                        @Override
-                        public long rowCount() {
-                            return rows.size();
-                        }
-                    };
-            bufferedBundles.add(copiedBundle);
-            totalBufferedRowCount += bundle.rowCount();
-            if (totalBufferedRowCount >= maxBufferRow) {
-                finalizeSchemaAndFlush();
+            for (InternalRow row : bundle) {
+                rows.add(InternalRowUtils.copyInternalRow(row, writePlanFactory.logicalRowType()));
             }
-        } else {
-            ((BundleFormatWriter) actualWriter).writeBundle(bundle);
+            bufferedBundles.add(new CopiedBundleRecords(rows));
+            totalBufferedRowCount += bundle.rowCount();
+            if (totalBufferedRowCount >= writePlanFactory.inferBufferRowCount()) {
+                finalizePlanAndFlush();
+            }
+            return;
         }
+
+        ((BundleFormatWriter) actualWriter).writeBundle(bundle);
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        if (!schemaFinalized) {
+        if (!planFinalized) {
             return false;
         }
         return actualWriter.reachTargetSize(suggestedCheck, targetSize);
     }
 
+    @Nullable
+    @Override
+    public Object writerMetadata() {
+        return actualWriter == null ? null : actualWriter.writerMetadata();
+    }
+
     @Override
     public void close() throws IOException {
         try {
-            if (!schemaFinalized) {
-                finalizeSchemaAndFlush();
+            if (!planFinalized) {
+                finalizePlanAndFlush();
             }
         } finally {
             if (actualWriter != null) {
@@ -136,11 +122,12 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
         }
     }
 
-    private void finalizeSchemaAndFlush() throws IOException {
-        RowType inferredShreddingSchema = shreddingSchemaInfer.inferSchema(collectAllRows());
+    private void finalizePlanAndFlush() throws IOException {
+        ShreddingWritePlan writePlan = writePlanFactory.createWritePlan(collectAllRows());
         actualWriter =
-                writerFactory.createWithShreddingSchema(out, compression, inferredShreddingSchema);
-        schemaFinalized = true;
+                ShreddingWritePlanWriterFactory.createWriterWithPlan(
+                        writerFactory, out, compression, writePlan);
+        planFinalized = true;
 
         if (!bufferedBundles.isEmpty()) {
             BundleFormatWriter bundleWriter = (BundleFormatWriter) actualWriter;
@@ -157,16 +144,36 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
     }
 
     private List<InternalRow> collectAllRows() {
-        if (!bufferedBundles.isEmpty()) {
-            List<InternalRow> allRows = new ArrayList<>();
-            for (BundleRecords bundle : bufferedBundles) {
-                for (InternalRow row : bundle) {
-                    allRows.add(row);
-                }
-            }
-            return allRows;
-        } else {
+        if (bufferedBundles.isEmpty()) {
             return bufferedRows;
+        }
+
+        List<InternalRow> allRows = new ArrayList<>();
+        for (BundleRecords bundle : bufferedBundles) {
+            for (InternalRow row : bundle) {
+                allRows.add(row);
+            }
+        }
+        return allRows;
+    }
+
+    private static class CopiedBundleRecords implements BundleRecords {
+
+        private final List<InternalRow> rows;
+
+        private CopiedBundleRecords(List<InternalRow> rows) {
+            this.rows = rows;
+        }
+
+        @Override
+        @Nonnull
+        public Iterator<InternalRow> iterator() {
+            return rows.iterator();
+        }
+
+        @Override
+        public long rowCount() {
+            return rows.size();
         }
     }
 }

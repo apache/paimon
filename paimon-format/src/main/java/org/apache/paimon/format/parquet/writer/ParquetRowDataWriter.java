@@ -25,10 +25,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.variant.GenericVariant;
-import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -71,17 +68,11 @@ public class ParquetRowDataWriter {
     private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
-    @Nullable private final RowType shreddingSchemas;
 
     public ParquetRowDataWriter(
-            RecordConsumer recordConsumer,
-            RowType rowType,
-            GroupType schema,
-            Configuration conf,
-            @Nullable RowType shreddingSchemas) {
+            RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
         this.conf = conf;
         this.recordConsumer = recordConsumer;
-        this.shreddingSchemas = shreddingSchemas;
         this.rowWriter = new RowWriter(rowType, schema);
     }
 
@@ -159,11 +150,7 @@ public class ParquetRowDataWriter {
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
             } else if (t instanceof VariantType && type instanceof GroupType) {
-                RowType shreddingSchema =
-                        shreddingSchemas != null && shreddingSchemas.containsField(type.getName())
-                                ? (RowType) shreddingSchemas.getField(type.getName()).type()
-                                : null;
-                return new VariantWriter(groupType, shreddingSchema);
+                return new VariantWriter();
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -637,19 +624,6 @@ public class ParquetRowDataWriter {
 
     private class VariantWriter implements FieldWriter {
 
-        @Nullable private final VariantSchema variantSchema;
-        @Nullable private final RowWriter shreddedVariantWriter;
-
-        public VariantWriter(GroupType groupType, @Nullable RowType shreddingSchema) {
-            if (shreddingSchema != null) {
-                variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
-                shreddedVariantWriter = new RowWriter(shreddingSchema, groupType);
-            } else {
-                variantSchema = null;
-                shreddedVariantWriter = null;
-            }
-        }
-
         @Override
         public void write(InternalRow row, int ordinal) {
             writeVariant(row.getVariant(ordinal));
@@ -661,15 +635,6 @@ public class ParquetRowDataWriter {
         }
 
         private void writeVariant(Variant variant) {
-            if (shreddedVariantWriter != null) {
-                recordConsumer.startGroup();
-                InternalRow shreddedVariant =
-                        PaimonShreddingUtils.castShredded((GenericVariant) variant, variantSchema);
-                shreddedVariantWriter.write(shreddedVariant);
-                recordConsumer.endGroup();
-                return;
-            }
-
             recordConsumer.startGroup();
             recordConsumer.startField(Variant.VALUE, 0);
             recordConsumer.addBinary(Binary.fromReusedByteArray(variant.value()));

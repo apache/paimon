@@ -33,7 +33,7 @@ import org.apache.paimon.format.SupportsDirectWrite;
 import org.apache.paimon.format.parquet.ParquetFileFormat;
 import org.apache.paimon.format.parquet.ParquetUtil;
 import org.apache.paimon.format.parquet.VariantUtils;
-import org.apache.paimon.format.variant.InferVariantShreddingWriter;
+import org.apache.paimon.format.shredding.InferShreddingWritePlanWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -63,7 +63,7 @@ import java.util.UUID;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link InferVariantShreddingWriter}. */
+/** Test for {@link InferShreddingWritePlanWriter}. */
 public class InferVariantShreddingWriteTest {
 
     @TempDir java.nio.file.Path tempPath;
