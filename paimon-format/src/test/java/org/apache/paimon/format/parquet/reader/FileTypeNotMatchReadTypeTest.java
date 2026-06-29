@@ -90,9 +90,7 @@ public class FileTypeNotMatchReadTypeTest {
 
             ParquetRowDataBuilder parquetRowDataBuilder =
                     new ParquetRowDataBuilder(
-                            new LocalOutputFile(new File(fileWholePath).toPath()),
-                            rowTypeWrite,
-                            null);
+                            new LocalOutputFile(new File(fileWholePath).toPath()), rowTypeWrite);
 
             ParquetWriter<InternalRow> parquetWriter = parquetRowDataBuilder.build();
             Timestamp timestamp = Timestamp.now();
@@ -131,9 +129,7 @@ public class FileTypeNotMatchReadTypeTest {
 
             ParquetRowDataBuilder parquetRowDataBuilder =
                     new ParquetRowDataBuilder(
-                            new LocalOutputFile(new File(fileWholePath).toPath()),
-                            rowTypeWrite,
-                            null);
+                            new LocalOutputFile(new File(fileWholePath).toPath()), rowTypeWrite);
 
             ParquetWriter<InternalRow> parquetWriter = parquetRowDataBuilder.build();
             Decimal decimal =
