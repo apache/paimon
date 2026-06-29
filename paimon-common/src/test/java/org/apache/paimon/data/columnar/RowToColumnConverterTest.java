@@ -19,10 +19,12 @@
 package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapBooleanVector;
@@ -35,6 +37,7 @@ import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
+import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -57,11 +60,13 @@ import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link RowToColumnConverter}. */
 public class RowToColumnConverterTest {
@@ -374,6 +379,87 @@ public class RowToColumnConverterTest {
     }
 
     @Test
+    public void testConvertVectorType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row1 =
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f}));
+        GenericRow row2 =
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {4.0f, 5.0f, 6.0f}));
+
+        HeapFloatVector elementVector = new HeapFloatVector(6);
+        HeapVectorColumnVector vectorColumn = new HeapVectorColumnVector(2, elementVector, 3);
+        WritableColumnVector[] vectors = new WritableColumnVector[] {vectorColumn};
+
+        converter.convert(row1, vectors);
+        converter.convert(row2, vectors);
+
+        assertThat(elementVector.getFloat(0)).isEqualTo(1.0f);
+        assertThat(elementVector.getFloat(1)).isEqualTo(2.0f);
+        assertThat(elementVector.getFloat(2)).isEqualTo(3.0f);
+        assertThat(elementVector.getFloat(3)).isEqualTo(4.0f);
+        assertThat(elementVector.getFloat(4)).isEqualTo(5.0f);
+        assertThat(elementVector.getFloat(5)).isEqualTo(6.0f);
+        assertThat(vectorColumn.getVector(0).toFloatArray()).containsExactly(1.0f, 2.0f, 3.0f);
+        assertThat(vectorColumn.getVector(1).toFloatArray()).containsExactly(4.0f, 5.0f, 6.0f);
+    }
+
+    @Test
+    public void testConvertNullableVectorType() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row1 = GenericRow.of((Object) null);
+        GenericRow row2 =
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f}));
+
+        HeapFloatVector elementVector = new HeapFloatVector(3);
+        HeapVectorColumnVector vectorColumn = new HeapVectorColumnVector(2, elementVector, 3);
+        WritableColumnVector[] vectors = new WritableColumnVector[] {vectorColumn};
+
+        converter.convert(row1, vectors);
+        converter.convert(row2, vectors);
+
+        assertThat(vectorColumn.isNullAt(0)).isTrue();
+        assertThat(elementVector.isNullAt(0)).isTrue();
+        assertThat(elementVector.isNullAt(1)).isTrue();
+        assertThat(elementVector.isNullAt(2)).isTrue();
+        assertThat(elementVector.getFloat(3)).isEqualTo(1.0f);
+        assertThat(elementVector.getFloat(4)).isEqualTo(2.0f);
+        assertThat(elementVector.getFloat(5)).isEqualTo(3.0f);
+        assertThat(vectorColumn.getVector(1).toFloatArray()).containsExactly(1.0f, 2.0f, 3.0f);
+    }
+
+    @Test
+    public void testConvertVectorTypeWithInvalidLength() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row = GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f}));
+        HeapVectorColumnVector vectorColumn =
+                new HeapVectorColumnVector(1, new HeapFloatVector(2), 3);
+
+        assertThatThrownBy(() -> converter.convert(row, new WritableColumnVector[] {vectorColumn}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Vector length mismatch");
+    }
+
+    @Test
+    public void testConvertVectorTypeWithNullElement() {
+        RowType rowType = RowType.of(new DataField(0, "f", DataTypes.VECTOR(3, DataTypes.FLOAT())));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        GenericRow row = GenericRow.of(createFloatVectorWithNullElement());
+        HeapVectorColumnVector vectorColumn =
+                new HeapVectorColumnVector(1, new HeapFloatVector(3), 3);
+
+        assertThatThrownBy(() -> converter.convert(row, new WritableColumnVector[] {vectorColumn}))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Vector elements must not be null");
+    }
+
+    @Test
     public void testConvertMapType() {
         RowType rowType =
                 RowType.of(
@@ -506,5 +592,20 @@ public class RowToColumnConverterTest {
         assertThat(rowVector.isNullAt(2)).isFalse();
         assertThat(idVector.isNullAt(2)).isTrue();
         assertThat(nameVector.isNullAt(2)).isTrue();
+    }
+
+    private static InternalVector createFloatVectorWithNullElement() {
+        BinaryVector vector = BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f});
+        Object proxy =
+                Proxy.newProxyInstance(
+                        RowToColumnConverterTest.class.getClassLoader(),
+                        new Class[] {InternalVector.class},
+                        (obj, method, args) -> {
+                            if ("isNullAt".equals(method.getName()) && ((Integer) args[0]) == 1) {
+                                return true;
+                            }
+                            return method.invoke(vector, args);
+                        });
+        return (InternalVector) proxy;
     }
 }

@@ -45,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -103,7 +104,12 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class SchemaValidation {
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
+            Arrays.asList(
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    MultisetType.class,
+                    VectorType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.

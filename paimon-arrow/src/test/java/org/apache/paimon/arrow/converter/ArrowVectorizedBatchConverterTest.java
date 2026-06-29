@@ -20,13 +20,18 @@ package org.apache.paimon.arrow.converter;
 
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarVec;
+import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapFloatVector;
+import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -91,6 +96,56 @@ public class ArrowVectorizedBatchConverterTest {
             List<Float> row0 = (List<Float>) listVector.getObject(0);
             assertThat(row0).containsExactly(1.0f, 2.0f, 3.0f);
             assertThat(listVector.getObject(1)).isNull();
+
+            converter.close();
+        }
+    }
+
+    @Test
+    public void testNullableVectorColumnFromRowToColumnConverter() {
+        RowType rowType = RowType.of(DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        RowToColumnConverter rowToColumnConverter = new RowToColumnConverter(rowType);
+
+        HeapFloatVector elementVector = new HeapFloatVector(6);
+        HeapVectorColumnVector vectorColumn = new HeapVectorColumnVector(2, elementVector, 3);
+        WritableColumnVector[] vectors = new WritableColumnVector[] {vectorColumn};
+        rowToColumnConverter.convert(GenericRow.of((Object) null), vectors);
+        rowToColumnConverter.convert(
+                GenericRow.of(BinaryVector.fromPrimitiveArray(new float[] {1.0f, 2.0f, 3.0f})),
+                vectors);
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(rowType, allocator);
+            ArrowFieldWriter[] fieldWriters = ArrowUtils.createArrowFieldWriters(vsr, rowType);
+            VectorizedColumnBatch batch =
+                    new VectorizedColumnBatch(new ColumnVector[] {vectorColumn});
+            batch.setNumRows(2);
+
+            ArrowVectorizedBatchConverter converter =
+                    new ArrowVectorizedBatchConverter(vsr, fieldWriters);
+            converter.reset(
+                    new VectorizedRecordIterator() {
+                        @Override
+                        public VectorizedColumnBatch batch() {
+                            return batch;
+                        }
+
+                        @Override
+                        public InternalRow next() {
+                            return null;
+                        }
+
+                        @Override
+                        public void releaseBatch() {}
+                    });
+            converter.next(2);
+
+            FixedSizeListVector listVector = (FixedSizeListVector) vsr.getVector(0);
+            assertThat(listVector.isNull(0)).isTrue();
+            assertThat(listVector.getObject(0)).isNull();
+            @SuppressWarnings("unchecked")
+            List<Float> row1 = (List<Float>) listVector.getObject(1);
+            assertThat(row1).containsExactly(1.0f, 2.0f, 3.0f);
 
             converter.close();
         }
