@@ -82,25 +82,14 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     }
 
     static int trainMaxSamples(Options tableOptions, String identifier, String fieldName) {
-        String optionPrefix = identifier + ".";
-        String fieldPrefix = "fields." + fieldName + ".";
-        String indexKey = optionPrefix + TRAIN_MAX_SAMPLES_OPTION;
-        String fieldKey = fieldPrefix + TRAIN_MAX_SAMPLES_OPTION;
         Map<String, String> tableOptionsMap = tableOptions.toMap();
-
-        String key = null;
-        String value = null;
-        if (tableOptionsMap.containsKey(indexKey)) {
-            key = indexKey;
-            value = tableOptionsMap.get(indexKey);
-        }
-        if (tableOptionsMap.containsKey(fieldKey)) {
-            key = fieldKey;
-            value = tableOptionsMap.get(fieldKey);
-        }
-        if (value == null) {
+        String key =
+                resolveFieldOverriddenKey(
+                        tableOptionsMap, identifier, fieldName, TRAIN_MAX_SAMPLES_OPTION);
+        if (key == null) {
             return DEFAULT_TRAIN_MAX_SAMPLES;
         }
+        String value = tableOptionsMap.get(key);
 
         try {
             int parsed = Integer.parseInt(value.trim());
@@ -116,6 +105,32 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
     private static IllegalArgumentException invalidTrainMaxSamples(String key, String value) {
         return new IllegalArgumentException(
                 "Invalid value for '" + key + "': " + value + ". Must be a positive integer.");
+    }
+
+    /**
+     * Resolves a single option key that supports index-level ({@code <index-type>.<option>}) and
+     * field-level ({@code fields.<field-name>.<option>}) forms, where the field-level key overrides
+     * the index-level key. Returns the winning fully-qualified key, or {@code null} if neither is
+     * set.
+     *
+     * <p>This is the same index/field precedence applied in bulk by {@link #nativeOptions}; the
+     * difference is that this helper resolves a single option so it can stay local (for example
+     * {@code train.max-samples}) instead of being forwarded to the native writer.
+     */
+    private static String resolveFieldOverriddenKey(
+            Map<String, String> tableOptionsMap,
+            String identifier,
+            String fieldName,
+            String option) {
+        String fieldKey = "fields." + fieldName + "." + option;
+        if (tableOptionsMap.containsKey(fieldKey)) {
+            return fieldKey;
+        }
+        String indexKey = identifier + "." + option;
+        if (tableOptionsMap.containsKey(indexKey)) {
+            return indexKey;
+        }
+        return null;
     }
 
     private static String nativeOptionKey(String optionKey) {
