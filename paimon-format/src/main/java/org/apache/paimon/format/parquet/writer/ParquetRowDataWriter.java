@@ -39,7 +39,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
@@ -65,13 +64,10 @@ public class ParquetRowDataWriter {
     public static final long NANOS_PER_MILLISECOND = TimeUnit.MILLISECONDS.toNanos(1);
     public static final long NANOS_PER_SECOND = TimeUnit.SECONDS.toNanos(1);
 
-    private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
 
-    public ParquetRowDataWriter(
-            RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
-        this.conf = conf;
+    public ParquetRowDataWriter(RecordConsumer recordConsumer, RowType rowType, GroupType schema) {
         this.recordConsumer = recordConsumer;
         this.rowWriter = new RowWriter(rowType, schema);
     }

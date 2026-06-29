@@ -50,7 +50,7 @@ public class ParquetRowDataBuilderForTest
     }
 
     @Override
-    protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
+    protected WriteSupport<InternalRow> getWriteSupport() {
         return new ParquetWriteSupport();
     }
 
@@ -65,9 +65,7 @@ public class ParquetRowDataBuilderForTest
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer =
-                    new ParquetRowDataWriter(
-                            recordConsumer, rowType, schema, new Configuration(), null);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
         }
 
         @Override

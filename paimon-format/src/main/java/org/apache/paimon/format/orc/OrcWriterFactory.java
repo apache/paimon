@@ -78,23 +78,6 @@ public class OrcWriterFactory implements FormatWriterFactory, SupportsShreddingW
         this(vectorizer, new Properties(), new Configuration(false), 1024, MemorySize.ZERO, false);
     }
 
-    /**
-     * Creates a new OrcBulkWriterFactory using the provided Vectorizer, Hadoop Configuration, ORC
-     * writer properties.
-     *
-     * @param vectorizer The vectorizer implementation to convert input record to a
-     *     VectorizerRowBatch.
-     * @param writerProperties Properties that can be used in ORC WriterOptions.
-     */
-    public OrcWriterFactory(
-            Vectorizer<InternalRow> vectorizer,
-            Properties writerProperties,
-            Configuration configuration,
-            int writeBatchSize,
-            MemorySize writeBatchMemory) {
-        this(vectorizer, writerProperties, configuration, writeBatchSize, writeBatchMemory, false);
-    }
-
     public OrcWriterFactory(
             Vectorizer<InternalRow> vectorizer,
             Properties writerProperties,

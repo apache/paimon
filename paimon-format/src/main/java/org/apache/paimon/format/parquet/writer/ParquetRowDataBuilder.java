@@ -61,21 +61,15 @@ public class ParquetRowDataBuilder
     }
 
     @Override
-    protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
-        return new ParquetWriteSupport(conf);
+    protected WriteSupport<InternalRow> getWriteSupport() {
+        return new ParquetWriteSupport();
     }
 
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
-        private final Configuration conf;
-        private final MessageType schema;
+        private final MessageType schema = convertToParquetMessageType(rowType);
 
         private ParquetRowDataWriter writer;
-
-        private ParquetWriteSupport(Configuration conf) {
-            this.conf = conf;
-            this.schema = convertToParquetMessageType(rowType);
-        }
 
         @Override
         public WriteContext init(Configuration configuration) {
@@ -84,7 +78,7 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema, conf);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
         }
 
         @Override
