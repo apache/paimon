@@ -22,11 +22,14 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.mergetree.lookup.FilePosition;
 import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistProcessor;
+import org.apache.paimon.mergetree.lookup.PositionedKeyValue;
 import org.apache.paimon.mergetree.lookup.RemoteFileDownloader;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
@@ -69,6 +72,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     private final LookupStoreFactory lookupStoreFactory;
     private final Function<Long, BloomFilter.Builder> bfGenerator;
     private final Cache<String, LookupFile> lookupFileCache;
+    private final DeletionVector.Factory dvFactory;
     private final Set<String> ownCachedFiles;
     private final Map<Pair<Long, String>, PersistProcessor<T>> schemaIdAndSerVersionToProcessors;
 
@@ -86,7 +90,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             Function<String, File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Function<Long, BloomFilter.Builder> bfGenerator,
-            Cache<String, LookupFile> lookupFileCache) {
+            Cache<String, LookupFile> lookupFileCache,
+            DeletionVector.Factory dvFactory) {
         this.schemaFunction = schemaFunction;
         this.currentSchemaId = currentSchemaId;
         this.levels = levels;
@@ -99,6 +104,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         this.lookupStoreFactory = lookupStoreFactory;
         this.bfGenerator = bfGenerator;
         this.lookupFileCache = lookupFileCache;
+        this.dvFactory = dvFactory;
         this.ownCachedFiles = new HashSet<>();
         this.schemaIdAndSerVersionToProcessors = new ConcurrentHashMap<>();
         levels.addDropFileCallback(this);
@@ -129,7 +135,36 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     public T lookup(InternalRow key, int startLevel) throws IOException {
-        return LookupUtils.lookup(levels, key, startLevel, this::lookup, this::lookupLevel0);
+        T result = LookupUtils.lookup(levels, key, startLevel, this::lookup, this::lookupLevel0);
+        if (result != null && isDeletedByDeletionVector(result)) {
+            // The hit may be served by a cached lookup file built before the latest
+            // deletion vector update: data files are immutable, but their deletion
+            // vectors are not, and lookup files freeze the deletion state of their
+            // build time. A hit whose position is marked deleted means the newest
+            // version of this key is gone; deeper levels only hold older versions,
+            // so the key must be reported as absent instead of continuing the search.
+            return null;
+        }
+        return result;
+    }
+
+    private boolean isDeletedByDeletionVector(T result) throws IOException {
+        String fileName;
+        long rowPosition;
+        if (result instanceof PositionedKeyValue) {
+            PositionedKeyValue positioned = (PositionedKeyValue) result;
+            fileName = positioned.fileName();
+            rowPosition = positioned.rowPosition();
+        } else if (result instanceof FilePosition) {
+            FilePosition position = (FilePosition) result;
+            fileName = position.fileName();
+            rowPosition = position.rowPosition();
+        } else {
+            // No position information persisted (e.g. value-only processors), cannot
+            // validate the hit against the deletion vector.
+            return false;
+        }
+        return dvFactory.create(fileName).map(dv -> dv.isDeleted(rowPosition)).orElse(false);
     }
 
     @Nullable
