@@ -346,7 +346,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
 
         wb = table.new_batch_write_builder()
         w = wb.new_write()
-        for pt in range(200):
+        for pt in range(800):
             rows = [{'pt': f'p{pt}', 'pk': i, 'val': f'v{i}'} for i in range(5)]
             w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
         wb.new_commit().commit(w.prepare_commit())
@@ -372,7 +372,7 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             entries = mfm.read(meta.file_name)
             self.assertEqual(len(entries), meta.num_added_files + meta.num_deleted_files)
             all_entries.extend(entries)
-        self.assertEqual(len(all_entries), 200)
+        self.assertEqual(len(all_entries), 800)
 
     def test_rolling_write_with_skewed_entries(self):
         target_size = 16 * 1024
@@ -404,6 +404,49 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
             f"{[(m.file_name, m.file_size) for m in oversized]}")
         total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
         self.assertEqual(total_entries, 300)
+
+    def test_manifest_compression(self):
+        pa_schema = pa.schema([('pk', pa.int32()), ('val', pa.string())])
+        schema_compressed = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'], options={'bucket': '1'})
+        schema_uncompressed = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['pk'],
+            options={'bucket': '1', 'manifest.compression': 'null'})
+
+        self.catalog.create_table('default.compressed', schema_compressed, False)
+        self.catalog.create_table('default.uncompressed', schema_uncompressed, False)
+
+        rows = [{'pk': i, 'val': f'value-{i}' * 20} for i in range(100)]
+        arrow_data = pa.Table.from_pylist(rows, schema=pa_schema)
+
+        for name in ('default.compressed', 'default.uncompressed'):
+            table = self.catalog.get_table(name)
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            w.write_arrow(arrow_data)
+            wb.new_commit().commit(w.prepare_commit())
+            w.close()
+
+        t_comp = self.catalog.get_table('default.compressed')
+        t_uncomp = self.catalog.get_table('default.uncompressed')
+
+        metas_comp = ManifestListManager(t_comp).read_all(
+            t_comp.snapshot_manager().get_latest_snapshot())
+        metas_uncomp = ManifestListManager(t_uncomp).read_all(
+            t_uncomp.snapshot_manager().get_latest_snapshot())
+
+        size_comp = sum(m.file_size for m in metas_comp)
+        size_uncomp = sum(m.file_size for m in metas_uncomp)
+        self.assertLess(
+            size_comp, size_uncomp,
+            f"Compressed manifest ({size_comp}B) should be smaller "
+            f"than uncompressed ({size_uncomp}B)")
+
+        mfm = ManifestFileManager(t_comp)
+        entries = []
+        for m in metas_comp:
+            entries.extend(mfm.read(m.file_name))
+        self.assertGreater(len(entries), 0)
 
 
 class ManifestListManagerTest(_ManifestManagerSetup):

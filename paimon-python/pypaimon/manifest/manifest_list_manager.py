@@ -32,11 +32,13 @@ class ManifestListManager:
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.manifest import avro_codec
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
+        self._codec = avro_codec(table.options.manifest_compression())
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
         """Read base + delta manifest lists for full file state."""
@@ -124,7 +126,9 @@ class ManifestListManager:
         list_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
-            fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, avro_records)
+            fastavro.writer(
+                buffer, MANIFEST_FILE_META_SCHEMA, avro_records,
+                codec=self._codec)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(list_path) as output_stream:
                 output_stream.write(avro_bytes)

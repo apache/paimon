@@ -186,6 +186,13 @@ class CoreOptions:
         .with_description("The parallelism for scanning manifest files.")
     )
 
+    MANIFEST_COMPRESSION: ConfigOption[str] = (
+        ConfigOptions.key("manifest.compression")
+        .string_type()
+        .default_value("zstd")
+        .with_description("Default file compression for manifest.")
+    )
+
     MANIFEST_TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("manifest.target-file-size")
         .memory_type()
@@ -837,6 +844,9 @@ class CoreOptions:
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
+
+    def manifest_compression(self, default=None):
+        return self.options.get(CoreOptions.MANIFEST_COMPRESSION, default)
 
     def manifest_target_size(self, default=None):
         if default is not None and not isinstance(default, MemorySize):
