@@ -60,8 +60,8 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 
 /**
  * A rolling file writer that supports dedicated file formats for different column types. This
- * writer creates separate files for normal columns, blob columns, and vector columns, managing their
- * lifecycle and ensuring consistency between them.
+ * writer creates separate files for normal columns, blob columns, and vector columns, managing
+ * their lifecycle and ensuring consistency between them.
  *
  * <p>The writer handles three types of data:
  *
