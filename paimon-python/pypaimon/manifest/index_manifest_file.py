@@ -85,12 +85,14 @@ class IndexManifestFile:
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.manifest import avro_codec
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = table.file_io
         self.partition_keys_fields = self.table.partition_keys_fields
+        self._codec = avro_codec(table.options.manifest_compression())
 
     def read(self, index_manifest_name: str) -> List[IndexManifestEntry]:
         index_manifest_path = f"{self.manifest_path}/{index_manifest_name}"
@@ -247,7 +249,9 @@ class IndexManifestFile:
         records = [self._to_avro_record(e) for e in entries]
         try:
             buffer = BytesIO()
-            fastavro.writer(buffer, INDEX_MANIFEST_ENTRY_SCHEMA, records)
+            fastavro.writer(
+                buffer, INDEX_MANIFEST_ENTRY_SCHEMA, records,
+                codec=self._codec)
             with self.file_io.new_output_stream(path) as output_stream:
                 output_stream.write(buffer.getvalue())
         except Exception as e:

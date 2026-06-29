@@ -221,6 +221,7 @@ class ManifestSchemaTest(unittest.TestCase):
         table.table_path = table_path
         table.file_io = file_io
         table.partition_keys_fields = []
+        table.options.manifest_compression.return_value = 'zstd'
         manager = ManifestListManager(table)
         metas = manager.read(manifest_list_name)
 

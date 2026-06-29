@@ -49,6 +49,8 @@ class ManifestFileManager:
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
+        from pypaimon.manifest import avro_codec
+        self._codec = avro_codec(table.options.manifest_compression())
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
                               drop_stats=True, max_workers=8,
@@ -211,7 +213,9 @@ class ManifestFileManager:
 
     def write(self, file_name, entries: List[ManifestEntry]):
         buf = BytesIO()
-        fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
+        fastavro.writer(
+            buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries),
+            codec=self._codec)
         self._flush(file_name, buf.getvalue())
 
     def rolling_write(self, entries: List[ManifestEntry],
@@ -227,7 +231,8 @@ class ManifestFileManager:
         written_files = []
         chunk_start = 0
         buf = BytesIO()
-        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
+        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA,
+                        sync_interval=sync_interval, codec=self._codec)
         try:
             for i, entry in enumerate(entries):
                 writer.write(self._to_avro_record(entry))
@@ -241,7 +246,9 @@ class ManifestFileManager:
                         file_name, entries[chunk_start:i + 1], len(avro_bytes)))
                     chunk_start = i + 1
                     buf = BytesIO()
-                    writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
+                    writer = Writer(
+                        buf, MANIFEST_ENTRY_SCHEMA,
+                        sync_interval=sync_interval, codec=self._codec)
 
             if chunk_start < len(entries):
                 writer.flush()
