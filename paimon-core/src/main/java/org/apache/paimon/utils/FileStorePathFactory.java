@@ -60,6 +60,7 @@ public class FileStorePathFactory {
 
     public static final String STATISTICS_PATH = "statistics";
     public static final String STATISTICS_PREFIX = "stat-";
+    public static final String STATISTICS_SIDECAR_PREFIX = "stat-sidecar-";
 
     public static final String BUCKET_PATH_PREFIX = "bucket-";
 
@@ -362,6 +363,21 @@ public class FileStorePathFactory {
             @Override
             public Path newPath() {
                 return toPath(STATISTICS_PREFIX + uuid + "-" + statsFileCount.getAndIncrement());
+            }
+
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(statisticsPath(), fileName);
+            }
+        };
+    }
+
+    public PathFactory statsSidecarFileFactory() {
+        return new PathFactory() {
+            @Override
+            public Path newPath() {
+                return toPath(
+                        STATISTICS_SIDECAR_PREFIX + uuid + "-" + statsFileCount.getAndIncrement());
             }
 
             @Override

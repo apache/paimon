@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.utils.FileStorePathFactory.STATISTICS_SIDECAR_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileStorePathFactory}. */
@@ -75,6 +76,16 @@ public class FileStorePathFactoryTest {
         assertThat(dataFilePathFactory.newPath("my-data-file-name").toString())
                 .startsWith(
                         new Path(tempDir.toString() + "/bucket-123/my-data-file-name").toString());
+    }
+
+    @Test
+    public void testStatisticsSidecarPath() {
+        FileStorePathFactory pathFactory = createNonPartFactory(new Path(tempDir.toString()));
+
+        Path sidecarPath = pathFactory.statsSidecarFileFactory().newPath();
+
+        assertThat(sidecarPath.getParent()).isEqualTo(new Path(tempDir.toString() + "/statistics"));
+        assertThat(sidecarPath.getName()).startsWith(STATISTICS_SIDECAR_PREFIX);
     }
 
     @Test

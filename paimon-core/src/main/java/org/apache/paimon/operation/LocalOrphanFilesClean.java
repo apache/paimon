@@ -159,12 +159,17 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
     private void collectWithoutDataFile(
             String branch, Consumer<String> usedFileConsumer, Consumer<String> manifestConsumer)
             throws IOException {
+        Set<String> readStatisticsFiles = ConcurrentHashMap.newKeySet();
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
                     try {
                         collectWithoutDataFile(
-                                branch, snapshot, usedFileConsumer, manifestConsumer);
+                                branch,
+                                snapshot,
+                                usedFileConsumer,
+                                manifestConsumer,
+                                readStatisticsFiles);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }

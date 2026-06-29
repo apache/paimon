@@ -19,20 +19,32 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.Decimal;
 
 import org.apache.datasketches.memory.Memory;
 import org.apache.datasketches.theta.Sketches;
 import org.apache.datasketches.theta.Union;
 import org.apache.datasketches.theta.UpdateSketch;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+
 /** A compressed bitmap for 32-bit integer. */
 public class ThetaSketch {
+
+    public static Builder builder() {
+        return new Builder();
+    }
 
     public static byte[] union(byte[] sketchBytes1, byte[] sketchBytes2) {
         Union union = Sketches.setOperationBuilder().buildUnion();
         union.union(Memory.wrap(sketchBytes1));
         union.union(Memory.wrap(sketchBytes2));
         return union.getResult().toByteArray();
+    }
+
+    public static double estimate(byte[] sketchBytes) {
+        return Sketches.wrapSketch(Memory.wrap(sketchBytes)).getEstimate();
     }
 
     @VisibleForTesting
@@ -42,5 +54,42 @@ public class ThetaSketch {
             updateSketch.update(value);
         }
         return updateSketch.compact().toByteArray();
+    }
+
+    /** Incremental Theta sketch builder. Null values are ignored. */
+    public static class Builder {
+
+        private final UpdateSketch updateSketch;
+
+        private Builder() {
+            this.updateSketch = UpdateSketch.builder().build();
+        }
+
+        public void update(Object value) {
+            if (value == null) {
+                return;
+            }
+
+            if (value instanceof byte[]) {
+                updateSketch.update((byte[]) value);
+            } else if (value instanceof Byte
+                    || value instanceof Short
+                    || value instanceof Integer
+                    || value instanceof Long) {
+                updateSketch.update(((Number) value).longValue());
+            } else if (value instanceof Float || value instanceof Double) {
+                updateSketch.update(((Number) value).doubleValue());
+            } else if (value instanceof BigDecimal) {
+                updateSketch.update(((BigDecimal) value).toPlainString());
+            } else if (value instanceof Decimal) {
+                updateSketch.update(((Decimal) value).toBigDecimal().toPlainString());
+            } else {
+                updateSketch.update(value.toString().getBytes(StandardCharsets.UTF_8));
+            }
+        }
+
+        public byte[] toByteArray() {
+            return updateSketch.compact().toByteArray();
+        }
     }
 }

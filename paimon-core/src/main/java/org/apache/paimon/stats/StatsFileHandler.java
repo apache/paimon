@@ -22,20 +22,40 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** Handler of StatsFile. */
 public class StatsFileHandler {
 
+    private static final Logger LOG = LoggerFactory.getLogger(StatsFileHandler.class);
+
     private final SnapshotManager snapshotManager;
     private final SchemaManager schemaManager;
     private final StatsFile statsFile;
+    @Nullable private final StatisticsSidecarFile sidecarFile;
 
     public StatsFileHandler(
             SnapshotManager snapshotManager, SchemaManager schemaManager, StatsFile statsFile) {
+        this(snapshotManager, schemaManager, statsFile, null);
+    }
+
+    public StatsFileHandler(
+            SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
+            StatsFile statsFile,
+            @Nullable StatisticsSidecarFile sidecarFile) {
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
         this.statsFile = statsFile;
+        this.sidecarFile = sidecarFile;
     }
 
     /**
@@ -77,15 +97,61 @@ public class StatsFileHandler {
         return stats;
     }
 
+    public List<StatisticsBlobMetadata> writeSidecar(List<StatisticsBlob> blobs) {
+        return sidecarFile().write(blobs);
+    }
+
+    public List<StatisticsBlobMetadata> readSidecarMetadata(String fileName) {
+        return sidecarFile().readMetadata(fileName);
+    }
+
+    public byte[] readSidecar(StatisticsBlobMetadata metadata) {
+        return sidecarFile().read(metadata);
+    }
+
     /** Delete stats of the specified snapshot. */
     public void deleteStats(long snapshotId) {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
         if (snapshot.statistics() != null) {
-            statsFile.delete(snapshot.statistics());
+            deleteStats(snapshot.statistics());
         }
     }
 
     public void deleteStats(String statistic) {
+        deleteSidecarFiles(statistic);
         statsFile.delete(statistic);
+    }
+
+    private void deleteSidecarFiles(String statistic) {
+        if (sidecarFile == null) {
+            return;
+        }
+
+        Statistics stats;
+        try {
+            stats = statsFile.read(statistic);
+        } catch (RuntimeException e) {
+            LOG.debug(
+                    "Failed to read statistics file {} before deletion. "
+                            + "Skipping statistics sidecar file cleanup.",
+                    statistic,
+                    e);
+            return;
+        }
+
+        Set<String> sidecarFileNames = new HashSet<>();
+        for (StatisticsBlobMetadata metadata : stats.blobMetadata()) {
+            sidecarFileNames.add(metadata.fileLocation());
+        }
+        for (String sidecarFileName : sidecarFileNames) {
+            sidecarFile.delete(sidecarFileName);
+        }
+    }
+
+    private StatisticsSidecarFile sidecarFile() {
+        if (sidecarFile == null) {
+            throw new IllegalStateException("Statistics sidecar file is not configured.");
+        }
+        return sidecarFile;
     }
 }

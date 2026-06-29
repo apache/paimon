@@ -21,8 +21,9 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.data.Decimal
 import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.stats.ColStats
+import org.apache.paimon.stats.{ColStats, StatisticsNdvSketch}
 import org.apache.paimon.utils.DateTimeUtils
+import org.apache.paimon.utils.FileStorePathFactory
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
@@ -31,6 +32,8 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
 
 import java.util.UUID
+
+import scala.collection.JavaConverters._
 
 abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
@@ -358,6 +361,46 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql(s"SELECT * from T ORDER BY id"),
       Row("1", "a", 1, 1) :: Row("2", "aaa", 1, 2) :: Nil)
+  }
+
+  test("Paimon analyze: write NDV sketch sidecar when enabled") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, l LONG)
+                 |USING PAIMON
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES (1, 'a', 1), (2, 'a', 2), (2, 'b', 3), (null, 'b', 4)")
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR COLUMNS id, name")
+    Assertions.assertTrue(loadTable("T").statistics().get().blobMetadata().isEmpty)
+
+    withSparkSQLConf("spark.paimon.analyze.ndv-sketch.enabled" -> "true") {
+      spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR COLUMNS id, name")
+    }
+
+    val table = loadTable("T")
+    val stats = table.statistics().get()
+    val metadata = stats.blobMetadata()
+    Assertions.assertEquals(2, metadata.size())
+    metadata.asScala.foreach(
+      blob =>
+        Assertions.assertTrue(
+          blob.fileLocation().startsWith(FileStorePathFactory.STATISTICS_SIDECAR_PREFIX)))
+
+    val metadataByFieldId = metadata.asScala.map(blob => blob.fieldIds().get(0) -> blob).toMap
+    val statsFileHandler = table.store().newStatsFileHandler()
+
+    val idSketch = statsFileHandler.readSidecar(metadataByFieldId(0))
+    Assertions.assertEquals(2.0, StatisticsNdvSketch.estimate(idSketch), 0.001)
+    Assertions.assertEquals(
+      stats.colStats().get("id").distinctCount().getAsLong,
+      Math.round(StatisticsNdvSketch.ndv(metadataByFieldId(0))))
+
+    val nameSketch = statsFileHandler.readSidecar(metadataByFieldId(1))
+    Assertions.assertEquals(2.0, StatisticsNdvSketch.estimate(nameSketch), 0.001)
+    Assertions.assertEquals(
+      stats.colStats().get("name").distinctCount().getAsLong,
+      Math.round(StatisticsNdvSketch.ndv(metadataByFieldId(1))))
   }
 
   test("Paimon analyze: statistics expire and clean") {

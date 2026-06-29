@@ -35,7 +35,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
@@ -48,6 +50,7 @@ import java.util.stream.Collectors;
  *   <li>mergedRecordCount: the total number of records after merge
  *   <li>mergedRecordSize: the size of the mergedRecordCount in bytes
  *   <li>colStats: column stats map
+ *   <li>blobMetadata: metadata of statistics blobs stored in sidecar files
  * </ul>
  */
 @Experimental
@@ -61,6 +64,7 @@ public class Statistics {
     private static final String FIELD_MERGED_RECORD_COUNT = "mergedRecordCount";
     private static final String FIELD_MERGED_RECORD_SIZE = "mergedRecordSize";
     private static final String FIELD_COL_STATS = "colStats";
+    private static final String FIELD_BLOB_METADATA = "blobMetadata";
 
     @JsonProperty(FIELD_SNAPSHOT_ID)
     private final long snapshotId;
@@ -79,22 +83,50 @@ public class Statistics {
     @JsonProperty(FIELD_COL_STATS)
     private final Map<String, ColStats<?>> colStats;
 
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonProperty(FIELD_BLOB_METADATA)
+    private final List<StatisticsBlobMetadata> blobMetadata;
+
     @JsonCreator
     public Statistics(
             @JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
-            @JsonProperty(FIELD_COL_STATS) Map<String, ColStats<?>> colStats) {
+            @JsonProperty(FIELD_COL_STATS) Map<String, ColStats<?>> colStats,
+            @JsonProperty(FIELD_BLOB_METADATA) @Nullable
+                    List<StatisticsBlobMetadata> blobMetadata) {
         this.snapshotId = snapshotId;
         this.schemaId = schemaId;
         this.mergedRecordCount = mergedRecordCount;
         this.mergedRecordSize = mergedRecordSize;
         this.colStats = colStats;
+        this.blobMetadata =
+                blobMetadata == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(blobMetadata));
     }
 
     public Statistics(
-            long snapshotId, long schemaId, Long mergedRecordCount, Long mergedRecordSize) {
+            long snapshotId,
+            long schemaId,
+            @Nullable Long mergedRecordCount,
+            @Nullable Long mergedRecordSize,
+            Map<String, ColStats<?>> colStats) {
+        this(
+                snapshotId,
+                schemaId,
+                mergedRecordCount,
+                mergedRecordSize,
+                colStats,
+                Collections.emptyList());
+    }
+
+    public Statistics(
+            long snapshotId,
+            long schemaId,
+            @Nullable Long mergedRecordCount,
+            @Nullable Long mergedRecordSize) {
         this(snapshotId, schemaId, mergedRecordCount, mergedRecordSize, Collections.emptyMap());
     }
 
@@ -116,6 +148,10 @@ public class Statistics {
 
     public Map<String, ColStats<?>> colStats() {
         return colStats;
+    }
+
+    public List<StatisticsBlobMetadata> blobMetadata() {
+        return blobMetadata;
     }
 
     public void serializeFieldsToString(TableSchema schema) {
@@ -190,12 +226,14 @@ public class Statistics {
                 && schemaId == stats.schemaId
                 && Objects.equals(mergedRecordCount, stats.mergedRecordCount)
                 && Objects.equals(mergedRecordSize, stats.mergedRecordSize)
-                && Objects.equals(colStats, stats.colStats);
+                && Objects.equals(colStats, stats.colStats)
+                && Objects.equals(blobMetadata, stats.blobMetadata);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(snapshotId, schemaId, mergedRecordCount, mergedRecordSize, colStats);
+        return Objects.hash(
+                snapshotId, schemaId, mergedRecordCount, mergedRecordSize, colStats, blobMetadata);
     }
 
     @Override

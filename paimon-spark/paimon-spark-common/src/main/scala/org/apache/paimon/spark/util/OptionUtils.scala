@@ -110,6 +110,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
   }
 
+  def analyzeNdvSketchEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.ANALYZE_NDV_SKETCH_ENABLED).toBoolean
+  }
+
   def writeMergeSchemaExplicitCastEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }

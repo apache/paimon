@@ -55,6 +55,7 @@ import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
+import org.apache.paimon.stats.StatisticsSidecarFile;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
@@ -249,7 +250,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         return new StatsFileHandler(
                 snapshotManager(),
                 schemaManager,
-                new StatsFile(fileIO, pathFactory().statsFileFactory()));
+                new StatsFile(fileIO, pathFactory().statsFileFactory()),
+                new StatisticsSidecarFile(fileIO, pathFactory().statsSidecarFileFactory()));
     }
 
     protected ManifestsReader newManifestsReader() {

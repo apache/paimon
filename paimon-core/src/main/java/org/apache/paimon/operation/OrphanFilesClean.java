@@ -29,6 +29,8 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.stats.StatisticsBlobMetadata;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -251,6 +253,17 @@ public abstract class OrphanFilesClean implements Serializable {
             Consumer<String> usedFileConsumer,
             Consumer<String> manifestConsumer)
             throws IOException {
+        collectWithoutDataFile(
+                branch, snapshot, usedFileConsumer, manifestConsumer, new HashSet<>());
+    }
+
+    protected void collectWithoutDataFile(
+            String branch,
+            Snapshot snapshot,
+            Consumer<String> usedFileConsumer,
+            Consumer<String> manifestConsumer,
+            Set<String> readStatisticsFiles)
+            throws IOException {
         Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer =
                 fileAndFlag -> {
                     if (fileAndFlag.getRight()) {
@@ -258,13 +271,24 @@ public abstract class OrphanFilesClean implements Serializable {
                     }
                     usedFileConsumer.accept(fileAndFlag.getLeft());
                 };
-        collectWithoutDataFileWithManifestFlag(branch, snapshot, usedFileWithFlagConsumer);
+        collectWithoutDataFileWithManifestFlag(
+                branch, snapshot, usedFileWithFlagConsumer, readStatisticsFiles);
     }
 
     protected void collectWithoutDataFileWithManifestFlag(
             String branch,
             Snapshot snapshot,
             Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer)
+            throws IOException {
+        collectWithoutDataFileWithManifestFlag(
+                branch, snapshot, usedFileWithFlagConsumer, new HashSet<>());
+    }
+
+    protected void collectWithoutDataFileWithManifestFlag(
+            String branch,
+            Snapshot snapshot,
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
+            Set<String> readStatisticsFiles)
             throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
         ManifestList manifestList = branchTable.store().manifestListFactory().create();
@@ -317,7 +341,36 @@ public abstract class OrphanFilesClean implements Serializable {
 
         // statistic file
         if (snapshot.statistics() != null) {
-            usedFileWithFlagConsumer.accept(Pair.of(snapshot.statistics(), false));
+            collectStatisticsFiles(
+                    branchTable,
+                    snapshot.statistics(),
+                    usedFileWithFlagConsumer,
+                    readStatisticsFiles);
+        }
+    }
+
+    private void collectStatisticsFiles(
+            FileStoreTable branchTable,
+            String statistics,
+            Consumer<Pair<String, Boolean>> usedFileWithFlagConsumer,
+            Set<String> readStatisticsFiles)
+            throws IOException {
+        usedFileWithFlagConsumer.accept(Pair.of(statistics, false));
+        if (!readStatisticsFiles.add(statistics)) {
+            return;
+        }
+
+        Path statisticsPath =
+                branchTable.store().pathFactory().statsFileFactory().toPath(statistics);
+        Statistics stats =
+                retryReadingFiles(
+                        () -> Statistics.fromJson(fileIO.readFileUtf8(statisticsPath)), null);
+        if (stats == null) {
+            return;
+        }
+
+        for (StatisticsBlobMetadata metadata : stats.blobMetadata()) {
+            usedFileWithFlagConsumer.accept(Pair.of(metadata.fileLocation(), false));
         }
     }
 

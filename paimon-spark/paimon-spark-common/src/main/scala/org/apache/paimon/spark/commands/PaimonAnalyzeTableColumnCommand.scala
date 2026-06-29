@@ -18,19 +18,24 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
-import org.apache.paimon.stats.{ColStats, Statistics}
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.stats.{ColStats, Statistics, StatisticsBlob, StatisticsBlobMetadata, StatisticsNdvSketch}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.utils.Preconditions.checkState
+import org.apache.paimon.utils.ThetaSketch
 
 import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{DataType, Decimal, DecimalType, TimestampType}
 
 import java.util
@@ -80,12 +85,21 @@ case class PaimonAnalyzeTableColumnCommand(
       colStatsMap.put(attr.name, toPaimonColStats(attr, stats, tableSchema))
     }
 
+    val blobMetadata = writeNdvSketchSidecarIfNeeded(
+      sparkSession,
+      relation,
+      attributes,
+      currentSnapshot,
+      tableSchema)
+
     val stats = new Statistics(
       currentSnapshot.id(),
       currentSnapshot.schemaId(),
       mergedRecordCount,
       mergedRecordSize,
-      colStatsMap)
+      colStatsMap,
+      blobMetadata
+    )
 
     // commit stats
     val commit = table.newBatchWriteBuilder().newCommit()
@@ -145,6 +159,67 @@ case class PaimonAnalyzeTableColumnCommand(
           )
       }
       .getOrElse(throw new RuntimeException(s"Column ${attribute.name} is not found in schema."))
+  }
+
+  private def writeNdvSketchSidecarIfNeeded(
+      sparkSession: SparkSession,
+      relation: DataSourceV2Relation,
+      attributes: Seq[Attribute],
+      currentSnapshot: Snapshot,
+      tableSchema: TableSchema): util.List[StatisticsBlobMetadata] = {
+    if (!OptionUtils.analyzeNdvSketchEnabled() || attributes.isEmpty) {
+      return java.util.Collections.emptyList()
+    }
+
+    // This optional path intentionally runs a second scan after Spark column-stat computation.
+    // Keeping it behind a default-off flag avoids changing ANALYZE cost for existing users while
+    // the sidecar format is still experimental.
+    val sketches = computeNdvSketches(sparkSession, relation, attributes)
+    val fieldsByName = tableSchema.fields.asScala.map(field => field.name() -> field).toMap
+    val blobs = new util.ArrayList[StatisticsBlob]()
+    attributes.foreach {
+      attr =>
+        val field = fieldsByName.getOrElse(
+          attr.name,
+          throw new RuntimeException(s"Column ${attr.name} is not found in schema."))
+        blobs.add(
+          StatisticsNdvSketch.toBlob(field.id(), currentSnapshot.id(), null, sketches(attr)))
+    }
+    table.store().newStatsFileHandler().writeSidecar(blobs)
+  }
+
+  private def computeNdvSketches(
+      sparkSession: SparkSession,
+      relation: DataSourceV2Relation,
+      attributes: Seq[Attribute]): Map[Attribute, Array[Byte]] = {
+    val selected = createDataset(sparkSession, relation)
+      .select(attributes.map(SparkShimLoader.shim.classicApi.column): _*)
+    val partitionSketches = selected.rdd
+      .mapPartitions {
+        rows =>
+          val builders = Array.fill(attributes.size)(ThetaSketch.builder())
+          rows.foreach {
+            row =>
+              var index = 0
+              while (index < builders.length) {
+                builders(index).update(row.get(index))
+                index += 1
+              }
+          }
+          Iterator(builders.map(_.toByteArray))
+      }
+      .collect()
+
+    val merged = Array.fill(attributes.size)(ThetaSketch.builder().toByteArray)
+    partitionSketches.foreach {
+      sketches =>
+        var index = 0
+        while (index < sketches.length) {
+          merged(index) = StatisticsNdvSketch.union(merged(index), sketches(index))
+          index += 1
+        }
+    }
+    attributes.zip(merged).toMap
   }
 
   /**
