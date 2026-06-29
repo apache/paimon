@@ -187,6 +187,7 @@ public class BucketedAppendFileStoreWriteTest {
                         .column("tags", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
                         .option("bucket", "1")
                         .option("bucket-key", "id")
+                        .option(WRITE_ONLY.key(), "true")
                         .option("fields.tags.map.storage-layout", "shared-shredding")
                         .build();
         Identifier compactIdentifier = Identifier.create("default", "compact_test");

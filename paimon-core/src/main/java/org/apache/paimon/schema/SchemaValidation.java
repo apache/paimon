@@ -656,7 +656,23 @@ public class SchemaValidation {
             options.mapSharedShreddingMaxColumns(fieldName);
         }
         if (hasSharedShredding) {
+            validateMapSharedShreddingTableMode(schema, options);
             validateMapSharedShreddingFileFormats(options);
+        }
+    }
+
+    private static void validateMapSharedShreddingTableMode(
+            TableSchema schema, CoreOptions options) {
+        if (!schema.primaryKeys().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding is only supported for append-only tables currently.");
+        }
+
+        if (options.bucket() != -1 && !options.writeOnly()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding is only supported for append-only tables with '%s' = -1 or '%s' = true currently.",
+                            CoreOptions.BUCKET.key(), CoreOptions.WRITE_ONLY.key()));
         }
     }
 

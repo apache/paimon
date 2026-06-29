@@ -236,6 +236,52 @@ class SchemaValidationTest {
                                                 options,
                                                 "")));
 
+        Map<String, String> primaryKeyOptions = new HashMap<>(options);
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                singletonList("id"),
+                                                primaryKeyOptions,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding is only supported for append-only tables currently.");
+
+        Map<String, String> fixedBucketOptions = new HashMap<>(options);
+        fixedBucketOptions.put(BUCKET.key(), "1");
+        fixedBucketOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                fixedBucketOptions,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding is only supported for append-only tables with 'bucket' = -1 or 'write-only' = true currently.");
+
+        fixedBucketOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                fixedBucketOptions,
+                                                "")));
+
         options.put("fields.metrics.map.storage-layout", "default");
         assertThatNoException()
                 .isThrownBy(
