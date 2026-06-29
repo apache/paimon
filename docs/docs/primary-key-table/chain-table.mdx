@@ -129,7 +129,6 @@ ALTER TABLE `default`.`t$branch_delta` SET (
 Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
 - Chain table should ensure that the schema of each branch is consistent.
-- Both Spark and Flink batch read/write are supported. Flink streaming read/write is not supported.
 - Deletion vector is not supported for chain table.
 
 After creating a chain table, you can read and write data in the following ways.
@@ -215,6 +214,55 @@ you will get the following result:
 | 2 |   1|   1 |
 +---+----+-----+
 ```
+
+## Streaming Read
+
+Chain tables support Flink streaming read. A streaming read job operates in two phases:
+
+1. **Full load phase**: Produces a full result by reading the latest snapshot partition (per group)
+   and delta partitions that come after it. For each partition group, only the most recent snapshot
+   partition is included — older snapshot partitions are considered outdated and excluded.
+2. **Incremental phase**: Continuously reads new commits from the delta branch as they arrive.
+
+### Write-Side Requirements
+
+Streaming read assumes the chain table follows the standard write pattern described at the top of
+this page:
+
+- **Snapshot branch** receives periodic full data (e.g., a daily ODS binlog dump job writes via
+  `INSERT OVERWRITE t$branch_snapshot`). Each snapshot partition represents a complete view of the
+  data at that point in time.
+- **Delta branch** receives incremental changes between snapshots (e.g., a batch job writes the
+  current day's new/updated records via `INSERT INTO t$branch_delta`). Each delta partition
+  contains only the changes for that period.
+
+The streaming read relies on this pattern to produce correct results. After the full load phase,
+only new delta branch commits are picked up — writes to the snapshot branch do not trigger
+streaming output. To incorporate a new snapshot, restart the streaming job.
+
+### Usage
+
+```sql
+SET 'execution.runtime-mode' = 'streaming';
+
+INSERT INTO downstream_sink SELECT * FROM default.t;
+```
+
+### Limitations
+
+- The incremental phase only monitors the **delta branch**. Writes to the snapshot branch are
+  not detected until the streaming job is restarted.
+- The chain-table-aware streaming scan only supports the default startup mode (`latest-full`).
+  When the user specifies an explicit starting position — such as `scan.snapshot-id`,
+  `scan.timestamp-millis`, `scan.mode = 'latest'`, or `consumer-id` — an
+  `UnsupportedOperationException` is thrown. To use standard streaming read without chain table
+  logic, read from a specific branch table (e.g., `t$branch_delta`) instead of the main table.
+- Partition filters are not supported in chain table streaming reads. Specifying a partition
+  filter — either via a `WHERE` clause on partition columns or the `scan.partitions` table
+  option — throws an `UnsupportedOperationException`. This is because the chain table streaming
+  scan determines which partitions to read based on the chain-merge logic across snapshot and
+  delta branches, and applying a partition filter would interfere with this logic. To read a
+  specific partition, use batch mode instead.
 
 ## Group Partition
 
