@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.ChainGroupReadTable;
@@ -78,26 +78,21 @@ public class ChainTableUtils {
                 new ArrayList<>(partitionComputer.generatePartValues(beginPartition).values());
         List<String> endPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(endPartition).values());
-        PartitionTimeExtractor timeExtractor =
-                new PartitionTimeExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
-        LocalDateTime stratPartitionTime =
-                timeExtractor.extract(partitionColumns, startPartitionValues);
-        LocalDateTime endPartitionTime =
-                timeExtractor.extract(partitionColumns, endPartitionValues);
-        ChainPartitionPatternResolver patternResolver =
-                new ChainPartitionPatternResolver(
+        PartitionTimeResolver timeResolver =
+                new PartitionTimeResolver(
                         partitionColumns,
                         options.partitionTimestampPattern(),
                         options.partitionTimestampFormatter());
-        TemporalAmount step = patternResolver.extractMinStep();
+        LocalDateTime stratPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
+        LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
+        TemporalAmount step = timeResolver.extractMinStep();
         LocalDateTime candidateTime = stratPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
             BinaryRow candidatePartition =
                     serializer
                             .toBinaryRow(
                                     InternalRowPartitionComputer.convertSpecToInternalRow(
-                                            patternResolver.calPartValues(candidateTime),
+                                            timeResolver.resolvePartitionValues(candidateTime),
                                             partType,
                                             options.partitionDefaultName()))
                             .copy();
