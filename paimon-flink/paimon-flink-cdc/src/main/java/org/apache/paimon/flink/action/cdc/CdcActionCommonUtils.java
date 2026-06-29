@@ -96,14 +96,19 @@ public class CdcActionCommonUtils {
                 return false;
             }
             DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(
-                            field.type(), type, TypeMapping.defaultMapping())
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+            UpdatedDataFieldsProcessFunction.ConvertAction sourceToPaimon =
+                    UpdatedDataFieldsProcessFunction.canConvert(
+                            field.type(), type, TypeMapping.defaultMapping());
+            UpdatedDataFieldsProcessFunction.ConvertAction paimonToSource =
+                    UpdatedDataFieldsProcessFunction.canConvert(
+                            type, field.type(), TypeMapping.defaultMapping());
+            if (sourceToPaimon != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT
+                    && paimonToSource != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 LOG.info(
-                        "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
+                        "Cannot convert field '{}': Paimon type '{}' and source table type '{}' are incompatible.",
                         field.name(),
-                        field.type(),
-                        type);
+                        type,
+                        field.type());
                 return false;
             }
         }
