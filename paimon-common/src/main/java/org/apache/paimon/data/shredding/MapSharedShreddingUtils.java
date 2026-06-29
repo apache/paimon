@@ -113,7 +113,7 @@ public class MapSharedShreddingUtils {
 
     public static void serializeMetadata(
             MapSharedShreddingFieldMeta fieldMeta,
-            String compression,
+            @Nullable String compression,
             Map<String, String> metadata) {
         metadata.put(
                 MapShreddingDefine.STORAGE_LAYOUT,
@@ -142,7 +142,7 @@ public class MapSharedShreddingUtils {
     }
 
     public static MapSharedShreddingFieldMeta deserializeMetadata(
-            @Nullable Map<String, String> metadata, String compression) {
+            @Nullable Map<String, String> metadata, @Nullable String compression) {
         if (!hasShreddingMetadata(metadata)) {
             throw new IllegalArgumentException(
                     "metadata is null or storage layout is not shared-shredding");
@@ -235,7 +235,11 @@ public class MapSharedShreddingUtils {
         }
     }
 
-    private static byte[] compress(byte[] input, String compression) {
+    private static byte[] compress(byte[] input, @Nullable String compression) {
+        if (isNoCompression(compression)) {
+            return input;
+        }
+
         BlockCompressionFactory factory =
                 BlockCompressionFactory.create(new CompressOptions(compression, 1));
         if (factory == null) {
@@ -247,7 +251,12 @@ public class MapSharedShreddingUtils {
         return Arrays.copyOf(output, actualSize);
     }
 
-    private static byte[] decompress(byte[] input, int originalLength, String compression) {
+    private static byte[] decompress(
+            byte[] input, int originalLength, @Nullable String compression) {
+        if (isNoCompression(compression)) {
+            return input;
+        }
+
         BlockCompressionFactory factory =
                 BlockCompressionFactory.create(new CompressOptions(compression, 1));
         if (factory == null) {
@@ -257,6 +266,10 @@ public class MapSharedShreddingUtils {
         byte[] output = new byte[originalLength];
         int actualSize = decompressor.decompress(input, 0, input.length, output, 0);
         return Arrays.copyOf(output, actualSize);
+    }
+
+    private static boolean isNoCompression(@Nullable String compression) {
+        return compression == null || "none".equalsIgnoreCase(compression);
     }
 
     private static String bytesToString(byte[] bytes) {
