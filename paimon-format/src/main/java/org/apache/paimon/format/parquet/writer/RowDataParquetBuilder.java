@@ -50,7 +50,7 @@ public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow
 
     private RowDataParquetBuilder(RowType rowType, Configuration conf) {
         this.rowType = rowType;
-        this.conf = new Configuration(conf);
+        this.conf = conf;
     }
 
     public RowDataParquetBuilder withRowType(RowType rowType) {
