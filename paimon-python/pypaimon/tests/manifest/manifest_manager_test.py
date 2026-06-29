@@ -325,6 +325,86 @@ class ManifestFileManagerTest(_ManifestManagerSetup):
         self.assertEqual(read_stats.max_values.get_field(0), 10)
         self.assertEqual(read_stats.null_counts, [2])
 
+    def test_commit_manifest_exceeds_target_size(self):
+        target_size = 16 * 1024
+        pa_schema = pa.schema([
+            ('pt', pa.string()),
+            ('pk', pa.int32()),
+            ('val', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['pk'],
+            partition_keys=['pt'],
+            options={
+                'bucket': '1',
+                'manifest.target-file-size': '16 kb',
+            },
+        )
+        self.catalog.create_table('default.rolling_bug', schema, False)
+        table = self.catalog.get_table('default.rolling_bug')
+
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        for pt in range(200):
+            rows = [{'pt': f'p{pt}', 'pk': i, 'val': f'v{i}'} for i in range(5)]
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        snap = table.snapshot_manager().get_latest_snapshot()
+        metas = ManifestListManager(table).read_all(snap)
+        max_allowed = target_size * 2
+        oversized = [m for m in metas if m.file_size > max_allowed]
+        self.assertEqual(
+            len(oversized), 0,
+            f"{len(oversized)} manifest file(s) exceed 2x target ({max_allowed} bytes): "
+            f"{[(m.file_name, m.file_size) for m in oversized]}. "
+            f"Java uses RollingFileWriter to split; Python writes one file.")
+        self.assertGreater(
+            len(metas), 1,
+            f"Expected multiple manifest files but got {len(metas)} "
+            f"with total {sum(m.file_size for m in metas)} bytes")
+
+        mfm = ManifestFileManager(table)
+        all_entries = []
+        for meta in metas:
+            entries = mfm.read(meta.file_name)
+            self.assertEqual(len(entries), meta.num_added_files + meta.num_deleted_files)
+            all_entries.extend(entries)
+        self.assertEqual(len(all_entries), 200)
+
+    def test_rolling_write_with_skewed_entries(self):
+        target_size = 16 * 1024
+        manager = ManifestFileManager(self.table)
+        small = self._create_manifest_entry("small.parquet")
+        big = ManifestEntry(
+            kind=0, partition=_EMPTY_ROW, bucket=0, total_buckets=1,
+            file=DataFileMeta(
+                file_name="big.parquet", file_size=1024, row_count=100,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                min_sequence_number=1, max_sequence_number=100,
+                schema_id=0, level=0,
+                extra_files=[f"extra-{i}.idx" for i in range(50)],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=b'\x00' * 2000,
+                file_source=None, value_stats_cols=None,
+                external_path=None, first_row_id=None, write_cols=None,
+            ),
+        )
+        entries = [big if i % 5 == 0 else small for i in range(300)]
+        metas = manager.rolling_write(entries, target_size, "manifest-skew")
+
+        max_allowed = target_size * 2
+        oversized = [m for m in metas if m.file_size > max_allowed]
+        self.assertEqual(
+            len(oversized), 0,
+            f"Skewed entries: {len(oversized)} file(s) exceed 2x target: "
+            f"{[(m.file_name, m.file_size) for m in oversized]}")
+        total_entries = sum(m.num_added_files + m.num_deleted_files for m in metas)
+        self.assertEqual(total_entries, 300)
+
 
 class ManifestListManagerTest(_ManifestManagerSetup):
     """Tests for ManifestListManager."""

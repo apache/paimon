@@ -374,7 +374,7 @@ class FileStoreCommit:
         delta_manifest_list = f"manifest-list-{unique_id}-1"
 
         # process new_manifest
-        new_manifest_file = f"manifest-{str(uuid.uuid4())}-0"
+        new_manifest_file = f"manifest-{str(uuid.uuid4())}"
         new_index_manifest = None
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
@@ -422,19 +422,19 @@ class FileStoreCommit:
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
         changelog_record_count = None
-        new_manifest_files_for_abort = []
+        merge_new_files = []
         try:
-            new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
-            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
+            new_manifest_file_metas = self._write_manifest_files(commit_entries, new_manifest_file)
+            self.manifest_list_manager.write(delta_manifest_list, new_manifest_file_metas)
 
             # Write changelog manifest if changelog entries exist
             if changelog_entries:
-                changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog-0"
-                changelog_manifest_file_meta = self._write_manifest_file(
+                changelog_manifest_file = f"manifest-{str(uuid.uuid4())}-changelog"
+                changelog_manifest_file_metas = self._write_manifest_files(
                     changelog_entries, changelog_manifest_file)
                 changelog_manifest_list_name = f"manifest-list-{unique_id}-changelog"
                 self.manifest_list_manager.write(
-                    changelog_manifest_list_name, [changelog_manifest_file_meta])
+                    changelog_manifest_list_name, changelog_manifest_file_metas)
                 manifest_path = self.manifest_list_manager.manifest_path
                 changelog_manifest_list_size = self.table.file_io.get_file_size(
                     f"{manifest_path}/{changelog_manifest_list_name}")
@@ -451,7 +451,7 @@ class FileStoreCommit:
                     total_record_count += previous_record_count
             else:
                 existing_manifest_files = []
-            merged_manifest_files, new_manifest_files_for_abort = self.manifest_file_merger.merge(
+            merged_manifest_files, merge_new_files = self.manifest_file_merger.merge(
                 existing_manifest_files)
             self.manifest_list_manager.write(base_manifest_list, merged_manifest_files)
 
@@ -495,9 +495,14 @@ class FileStoreCommit:
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
-            self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list,
-                                              new_index_manifest, changelog_manifest_list_name,
-                                              new_manifest_files_for_abort)
+            try:
+                self._clean_up_reuse_tmp_manifests(
+                    delta_manifest_list, changelog_manifest_list_name, new_index_manifest)
+                self._clean_up_no_reuse_tmp_manifests(
+                    base_manifest_list, merge_new_files)
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up temporary files: {cleanup_err}",
+                               exc_info=True)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
 
@@ -543,8 +548,9 @@ class FileStoreCommit:
 
         return SuccessResult()
 
-    def _write_manifest_file(self, commit_entries, new_manifest_file):
-        return self.manifest_file_manager.write_with_meta(new_manifest_file, commit_entries)
+    def _write_manifest_files(self, commit_entries, base_name):
+        return self.manifest_file_manager.rolling_write(
+            commit_entries, self.manifest_target_size, base_name)
 
     def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
         if retry_result is not None and latest_snapshot is not None:
@@ -641,51 +647,42 @@ class FileStoreCommit:
                 ))
         return changelog_entries
 
-    def _cleanup_preparation_failure(self,
-                                     delta_manifest_list: Optional[str],
-                                     base_manifest_list: Optional[str],
-                                     index_manifest: Optional[str] = None,
-                                     changelog_manifest_list: Optional[str] = None,
-                                     base_manifest_files_to_delete: Optional[List[ManifestFileMeta]] = None):
-        try:
-            manifest_path = self.manifest_list_manager.manifest_path
+    def _clean_up_reuse_tmp_manifests(
+            self,
+            delta_manifest_list: Optional[str],
+            changelog_manifest_list: Optional[str],
+            index_manifest: Optional[str] = None):
+        """Clean up delta/changelog manifests and index manifest.
 
-            if index_manifest:
-                self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
-
-            if delta_manifest_list:
+        Mirrors Java CommitCleaner.cleanUpReuseTmpManifests.
+        """
+        manifest_path = self.manifest_list_manager.manifest_path
+        for ml_name in (delta_manifest_list, changelog_manifest_list):
+            if ml_name:
                 try:
-                    manifest_files = self.manifest_list_manager.read(delta_manifest_list)
-                    for manifest_meta in manifest_files:
-                        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}"
-                        self.table.file_io.delete_quietly(manifest_file_path)
+                    for meta in self.manifest_list_manager.read(ml_name):
+                        self.table.file_io.delete_quietly(
+                            f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
                 except Exception:
                     pass
-                delta_path = f"{manifest_path}/{delta_manifest_list}"
-                self.table.file_io.delete_quietly(delta_path)
+                self.table.file_io.delete_quietly(f"{manifest_path}/{ml_name}")
+        if index_manifest:
+            self.table.file_io.delete_quietly(f"{manifest_path}/{index_manifest}")
 
-            if base_manifest_list:
-                if base_manifest_files_to_delete:
-                    for manifest_meta in base_manifest_files_to_delete:
-                        manifest_file_path = (
-                            f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}")
-                        self.table.file_io.delete_quietly(manifest_file_path)
-                base_path = f"{manifest_path}/{base_manifest_list}"
-                self.table.file_io.delete_quietly(base_path)
+    def _clean_up_no_reuse_tmp_manifests(
+            self,
+            base_manifest_list: Optional[str],
+            merge_new_files: List[ManifestFileMeta]):
+        """Clean up base manifest list and newly created merge manifests.
 
-            if changelog_manifest_list:
-                try:
-                    changelog_manifests = self.manifest_list_manager.read(changelog_manifest_list)
-                    for manifest_meta in changelog_manifests:
-                        manifest_file_path = (
-                            f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}")
-                        self.table.file_io.delete_quietly(manifest_file_path)
-                except Exception:
-                    pass
-                changelog_path = f"{manifest_path}/{changelog_manifest_list}"
-                self.table.file_io.delete_quietly(changelog_path)
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
+        Mirrors Java CommitCleaner.cleanUpNoReuseTmpManifests.
+        """
+        manifest_path = self.manifest_list_manager.manifest_path
+        if base_manifest_list:
+            self.table.file_io.delete_quietly(f"{manifest_path}/{base_manifest_list}")
+        for meta in merge_new_files:
+            self.table.file_io.delete_quietly(
+                f"{self.manifest_file_manager.manifest_path}/{meta.file_name}")
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""

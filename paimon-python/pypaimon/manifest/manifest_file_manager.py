@@ -37,6 +37,8 @@ from pypaimon.table.row.binary_row import BinaryRow
 class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
+    _AVRO_SYNC_INTERVAL = 16000
+
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -208,60 +210,107 @@ class ManifestFileManager:
         return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
-        avro_records = []
-        for entry in entries:
-            avro_record = {
-                "_VERSION": 2,
-                "_KIND": entry.kind,
-                "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
-                "_BUCKET": entry.bucket,
-                "_TOTAL_BUCKETS": entry.total_buckets,
-                "_FILE": {
-                    "_FILE_NAME": entry.file.file_name,
-                    "_FILE_SIZE": entry.file.file_size,
-                    "_ROW_COUNT": entry.file.row_count,
-                    "_MIN_KEY": GenericRowSerializer.to_bytes(entry.file.min_key),
-                    "_MAX_KEY": GenericRowSerializer.to_bytes(entry.file.max_key),
-                    "_KEY_STATS": {
-                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.min_values),
-                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.max_values),
-                        "_NULL_COUNTS": entry.file.key_stats.null_counts,
-                    },
-                    "_VALUE_STATS": {
-                        "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.min_values),
-                        "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.max_values),
-                        "_NULL_COUNTS": entry.file.value_stats.null_counts,
-                    },
-                    "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
-                    "_MAX_SEQUENCE_NUMBER": entry.file.max_sequence_number,
-                    "_SCHEMA_ID": entry.file.schema_id,
-                    "_LEVEL": entry.file.level,
-                    "_EXTRA_FILES": entry.file.extra_files,
-                    "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
-                    "_DELETE_ROW_COUNT": entry.file.delete_row_count,
-                    "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
-                    "_FILE_SOURCE": entry.file.file_source,
-                    "_VALUE_STATS_COLS": entry.file.value_stats_cols,
-                    "_EXTERNAL_PATH": entry.file.external_path,
-                    "_FIRST_ROW_ID": entry.file.first_row_id,
-                    "_WRITE_COLS": entry.file.write_cols,
-                }
-            }
-            avro_records.append(avro_record)
+        buf = BytesIO()
+        fastavro.writer(buf, MANIFEST_ENTRY_SCHEMA, self._to_avro_records(entries))
+        self._flush(file_name, buf.getvalue())
 
+    def rolling_write(self, entries: List[ManifestEntry],
+                      suggested_file_size: int,
+                      name_prefix: str) -> List[ManifestFileMeta]:
+        if not entries:
+            return []
+
+        from fastavro.write import Writer
+
+        sync_interval = min(self._AVRO_SYNC_INTERVAL, suggested_file_size)
+        result = []
+        written_files = []
+        chunk_start = 0
+        buf = BytesIO()
+        writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
+        try:
+            for i, entry in enumerate(entries):
+                writer.write(self._to_avro_record(entry))
+                if buf.tell() >= suggested_file_size:
+                    writer.flush()
+                    avro_bytes = buf.getvalue()
+                    file_name = f"{name_prefix}-{len(result)}"
+                    self._flush(file_name, avro_bytes)
+                    written_files.append(file_name)
+                    result.append(self._build_meta(
+                        file_name, entries[chunk_start:i + 1], len(avro_bytes)))
+                    chunk_start = i + 1
+                    buf = BytesIO()
+                    writer = Writer(buf, MANIFEST_ENTRY_SCHEMA, sync_interval=sync_interval)
+
+            if chunk_start < len(entries):
+                writer.flush()
+                avro_bytes = buf.getvalue()
+                file_name = f"{name_prefix}-{len(result)}"
+                self._flush(file_name, avro_bytes)
+                written_files.append(file_name)
+                result.append(self._build_meta(
+                    file_name, entries[chunk_start:], len(avro_bytes)))
+        except Exception:
+            for fname in written_files:
+                self.file_io.delete_quietly(f"{self.manifest_path}/{fname}")
+            raise
+        return result
+
+    @staticmethod
+    def _to_avro_record(entry: ManifestEntry) -> dict:
+        return {
+            "_VERSION": 2,
+            "_KIND": entry.kind,
+            "_PARTITION": GenericRowSerializer.to_bytes(entry.partition),
+            "_BUCKET": entry.bucket,
+            "_TOTAL_BUCKETS": entry.total_buckets,
+            "_FILE": {
+                "_FILE_NAME": entry.file.file_name,
+                "_FILE_SIZE": entry.file.file_size,
+                "_ROW_COUNT": entry.file.row_count,
+                "_MIN_KEY": GenericRowSerializer.to_bytes(entry.file.min_key),
+                "_MAX_KEY": GenericRowSerializer.to_bytes(entry.file.max_key),
+                "_KEY_STATS": {
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.key_stats.max_values),
+                    "_NULL_COUNTS": entry.file.key_stats.null_counts,
+                },
+                "_VALUE_STATS": {
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(entry.file.value_stats.max_values),
+                    "_NULL_COUNTS": entry.file.value_stats.null_counts,
+                },
+                "_MIN_SEQUENCE_NUMBER": entry.file.min_sequence_number,
+                "_MAX_SEQUENCE_NUMBER": entry.file.max_sequence_number,
+                "_SCHEMA_ID": entry.file.schema_id,
+                "_LEVEL": entry.file.level,
+                "_EXTRA_FILES": entry.file.extra_files,
+                "_CREATION_TIME": entry.file.creation_time.get_millisecond() if entry.file.creation_time else None,
+                "_DELETE_ROW_COUNT": entry.file.delete_row_count,
+                "_EMBEDDED_FILE_INDEX": entry.file.embedded_index,
+                "_FILE_SOURCE": entry.file.file_source,
+                "_VALUE_STATS_COLS": entry.file.value_stats_cols,
+                "_EXTERNAL_PATH": entry.file.external_path,
+                "_FIRST_ROW_ID": entry.file.first_row_id,
+                "_WRITE_COLS": entry.file.write_cols,
+            }
+        }
+
+    def _to_avro_records(self, entries: List[ManifestEntry]) -> List[dict]:
+        return [self._to_avro_record(e) for e in entries]
+
+    def _flush(self, file_name: str, avro_bytes: bytes):
         manifest_path = f"{self.manifest_path}/{file_name}"
         try:
-            buffer = BytesIO()
-            fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, avro_records)
-            avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(manifest_path) as output_stream:
                 output_stream.write(avro_bytes)
         except Exception as e:
             self.file_io.delete_quietly(manifest_path)
             raise RuntimeError(f"Failed to write manifest file: {e}") from e
 
-    def write_with_meta(self, file_name, entries: List[ManifestEntry]) -> ManifestFileMeta:
-        self.write(file_name, entries)
+    def _build_meta(self, file_name: str, entries: List[ManifestEntry],
+                    file_size: int = None) -> ManifestFileMeta:
         added_file_count = 0
         deleted_file_count = 0
         schema_id = None
@@ -296,10 +345,12 @@ class ManifestFileManager:
             if max_row_id is None or file_range.to > max_row_id:
                 max_row_id = file_range.to
 
-        manifest_file_path = f"{self.manifest_path}/{file_name}"
+        if file_size is None:
+            manifest_file_path = f"{self.manifest_path}/{file_name}"
+            file_size = self.table.file_io.get_file_size(manifest_file_path)
         return ManifestFileMeta(
             file_name=file_name,
-            file_size=self.table.file_io.get_file_size(manifest_file_path),
+            file_size=file_size,
             num_added_files=added_file_count,
             num_deleted_files=deleted_file_count,
             partition_stats=SimpleStats(

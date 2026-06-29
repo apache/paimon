@@ -85,13 +85,11 @@ class ManifestFileMerger:
         if not merged_entries:
             return
 
-        manifest_file = "manifest-{}-0".format(str(uuid.uuid4()))
-        merged_meta = self.manifest_file_manager.write_with_meta(
-            manifest_file,
-            merged_entries,
-        )
-        result.append(merged_meta)
-        new_files.append(merged_meta)
+        manifest_file = "manifest-{}".format(str(uuid.uuid4()))
+        merged_metas = self.manifest_file_manager.rolling_write(
+            merged_entries, self.suggested_meta_size, manifest_file)
+        result.extend(merged_metas)
+        new_files.extend(merged_metas)
 
     def _delete_manifests(self, manifests: List[ManifestFileMeta]):
         for manifest in manifests:
