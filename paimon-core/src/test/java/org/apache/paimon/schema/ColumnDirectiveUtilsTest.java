@@ -95,23 +95,6 @@ public class ColumnDirectiveUtilsTest {
     }
 
     @Test
-    public void testBlobExternalStorageFieldDirective() {
-        Map<String, String> opts = new HashMap<>();
-        ColumnDirectiveUtils.ConvertedColumn result =
-                ColumnDirectiveUtils.applyAddColumnDirective(
-                        "__BLOB_EXTERNAL_STORAGE_FIELD; external video",
-                        "video",
-                        DataTypes.BYTES(),
-                        opts);
-
-        assertThat(result).isNotNull();
-        assertThat(result.type().getTypeRoot()).isEqualTo(DataTypeRoot.BLOB);
-        assertThat(result.comment()).isEqualTo("external video");
-        assertThat(opts).containsEntry(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "video");
-        assertThat(opts).containsEntry(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video");
-    }
-
-    @Test
     public void testVectorFieldDirective() {
         Map<String, String> opts = new HashMap<>();
         ColumnDirectiveUtils.ConvertedColumn result =
@@ -331,7 +314,6 @@ public class ColumnDirectiveUtilsTest {
         opts.put(CoreOptions.BLOB_FIELD.key(), "a,b");
         opts.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "b,c");
         opts.put(CoreOptions.BLOB_VIEW_FIELD.key(), "b");
-        opts.put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "b");
         opts.put("blob.stored-descriptor-fields", "b,legacy");
         opts.put(CoreOptions.VECTOR_FIELD.key(), "v");
 
@@ -340,7 +322,6 @@ public class ColumnDirectiveUtilsTest {
         assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "a");
         assertThat(opts).containsEntry(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "c");
         assertThat(opts).doesNotContainKey(CoreOptions.BLOB_VIEW_FIELD.key());
-        assertThat(opts).doesNotContainKey(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
         assertThat(opts).containsEntry("blob.stored-descriptor-fields", "legacy");
         assertThat(opts).containsEntry(CoreOptions.VECTOR_FIELD.key(), "v");
     }

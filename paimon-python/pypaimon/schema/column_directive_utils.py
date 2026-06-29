@@ -21,7 +21,6 @@ Mirrors Java's ColumnDirectiveUtils. Supported directives:
   __BLOB_FIELD                   -> blob-field
   __BLOB_DESCRIPTOR_FIELD        -> blob-descriptor-field
   __BLOB_VIEW_FIELD              -> blob-view-field
-  __BLOB_EXTERNAL_STORAGE_FIELD  -> blob-external-storage-field + blob-descriptor-field
   __VECTOR_FIELD;dim             -> vector-field
 """
 
@@ -35,11 +34,9 @@ from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
 BLOB_FIELD_DIRECTIVE = "__BLOB_FIELD"
 BLOB_DESCRIPTOR_FIELD_DIRECTIVE = "__BLOB_DESCRIPTOR_FIELD"
 BLOB_VIEW_FIELD_DIRECTIVE = "__BLOB_VIEW_FIELD"
-BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE = "__BLOB_EXTERNAL_STORAGE_FIELD"
 VECTOR_FIELD_DIRECTIVE = "__VECTOR_FIELD"
 
 _BLOB_DIRECTIVES = [
-    (BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE, CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()),
     (BLOB_VIEW_FIELD_DIRECTIVE, CoreOptions.BLOB_VIEW_FIELD.key()),
     (BLOB_DESCRIPTOR_FIELD_DIRECTIVE, CoreOptions.BLOB_DESCRIPTOR_FIELD.key()),
     (BLOB_FIELD_DIRECTIVE, CoreOptions.BLOB_FIELD.key()),
@@ -49,7 +46,6 @@ _BLOB_OPTIONS = [
     CoreOptions.BLOB_FIELD,
     CoreOptions.BLOB_DESCRIPTOR_FIELD,
     CoreOptions.BLOB_VIEW_FIELD,
-    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD,
 ]
 
 _VECTOR_OPTIONS = [
@@ -103,8 +99,7 @@ def parse_add_column_comment(comment: Optional[str]) -> Optional[ParsedDirective
     raise ValueError(
         f"Unsupported BLOB directive in column comment: '{comment}'. "
         f"Supported directives are '{BLOB_FIELD_DIRECTIVE}', "
-        f"'{BLOB_DESCRIPTOR_FIELD_DIRECTIVE}', '{BLOB_VIEW_FIELD_DIRECTIVE}' "
-        f"and '{BLOB_EXTERNAL_STORAGE_FIELD_DIRECTIVE}'."
+        f"'{BLOB_DESCRIPTOR_FIELD_DIRECTIVE}' and '{BLOB_VIEW_FIELD_DIRECTIVE}'."
     )
 
 
@@ -188,8 +183,6 @@ def apply_add_column_directive(
         return None
     new_type = _convert_type(directive, field_name, source_type)
     _modify_field_options(directive.option_key, field_name, options)
-    if directive.option_key == CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key():
-        _modify_field_options(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), field_name, options)
     return ConvertedColumn(new_type, directive.real_comment)
 
 

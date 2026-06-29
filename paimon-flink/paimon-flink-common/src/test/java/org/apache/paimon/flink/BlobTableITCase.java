@@ -39,12 +39,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.OutputStream;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,24 +56,14 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
-        String externalStoragePath = warehouse.resolve("external-storage-blob-path").toString();
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='picture')",
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
                 "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-compaction.enabled'='true', 'blob-field'='pic1,pic2')",
-                String.format(
-                        "CREATE TABLE IF NOT EXISTS copy_blob_table (id INT, data STRING, picture BYTES)"
-                                + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
-                                + " 'blob-field'='picture', 'blob-descriptor-field'='picture',"
-                                + " 'blob-external-storage-field'='picture', 'blob-external-storage-path'='%s')",
-                        externalStoragePath),
-                String.format(
-                        "CREATE TABLE IF NOT EXISTS three_type_blob_table"
-                                + " (id INT, data STRING, raw_pic BYTES, desc_pic BYTES, copy_pic BYTES)"
-                                + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
-                                + " 'blob-field'='raw_pic,desc_pic,copy_pic', 'blob-descriptor-field'='desc_pic,copy_pic',"
-                                + " 'blob-external-storage-field'='copy_pic', 'blob-external-storage-path'='%s')",
-                        externalStoragePath));
+                "CREATE TABLE IF NOT EXISTS mixed_blob_table"
+                        + " (id INT, data STRING, raw_pic BYTES, desc_pic BYTES)"
+                        + " WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='raw_pic,desc_pic', 'blob-descriptor-field'='desc_pic')");
     }
 
     @Test
@@ -447,28 +435,7 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testExternalStorageBlob() throws Exception {
-        // Write raw data; descriptor mode with external storage should write to the external path.
-        batchSql("INSERT INTO copy_blob_table VALUES (1, 'copy-test', X'48656C6C6F')");
-
-        // Read back — the blob should be readable
-        List<Row> result = batchSql("SELECT * FROM copy_blob_table");
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, "copy-test", new byte[] {72, 101, 108, 108, 111}));
-
-        // Verify blob files exist in the external storage path
-        Path externalStorageDir = warehouse.resolve("external-storage-blob-path");
-        assertThat(Files.exists(externalStorageDir)).isTrue();
-        try (Stream<Path> stream = Files.list(externalStorageDir)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-    }
-
-    @Test
-    public void testThreeTypeBlobCoexistence() throws Exception {
+    public void testRawAndDescriptorBlobCoexistence() throws Exception {
         // Prepare external blob for the descriptor field
         byte[] descBlobData = new byte[256];
         RANDOM.nextBytes(descBlobData);
@@ -481,52 +448,20 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
         BlobDescriptor descriptor = new BlobDescriptor(uri, 0, descBlobData.length);
 
-        // raw_pic = raw bytes, desc_pic = descriptor, copy_pic = descriptor with external storage
         batchSql(
                 String.format(
-                        "INSERT INTO three_type_blob_table VALUES"
-                                + " (1, 'three-types', X'48656C6C6F', X'%s', X'5945')",
+                        "INSERT INTO mixed_blob_table VALUES"
+                                + " (1, 'mixed-types', X'48656C6C6F', X'%s')",
                         bytesToHex(descriptor.serialize())));
 
-        // Read back and verify all three blob types
-        List<Row> result =
-                batchSql("SELECT id, data, raw_pic, copy_pic FROM three_type_blob_table");
+        // Read back and verify both blob storage modes
+        List<Row> result = batchSql("SELECT id, data, raw_pic, desc_pic FROM mixed_blob_table");
         assertThat(result.size()).isEqualTo(1);
         Row row = result.get(0);
         assertThat(row.getField(0)).isEqualTo(1);
-        assertThat(row.getField(1)).isEqualTo("three-types");
+        assertThat(row.getField(1)).isEqualTo("mixed-types");
         assertThat((byte[]) row.getField(2)).isEqualTo(new byte[] {72, 101, 108, 108, 111});
-        assertThat((byte[]) row.getField(3)).isEqualTo(new byte[] {89, 69});
-
-        // Verify descriptor files backed by external storage exist in the configured path
-        Path externalStorageDir = warehouse.resolve("external-storage-blob-path");
-        assertThat(Files.exists(externalStorageDir)).isTrue();
-        try (Stream<Path> stream = Files.list(externalStorageDir)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-    }
-
-    @Test
-    public void testExternalStorageBlobMultipleWrites() throws Exception {
-        // Write two batches; each should create separate descriptor files in external storage.
-        batchSql("INSERT INTO copy_blob_table VALUES (1, 'row1', X'48656C6C6F')");
-        batchSql("INSERT INTO copy_blob_table VALUES (2, 'row2', X'5945')");
-
-        // Read back
-        List<Row> result = batchSql("SELECT * FROM copy_blob_table ORDER BY id");
-        assertThat(result.size()).isEqualTo(2);
-        assertThat(result.get(0)).isEqualTo(Row.of(1, "row1", new byte[] {72, 101, 108, 108, 111}));
-        assertThat(result.get(1)).isEqualTo(Row.of(2, "row2", new byte[] {89, 69}));
-
-        // Verify multiple blob files exist in the external storage path
-        Path externalStorageDir = warehouse.resolve("external-storage-blob-path");
-        try (Stream<Path> stream = Files.list(externalStorageDir)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(2);
-        }
+        assertThat((byte[]) row.getField(3)).isEqualTo(descBlobData);
     }
 
     @Test

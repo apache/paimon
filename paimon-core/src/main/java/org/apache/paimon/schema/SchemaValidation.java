@@ -206,7 +206,6 @@ public class SchemaValidation {
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
-        validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
 
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         Set<String> fieldsInDedicatedFile =
@@ -990,37 +989,6 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
-    }
-
-    private static void validateBlobExternalStorageFields(
-            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
-        Set<String> blobFieldNames =
-                rowType.getFields().stream()
-                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
-                        .map(DataField::name)
-                        .collect(Collectors.toCollection(HashSet::new));
-        Set<String> configured = options.blobExternalStorageField();
-        for (String field : configured) {
-            checkArgument(
-                    blobFieldNames.contains(field),
-                    "Field '%s' in '%s' must be a BLOB field in table schema.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-            checkArgument(
-                    blobDescriptorFields.contains(field),
-                    "Field '%s' in '%s' must also be in '%s'.",
-                    field,
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(),
-                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
-        }
-        if (!configured.isEmpty()) {
-            String externalStoragePath = options.blobExternalStoragePath();
-            checkArgument(
-                    externalStoragePath != null && !externalStoragePath.isEmpty(),
-                    "'%s' must be set when '%s' is configured.",
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
-        }
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
