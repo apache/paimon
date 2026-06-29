@@ -1733,6 +1733,136 @@ public class FieldAggregatorTest {
                                 row(0, 1, "B_updated", 4), row(1, 2, "C", 3), row(2, 3, "D", 5)));
     }
 
+    @Test
+    public void testFieldNestedUpdateAggRetractWithNullNestedKeyInAccumulator() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        // Build an accumulator containing a null nested key.
+        FieldNestedUpdateAgg mergeAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(0, null, "A")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 0, "B")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 1, "C")));
+
+        // ============================================================
+        // Verify IGNORE behavior:
+        // rows with null nested keys in the accumulator should be ignored.
+        // ============================================================
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray result =
+                (InternalArray) ignoreAgg.retract(accumulator, singletonArray(row(1, 0, "B")));
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        assertThat(unnest(result, elementGetter)).containsExactly(row(1, 1, "C"));
+
+        // ============================================================
+        // Verify ERROR behavior:
+        // rows with null nested keys in the accumulator should throw exception.
+        // ============================================================
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        final InternalArray acc = accumulator;
+
+        assertThatThrownBy(() -> errorAgg.retract(acc, singletonArray(row(1, 0, "B"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+    }
+
+    @Test
+    public void testFieldNestedUpdateAggRetractAppliesNestedKeyNullStrategyToRetractInput() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
+
+        // Build an accumulator without null nested keys.
+        FieldNestedUpdateAgg mergeAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.MERGE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(0, 0, "A")));
+        accumulator = (InternalArray) mergeAgg.agg(accumulator, singletonArray(row(1, 1, "B")));
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        // ============================================================
+        // Verify IGNORE behavior:
+        // rows with null nested keys in the retract input should be ignored.
+        // ============================================================
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.IGNORE,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        InternalArray result =
+                (InternalArray) ignoreAgg.retract(accumulator, singletonArray(row(0, null, "X")));
+
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(row(0, 0, "A"), row(1, 1, "B"));
+
+        // ============================================================
+        // Verify ERROR behavior:
+        // rows with null nested keys in the retract input should throw exception.
+        // ============================================================
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAgg(
+                        FieldNestedUpdateAggFactory.NAME,
+                        DataTypes.ARRAY(elementRowType),
+                        Arrays.asList("k0", "k1"),
+                        CoreOptions.NestedKeyNullStrategy.ERROR,
+                        Collections.emptyList(),
+                        Integer.MAX_VALUE);
+
+        final InternalArray acc = accumulator;
+
+        assertThatThrownBy(() -> errorAgg.retract(acc, singletonArray(row(0, null, "X"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
+    }
+
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
         return IntStream.range(0, array.size())
                 .mapToObj(i -> elementGetter.getElementOrNull(array, i))

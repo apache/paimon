@@ -189,14 +189,22 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
                     continue;
                 }
                 InternalRow row = acc.getRow(i, nestedFields);
-                map.put(keyProjection.apply(row).copy(), row);
+                BinaryRow key = keyProjection.apply(row).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.put(key, row);
             }
 
             for (int i = 0; i < retract.size(); i++) {
                 if (retract.isNullAt(i)) {
                     continue;
                 }
-                map.remove(keyProjection.apply(retract.getRow(i, nestedFields)));
+                BinaryRow key = keyProjection.apply(retract.getRow(i, nestedFields)).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.remove(key);
             }
 
             return new GenericArray(new ArrayList<>(map.values()).toArray());
