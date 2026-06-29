@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end tests for committing an append table through Paimon writer coordinator. */
-@Timeout(300)
+@Timeout(180)
 public class PaimonWriterCoordinatorE2eTest extends E2eTestBase {
 
     private static final long WAIT_TIMEOUT_MS = 120_000L;
@@ -52,7 +52,7 @@ public class PaimonWriterCoordinatorE2eTest extends E2eTestBase {
     private static final Pattern INTEGER_PATTERN = Pattern.compile("(\\d+)");
 
     public PaimonWriterCoordinatorE2eTest() {
-        super(false, false, false, 2);
+        super(false, false, false, 2, true);
     }
 
     @Override
@@ -86,20 +86,17 @@ public class PaimonWriterCoordinatorE2eTest extends E2eTestBase {
         TestContext context = createContext();
         writeRecords(context.inputDirectory, 0, 20);
 
-        // 先启动流作业并完成一次正常 checkpoint，确保 coordinator 已经完成一次提交。
         String jobId = submit(context);
         waitForJobStatus(jobId, "RUNNING");
         waitForWriterSubtasks(jobId);
         waitForRecords();
         triggerAndWaitForCompletedCheckpoint(jobId);
 
-        // 记录 writer 两个 subtask 的 attempt 和所在 TM，后面用来确认失败 checkpoint 不会重启任务。
         String writerVertexId = findWriterVertexId(jobId);
         Map<Integer, SubtaskAttempt> before = waitForWriterSubtasks(jobId);
         assertThat(before).hasSize(2);
         assertThat(before.get(0).host).isNotEqualTo(before.get(1).host);
 
-        // 写入第二批数据，然后暂停其中一个 writer 所在 TM，让 checkpoint 进入部分完成状态。
         writeRecords(context.inputDirectory, 20, 20);
         waitForRecords();
         ContainerState pausedTaskManager = findTaskManager(before.get(1));
@@ -116,7 +113,6 @@ public class PaimonWriterCoordinatorE2eTest extends E2eTestBase {
             waitForPartialCheckpoint(jobId);
             waitForCheckpointCount(jobId, "failed", failedBefore + 1);
         } finally {
-            // 恢复被暂停的 TM，使后续 checkpoint 可以重新收齐所有 writer 的 committable。
             if (paused) {
                 pausedTaskManager
                         .getDockerClient()
@@ -125,14 +121,12 @@ public class PaimonWriterCoordinatorE2eTest extends E2eTestBase {
             }
         }
 
-        // 再触发一次成功 checkpoint，验证前一次 abort 的部分提交信息能被下一次 checkpoint 恢复。
         waitForJobStatus(jobId, "RUNNING");
         triggerAndWaitForDataCommitted(jobId, context);
         Map<Integer, SubtaskAttempt> after = getSubtaskAttempts(jobId, writerVertexId);
         assertThat(after.get(0).attempt).isEqualTo(before.get(0).attempt);
         assertThat(after.get(1).attempt).isEqualTo(before.get(1).attempt);
 
-        // 取消流作业释放 slot 后，用 batch query 校验两批数据最终一致。
         cancel(jobId);
         assertTable(context, 0, 40);
     }

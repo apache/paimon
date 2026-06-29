@@ -59,6 +59,7 @@ public abstract class E2eTestBase {
     private final boolean withHive;
     private final boolean withSpark;
     private final int taskManagerReplicas;
+    private final boolean exposeFlinkRest;
 
     protected E2eTestBase() {
         this(false, false);
@@ -69,15 +70,24 @@ public abstract class E2eTestBase {
     }
 
     protected E2eTestBase(boolean withKafka, boolean withHive, boolean withSpark) {
-        this(withKafka, withHive, withSpark, 1);
+        this.withKafka = withKafka;
+        this.withHive = withHive;
+        this.withSpark = withSpark;
+        this.taskManagerReplicas = 1;
+        this.exposeFlinkRest = false;
     }
 
     protected E2eTestBase(
-            boolean withKafka, boolean withHive, boolean withSpark, int taskManagerReplicas) {
+            boolean withKafka,
+            boolean withHive,
+            boolean withSpark,
+            int taskManagerReplicas,
+            boolean exposeFlinkRest) {
         this.withKafka = withKafka;
         this.withHive = withHive;
         this.withSpark = withSpark;
         this.taskManagerReplicas = taskManagerReplicas;
+        this.exposeFlinkRest = exposeFlinkRest;
     }
 
     protected static final String TEST_DATA_DIR = "/test-data";
@@ -152,6 +162,8 @@ public abstract class E2eTestBase {
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
         if (taskManagerReplicas > 1) {
             environment.withScaledService("taskmanager", taskManagerReplicas);
+        }
+        if (exposeFlinkRest) {
             environment.withExposedService("jobmanager-1", 8081);
         }
 
@@ -177,7 +189,7 @@ public abstract class E2eTestBase {
     }
 
     protected String flinkRestUrl() {
-        if (taskManagerReplicas <= 1) {
+        if (!exposeFlinkRest) {
             throw new IllegalStateException("Flink REST is not exposed for this test.");
         }
         return String.format(
