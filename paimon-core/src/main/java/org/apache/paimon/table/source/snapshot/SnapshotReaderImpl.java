@@ -85,7 +85,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
-import static org.apache.paimon.utils.DeletionVectorUtils.retrieveAnchorFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 
 /** Implementation of {@link SnapshotReader}. */
 public class SnapshotReaderImpl implements SnapshotReader {

@@ -30,7 +30,7 @@ import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Util class for Deletion Vectors. */
-public class DeletionVectorUtils {
+public class DataEvolutionUtils {
 
     /**
      * Retrieve the anchor file of a row range group. Always the oldest normal file. Note that in

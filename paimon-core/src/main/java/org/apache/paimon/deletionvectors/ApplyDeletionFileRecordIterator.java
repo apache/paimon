@@ -32,11 +32,13 @@ public class ApplyDeletionFileRecordIterator
 
     private final FileRecordIterator<InternalRow> iterator;
     private final DeletionVector deletionVector;
+    private final long offset;
 
     public ApplyDeletionFileRecordIterator(
-            FileRecordIterator<InternalRow> iterator, DeletionVector deletionVector) {
+            FileRecordIterator<InternalRow> iterator, DeletionVector deletionVector, long offset) {
         this.iterator = iterator;
         this.deletionVector = deletionVector;
+        this.offset = offset;
     }
 
     @Override
@@ -67,7 +69,7 @@ public class ApplyDeletionFileRecordIterator
             if (next == null) {
                 return null;
             }
-            if (!deletionVector.isDeleted(returnedPosition())) {
+            if (!deletionVector.isDeleted(offset + returnedPosition())) {
                 return next;
             }
         }

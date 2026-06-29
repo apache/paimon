@@ -34,10 +34,23 @@ public class ApplyDeletionVectorReader implements FileRecordReader<InternalRow> 
 
     private final DeletionVector deletionVector;
 
+    /**
+     * The file offset of this reader comparing to the deletion vector. This is useful in
+     * data-evolution scenario, where a blob/vector file may only cover a partial range of the
+     * deletion vector.
+     */
+    private final long fileOffset;
+
     public ApplyDeletionVectorReader(
             FileRecordReader<InternalRow> reader, DeletionVector deletionVector) {
+        this(reader, deletionVector, 0L);
+    }
+
+    public ApplyDeletionVectorReader(
+            FileRecordReader<InternalRow> reader, DeletionVector deletionVector, long fileOffset) {
         this.reader = reader;
         this.deletionVector = deletionVector;
+        this.fileOffset = fileOffset;
     }
 
     public RecordReader<InternalRow> reader() {
@@ -57,7 +70,7 @@ public class ApplyDeletionVectorReader implements FileRecordReader<InternalRow> 
             return null;
         }
 
-        return new ApplyDeletionFileRecordIterator(batch, deletionVector);
+        return new ApplyDeletionFileRecordIterator(batch, deletionVector, fileOffset);
     }
 
     @Override

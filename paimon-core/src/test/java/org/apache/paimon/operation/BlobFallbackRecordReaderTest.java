@@ -23,9 +23,14 @@ import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.BitmapDeletionVector;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.BlobFallbackRecordReader.BlobSequenceGroupRecordReader;
+import org.apache.paimon.reader.FileRecordIterator;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.stats.SimpleStats;
@@ -221,6 +226,39 @@ public class BlobFallbackRecordReaderTest {
                 .containsExactly(2L, 2L, 2L, 2L, 2L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 2L, 2L);
     }
 
+    @Test
+    public void testBlobFallbackRecordReaderAppliesDeletionVectorToPlaceholderGaps()
+            throws Exception {
+        DataFileMeta oldFile = blobFile("old-file", 0, 6, 1);
+        DataFileMeta newFile = blobFile("new-file", 0, 3, 2);
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        deletionVector.delete(4);
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Arrays.asList(newFile, oldFile),
+                                file ->
+                                        new ApplyDeletionVectorReader(
+                                                oneRowPerBatchReader(
+                                                        file,
+                                                        fileRows(
+                                                                file,
+                                                                null,
+                                                                placeholderRows(newFile, 1))),
+                                                deletionVector,
+                                                file.nonNullFirstRowId()),
+                                (reader, range) ->
+                                        new ApplyDeletionVectorReader(
+                                                reader, deletionVector, range.from),
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.rowIds).containsExactly(0L, 1L, 2L, 3L, 5L);
+        assertThat(rows.sequenceNumbers).containsExactly(2L, 1L, 2L, 1L, 1L);
+    }
+
     private static ReadResult readFallback(
             List<DataFileMeta> files, List<Range> rowRanges, Set<String> placeholderRows)
             throws Exception {
@@ -236,7 +274,10 @@ public class BlobFallbackRecordReaderTest {
         return ReadResult.read(
                 new BlobFallbackRecordReader(
                         files,
-                        file -> oneRowPerBatchReader(fileRows(file, rowRanges, placeholderRows)),
+                        file ->
+                                oneRowPerBatchReader(
+                                        file, fileRows(file, rowRanges, placeholderRows)),
+                        (reader, range) -> reader,
                         rowRanges,
                         readRowType,
                         BLOB_INDEX),
@@ -254,12 +295,11 @@ public class BlobFallbackRecordReaderTest {
                 new BlobSequenceGroupRecordReader(
                         sequenceNumber,
                         files,
-                        file -> oneRowPerBatchReader(fileRows(file, rowRanges)),
+                        file -> oneRowPerBatchReader(file, fileRows(file, rowRanges)),
+                        (reader, range) -> reader,
                         rowRanges,
                         READ_ROW_TYPE,
                         BLOB_INDEX,
-                        READ_ROW_TYPE.getFieldIndex(SpecialFields.ROW_ID.name()),
-                        READ_ROW_TYPE.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name()),
                         firstRowId,
                         lastRowId),
                 READ_ROW_TYPE);
@@ -391,20 +431,32 @@ public class BlobFallbackRecordReaderTest {
         return row;
     }
 
-    private static RecordReader<InternalRow> oneRowPerBatchReader(List<InternalRow> rows) {
-        return new RecordReader<InternalRow>() {
+    private static FileRecordReader<InternalRow> oneRowPerBatchReader(
+            DataFileMeta file, List<InternalRow> rows) {
+        return new FileRecordReader<InternalRow>() {
 
             int index;
+            long returnedPosition = -1L;
 
             @Override
-            public RecordIterator<InternalRow> readBatch() {
+            public FileRecordIterator<InternalRow> readBatch() {
                 if (index >= rows.size()) {
                     return null;
                 }
                 InternalRow row = rows.get(index++);
-                return new RecordIterator<InternalRow>() {
+                return new FileRecordIterator<InternalRow>() {
 
                     boolean returned;
+
+                    @Override
+                    public long returnedPosition() {
+                        return returnedPosition;
+                    }
+
+                    @Override
+                    public Path filePath() {
+                        return new Path(file.fileName());
+                    }
 
                     @Override
                     public InternalRow next() {
@@ -412,6 +464,7 @@ public class BlobFallbackRecordReaderTest {
                             return null;
                         }
                         returned = true;
+                        returnedPosition = row.getLong(1) - file.nonNullFirstRowId();
                         return row;
                     }
 

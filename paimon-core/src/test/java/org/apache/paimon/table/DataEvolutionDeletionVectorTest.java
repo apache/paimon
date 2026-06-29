@@ -67,7 +67,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
-import static org.apache.paimon.utils.DeletionVectorUtils.retrieveAnchorFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests filename-anchored deletion vectors for data evolution tables. */

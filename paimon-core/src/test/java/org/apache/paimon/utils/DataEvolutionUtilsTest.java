@@ -30,8 +30,8 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link DeletionVectorUtils}. */
-public class DeletionVectorUtilsTest {
+/** Test for {@link DataEvolutionUtils}. */
+public class DataEvolutionUtilsTest {
 
     @Test
     public void testRetrieveAnchorFileSkipsSpecialFiles() {
@@ -41,7 +41,7 @@ public class DeletionVectorUtilsTest {
         DataFileMeta newestNormalFile = dataFile("newest-normal.parquet", 4);
 
         assertThat(
-                        DeletionVectorUtils.retrieveAnchorFile(
+                        DataEvolutionUtils.retrieveAnchorFile(
                                 Arrays.asList(
                                         blobFile, newestNormalFile, vectorFile, oldestNormalFile),
                                 Function.identity()))
@@ -52,7 +52,7 @@ public class DeletionVectorUtilsTest {
     public void testRetrieveAnchorFileFailsWithoutNormalFile() {
         assertThatThrownBy(
                         () ->
-                                DeletionVectorUtils.retrieveAnchorFile(
+                                DataEvolutionUtils.retrieveAnchorFile(
                                         Arrays.asList(
                                                 dataFile("blob-file.blob", 1),
                                                 dataFile("data.vector.lance", 2)),
@@ -65,7 +65,7 @@ public class DeletionVectorUtilsTest {
     public void testRetrieveAnchorFileFailsWithDuplicatedMaxSequenceNumber() {
         assertThatThrownBy(
                         () ->
-                                DeletionVectorUtils.retrieveAnchorFile(
+                                DataEvolutionUtils.retrieveAnchorFile(
                                         Arrays.asList(
                                                 dataFile("normal-1.parquet", 1),
                                                 dataFile("normal-2.parquet", 1)),
