@@ -286,28 +286,6 @@ class CoreOptions:
         )
     )
 
-    BLOB_EXTERNAL_STORAGE_PATH: ConfigOption[str] = (
-        ConfigOptions.key("blob-external-storage-path")
-        .string_type()
-        .no_default_value()
-        .with_description(
-            "The external storage path where raw BLOB data from fields configured "
-            "by 'blob-external-storage-field' is written at write time. "
-            "Orphan file cleanup is not applied to this path."
-        )
-    )
-
-    BLOB_EXTERNAL_STORAGE_FIELD: ConfigOption[str] = (
-        ConfigOptions.key("blob-external-storage-field")
-        .string_type()
-        .no_default_value()
-        .with_description(
-            "Comma-separated BLOB field names (must be a subset of 'blob-descriptor-field') "
-            "whose raw data will be written to external storage at write time. "
-            "The external storage path is configured via 'blob-external-storage-path'."
-        )
-    )
-
     BLOB_VIEW_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-view-field")
         .string_type()
@@ -926,19 +904,6 @@ class CoreOptions:
         if isinstance(value, (list, set, tuple)):
             return {str(field).strip() for field in value if str(field).strip()}
         return set()
-
-    def blob_external_storage_fields(self, default=None):
-        value = self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, default)
-        if value is None:
-            return set()
-        if isinstance(value, str):
-            return {field.strip() for field in value.split(",") if field.strip()}
-        if isinstance(value, (list, set, tuple)):
-            return {str(field).strip() for field in value if str(field).strip()}
-        return set()
-
-    def blob_external_storage_path(self, default=None):
-        return self.options.get(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, default)
 
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,

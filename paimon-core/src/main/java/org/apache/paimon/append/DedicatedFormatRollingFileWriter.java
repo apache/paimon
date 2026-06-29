@@ -60,10 +60,10 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 
 /**
  * A rolling file writer that supports dedicated file formats for different column types. This
- * writer creates separate files for normal columns, blob columns, vector columns, and external
- * storage blob columns, managing their lifecycle and ensuring consistency between them.
+ * writer creates separate files for normal columns, blob columns, and vector columns, managing
+ * their lifecycle and ensuring consistency between them.
  *
- * <p>The writer handles four types of data:
+ * <p>The writer handles three types of data:
  *
  * <ul>
  *   <li><b>Normal columns</b>: Stored in the main data file using the configured file format (e.g.,
@@ -71,7 +71,6 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  *   <li><b>Blob columns</b>: Stored in dedicated blob files within blob file format
  *   <li><b>Vector columns</b>: Stored in dedicated vector files using a specialized format (e.g.,
  *       lance)
- *   <li><b>External storage blob columns</b>: Stored in external storage locations for blob data
  * </ul>
  *
  * <p>File rolling is triggered based on the target file size for each type. When rolling occurs,
@@ -83,8 +82,6 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  *   Normal file: f1.parquet (id, name columns)
  *   Blob files:  blob/b1.blob, blob/b2.blob (data BLOB column)
  *   Vector file: vector/v1.lance (embedding VECTOR column)
- *   External blob: stored in external storage path
- *
  * Rolling behavior:
  *   Normal file1: f1.parquet -&gt; blob files (b1.blob, b2.blob)
  *   Normal file2: f2.parquet -&gt; blob files (b3.blob)
@@ -112,7 +109,6 @@ public class DedicatedFormatRollingFileWriter
                             RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
             vectorStoreWriterFactory;
     private final long targetFileSize;
-    private final @Nullable ExternalStorageBlobWriter externalStorageBlobWriter;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -205,24 +201,6 @@ public class DedicatedFormatRollingFileWriter
                                     context.blobInlineFields());
         } else {
             this.blobWriterFactory = null;
-        }
-
-        if (context != null && !context.blobExternalStorageFields().isEmpty()) {
-            this.externalStorageBlobWriter =
-                    new ExternalStorageBlobWriter(
-                            fileIO,
-                            schemaId,
-                            writeSchema,
-                            context.blobExternalStorageFields(),
-                            context.blobExternalStoragePath(),
-                            pathFactory,
-                            seqNumCounterSupplier,
-                            fileSource,
-                            asyncFileWrite,
-                            statsDenseStore,
-                            blobTargetFileSize);
-        } else {
-            this.externalStorageBlobWriter = null;
         }
 
         // Initialize vector-store writer
@@ -351,12 +329,6 @@ public class DedicatedFormatRollingFileWriter
     @Override
     public void write(InternalRow row) throws IOException {
         try {
-            // Transform descriptor BLOB fields backed by external storage first.
-            InternalRow transformedRow =
-                    externalStorageBlobWriter != null
-                            ? externalStorageBlobWriter.transformRow(row)
-                            : row;
-
             if (writerFactory != null && currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
@@ -367,13 +339,13 @@ public class DedicatedFormatRollingFileWriter
                 vectorStoreWriter = vectorStoreWriterFactory.get();
             }
             if (blobWriter != null) {
-                blobWriter.write(transformedRow);
+                blobWriter.write(row);
             }
             if (vectorStoreWriter != null) {
-                vectorStoreWriter.write(transformedRow);
+                vectorStoreWriter.write(row);
             }
             if (currentWriter != null) {
-                currentWriter.write(transformedRow);
+                currentWriter.write(row);
             }
             recordCount++;
 
@@ -437,9 +409,6 @@ public class DedicatedFormatRollingFileWriter
         if (vectorStoreWriter != null) {
             vectorStoreWriter.abort();
             vectorStoreWriter = null;
-        }
-        if (externalStorageBlobWriter != null) {
-            externalStorageBlobWriter.abort();
         }
     }
 
@@ -574,9 +543,6 @@ public class DedicatedFormatRollingFileWriter
 
         try {
             closeCurrentWriter();
-            if (externalStorageBlobWriter != null) {
-                externalStorageBlobWriter.close();
-            }
         } catch (IOException e) {
             handleCloseException(e);
             throw e;

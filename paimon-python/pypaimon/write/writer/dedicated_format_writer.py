@@ -145,29 +145,13 @@ class DedicatedFormatWriter(DataWriter):
                 options=options,
             )
 
-        # Initialize ExternalStorageBlobWriter if configured
-        self._external_storage_writer = None
-        external_storage_fields = self.options.blob_external_storage_fields()
-        external_storage_path = self.options.blob_external_storage_path()
-        if external_storage_fields and external_storage_path:
-            from pypaimon.write.writer.external_storage_blob_writer import \
-                ExternalStorageBlobWriter
-            self._external_storage_writer = ExternalStorageBlobWriter(
-                file_io=self.file_io,
-                external_storage_path=external_storage_path,
-                external_storage_fields=external_storage_fields,
-                blob_target_file_size=self.options.blob_target_file_size(),
-                data_file_prefix=CoreOptions.data_file_prefix(self.options),
-            )
-
         logger.info(
             "Initialized DedicatedFormatWriter with blob columns: %s, blob file columns: %s, "
-            "vector columns: %s, descriptor stored columns: %s, external storage fields: %s, view stored columns: %s",
+            "vector columns: %s, descriptor stored columns: %s, view stored columns: %s",
             self.blob_column_names,
             self.blob_file_column_names,
             self.vector_write_columns,
             sorted(self.blob_descriptor_fields),
-            sorted(external_storage_fields) if external_storage_fields else [],
             sorted(self.blob_view_fields)
         )
 
@@ -197,11 +181,6 @@ class DedicatedFormatWriter(DataWriter):
 
     def write(self, data: pa.RecordBatch):
         try:
-            # Transform external-storage fields: write raw blob to external storage,
-            # replace with serialized BlobDescriptor
-            if self._external_storage_writer:
-                data = self._external_storage_writer.transform_batch(data)
-
             # Split data into normal, blob, and vector parts
             normal_data, blob_data_map, vector_data = self._split_data(data)
             self._validate_inline_stored_fields_input(data)
@@ -247,8 +226,6 @@ class DedicatedFormatWriter(DataWriter):
 
         try:
             self._close_current_writers()
-            if self._external_storage_writer:
-                self._external_storage_writer.close()
         except Exception as e:
             logger.error("Exception occurs when closing writer. Cleaning up.", exc_info=e)
             self.abort()
@@ -263,8 +240,6 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer.abort()
         if self.vector_writer is not None:
             self.vector_writer.abort()
-        if self._external_storage_writer:
-            self._external_storage_writer.abort()
         committed_non_blob_files = [
             file_meta for file_meta in self.committed_files
             if not DataFileMeta.is_blob_file(file_meta.file_name)
