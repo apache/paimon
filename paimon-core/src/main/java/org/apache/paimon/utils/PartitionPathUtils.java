@@ -19,10 +19,17 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -36,6 +43,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -286,7 +294,7 @@ public class PartitionPathUtils {
                 partitionNumber,
                 partitionKeys,
                 onlyValueInPath,
-                Collections.emptyMap(),
+                (Predicate) null,
                 null,
                 null);
     }
@@ -297,7 +305,7 @@ public class PartitionPathUtils {
             int partitionNumber,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            Map<String, Predicate> partitionFilter,
+            @Nullable Predicate partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         FileStatus[] generatedParts =
@@ -312,8 +320,7 @@ public class PartitionPathUtils {
                         defaultPartValue);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
-            // ignore hidden file
-            if (isHiddenFile(part)) {
+            if (isHiddenFile(part, onlyValueInPath, defaultPartValue)) {
                 continue;
             }
             if (onlyValueInPath) {
@@ -340,16 +347,22 @@ public class PartitionPathUtils {
             FileIO fileIO,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            Map<String, Predicate> partitionFilter,
+            @Nullable Predicate partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         ArrayList<FileStatus> result = new ArrayList<>();
 
+        // Only predicate-referenced levels are parsed/pruned.
+        Set<String> referencedFields =
+                partitionFilter == null
+                        ? Collections.emptySet()
+                        : PredicateVisitor.collectFieldNames(partitionFilter);
+        GenericRow values =
+                partitionType == null ? null : new GenericRow(partitionType.getFieldCount());
+
         try {
             FileStatus fileStatus = fileIO.getFileStatus(path);
-            // Calculate the starting offset when we begin from a prefix path
-            // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
-            // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
+            // Skip partition levels already fixed by the scan-path prefix.
             int levelOffset = partitionKeys.size() - expectLevel;
             listStatusRecursively(
                     fileIO,
@@ -360,9 +373,11 @@ public class PartitionPathUtils {
                     partitionKeys,
                     onlyValueInPath,
                     partitionFilter,
+                    referencedFields,
                     partitionType,
                     defaultPartValue,
-                    levelOffset);
+                    levelOffset,
+                    values);
         } catch (FileNotFoundException e) {
             return new FileStatus[0];
         } catch (IOException e) {
@@ -380,12 +395,14 @@ public class PartitionPathUtils {
             List<FileStatus> results,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            Map<String, Predicate> partitionFilter,
+            @Nullable Predicate partitionFilter,
+            Set<String> referencedFields,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue,
-            int levelOffset)
+            int levelOffset,
+            @Nullable GenericRow values)
             throws IOException {
-        if (isHiddenFile(fileStatus.getPath())) {
+        if (isHiddenFile(fileStatus, onlyValueInPath, defaultPartValue)) {
             return;
         }
 
@@ -396,69 +413,30 @@ public class PartitionPathUtils {
 
         if (fileStatus.isDir()) {
             for (FileStatus stat : fileIO.listStatus(fileStatus.getPath())) {
-                // Calculate the actual partition key index considering the level offset
-                // When starting from a prefix path, levelOffset accounts for already-traversed
-                // levels
                 int partitionKeyIndex = levelOffset + level;
+                String partitionKey = partitionKeys.get(partitionKeyIndex);
 
-                // Apply partition filter if available
-                if (partitionFilter.containsKey(partitionKeys.get(partitionKeyIndex))
-                        && partitionType != null) {
-
-                    Predicate partitionPredicate =
-                            partitionFilter.get(partitionKeys.get(partitionKeyIndex));
-                    // Extract the partition value from the directory name
-                    String dirName = stat.getPath().getName();
-                    String partitionKey = partitionKeys.get(partitionKeyIndex);
-                    String partitionValue;
-
-                    if (onlyValueInPath) {
-                        partitionValue = unescapePathName(dirName);
-                    } else {
-                        // Parse key=value format
-                        Matcher m = PARTITION_NAME_PATTERN.matcher(dirName);
-                        if (m.matches()) {
-                            String key = unescapePathName(m.group(1));
-                            if (!key.equals(partitionKey)) {
-                                // Key doesn't match expected partition key, skip filtering
-                                partitionValue = null;
-                            } else {
-                                partitionValue = unescapePathName(m.group(2));
-                            }
-                        } else {
-                            // Not a valid partition directory format
-                            partitionValue = null;
-                        }
-                    }
-
+                // Bind the current partition value and prune only when the partially bound
+                // predicate is provably false. Unreferenced or unparseable levels are descended
+                // without pruning.
+                if (partitionFilter != null
+                        && partitionType != null
+                        && values != null
+                        && referencedFields.contains(partitionKey)) {
+                    String partitionValue =
+                            parsePartitionValue(
+                                    stat.getPath().getName(), partitionKey, onlyValueInPath);
                     if (partitionValue != null) {
-                        // Convert the partition value to internal format
                         Object internalValue =
                                 defaultPartValue != null && defaultPartValue.equals(partitionValue)
                                         ? null
                                         : castFromString(
                                                 partitionValue,
                                                 partitionType.getTypeAt(partitionKeyIndex));
-
-                        GenericRow partialRow = GenericRow.of(internalValue);
-                        if (!partitionPredicate.test(partialRow)) {
+                        values.setField(partitionKeyIndex, internalValue);
+                        if (!mightMatch(partitionFilter, levelOffset, partitionKeyIndex, values)) {
                             continue;
                         }
-
-                        // Pass the accumulated values to the next level
-                        listStatusRecursively(
-                                fileIO,
-                                stat,
-                                level + 1,
-                                expectLevel,
-                                results,
-                                partitionKeys,
-                                onlyValueInPath,
-                                partitionFilter,
-                                partitionType,
-                                defaultPartValue,
-                                levelOffset);
-                        continue;
                     }
                 }
 
@@ -471,19 +449,91 @@ public class PartitionPathUtils {
                         partitionKeys,
                         onlyValueInPath,
                         partitionFilter,
+                        referencedFields,
                         partitionType,
                         defaultPartValue,
-                        levelOffset);
+                        levelOffset,
+                        values);
             }
         }
     }
 
-    private static boolean isHiddenFile(FileStatus fileStatus) {
-        return isHiddenFile(fileStatus.getPath());
+    /** Returns the partition value from a directory name, or {@code null} when it can't be used. */
+    @Nullable
+    private static String parsePartitionValue(
+            String dirName, String partitionKey, boolean onlyValueInPath) {
+        if (onlyValueInPath) {
+            return unescapePathName(dirName);
+        }
+        Matcher m = PARTITION_NAME_PATTERN.matcher(dirName);
+        if (m.matches()) {
+            String key = unescapePathName(m.group(1));
+            if (!key.equals(partitionKey)) {
+                return null;
+            }
+            return unescapePathName(m.group(2));
+        }
+        return null;
     }
 
-    private static boolean isHiddenFile(Path path) {
+    /**
+     * Returns whether a subtree might still match the partition predicate.
+     *
+     * <p>{@code values} holds the currently bound partition values in {@code [minIdx, maxIdx]}.
+     * Indices below {@code minIdx} belong to the scan-path prefix; indices above {@code maxIdx} are
+     * not known yet. Returning {@code false} means the subtree can be pruned safely.
+     */
+    static boolean mightMatch(
+            @Nullable Predicate predicate, int minIdx, int maxIdx, InternalRow values) {
+        if (predicate == null) {
+            return true;
+        }
+        if (predicate instanceof CompoundPredicate) {
+            CompoundPredicate compound = (CompoundPredicate) predicate;
+            if (compound.function() instanceof Or) {
+                for (Predicate child : compound.children()) {
+                    if (mightMatch(child, minIdx, maxIdx, values)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (compound.function() instanceof And) {
+                for (Predicate child : compound.children()) {
+                    if (!mightMatch(child, minIdx, maxIdx, values)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return true;
+        }
+        if (predicate instanceof LeafPredicate) {
+            for (Object input : ((LeafPredicate) predicate).transform().inputs()) {
+                if (input instanceof FieldRef) {
+                    int idx = ((FieldRef) input).index();
+                    if (idx < minIdx || idx > maxIdx) {
+                        return true;
+                    }
+                }
+            }
+            return predicate.test(values);
+        }
+        // Unknown predicate node: be conservative.
+        return true;
+    }
+
+    private static boolean isHiddenFile(
+            FileStatus fileStatus, boolean onlyValueInPath, @Nullable String defaultPartValue) {
+        return isHiddenFile(fileStatus.getPath(), onlyValueInPath, defaultPartValue);
+    }
+
+    private static boolean isHiddenFile(
+            Path path, boolean onlyValueInPath, @Nullable String defaultPartValue) {
         String name = path.getName();
+        if (onlyValueInPath && defaultPartValue != null && defaultPartValue.equals(name)) {
+            return false;
+        }
         return name.startsWith("_") || name.startsWith(".");
     }
 }

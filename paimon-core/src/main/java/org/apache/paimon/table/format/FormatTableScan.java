@@ -43,7 +43,6 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.format.predicate.PredicateUtils;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -122,7 +121,10 @@ public class FormatTableScan implements InnerTableScan {
                         new Path(table.location()),
                         table.partitionKeys().size(),
                         table.partitionKeys(),
-                        coreOptions.formatTablePartitionOnlyValueInPath());
+                        coreOptions.formatTablePartitionOnlyValueInPath(),
+                        null,
+                        table.partitionType(),
+                        table.defaultPartName());
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
@@ -199,17 +201,11 @@ public class FormatTableScan implements InnerTableScan {
             // search paths with partition filter optimization
             // This will prune partition directories early during traversal,
             // which is especially important for cloud storage like OSS/S3
-            Map<String, Predicate> partitionPredicates = new HashMap<>();
             Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
             LOG.debug(
                     "Extracted predicate for format table {} partition pruning: {}",
                     table.name(),
                     predicate.orElse(null));
-            if (predicate.isPresent()) {
-                partitionPredicates =
-                        PredicateUtils.splitPartitionPredicate(
-                                table.partitionType(), predicate.get());
-            }
 
             Pair<Path, Integer> scanPathAndLevel =
                     computeScanPathAndLevel(
@@ -224,7 +220,7 @@ public class FormatTableScan implements InnerTableScan {
                     scanPathAndLevel.getRight(),
                     table.partitionKeys(),
                     onlyValueInPath,
-                    partitionPredicates,
+                    predicate.orElse(null),
                     table.partitionType(),
                     table.defaultPartName());
         }
