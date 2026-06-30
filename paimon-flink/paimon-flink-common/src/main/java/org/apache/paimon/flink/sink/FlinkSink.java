@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.TagCreationMode;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactCoordinateOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactSortOperator;
 import org.apache.paimon.flink.compact.changelog.ChangelogCompactWorkerOperator;
@@ -26,6 +27,7 @@ import org.apache.paimon.flink.compact.changelog.ChangelogTaskTypeInfo;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -51,6 +53,7 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.apache.paimon.flink.FlinkConnectorOptions.END_INPUT_WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
@@ -188,7 +191,6 @@ public abstract class FlinkSink<T> implements Serializable {
 
     public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
-        ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean streamingCheckpointEnabled =
                 isStreaming(written) && checkpointConfig.isCheckpointingEnabled();
@@ -196,7 +198,32 @@ public abstract class FlinkSink<T> implements Serializable {
             assertStreamingConfiguration(env);
         }
 
+        if (coordinatorCommitEnabled()) {
+            return doCoordinatorCommit(written, checkpointConfig, streamingCheckpointEnabled);
+        }
+        return doOperatorCommit(written, commitUser, streamingCheckpointEnabled);
+    }
+
+    private DataStreamSink<?> doCoordinatorCommit(
+            DataStream<Committable> written,
+            CheckpointConfig checkpointConfig,
+            boolean streamingCheckpointEnabled) {
+        checkCoordinatorCommitPreconditions(table, checkpointConfig, streamingCheckpointEnabled);
+        // The commit runs inside the writer's OperatorCoordinator on the JobManager, so there
+        // is no global committer operator. Committables are still forwarded by the writer for
+        // observability and are discarded here.
+        return written.sinkTo(new DiscardingSink<>())
+                .name("end")
+                .setParallelism(written.getParallelism());
+    }
+
+    private DataStreamSink<?> doOperatorCommit(
+            DataStream<Committable> written,
+            String commitUser,
+            boolean streamingCheckpointEnabled) {
+        ReadableConfig conf = written.getExecutionEnvironment().getConfiguration();
         Options options = Options.fromMap(table.options());
+
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 createCommitterOperatorFactory(
                         streamingCheckpointEnabled, commitUser, options.get(END_INPUT_WATERMARK));
@@ -310,6 +337,74 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory();
 
     protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
+
+    /**
+     * Whether the writer commits through its {@link
+     * org.apache.flink.runtime.operators.coordination.OperatorCoordinator} on the JobManager. When
+     * {@code true}, {@link #doCommit} skips the global committer operator. Sinks that wire a
+     * coordinated writer factory override this.
+     */
+    protected boolean coordinatorCommitEnabled() {
+        return false;
+    }
+
+    /**
+     * Fails fast when coordinator commit is enabled together with a table property or runtime
+     * setting it cannot honor yet. Enabling coordinator commit is an explicit user choice, so a
+     * conflicting configuration is reported instead of silently falling back to the global
+     * committer.
+     */
+    @VisibleForTesting
+    static void checkCoordinatorCommitPreconditions(
+            FileStoreTable table,
+            CheckpointConfig checkpointConfig,
+            boolean streamingCheckpointEnabled) {
+        Options options = Options.fromMap(table.options());
+
+        // Region failover only benefits streaming jobs. A batch job persists its shuffle data and
+        // has no region-failover concern, so coordinator commit brings no benefit and batch is not
+        // supported. The commit is driven by checkpoint completion, so checkpointing must be on.
+        checkArgument(
+                streamingCheckpointEnabled,
+                "Could not enable coordinator commit because it requires streaming mode with checkpointing enabled.");
+
+        // The checks below reject configurations that introduce an all-to-all shuffle. Such a
+        // shuffle places every operator into a single failover region, which defeats the region
+        // failover that coordinator commit is meant to enable.
+        checkArgument(
+                table.primaryKeys().isEmpty(),
+                "Could not enable coordinator commit because only append tables are supported, but the table has primary keys.");
+        checkArgument(
+                table.bucketMode() == BucketMode.BUCKET_UNAWARE,
+                "Could not enable coordinator commit because bucket mode is "
+                        + table.bucketMode()
+                        + ", only unaware bucket is supported.");
+        checkArgument(
+                table.coreOptions().writeOnly(),
+                "Could not enable coordinator commit because it requires "
+                        + WRITE_ONLY.key()
+                        + " = true.");
+        checkArgument(
+                !options.get(PRECOMMIT_COMPACT),
+                "Could not enable coordinator commit because it requires "
+                        + PRECOMMIT_COMPACT.key()
+                        + " = false.");
+
+        // The OperatorCoordinator cannot tell a savepoint from a normal checkpoint.
+        // TODO support savepoint auto-tag.
+        checkArgument(
+                !options.get(SINK_AUTO_TAG_FOR_SAVEPOINT),
+                "Could not enable coordinator commit because "
+                        + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
+                        + " is enabled, which is not supported yet.");
+
+        // TODO concurrent checkpoints are not supported yet.
+        checkArgument(
+                checkpointConfig.getMaxConcurrentCheckpoints() == 1,
+                "Could not enable coordinator commit because execution.checkpointing.max-concurrent-checkpoints is "
+                        + checkpointConfig.getMaxConcurrentCheckpoints()
+                        + ", which is not supported yet.");
+    }
 
     public static boolean isStreaming(DataStream<?> input) {
         return isStreaming(input.getExecutionEnvironment());
