@@ -106,6 +106,14 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         ):
             self.assertEqual(blob_key(opts), "USERKEY")
 
+    def test_non_oss_partial_config_left_null_for_env(self):
+        # Non-OSS endpoint-only (no key pair) -> null, so Daft's s3:// uses its env cred chain.
+        opts = {"warehouse": "s3://b", "fs.s3.endpoint": "https://s3.example.com"}
+        self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts))
+        self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False))
+        task = _PaimonPKSplitTask(opts, None, None, {}, None, None, blob_column_names={"x"})
+        self.assertIsNone(task._blob_io_config_bytes(None))
+
     @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):
         # The crux: embedded bytes must survive the cast to DataType.file() so a native

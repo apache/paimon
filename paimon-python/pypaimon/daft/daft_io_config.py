@@ -124,9 +124,9 @@ def _convert_paimon_catalog_options_to_file_io_config(
     """
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
-        # Non-OSS (s3://, s3a://, local): require a complete key pair. An endpoint or a
-        # half credential is not credentials, so fall through to explicit io_config / env.
-        if require_credentials and not (
+        # Non-OSS (s3://, local): embed only with a complete key pair; else null, so Daft's
+        # native s3:// handling uses its env credential chain (OSS alias relaxation is below).
+        if not (
             catalog_options.get("fs.s3.accessKeyId") and catalog_options.get("fs.s3.accessKeySecret")
         ):
             return None
