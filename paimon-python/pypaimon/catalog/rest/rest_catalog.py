@@ -572,6 +572,8 @@ class RESTCatalog(Catalog):
                 database_name, max_results, page_token, resource_name_pattern)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
     def list_resources_paged_globally(
             self,
@@ -602,6 +604,8 @@ class RESTCatalog(Catalog):
             return PagedList(resources, result.next_page_token)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
     def _to_resource(self, identifier: Identifier, response) -> 'Resource':
         from pypaimon.resource.resource import Resource

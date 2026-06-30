@@ -999,6 +999,8 @@ public class RESTCatalog implements Catalog {
             return api.listResourcesPaged(databaseName, maxResults, pageToken, resourceNamePattern);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -1020,6 +1022,8 @@ public class RESTCatalog implements Catalog {
                     resources.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 

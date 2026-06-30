@@ -78,6 +78,24 @@ class RESTPermissionTest(RESTBaseTest):
 
         self.assertEqual("forbidden_db_list_paged", context.exception.database)
 
+    def test_list_resources_paged_no_permission(self):
+        self.rest_catalog.create_database("forbidden_db_list_resources_paged", False)
+        self.server.add_no_permission_database("forbidden_db_list_resources_paged")
+
+        with self.assertRaises(DatabaseNoPermissionException) as context:
+            self.rest_catalog.list_resources_paged("forbidden_db_list_resources_paged")
+
+        self.assertEqual("forbidden_db_list_resources_paged", context.exception.database)
+
+    def test_list_resource_details_paged_no_permission(self):
+        self.rest_catalog.create_database("forbidden_db_list_resource_details_paged", False)
+        self.server.add_no_permission_database("forbidden_db_list_resource_details_paged")
+
+        with self.assertRaises(DatabaseNoPermissionException) as context:
+            self.rest_catalog.list_resource_details_paged("forbidden_db_list_resource_details_paged")
+
+        self.assertEqual("forbidden_db_list_resource_details_paged", context.exception.database)
+
     def test_get_table_no_permission(self):
         self.rest_catalog.create_database("test_db", True)
         schema = Schema.from_pyarrow_schema(self.pa_schema)
