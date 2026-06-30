@@ -449,6 +449,32 @@ class FileStoreTable(Table):
             BatchVectorSearchBuilderImpl
         return BatchVectorSearchBuilderImpl(self)
 
+    def create_global_index(self, index_column, index_type: str = "btree",
+                            partition_filter=None, partitions=None,
+                            options: Optional[dict] = None) -> int:
+        from pypaimon.globalindex.create_global_index import create_global_index
+        return create_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            options=options,
+        )
+
+    def drop_global_index(self, index_column, index_type: str = "btree",
+                          partition_filter=None, partitions=None,
+                          dry_run: bool = False) -> int:
+        from pypaimon.globalindex.drop_global_index import drop_global_index
+        return drop_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            dry_run=dry_run,
+        )
+
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()
         if bucket_mode == BucketMode.HASH_FIXED:

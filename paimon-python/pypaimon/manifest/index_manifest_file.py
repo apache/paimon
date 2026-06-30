@@ -234,14 +234,23 @@ class IndexManifestFile:
         previous_name: Optional[str],
         deletes: List[IndexManifestEntry],
     ) -> Optional[str]:
-        if not deletes:
+        return self.combine_changes(previous_name, [], deletes)
+
+    def combine_changes(
+        self,
+        previous_name: Optional[str],
+        adds: List[IndexManifestEntry],
+        deletes: List[IndexManifestEntry],
+    ) -> Optional[str]:
+        if not adds and not deletes:
             return previous_name
         previous = self.read(previous_name) if previous_name else []
         delete_names = {e.index_file.file_name for e in deletes}
         survivors = [e for e in previous if e.index_file.file_name not in delete_names]
-        if not survivors:
+        combined = survivors + adds
+        if not combined:
             return None
-        return self.write(survivors)
+        return self.write(combined)
 
     def write(self, entries: List[IndexManifestEntry]) -> str:
         file_name = f"{FileStorePathFactory.INDEX_MANIFEST_PREFIX}{uuid.uuid4()}"

@@ -675,6 +675,29 @@ class CoreOptions:
         )
     )
 
+    BTREE_INDEX_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("btree-index.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(64))
+        .with_description("The block size to use for BTree global indexes.")
+    )
+
+    SORTED_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("sorted-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description("The expected number of records per sorted global index file.")
+    )
+
+    BTREE_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("btree-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description(
+            "The expected number of records per BTree global index file."
+        )
+    )
+
     BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("bitmap-index.fallback-scan-max-size")
         .memory_type()
@@ -1156,6 +1179,14 @@ class CoreOptions:
         return self.options.get(
             CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
+
+    def btree_index_block_size(self) -> int:
+        return self.options.get(CoreOptions.BTREE_INDEX_BLOCK_SIZE).get_bytes()
+
+    def sorted_index_records_per_range(self) -> int:
+        if self.options.contains(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE):
+            return self.options.get(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE)
+        return self.options.get(CoreOptions.BTREE_INDEX_RECORDS_PER_RANGE)
 
     def bitmap_index_fallback_scan_max_size(self) -> int:
         return self.options.get(

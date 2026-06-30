@@ -156,8 +156,10 @@ class FileStoreCommit:
                     len(commit_entries), len(changelog_entries))
 
         index_deletes = []
+        index_adds = []
         for msg in commit_messages:
             index_deletes.extend(msg.index_deletes)
+            index_adds.extend(msg.index_adds)
 
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
@@ -197,7 +199,8 @@ class FileStoreCommit:
                          changelog_entries=changelog_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback,
-                         index_deletes=index_deletes)
+                         index_deletes=index_deletes,
+                         index_adds=index_adds)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -286,7 +289,8 @@ class FileStoreCommit:
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
-                    detect_conflicts=False, allow_rollback=False, index_deletes=None, changelog_entries=None):
+                    detect_conflicts=False, allow_rollback=False, index_deletes=None,
+                    index_adds=None, changelog_entries=None):
 
         retry_count = 0
         retry_result = None
@@ -297,7 +301,7 @@ class FileStoreCommit:
 
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
-            if not commit_entries and not index_deletes:
+            if not commit_entries and not index_deletes and not index_adds:
                 break
 
             result = self._try_commit_once(
@@ -310,6 +314,7 @@ class FileStoreCommit:
                 detect_conflicts=detect_conflicts,
                 allow_rollback=allow_rollback,
                 index_deletes=index_deletes,
+                index_adds=index_adds,
             )
 
             if result.is_success():
@@ -364,7 +369,8 @@ class FileStoreCommit:
                          latest_snapshot: Optional[Snapshot],
                          detect_conflicts: bool = False,
                          allow_rollback: bool = False,
-                         index_deletes=None) -> CommitResult:
+                         index_deletes=None,
+                         index_adds=None) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
@@ -466,11 +472,11 @@ class FileStoreCommit:
             index_manifest = None
             if latest_snapshot and commit_kind == "APPEND":
                 index_manifest = latest_snapshot.index_manifest
-            if index_deletes:
+            if index_deletes or index_adds:
                 from pypaimon.manifest.index_manifest_file import IndexManifestFile
                 previous_index_manifest = index_manifest
-                index_manifest = IndexManifestFile(self.table).combine_deletes(
-                    previous_index_manifest, index_deletes)
+                index_manifest = IndexManifestFile(self.table).combine_changes(
+                    previous_index_manifest, index_adds or [], index_deletes or [])
                 if index_manifest != previous_index_manifest:
                     new_index_manifest = index_manifest
 
@@ -696,6 +702,14 @@ class FileStoreCommit:
                 except Exception as e:
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
+            for entry in message.index_adds:
+                try:
+                    file_name = entry.index_file.file_name
+                    index_path = self.table.path_factory().global_index_path_factory().to_path(file_name)
+                    self.table.file_io.delete_quietly(index_path)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to clean up index file {entry.index_file.file_name} during abort: {e}")
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
