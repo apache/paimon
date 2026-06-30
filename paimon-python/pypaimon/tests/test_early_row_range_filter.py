@@ -111,5 +111,73 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             f"got {construction_count[0]}")
 
 
+    def test_add_delete_pair_not_broken_by_early_filter(self):
+        """Guard ADD/DELETE merge semantics: when a file is overwritten,
+        its ADD and DELETE entries share the same _FIRST_ROW_ID. The early
+        filter must either keep both or drop both — never keep ADD but
+        drop DELETE (which would resurrect a deleted file)."""
+        pa_schema = self.pa_schema
+        self.catalog.create_table('default.test_add_delete_pair',
+                                  Schema.from_pyarrow_schema(pa_schema, options={
+                                      'row-tracking.enabled': 'true',
+                                      'data-evolution.enabled': 'true',
+                                      'manifest.merge-min-count': '1',
+                                  }), False)
+        table = self.catalog.get_table('default.test_add_delete_pair')
+        wb = table.new_batch_write_builder()
+
+        # Commit 1: write file at row_id 0-9
+        tw, tc = wb.new_write(), wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'id': list(range(10)), 'value': ['old'] * 10}, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        for m in cmts:
+            for nf in m.new_files:
+                nf.first_row_id = 0
+        tc.commit(cmts)
+        tw.close(); tc.close()
+
+        # Commit 2: overwrite same row_id 0-9 with new data
+        # This creates DELETE(old_file, row_id=0) + ADD(new_file, row_id=0)
+        tw = wb.new_write().with_write_type(['id', 'value'])
+        tc = wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'id': list(range(10)), 'value': ['new'] * 10}, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        for m in cmts:
+            for nf in m.new_files:
+                nf.first_row_id = 0
+        tc.commit(cmts)
+        tw.close(); tc.close()
+
+        # Commit 3: write file at row_id 100-109 (unrelated, outside query range)
+        tw, tc = wb.new_write(), wb.new_commit()
+        tw.write_arrow(pa.Table.from_pydict(
+            {'id': list(range(100, 110)), 'value': ['other'] * 10}, schema=pa_schema))
+        cmts = tw.prepare_commit()
+        for m in cmts:
+            for nf in m.new_files:
+                nf.first_row_id = 100
+        tc.commit(cmts)
+        tw.close(); tc.close()
+
+        # Query row_id [0, 9]: should return the NEW data, not the old
+        predicate = Predicate(method='between', index=None,
+                              field='_ROW_ID', literals=[0, 9])
+        rb = table.new_read_builder().with_filter(predicate)
+        splits = rb.new_scan().plan().splits()
+        actual = rb.new_read().to_arrow(splits)
+
+        values = actual.column('value').to_pylist()
+        self.assertTrue(all(v == 'new' for v in values),
+                        f"Expected all 'new' but got {values}. "
+                        "Early filter may have dropped DELETE without its ADD.")
+
+        # Also verify row_id [100, 109] is NOT in the result
+        ids = actual.column('id').to_pylist()
+        self.assertTrue(all(i < 100 for i in ids),
+                        f"row_id [100,109] should be filtered out but got ids={ids}")
+
+
 if __name__ == '__main__':
     unittest.main()
