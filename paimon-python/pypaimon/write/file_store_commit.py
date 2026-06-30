@@ -705,7 +705,12 @@ class FileStoreCommit:
             for entry in message.index_adds:
                 try:
                     file_name = entry.index_file.file_name
-                    index_path = self.table.path_factory().global_index_path_factory().to_path(file_name)
+                    index_path = (
+                        entry.index_file.external_path
+                        or self.table.path_factory()
+                        .global_index_path_factory()
+                        .to_path(file_name)
+                    )
                     self.table.file_io.delete_quietly(index_path)
                 except Exception as e:
                     logger.warning(

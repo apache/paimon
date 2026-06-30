@@ -33,9 +33,11 @@ from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -141,14 +143,11 @@ class GlobalIndexBuilder:
             predicate=None,
             read_type=read_type,
         )
-        index_path = (
-            self._table.path_factory()
-            .global_index_path_factory()
-            .index_path()
-        )
+        index_path_factory = self._table.path_factory().global_index_path_factory()
+        index_path = index_path_factory.global_index_root_path()
 
         messages = []
-        for split in splits:
+        for split in _split_by_contiguous_row_range(splits):
             row_range = _calc_row_range(split)
             table = table_read.to_arrow([split])
             if table is None or table.num_rows == 0:
@@ -253,6 +252,66 @@ def _calc_row_range(split) -> Range:
     return Range(merged[0].from_, merged[-1].to)
 
 
+def _split_by_contiguous_row_range(splits):
+    result = []
+    for split in splits:
+        result.extend(_split_one_by_contiguous_row_range(split))
+    return result
+
+
+def _split_one_by_contiguous_row_range(split):
+    for file in split.files:
+        if file.row_id_range() is None:
+            raise ValueError(
+                "Cannot build global index because file '%s' has no row id range."
+                % file.file_name
+            )
+
+    range_helper = RangeHelper(lambda file: file.row_id_range())
+    ranges = range_helper.merge_overlapping_ranges(split.files)
+    if not ranges:
+        return []
+
+    result = []
+    current_segment = []
+    current_max_row_id = None
+    for range_files in ranges:
+        min_row_id = min(file.row_id_range().from_ for file in range_files)
+        max_row_id = max(file.row_id_range().to for file in range_files)
+        if (
+            not current_segment
+            or current_max_row_id is None
+            or current_max_row_id >= min_row_id - 1
+        ):
+            current_segment.extend(range_files)
+            current_max_row_id = max_row_id
+        else:
+            result.append(_copy_split_with_files(split, current_segment))
+            current_segment = list(range_files)
+            current_max_row_id = max_row_id
+
+    if current_segment:
+        result.append(_copy_split_with_files(split, current_segment))
+    return result
+
+
+def _copy_split_with_files(split, files):
+    data_deletion_files = None
+    if getattr(split, "data_deletion_files", None) is not None:
+        index_by_file = {id(file): i for i, file in enumerate(split.files)}
+        data_deletion_files = [
+            split.data_deletion_files[index_by_file[id(file)]]
+            for file in files
+        ]
+    return DataSplit(
+        files=list(files),
+        partition=split.partition,
+        bucket=split.bucket,
+        raw_convertible=getattr(split, "raw_convertible", False),
+        data_deletion_files=data_deletion_files,
+    )
+
+
 def _extract_sorted_rows(
     table: pa.Table,
     index_column: str,
@@ -299,7 +358,9 @@ def _to_index_manifest_entries(
     path_factory = table.path_factory().global_index_path_factory()
     entries = []
     for result in result_entries:
-        file_size = table.file_io.get_file_size(path_factory.to_path(result.file_name))
+        file_path = path_factory.to_path(result.file_name)
+        file_size = table.file_io.get_file_size(file_path)
+        external_path = file_path if path_factory.is_external_path() else None
         index_file = IndexFileMeta(
             index_type=index_type,
             file_name=result.file_name,
@@ -312,6 +373,7 @@ def _to_index_manifest_entries(
                 extra_field_ids=None,
                 index_meta=result.meta,
             ),
+            external_path=external_path,
         )
         entries.append(
             IndexManifestEntry(

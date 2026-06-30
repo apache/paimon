@@ -36,7 +36,7 @@ _DELETION_VECTOR_META_SCHEMA = {
     "name": "DeletionVectorMeta",
     "fields": [
         {"name": "f0", "type": "string"},
-        {"name": "f1", "type": "long"},
+        {"name": "f1", "type": "int"},
         {"name": "f2", "type": "int"},
         {"name": "_CARDINALITY", "type": ["null", "long"], "default": None},
     ],

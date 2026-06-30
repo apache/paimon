@@ -20,6 +20,7 @@ import warnings
 from datetime import timedelta
 from enum import Enum
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -646,6 +647,16 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Global index root directory. If not set, global index files are "
+            "stored under the table index directory."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -1171,6 +1182,17 @@ class CoreOptions:
 
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
+
+    def global_index_external_path(self, default=None):
+        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        if not urlparse(value).scheme:
+            raise ValueError("scheme should not be null: %s" % value)
+        return value
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)

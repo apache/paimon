@@ -17,7 +17,7 @@
 
 """The ``$table_indexes`` system table."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pyarrow
 
@@ -28,7 +28,18 @@ from pypaimon.table.system.files_table import _render_partition
 from pypaimon.table.system.system_table import SystemTable
 
 
-_DV_RANGES_TYPE = pyarrow.list_(pyarrow.string())
+_DV_RANGE_ROW_TYPE = RowType(False, [
+    DataField(0, "f0", AtomicType("STRING", nullable=False)),
+    DataField(1, "f1", AtomicType("INT", nullable=False)),
+    DataField(2, "f2", AtomicType("INT", nullable=False)),
+    DataField(3, "_CARDINALITY", AtomicType("BIGINT", nullable=True)),
+])
+_DV_RANGES_TYPE = pyarrow.list_(pyarrow.struct([
+    pyarrow.field("f0", pyarrow.string(), nullable=False),
+    pyarrow.field("f1", pyarrow.int32(), nullable=False),
+    pyarrow.field("f2", pyarrow.int32(), nullable=False),
+    pyarrow.field("_CARDINALITY", pyarrow.int64(), nullable=True),
+]))
 
 TABLE_TYPE = RowType(False, [
     DataField(0, "partition", AtomicType("STRING", nullable=True)),
@@ -41,7 +52,7 @@ TABLE_TYPE = RowType(False, [
         6,
         "dv_ranges",
         ArrayType(nullable=True,
-                  element_type=AtomicType("STRING", nullable=True))),
+                  element_type=_DV_RANGE_ROW_TYPE)),
     DataField(7, "row_range_start", AtomicType("BIGINT", nullable=True)),
     DataField(8, "row_range_end", AtomicType("BIGINT", nullable=True)),
     DataField(9, "index_field_id", AtomicType("INT", nullable=True)),
@@ -127,15 +138,19 @@ class TableIndexesTable(SystemTable):
         })
 
 
-def _render_dv_ranges(dv_ranges) -> Optional[List[str]]:
+def _render_dv_ranges(dv_ranges) -> Optional[List[Dict[str, object]]]:
     if not dv_ranges:
         return None
     rendered = []
     for meta in dv_ranges.values():
-        rendered.append(
-            "%s:%s:%s:%s"
-            % (meta.data_file_name, meta.offset, meta.length, meta.cardinality)
-        )
+        rendered.append({
+            "f0": meta.data_file_name,
+            "f1": int(meta.offset),
+            "f2": int(meta.length),
+            "_CARDINALITY": (
+                None if meta.cardinality is None else int(meta.cardinality)
+            ),
+        })
     return rendered
 
 
