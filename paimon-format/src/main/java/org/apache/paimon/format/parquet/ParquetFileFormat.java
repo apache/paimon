@@ -25,8 +25,8 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
-import org.apache.paimon.format.variant.VariantInferenceConfig;
-import org.apache.paimon.format.variant.VariantInferenceWriterFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
+import org.apache.paimon.format.variant.VariantShreddingWritePlanFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -77,9 +77,8 @@ public class ParquetFileFormat extends FileFormat {
     public FormatWriterFactory createWriterFactory(RowType type) {
         ParquetWriterFactory baseFactory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
-        // Wrap with variant inference decorator
-        return new VariantInferenceWriterFactory(
-                baseFactory, new VariantInferenceConfig(type, formatContext.options()));
+        return new ShreddingWritePlanWriterFactory(
+                baseFactory, new VariantShreddingWritePlanFactory(type, formatContext.options()));
     }
 
     @Override

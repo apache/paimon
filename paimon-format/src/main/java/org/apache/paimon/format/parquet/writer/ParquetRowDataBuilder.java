@@ -20,7 +20,6 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatMetadataUtils;
-import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
@@ -30,8 +29,6 @@ import org.apache.parquet.hadoop.api.WriteSupport.FinalizedWriteContext;
 import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.MessageType;
-
-import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -44,14 +41,11 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
-    @Nullable private final RowType shreddingSchemas;
     private Supplier<Map<String, byte[]>> metadataSupplier;
 
-    public ParquetRowDataBuilder(
-            OutputFile path, RowType rowType, @Nullable RowType shreddingSchemas) {
+    public ParquetRowDataBuilder(OutputFile path, RowType rowType) {
         super(path);
         this.rowType = rowType;
-        this.shreddingSchemas = shreddingSchemas;
         this.metadataSupplier = HashMap::new;
     }
 
@@ -68,22 +62,14 @@ public class ParquetRowDataBuilder
 
     @Override
     protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
-        return new ParquetWriteSupport(conf);
+        return new ParquetWriteSupport();
     }
 
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
-        private final Configuration conf;
-        private final MessageType schema;
+        private final MessageType schema = convertToParquetMessageType(rowType);
 
         private ParquetRowDataWriter writer;
-
-        private ParquetWriteSupport(Configuration conf) {
-            this.conf = conf;
-            this.schema =
-                    convertToParquetMessageType(
-                            VariantUtils.replaceWithShreddingType(rowType, shreddingSchemas));
-        }
 
         @Override
         public WriteContext init(Configuration configuration) {
@@ -92,9 +78,7 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer =
-                    new ParquetRowDataWriter(
-                            recordConsumer, rowType, schema, conf, shreddingSchemas);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
         }
 
         @Override

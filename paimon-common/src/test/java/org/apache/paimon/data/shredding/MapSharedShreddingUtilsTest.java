@@ -203,24 +203,27 @@ class MapSharedShreddingUtilsTest {
         MapSharedShreddingFieldMeta original =
                 new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, overflowSet, 3, 2);
 
-        Map<String, String> metadata = new HashMap<>();
-        MapSharedShreddingUtils.serializeMetadata(original, "none", metadata);
-
-        assertThat(MapSharedShreddingUtils.hasShreddingMetadata(metadata)).isTrue();
-        assertThat(metadata.get(MapShreddingDefine.STORAGE_LAYOUT)).isEqualTo("shared-shredding");
-        assertThat(metadata.get(MapSharedShreddingDefine.VERSION)).isEqualTo("1");
-        assertThat(metadata.get(MapSharedShreddingDefine.NUM_COLUMNS)).isEqualTo("3");
-        assertThat(metadata.get(MapSharedShreddingDefine.MAX_ROW_WIDTH)).isEqualTo("2");
-
         String expectedDict = "{\"age\":0,\"name\":1}";
-        assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT)).isEqualTo(expectedDict);
-        assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE))
-                .isEqualTo(String.valueOf(expectedDict.length()));
-        assertThat(metadata.get(MapSharedShreddingDefine.FIELD_COLUMNS))
-                .isEqualTo("{\"0\":[0],\"1\":[1,2]}");
-        assertThat(metadata.get(MapSharedShreddingDefine.OVERFLOW_SET)).isEqualTo("[1,5]");
-        assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata, "none"))
-                .isEqualTo(original);
+        for (String compression : Arrays.<String>asList(null, "none", "NONE")) {
+            Map<String, String> metadata = new HashMap<>();
+            MapSharedShreddingUtils.serializeMetadata(original, compression, metadata);
+
+            assertThat(MapSharedShreddingUtils.hasShreddingMetadata(metadata)).isTrue();
+            assertThat(metadata.get(MapShreddingDefine.STORAGE_LAYOUT))
+                    .isEqualTo("shared-shredding");
+            assertThat(metadata.get(MapSharedShreddingDefine.VERSION)).isEqualTo("1");
+            assertThat(metadata.get(MapSharedShreddingDefine.NUM_COLUMNS)).isEqualTo("3");
+            assertThat(metadata.get(MapSharedShreddingDefine.MAX_ROW_WIDTH)).isEqualTo("2");
+
+            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT)).isEqualTo(expectedDict);
+            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE))
+                    .isEqualTo(String.valueOf(expectedDict.length()));
+            assertThat(metadata.get(MapSharedShreddingDefine.FIELD_COLUMNS))
+                    .isEqualTo("{\"0\":[0],\"1\":[1,2]}");
+            assertThat(metadata.get(MapSharedShreddingDefine.OVERFLOW_SET)).isEqualTo("[1,5]");
+            assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata, compression))
+                    .isEqualTo(original);
+        }
     }
 
     @Test
