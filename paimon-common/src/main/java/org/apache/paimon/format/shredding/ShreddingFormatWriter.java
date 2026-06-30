@@ -79,8 +79,11 @@ public class ShreddingFormatWriter implements BundleFormatWriter {
 
     @Override
     public void close() throws IOException {
-        writerFactory.commitShreddingMetadata(delegate, writePlan, compression);
-        delegate.close();
+        try {
+            writerFactory.commitShreddingMetadata(delegate, writePlan, compression);
+        } finally {
+            delegate.close();
+        }
     }
 
     private class PhysicalBundleRecords implements BundleRecords {
