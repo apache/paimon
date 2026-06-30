@@ -1422,6 +1422,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOB_DESCRIPTOR =
+            key("lookup.blob-as-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, the lookup join stores only the BlobDescriptor "
+                                    + "(a lightweight reference containing file URI, offset, and length) "
+                                    + "for BLOB fields instead of the full blob bytes. This dramatically "
+                                    + "reduces local disk and memory usage for tables with large BLOB "
+                                    + "columns (e.g., images, videos). The downstream consumer receives "
+                                    + "the serialized BlobDescriptor bytes and can resolve the actual "
+                                    + "blob content on demand.");
+
     public static final ConfigOption<Double> LOOKUP_CACHE_HIGH_PRIO_POOL_RATIO =
             key("lookup.cache.high-priority-pool-ratio")
                     .doubleType()
