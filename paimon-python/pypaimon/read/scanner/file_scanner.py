@@ -102,9 +102,16 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
 
 
 def _build_early_row_range_filter(row_ranges):
-    """Skip Avro records whose row-id range doesn't intersect row_ranges."""
+    """Skip entries whose row-id range doesn't intersect ``row_ranges``.
+
+    Runs on the raw fastavro record dict before constructing
+    DataFileMeta/BinaryRow/SimpleStats. Safe for DELETE entries because
+    ADD and DELETE for the same file share the same ``_FIRST_ROW_ID``.
+    """
     if row_ranges is None:
         return None
+
+    from pypaimon.utils.range import Range
 
     def _filter(record):
         file_dict = record.get('_FILE')
@@ -119,7 +126,7 @@ def _build_early_row_range_filter(row_ranges):
         file_start = int(first_row_id)
         file_end = file_start + int(row_count) - 1
         for r in row_ranges:
-            if file_start <= r.to and file_end >= r.from_:
+            if Range.intersect(file_start, file_end, r.from_, r.to):
                 return True
         return False
 
@@ -368,6 +375,7 @@ class FileScanner:
 
         entries = self.read_manifest_entries(manifest_files, row_ranges=row_ranges)
 
+        # Redundant when early_record_filter ran; kept for explain mode and as safety net.
         if row_ranges is not None:
             entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
 
