@@ -39,9 +39,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
-import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -50,9 +48,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -67,7 +63,7 @@ public class DataSplit implements Split {
 
     private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 9;
+    private static final int VERSION = 8;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -76,8 +72,12 @@ public class DataSplit implements Split {
     @Nullable private Integer totalBuckets;
 
     private List<DataFileMeta> dataFiles;
+
+    /**
+     * This list should have the same size as dataFiles. For data evolution tables, only anchor
+     * files would have corresponding deletion file.
+     */
     @Nullable private List<DeletionFile> dataDeletionFiles;
-    @Nullable private Map<Range, DeletionFile> dataEvolutionDeletionFiles;
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
@@ -113,17 +113,12 @@ public class DataSplit implements Split {
         return Optional.ofNullable(dataDeletionFiles);
     }
 
-    public Optional<Map<Range, DeletionFile>> dataEvolutionDeletionFiles() {
-        return Optional.ofNullable(dataEvolutionDeletionFiles);
-    }
-
     public boolean isStreaming() {
         return isStreaming;
     }
 
     public boolean rawConvertible() {
-        return rawConvertible
-                && (dataEvolutionDeletionFiles == null || dataEvolutionDeletionFiles.isEmpty());
+        return rawConvertible;
     }
 
     public OptionalLong earliestFileCreationEpochMillis() {
@@ -179,12 +174,9 @@ public class DataSplit implements Split {
             }
         }
 
-        // If DV is enabled, we should check each DV range is contained by data file range
-        if (dataEvolutionDeletionFiles != null) {
-            RowRangeIndex rangeIndex = createRangeIndex(dataFiles);
-            for (Map.Entry<Range, DeletionFile> entry : dataEvolutionDeletionFiles.entrySet()) {
-                if (entry.getValue().cardinality() == null
-                        || !rangeIndex.contains(entry.getKey())) {
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null && deletionFile.cardinality() == null) {
                     return false;
                 }
             }
@@ -203,9 +195,11 @@ public class DataSplit implements Split {
             }
             sum += maxCount;
         }
-        if (dataEvolutionDeletionFiles != null) {
-            for (DeletionFile deletionFile : dataEvolutionDeletionFiles.values()) {
-                sum -= deletionFile.cardinality();
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null) {
+                    sum -= deletionFile.cardinality();
+                }
             }
         }
         return sum;
@@ -338,34 +332,7 @@ public class DataSplit implements Split {
         split.assign(this);
         split.dataFiles = filtered;
         split.dataDeletionFiles = filteredDeletion;
-        split.dataEvolutionDeletionFiles =
-                filterDataEvolutionDeletionFiles(dataEvolutionDeletionFiles, filtered);
         return Optional.of(split);
-    }
-
-    @Nullable
-    private static Map<Range, DeletionFile> filterDataEvolutionDeletionFiles(
-            @Nullable Map<Range, DeletionFile> deletionFiles, List<DataFileMeta> dataFiles) {
-        if (deletionFiles == null || deletionFiles.isEmpty()) {
-            return deletionFiles;
-        }
-
-        Map<Range, DeletionFile> filtered = new LinkedHashMap<>();
-        RowRangeIndex rangeIndex = createRangeIndex(dataFiles);
-        for (Map.Entry<Range, DeletionFile> entry : deletionFiles.entrySet()) {
-            Range range = entry.getKey();
-            if (rangeIndex.intersects(range.from, range.to)) {
-                filtered.put(range, entry.getValue());
-            }
-        }
-        return filtered.isEmpty() ? null : filtered;
-    }
-
-    private static RowRangeIndex createRangeIndex(List<DataFileMeta> dataFiles) {
-        return RowRangeIndex.create(
-                dataFiles.stream()
-                        .map(DataFileMeta::nonNullRowIdRange)
-                        .collect(Collectors.toList()));
     }
 
     @Override
@@ -385,8 +352,7 @@ public class DataSplit implements Split {
                 && Objects.equals(bucketPath, dataSplit.bucketPath)
                 && Objects.equals(totalBuckets, dataSplit.totalBuckets)
                 && Objects.equals(dataFiles, dataSplit.dataFiles)
-                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles)
-                && Objects.equals(dataEvolutionDeletionFiles, dataSplit.dataEvolutionDeletionFiles);
+                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles);
     }
 
     @Override
@@ -399,7 +365,6 @@ public class DataSplit implements Split {
                 totalBuckets,
                 dataFiles,
                 dataDeletionFiles,
-                dataEvolutionDeletionFiles,
                 isStreaming,
                 rawConvertible);
     }
@@ -436,7 +401,6 @@ public class DataSplit implements Split {
         this.totalBuckets = other.totalBuckets;
         this.dataFiles = other.dataFiles;
         this.dataDeletionFiles = other.dataDeletionFiles;
-        this.dataEvolutionDeletionFiles = other.dataEvolutionDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
     }
@@ -471,8 +435,6 @@ public class DataSplit implements Split {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
-
-        serializeDataEvolutionDeletionFiles(out, dataEvolutionDeletionFiles);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -510,8 +472,6 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
-        Map<Range, DeletionFile> dataEvolutionDeletionFiles =
-                version >= 9 ? deserializeDataEvolutionDeletionFiles(in, deletionFileSerde) : null;
 
         DataSplit.Builder builder =
                 builder()
@@ -526,9 +486,6 @@ public class DataSplit implements Split {
 
         if (dataDeletionFiles != null) {
             builder.withDataDeletionFiles(dataDeletionFiles);
-        }
-        if (dataEvolutionDeletionFiles != null) {
-            builder.withDataEvolutionDeletionFiles(dataEvolutionDeletionFiles);
         }
         return builder.build();
     }
@@ -551,47 +508,12 @@ public class DataSplit implements Split {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version >= 8) {
+        } else if (version == 8) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
             throw new UnsupportedOperationException("Unsupported version: " + version);
         }
-    }
-
-    private static void serializeDataEvolutionDeletionFiles(
-            DataOutputView out, @Nullable Map<Range, DeletionFile> deletionFiles)
-            throws IOException {
-        if (deletionFiles == null || deletionFiles.isEmpty()) {
-            out.writeBoolean(false);
-            return;
-        }
-
-        out.writeBoolean(true);
-        out.writeInt(deletionFiles.size());
-        for (Map.Entry<Range, DeletionFile> entry : deletionFiles.entrySet()) {
-            out.writeLong(entry.getKey().from);
-            out.writeLong(entry.getKey().to);
-            DeletionFile.serialize(out, entry.getValue());
-        }
-    }
-
-    @Nullable
-    private static Map<Range, DeletionFile> deserializeDataEvolutionDeletionFiles(
-            DataInputView in,
-            FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerde)
-            throws IOException {
-        if (!in.readBoolean()) {
-            return null;
-        }
-
-        int size = in.readInt();
-        Map<Range, DeletionFile> deletionFiles = new LinkedHashMap<>();
-        for (int i = 0; i < size; i++) {
-            Range key = new Range(in.readLong(), in.readLong());
-            deletionFiles.put(key, deletionFileSerde.apply(in));
-        }
-        return deletionFiles;
     }
 
     private static FunctionWithIOException<DataInputView, DeletionFile> getDeletionFileSerde(
@@ -646,15 +568,6 @@ public class DataSplit implements Split {
 
         public Builder withDataDeletionFiles(List<DeletionFile> dataDeletionFiles) {
             this.split.dataDeletionFiles = new ArrayList<>(dataDeletionFiles);
-            return this;
-        }
-
-        public Builder withDataEvolutionDeletionFiles(
-                Map<Range, DeletionFile> dataEvolutionDeletionFiles) {
-            this.split.dataEvolutionDeletionFiles =
-                    dataEvolutionDeletionFiles.isEmpty()
-                            ? null
-                            : new LinkedHashMap<>(dataEvolutionDeletionFiles);
             return this;
         }
 

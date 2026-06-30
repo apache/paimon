@@ -69,7 +69,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -82,6 +81,7 @@ import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -164,8 +164,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private RecordReader<InternalRow> createReader(
             DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
         List<DataFileMeta> files = dataSplit.dataFiles();
-        NavigableMap<Range, DeletionVector> deletionVectors =
-                readDeletionVectors(dataSplit.dataEvolutionDeletionFiles().orElse(null));
+
+        List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
+        DeletionVector.Factory deletionVectorFactory =
+                DeletionVector.factory(fileIO, files, deletionFiles);
+
         BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
@@ -188,27 +191,33 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             if (needMergeFiles.size() == 1 || readRowType.getFields().isEmpty()) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
-                        () ->
-                                createFileReader(
-                                        partition,
-                                        dataFilePathFactory,
-                                        needMergeFiles.get(0),
-                                        formatBuilder,
-                                        rowRanges,
-                                        readRowType,
-                                        deletionVectors));
+                        () -> {
+                            DeletionVectorWithRange deletionVector =
+                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            return createFileReader(
+                                    partition,
+                                    dataFilePathFactory,
+                                    needMergeFiles.get(0),
+                                    formatBuilder,
+                                    rowRanges,
+                                    readRowType,
+                                    deletionVector);
+                        });
 
             } else {
                 suppliers.add(
-                        () ->
-                                createUnionReader(
-                                        needMergeFiles,
-                                        partition,
-                                        dataFilePathFactory,
-                                        formatBuilder,
-                                        rowRanges,
-                                        readRowType,
-                                        deletionVectors));
+                        () -> {
+                            DeletionVectorWithRange deletionVector =
+                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            return createUnionReader(
+                                    needMergeFiles,
+                                    partition,
+                                    dataFilePathFactory,
+                                    formatBuilder,
+                                    rowRanges,
+                                    readRowType,
+                                    deletionVector);
+                        });
             }
         }
 
@@ -231,7 +240,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         List<FieldBunch> fieldsFiles =
                 splitFieldBunches(
@@ -328,7 +337,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         formatReaderMapping,
                                         rowRanges,
                                         partialReadRowType,
-                                        deletionVectors));
+                                        deletionVector));
             }
         }
 
@@ -352,7 +361,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         if (bunch instanceof DataBunch) {
             // for data bunch, directly read the single file
@@ -363,7 +372,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     formatReaderMapping,
                     rowRanges,
                     readRowType,
-                    deletionVectors);
+                    deletionVector);
         } else if (bunch instanceof VectorFileBunch) {
             // for vector bunch, sequential read all data files and concat them
             return sequentialReadFiles(
@@ -372,7 +381,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     dataFilePathFactory,
                     formatReaderMapping,
                     rowRanges,
-                    deletionVectors);
+                    deletionVector);
         } else if (bunch instanceof BlobFileBunch) {
             // for blob bunch, fallback on placeholders
 
@@ -384,7 +393,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         dataFilePathFactory,
                         formatReaderMapping,
                         rowRanges,
-                        deletionVectors);
+                        deletionVector);
             }
             int blobIndex = findBlobFieldIndex(readRowType);
             checkArgument(blobIndex >= 0, "Blob bunch read type should contain a blob field.");
@@ -398,8 +407,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     formatReaderMapping,
                                     rowRanges,
                                     readRowType,
-                                    deletionVectors),
-                    (reader, range) -> applyDeletionVector(reader, range, deletionVectors),
+                                    deletionVector),
+                    (reader, range) -> applyDeletionVector(reader, range, deletionVector),
                     rowRanges,
                     readRowType,
                     blobIndex);
@@ -414,7 +423,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
@@ -430,7 +439,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                             DataFilePathFactory.formatIdentifier(file.fileName()),
                                             dataFilePathFactory.toPath(file),
                                             file.fileSize()),
-                                    deletionVectors));
+                                    deletionVector));
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -451,7 +460,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             Builder formatBuilder,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
         String formatIdentifier = readTarget.formatIdentifier;
@@ -473,7 +482,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 readTarget,
-                deletionVectors);
+                deletionVector);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -483,7 +492,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
             RowType readRowType,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         return createFileReader(
                 partition,
@@ -492,7 +501,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 rowRanges,
                 readRowType,
                 readTarget(file, dataFilePathFactory, rowRanges),
-                deletionVectors);
+                deletionVector);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -502,7 +511,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> rowRanges,
             RowType readRowType,
             FileReadTarget readTarget,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors)
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         FormatReaderContext formatReaderContext =
@@ -521,37 +530,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         file.firstRowId(),
                         file.maxSequenceNumber(),
                         formatReaderMapping.getSystemFields());
-        return applyDeletionVector(fileRecordReader, file.nonNullRowIdRange(), deletionVectors);
-    }
-
-    @Nullable
-    private NavigableMap<Range, DeletionVector> readDeletionVectors(
-            @Nullable Map<Range, DeletionFile> deletionFiles) throws IOException {
-        if (deletionFiles == null || deletionFiles.isEmpty()) {
-            return null;
-        }
-
-        // use tree map to fast search overlapping ranges
-        NavigableMap<Range, DeletionVector> deletionVectors =
-                new TreeMap<>(comparingLong((Range range) -> range.from));
-        for (Map.Entry<Range, DeletionFile> entry : deletionFiles.entrySet()) {
-            deletionVectors.put(entry.getKey(), DeletionVector.read(fileIO, entry.getValue()));
-        }
-        return deletionVectors;
+        return applyDeletionVector(fileRecordReader, file.nonNullRowIdRange(), deletionVector);
     }
 
     private FileRecordReader<InternalRow> applyDeletionVector(
             FileRecordReader<InternalRow> reader,
             Range readerRange,
-            @Nullable NavigableMap<Range, DeletionVector> deletionVectors) {
-        if (deletionVectors == null || deletionVectors.isEmpty()) {
-            return reader;
-        }
-
-        DeletionVectorWithRange deletionVector = findDeletionVector(readerRange, deletionVectors);
+            @Nullable DeletionVectorWithRange deletionVector) {
         if (deletionVector == null || deletionVector.deletionVector.isEmpty()) {
             return reader;
         }
+
+        checkArgument(
+                deletionVector.range.from <= readerRange.from
+                        && deletionVector.range.to >= readerRange.to,
+                "Deletion vector range %s should contain reader range %s.",
+                deletionVector.range,
+                readerRange);
 
         return new ApplyDeletionVectorReader(
                 reader,
@@ -559,20 +554,18 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readerRange.from - deletionVector.range.from);
     }
 
-    /** Find the deletion vector whose range fully contains the reader's range. */
     @Nullable
-    private DeletionVectorWithRange findDeletionVector(
-            Range readerRange, NavigableMap<Range, DeletionVector> deletionVectors) {
-        // find the first DvRange whose `from` <= reader range's `from`
-        Map.Entry<Range, DeletionVector> entry = deletionVectors.floorEntry(readerRange);
-        if (entry != null) {
-            Range dvRange = entry.getKey();
-            if (dvRange.from <= readerRange.from && dvRange.to >= readerRange.to) {
-                return new DeletionVectorWithRange(entry.getKey(), entry.getValue());
-            }
-        }
+    private DeletionVectorWithRange readDeletionVector(
+            List<DataFileMeta> group, DeletionVector.Factory deletionVectorFactory)
+            throws IOException {
+        // pack row ranges and deletion vector
+        DataFileMeta anchor = retrieveAnchorFile(group, Function.identity());
+        Range range = anchor.nonNullRowIdRange();
 
-        return null;
+        return deletionVectorFactory
+                .create(anchor.fileName())
+                .map(dv -> new DeletionVectorWithRange(range, dv))
+                .orElse(null);
     }
 
     private FileReadTarget readTarget(

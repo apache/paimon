@@ -45,6 +45,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -175,11 +176,9 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         .sorted(Comparator.comparingLong(split -> splitRowRange(split).from))
                         .collect(Collectors.toList());
         assertThat(splits).hasSize(3);
-        assertThat(splits.get(0).dataEvolutionDeletionFiles()).isPresent();
-        assertThat(splits.get(0).dataEvolutionDeletionFiles().get().keySet())
-                .containsExactly(new Range(0, 4));
-        assertThat(splits.get(1).dataEvolutionDeletionFiles()).isNotPresent();
-        assertThat(splits.get(2).dataEvolutionDeletionFiles()).isNotPresent();
+        assertDeletionFileRanges(splits.get(0), new Range(0, 4));
+        assertDeletionFileRanges(splits.get(1));
+        assertDeletionFileRanges(splits.get(2));
         assertThat(splits.get(1).mergedRowCount()).hasValue(5L);
         assertThat(splits.get(2).mergedRowCount()).hasValue(5L);
 
@@ -393,11 +392,29 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 .containsExactlyElementsOf(expectedBlobValues);
 
         DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
-        assertThat(fullRangeSplit.dataEvolutionDeletionFiles()).isPresent();
-        assertThat(fullRangeSplit.dataEvolutionDeletionFiles().get().keySet())
-                .containsExactlyInAnyOrder(new Range(0, 4), new Range(5, 9), new Range(10, 14));
+        assertDeletionFileRanges(
+                fullRangeSplit, new Range(0, 4), new Range(5, 9), new Range(10, 14));
         assertThat(fullRangeSplit.mergedRowCount()).hasValue(10L);
         assertThat(planDataSplit(table, FIRST_RANGE).mergedRowCount()).hasValue(3L);
+    }
+
+    private static void assertDeletionFileRanges(DataSplit split, Range... expectedRanges) {
+        List<DeletionFile> deletionFiles = split.deletionFiles().orElse(Collections.emptyList());
+        assertThat(deletionFiles).hasSize(split.dataFiles().size());
+
+        Map<Range, DeletionFile> actual = new HashMap<>();
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        for (List<DataFileMeta> group : rangeHelper.mergeOverlappingRanges(split.dataFiles())) {
+            DataFileMeta anchor = retrieveAnchorFile(group, file -> file);
+            DeletionFile deletionFile = deletionFiles.get(split.dataFiles().indexOf(anchor));
+            if (deletionFile != null) {
+                actual.put(anchor.nonNullRowIdRange(), deletionFile);
+            }
+        }
+
+        assertThat(deletionFiles.stream().filter(file -> file != null).count())
+                .isEqualTo((long) expectedRanges.length);
+        assertThat(actual.keySet()).containsExactlyInAnyOrder(expectedRanges);
     }
 
     private static List<String> expectedRows(String structuredValuePrefix, Range range) {

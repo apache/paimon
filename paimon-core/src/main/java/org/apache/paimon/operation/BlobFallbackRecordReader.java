@@ -384,7 +384,6 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
 
     /** Wraps placeholder readers with shared post-processing. e.g. Apply Deletion Vectors. */
     interface ReaderWrapper {
-
         FileRecordReader<InternalRow> wrap(FileRecordReader<InternalRow> reader, Range range)
                 throws IOException;
     }
