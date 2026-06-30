@@ -190,6 +190,29 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
+    def test_create_global_index_rejects_overlapping_existing_range(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [3, 1, 2, 2],
+                'name': ['c', 'a', 'b1', 'b2'],
+                'age': [30, 10, 20, 21],
+                'city': ['z', 'x', 'y', 'y2'],
+            },
+            schema=self.pa_schema,
+        ))
+        options = {'sorted-index.records-per-range': '2'}
+
+        self.assertEqual(2, table.create_global_index('id', options=options))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(2, len(IndexFileHandler(table).scan(snapshot)))
+
+        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
+            table.create_global_index('id', options=options)
+
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(2, len(IndexFileHandler(table).scan(latest_snapshot)))
+
     def test_create_btree_global_index_for_java_scalar_types(self):
         schema = pa.schema([
             ('flag', pa.bool_()),
