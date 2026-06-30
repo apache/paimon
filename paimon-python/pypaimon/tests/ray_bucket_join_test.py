@@ -65,6 +65,11 @@ class RayBucketJoinTest(unittest.TestCase):
         w.close()
         return name
 
+    def _create_bucketed(self, name, schema, key, num_buckets):
+        opts = {"bucket": str(num_buckets), "bucket-key": key}
+        self.catalog.create_table(name, Schema.from_pyarrow_schema(schema, options=opts), False)
+        return name
+
     def test_bucket_join_matches_global_join(self):
         loc_schema = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
         in_schema = pa.schema([("url", pa.string())])
@@ -87,15 +92,26 @@ class RayBucketJoinTest(unittest.TestCase):
         self.assertEqual(got["u399"], 399)
         self.assertTrue(all(got[f"u{i}"] == i for i in range(400)))
 
-    def test_rejects_incompatible_bucketing(self):
-        # different bucket count -> not bucket-aligned -> must reject
+    def test_rejects_different_bucket_count(self):
         sch = pa.schema([("url", pa.string())])
-        self._bucketed_table("default.in_8", sch, "url", pa.Table.from_pydict({"url": ["a"]}))
-        self.catalog.create_table(
-            "default.loc_16",
-            Schema.from_pyarrow_schema(sch, options={"bucket": "16", "bucket-key": "url"}), False)
+        self._create_bucketed("default.cnt_8", sch, "url", 8)
+        self._create_bucketed("default.cnt_16", sch, "url", 16)
         with self.assertRaises(ValueError):
-            bucket_join("default.in_8", "default.loc_16", self.catalog_options, on="url")
+            bucket_join("default.cnt_8", "default.cnt_16", self.catalog_options, on="url")
+
+    def test_rejects_different_bucket_key(self):
+        sch = pa.schema([("url", pa.string()), ("k", pa.string())])
+        self._create_bucketed("default.by_url", sch, "url", 8)
+        self._create_bucketed("default.by_k", sch, "k", 8)
+        with self.assertRaises(ValueError):
+            bucket_join("default.by_url", "default.by_k", self.catalog_options, on="url")
+
+    def test_rejects_join_key_not_bucket_key(self):
+        sch = pa.schema([("url", pa.string()), ("k", pa.string())])
+        self._create_bucketed("default.k1", sch, "url", 8)
+        self._create_bucketed("default.k2", sch, "url", 8)
+        with self.assertRaises(ValueError):  # on=k but bucket-key=url
+            bucket_join("default.k1", "default.k2", self.catalog_options, on="k")
 
 
 if __name__ == "__main__":
