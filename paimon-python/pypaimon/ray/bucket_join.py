@@ -1,0 +1,118 @@
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing,
+#  software distributed under the License is distributed on an
+#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+#  KIND, either express or implied.  See the License for the
+#  specific language governing permissions and limitations
+#  under the License.
+
+"""Bucket-aligned join on Ray for two fixed-bucket (HASH_FIXED) Paimon tables.
+
+Both tables must share the same bucket count and bucket-key, and the join key must
+be the bucket-key, so equal keys land in the same bucket on both sides. Each bucket
+is read and joined locally in its own Ray task -- no global shuffle. This is the
+no-shuffle alternative to ``ray.data.join`` for co-bucketed tables (e.g. a
+``url -> row_id`` locator table joined with a per-task input table).
+"""
+
+from typing import Any, Dict, List, Optional, Sequence, Union
+
+__all__ = ["bucket_join"]
+
+OnSpec = Union[str, Sequence[str]]
+
+
+def _norm(on: OnSpec) -> List[str]:
+    return [on] if isinstance(on, str) else list(on)
+
+
+def _bucketing(table):
+    count = table.options.bucket()
+    key = table.options.bucket_key()
+    return count, ([k.strip() for k in key.split(",")] if key else [])
+
+
+def _read_bucket(table_id, catalog_options, projection, bucket):
+    from pypaimon.catalog.catalog_factory import CatalogFactory
+    cat = CatalogFactory.create(catalog_options)
+    t = cat.get_table(table_id)
+    rb = t.new_read_builder()
+    if projection is not None:
+        rb = rb.with_projection(projection)
+    rd = rb.new_read()
+    # TODO(perf): plan once in the driver and dispatch per-bucket splits, instead
+    # of re-planning the manifest in every bucket task.
+    splits = [s for s in rb.new_scan().plan().splits() if s.bucket == bucket]
+    return rd.to_arrow(splits) if splits else None
+
+
+def bucket_join(
+    left: str,
+    right: str,
+    catalog_options: Dict[str, str],
+    *,
+    on: OnSpec,
+    left_projection: Optional[List[str]] = None,
+    right_projection: Optional[List[str]] = None,
+    join_type: str = "inner",
+    ray_remote_args: Optional[Dict[str, Any]] = None,
+) -> "ray.data.Dataset":
+    """Join two co-bucketed Paimon tables without a global shuffle.
+
+    Args:
+        left, right: table identifiers, e.g. ``"db.input"`` / ``"db.locator"``.
+        catalog_options: options passed to ``CatalogFactory.create()``.
+        on: join key column(s); must equal the tables' bucket-key.
+        left_projection, right_projection: optional column projections per side.
+        join_type: pyarrow join type (default ``"inner"``).
+        ray_remote_args: optional kwargs for the per-bucket ``ray.remote`` tasks.
+
+    Returns:
+        A ``ray.data.Dataset`` of joined rows.
+    """
+    import ray
+    from pypaimon.catalog.catalog_factory import CatalogFactory
+
+    on_cols = _norm(on)
+    cat = CatalogFactory.create(catalog_options)
+    lcount, lkey = _bucketing(cat.get_table(left))
+    rcount, rkey = _bucketing(cat.get_table(right))
+
+    if not lcount or lcount <= 0 or not rcount or rcount <= 0:
+        raise ValueError(
+            "bucket_join requires both tables to be fixed-bucket (bucket > 0); "
+            f"got {left}={lcount}, {right}={rcount}.")
+    if lcount != rcount:
+        raise ValueError(
+            f"bucket_join requires the same bucket count; {left}={lcount}, {right}={rcount}.")
+    if lkey != rkey:
+        raise ValueError(
+            f"bucket_join requires the same bucket-key; {left}={lkey}, {right}={rkey}.")
+    if on_cols != lkey:
+        raise ValueError(
+            f"bucket_join requires the join key to be the bucket-key {lkey}; got on={on_cols}. "
+            "Equal keys only co-locate by bucket when joining on the bucket-key.")
+
+    def _join_bucket(bucket):
+        left_t = _read_bucket(left, catalog_options, left_projection, bucket)
+        right_t = _read_bucket(right, catalog_options, right_projection, bucket)
+        if left_t is None or right_t is None or left_t.num_rows == 0 or right_t.num_rows == 0:
+            return None
+        return left_t.join(right_t, keys=on_cols, join_type=join_type)
+
+    # ``@ray.remote()`` (empty parens) is rejected by Ray, so wrap conditionally.
+    remote_fn = ray.remote(**ray_remote_args)(_join_bucket) if ray_remote_args else ray.remote(_join_bucket)
+    parts = [p for p in ray.get([remote_fn.remote(b) for b in range(lcount)])
+             if p is not None and p.num_rows > 0]
+    if not parts:
+        return ray.data.from_items([])
+    return ray.data.from_arrow(parts)
