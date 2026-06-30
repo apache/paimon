@@ -124,13 +124,18 @@ def _convert_paimon_catalog_options_to_file_io_config(
     """
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
-        # Non-OSS (s3://, local): embed only with a complete key pair; else null, so Daft's
-        # native s3:// handling uses its env credential chain (OSS alias relaxation is below).
-        if not (
-            catalog_options.get("fs.s3.accessKeyId") and catalog_options.get("fs.s3.accessKeySecret")
-        ):
+        # Non-OSS (s3://, s3a://, local). With a complete key pair, embed the full config.
+        if catalog_options.get("fs.s3.accessKeyId") and catalog_options.get("fs.s3.accessKeySecret"):
+            return _convert_paimon_catalog_options_to_io_config(catalog_options)
+        # No complete pair: fall through (None) when required so an explicit io_config wins; else
+        # keep endpoint/region only (custom S3 like MinIO/Ceph) for the env credential chain.
+        if require_credentials:
             return None
-        return _convert_paimon_catalog_options_to_io_config(catalog_options)
+        endpoint = catalog_options.get("fs.s3.endpoint")
+        region = catalog_options.get("fs.s3.region")
+        if not endpoint and not region:
+            return None
+        return IOConfig(s3=S3Config(endpoint_url=endpoint, region_name=region))
 
     endpoint = catalog_options.get("fs.oss.endpoint")
     if endpoint and not endpoint.startswith(("http://", "https://")):
@@ -154,3 +159,19 @@ def _convert_paimon_catalog_options_to_file_io_config(
         ),
         protocol_aliases={"oss": "s3"},
     )
+
+
+def _with_oss_alias(io_config: IOConfig) -> IOConfig:
+    """Make oss:// use Daft's S3 client (alias + virtual-hosted) on a caller-supplied io_config,
+    deriving creds from an OpenDAL OSS backend when the S3 config has none, so File.open() works."""
+    s3 = io_config.s3
+    if s3 is None or s3.key_id is None:
+        oss = (io_config.opendal_backends or {}).get("oss") or {}
+        if oss:
+            s3 = S3Config(
+                endpoint_url=oss.get("endpoint"), region_name=oss.get("region"),
+                key_id=oss.get("access_key_id"), access_key=oss.get("access_key_secret"),
+                session_token=oss.get("security_token"),
+            )
+    s3 = (s3 or S3Config()).replace(force_virtual_addressing=True)
+    return io_config.replace(s3=s3, protocol_aliases={**dict(io_config.protocol_aliases or {}), "oss": "s3"})

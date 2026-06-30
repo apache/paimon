@@ -106,6 +106,32 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         ):
             self.assertEqual(blob_key(opts), "USERKEY")
 
+    def test_with_oss_alias_augments_explicit_config(self):
+        # s3 config -> add oss->s3 alias + virtual-hosted, keep creds.
+        from pypaimon.daft.daft_io_config import _with_oss_alias
+        s3 = _with_oss_alias(IOConfig(s3=S3Config(key_id="AK", access_key="SK")))
+        self.assertEqual(dict(s3.protocol_aliases)["oss"], "s3")
+        self.assertTrue(s3.s3.force_virtual_addressing)
+        self.assertEqual(s3.s3.key_id, "AK")
+        # opendal OSS config -> converted to S3Config + alias.
+        od = _with_oss_alias(IOConfig(opendal_backends={"oss": {
+            "access_key_id": "AK", "access_key_secret": "SK", "endpoint": "https://oss-test.example.com"}}))
+        self.assertEqual(dict(od.protocol_aliases)["oss"], "s3")
+        self.assertEqual(od.s3.key_id, "AK")
+        self.assertEqual(od.s3.endpoint_url, "https://oss-test.example.com")
+
+    def test_explicit_io_config_gets_oss_alias_for_oss_blobs(self):
+        # An oss:// table's explicit-fallback io_config gets the s3 alias so File.open() works.
+        class _OssTable:
+            table_path = "oss://b/db.db/t"
+
+        explicit = serialize_io_config(IOConfig(s3=S3Config(key_id="USERKEY", access_key="SK")))
+        task = _PaimonPKSplitTask({}, None, None, {}, None, None,
+                                  blob_column_names={"x"}, explicit_io_config_bytes=explicit)
+        cfg = IOConfig._from_serialized(task._blob_io_config_bytes(_OssTable()))
+        self.assertEqual(cfg.s3.key_id, "USERKEY")
+        self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
+
     def test_oss_partial_credentials_cleared_for_env(self):
         # OSS half key pair (no secret): keep only the oss->s3 alias, drop the partial key.
         opts = {"warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com",
@@ -115,13 +141,20 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertIsNone(cfg.s3.key_id)
         self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
 
-    def test_non_oss_partial_config_left_null_for_env(self):
-        # Non-OSS endpoint-only (no key pair) -> null, so Daft's s3:// uses its env cred chain.
-        opts = {"warehouse": "s3://b", "fs.s3.endpoint": "https://s3.example.com"}
+    def test_non_oss_endpoint_kept_for_env_without_credentials(self):
+        # Custom-endpoint S3 (MinIO/Ceph): no complete key pair -> None when required (explicit
+        # wins); env tier keeps endpoint/region but embeds no (half) credentials.
+        opts = {"warehouse": "s3a://b", "fs.s3.endpoint": "https://minio.example.com"}
         self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts))
-        self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False))
-        task = _PaimonPKSplitTask(opts, None, None, {}, None, None, blob_column_names={"x"})
-        self.assertIsNone(task._blob_io_config_bytes(None))
+        env = _convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False)
+        self.assertEqual(env.s3.endpoint_url, "https://minio.example.com")
+        self.assertIsNone(env.s3.key_id)
+        # A half key is dropped; the endpoint is still kept.
+        partial = _convert_paimon_catalog_options_to_file_io_config(
+            {"warehouse": "s3://b", "fs.s3.endpoint": "https://minio.example.com",
+             "fs.s3.accessKeyId": "PARTIAL"}, require_credentials=False)
+        self.assertEqual(partial.s3.endpoint_url, "https://minio.example.com")
+        self.assertIsNone(partial.s3.key_id)
 
     @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):

@@ -239,6 +239,7 @@ class _PaimonPKSplitTask(DataSourceTask):
         _convert_paimon_catalog_options_to_file_io_config)."""
         from pypaimon.daft.daft_io_config import (
             _convert_paimon_catalog_options_to_file_io_config,
+            _with_oss_alias,
             serialize_io_config,
         )
         from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
@@ -248,6 +249,10 @@ class _PaimonPKSplitTask(DataSourceTask):
         if io_config is not None:
             return serialize_io_config(io_config)
         if self._explicit_io_config_bytes is not None:
+            # oss:// blobs need the s3 alias even from an explicit io_config (opendal File.open is broken).
+            if urlparse(str(getattr(table, "table_path", "") or "")).scheme == "oss":
+                from daft.io import IOConfig
+                return serialize_io_config(_with_oss_alias(IOConfig._from_serialized(self._explicit_io_config_bytes)))
             return self._explicit_io_config_bytes
         io_config = _convert_paimon_catalog_options_to_file_io_config(enriched, require_credentials=False)
         return serialize_io_config(io_config) if io_config is not None else None
