@@ -1011,16 +1011,57 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
-  test("Data Evolution: update table throws exception") {
-    withTable("t") {
-      sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-      assert(
-        intercept[RuntimeException] {
-          sql("UPDATE t SET b = 22")
-        }.getMessage
-          .contains("Update operation is not supported when data evolution is enabled yet."))
+  test("Data Evolution: V1 update table with data-evolution") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22 WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update table with data-evolution without condition") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 22, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update partition column throws exception") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, b INT, dt STRING)
+              |PARTITIONED BY (dt)
+              |TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 1, 'p1'), (2, 2, 'p2')")
+
+        assert(
+          intercept[RuntimeException] {
+            sql("UPDATE t SET dt = 'p3' WHERE id = 1")
+          }.getMessage
+            .contains("Update to partition columns is not supported for data evolution tables."))
+
+        sql("UPDATE t SET b = 10 WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 10, "p1"), Row(2, 2, "p2")))
+      }
     }
   }
 
