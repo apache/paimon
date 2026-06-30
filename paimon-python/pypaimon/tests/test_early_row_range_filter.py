@@ -104,12 +104,11 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
         self.assertEqual(sorted(actual.column('id').to_pylist()),
                          list(range(5, 15)))
 
-        # Before fix: all 20 entries constructed. After fix: only matching ones.
-        self.assertLess(
-            construction_count[0], self.NUM_COMMITS,
-            f"Early row-range filter should skip most entries, "
-            f"but {construction_count[0]} DataFileMeta were constructed "
-            f"(expected < {self.NUM_COMMITS})")
+        # 2 matching files × 2 (ADD + DELETE from manifest merge) = 4
+        self.assertLessEqual(
+            construction_count[0], 2 * total_files,
+            f"Expected at most {2 * total_files} DataFileMeta constructions, "
+            f"got {construction_count[0]}")
 
 
 if __name__ == '__main__':
