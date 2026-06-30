@@ -124,6 +124,13 @@ def _convert_paimon_catalog_options_to_file_io_config(
     """
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
+        # Non-OSS (s3://, s3a://, local): an endpoint alone is not credentials, so fall
+        # through (to explicit io_config / env) when no AK/SK/token is set.
+        if require_credentials and not any(
+            catalog_options.get(k)
+            for k in ("fs.s3.accessKeyId", "fs.s3.accessKeySecret", "fs.s3.securityToken")
+        ):
+            return None
         return _convert_paimon_catalog_options_to_io_config(catalog_options)
 
     endpoint = catalog_options.get("fs.oss.endpoint")

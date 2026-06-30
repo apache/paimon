@@ -66,7 +66,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         s3 = IOConfig(s3=S3Config(key_id="AK", access_key="SK", session_token="TOK"))
         self.assertEqual(IOConfig._from_serialized(serialize_io_config(s3)).s3.session_token, "TOK")
         # OSS uses Daft's OpenDAL backend, which serializes differently from S3Config.
-        oss = {"access_key_id": "AK", "endpoint": "https://oss-cn-hangzhou.aliyuncs.com", "bucket": "b"}
+        oss = {"access_key_id": "AK", "endpoint": "https://oss-test.example.com", "bucket": "b"}
         cfg = IOConfig(opendal_backends={"oss": oss})
         self.assertEqual(IOConfig._from_serialized(serialize_io_config(cfg)).opendal_backends["oss"], oss)
 
@@ -74,12 +74,12 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         # OSS -> Daft S3 client (oss:// aliased to s3, virtual-hosted); File.open() over
         # OpenDAL/OSS fails to issue the request on some Daft builds.
         cfg = _convert_paimon_catalog_options_to_file_io_config({
-            "warehouse": "oss://b", "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
-            "fs.oss.region": "cn-hangzhou", "fs.oss.accessKeyId": "AK",
+            "warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com",
+            "fs.oss.region": "test-region", "fs.oss.accessKeyId": "AK",
             "fs.oss.accessKeySecret": "SK", "fs.oss.securityToken": "TOK",
         })
         self.assertEqual(cfg.s3.key_id, "AK")
-        self.assertEqual(cfg.s3.endpoint_url, "https://oss-cn-hangzhou.aliyuncs.com")
+        self.assertEqual(cfg.s3.endpoint_url, "https://oss-test.example.com")
         self.assertTrue(cfg.s3.force_virtual_addressing)
         self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
         # No credentials: None when required; oss->s3 alias otherwise (env/instance creds).
@@ -98,20 +98,24 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
             return IOConfig._from_serialized(task._blob_io_config_bytes(None)).s3.key_id
 
         self.assertEqual(blob_key({}), "USERKEY")
-        self.assertEqual(blob_key({"warehouse": "oss://b", "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com"}),
-                         "USERKEY")
+        for opts in (
+            {"warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com"},
+            {"warehouse": "s3://b", "fs.s3.endpoint": "https://s3.example.com"},
+            {"warehouse": "s3a://b", "fs.s3.endpoint": "https://s3.example.com"},
+        ):
+            self.assertEqual(blob_key(opts), "USERKEY")
 
     @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):
         # The crux: embedded bytes must survive the cast to DataType.file() so a native
         # Daft File carries the credentials.
-        blob = serialize_io_config(IOConfig(s3=S3Config(key_id="AK", region_name="cn-hangzhou")))
+        blob = serialize_io_config(IOConfig(s3=S3Config(key_id="AK", region_name="test-region")))
         arr = blob_column_to_file_array(_descriptor_column([("s3://b/k", 0, 4)]), blob)
         df = daft.from_arrow(pa.table({"f": arr}))
         df = df.with_column("f", df["f"].cast(DataType.file()))
         restored = IOConfig._from_serialized(df.to_arrow().column("f")[0].as_py()["io_config"])
         self.assertEqual(restored.s3.key_id, "AK")
-        self.assertEqual(restored.s3.region_name, "cn-hangzhou")
+        self.assertEqual(restored.s3.region_name, "test-region")
 
 
 if __name__ == "__main__":
