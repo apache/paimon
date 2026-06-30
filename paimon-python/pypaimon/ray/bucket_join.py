@@ -15,13 +15,10 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-"""Bucket-aligned join on Ray for two fixed-bucket (HASH_FIXED) Paimon tables.
+"""Bucket-aligned join on Ray for two co-bucketed Paimon tables.
 
-Both tables must share the same bucket count and bucket-key, and the join key must
-be the bucket-key, so equal keys land in the same bucket on both sides. Each bucket
-is read and joined locally in its own Ray task -- no global shuffle. This is the
-no-shuffle alternative to ``ray.data.join`` for co-bucketed tables (e.g. a
-``url -> row_id`` locator table joined with a per-task input table).
+Same key -> same bucket on both sides, so each bucket is read and joined in its own
+Ray task with no global shuffle -- the no-shuffle alternative to ``ray.data.join``.
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -70,19 +67,9 @@ def bucket_join(
     join_type: str = "inner",
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> "ray.data.Dataset":
-    """Join two co-bucketed Paimon tables without a global shuffle.
-
-    Args:
-        left, right: table identifiers, e.g. ``"db.input"`` / ``"db.locator"``.
-        catalog_options: options passed to ``CatalogFactory.create()``.
-        on: join key column(s); must equal the tables' bucket-key.
-        left_projection, right_projection: optional column projections per side.
-        join_type: pyarrow join type (default ``"inner"``).
-        ray_remote_args: optional kwargs for the per-bucket ``ray.remote`` tasks.
-
-    Returns:
-        A ``ray.data.Dataset`` of joined rows.
-    """
+    """Join two co-bucketed tables (same bucket count + bucket-key, joined on the
+    bucket-key) with no global shuffle. ``on`` must equal the bucket-key. Returns a
+    ``ray.data.Dataset``."""
     import ray
     from pypaimon.catalog.catalog_factory import CatalogFactory
 
