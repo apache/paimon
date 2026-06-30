@@ -59,8 +59,12 @@ def _deserialize_one(data: bytes) -> tuple[str, int, int]:
     return uri, offset, length
 
 
-def blob_column_to_file_array(column: pa.Array) -> pa.Array:
-    """Convert a large_binary column of serialized BlobDescriptors to a FileReference-compatible struct."""
+def blob_column_to_file_array(column: pa.Array, io_config_bytes: bytes | None = None) -> pa.Array:
+    """Convert a large_binary column of serialized BlobDescriptors to a File-compatible struct.
+
+    ``io_config_bytes`` (serialized IOConfig) is embedded into each File so native File ops carry
+    credentials; when None the io_config is left null and ops fall back to Daft's global IOConfig.
+    """
     urls: list[str | None] = []
     offsets: list[int | None] = []
     lengths: list[int | None] = []
@@ -78,10 +82,18 @@ def blob_column_to_file_array(column: pa.Array) -> pa.Array:
             lengths.append(length)
 
     n = len(urls)
+    if io_config_bytes is None:
+        io_configs: pa.Array = pa.nulls(n, type=pa.large_binary())
+    else:
+        # Only populate io_config for valid rows; keep null rows null.
+        io_configs = pa.array(
+            [io_config_bytes if u is not None else None for u in urls],
+            type=pa.large_binary(),
+        )
     return pa.StructArray.from_arrays(
         [
             pa.array(urls, type=pa.large_utf8()),
-            pa.nulls(n, type=pa.large_binary()),
+            io_configs,
             pa.array(offsets, type=pa.int64()),
             pa.array(lengths, type=pa.int64()),
         ],
