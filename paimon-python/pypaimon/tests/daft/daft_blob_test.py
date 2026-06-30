@@ -12,6 +12,7 @@
 #  Unless required by applicable law or agreed to in writing, software
 #  distributed under the License is distributed on an "AS IS" BASIS,
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
 import unittest
@@ -74,6 +75,51 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         restored = IOConfig._from_serialized(serialize_io_config(cfg))
         self.assertEqual(restored.s3.key_id, "AK")
         self.assertEqual(restored.s3.session_token, "TOK")
+
+    def test_serialize_io_config_roundtrips_oss(self):
+        # OSS (the primary target) uses Daft's OpenDAL backend, which serializes
+        # differently from S3Config -- cover it explicitly.
+        oss = {"access_key_id": "AK", "access_key_secret": "SK",
+               "endpoint": "https://oss-cn-hangzhou.aliyuncs.com", "bucket": "b"}
+        cfg = IOConfig(opendal_backends={"oss": oss})
+        restored = IOConfig._from_serialized(serialize_io_config(cfg))
+        self.assertEqual(restored.opendal_backends["oss"], oss)
+
+    def test_file_io_config_routes_oss_through_s3(self):
+        # Daft's File.open() over OpenDAL/OSS is broken on some builds; the blob path
+        # must route OSS through Daft's S3 client (oss:// aliased to s3, virtual-hosted).
+        from pypaimon.daft.daft_io_config import _convert_paimon_catalog_options_to_file_io_config
+
+        cfg = _convert_paimon_catalog_options_to_file_io_config({
+            "warehouse": "oss://mybucket",
+            "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "fs.oss.region": "cn-hangzhou",
+            "fs.oss.accessKeyId": "AK",
+            "fs.oss.accessKeySecret": "SK",
+            "fs.oss.securityToken": "TOK",
+        })
+        self.assertEqual(cfg.s3.key_id, "AK")
+        self.assertEqual(cfg.s3.session_token, "TOK")
+        self.assertEqual(cfg.s3.endpoint_url, "https://oss-cn-hangzhou.aliyuncs.com")
+        self.assertTrue(cfg.s3.force_virtual_addressing)
+        self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
+
+    def test_blob_io_config_falls_back_to_explicit(self):
+        # When no credentials are derivable from catalog options / REST token, the
+        # io_config the caller passed to read_paimon must still reach blob File columns.
+        from pypaimon.daft.daft_datasource import _PaimonPKSplitTask
+
+        cfg = IOConfig(s3=S3Config(key_id="EXPLICIT", access_key="SK"))
+        blob = serialize_io_config(cfg)
+        task = _PaimonPKSplitTask(
+            {},  # non-rest catalog options, nothing derivable
+            None, None, {}, None, None,
+            blob_column_names={"b"},
+            explicit_io_config_bytes=blob,
+        )
+        out = task._blob_io_config_bytes(None)
+        self.assertEqual(out, blob)
+        self.assertEqual(IOConfig._from_serialized(out).s3.key_id, "EXPLICIT")
 
     def test_cast_to_file_reconstructs_io_config(self):
         # The crux of the fix: embedded bytes must survive cast to DataType.file() so a native

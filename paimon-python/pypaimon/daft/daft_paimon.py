@@ -90,10 +90,15 @@ def _source_for_table(
     from pypaimon.daft.daft_datasource import PaimonDataSource
     from pypaimon.daft.daft_io_config import (
         _convert_paimon_catalog_options_to_io_config,
+        serialize_io_config,
     )
 
     if catalog_options is None:
         catalog_options = {}
+
+    # Keep the caller-supplied io_config so blob File columns can fall back to it
+    # when no credentials are derivable from catalog options / REST token.
+    explicit_io_config_bytes = serialize_io_config(io_config) if io_config is not None else None
 
     io_config = io_config or _convert_paimon_catalog_options_to_io_config(
         _enrich_options_with_rest_token(catalog_options, table)
@@ -104,7 +109,10 @@ def _source_for_table(
     storage_config = StorageConfig(multithreaded_io, io_config)
 
     return PaimonDataSource(
-        table, storage_config=storage_config, catalog_options=catalog_options
+        table,
+        storage_config=storage_config,
+        catalog_options=catalog_options,
+        explicit_io_config_bytes=explicit_io_config_bytes,
     )
 
 

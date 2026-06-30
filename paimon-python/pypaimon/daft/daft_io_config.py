@@ -28,8 +28,17 @@ def serialize_io_config(io_config: IOConfig) -> bytes:
 
     Daft pickles IOConfig via ``__reduce__`` -> ``(IOConfig._from_serialized, (bytes,))``;
     those bytes are exactly what the File struct's ``io_config`` field is deserialized from.
+    Validate that shape so a future Daft serialization change fails loudly, not silently.
     """
-    return io_config.__reduce__()[1][0]
+    reducer = io_config.__reduce__()
+    if (reducer[0] is not IOConfig._from_serialized
+            or not isinstance(reducer[1], tuple) or not reducer[1]
+            or not isinstance(reducer[1][0], bytes)):
+        raise TypeError(
+            f"Unexpected IOConfig.__reduce__ shape ({reducer!r}); "
+            "Daft may have changed its IOConfig serialization format."
+        )
+    return reducer[1][0]
 
 
 def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]) -> IOConfig | None:
@@ -96,3 +105,35 @@ def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]
     )
 
     return io_config if any_props_set else None
+
+
+def _convert_paimon_catalog_options_to_file_io_config(catalog_options: dict[str, str]) -> IOConfig | None:
+    """IOConfig for Daft native File ops (open/read/as_image) on blob columns.
+
+    Same as _convert_paimon_catalog_options_to_io_config, except OSS is routed through
+    Daft's S3 client (oss:// aliased to s3, virtual-hosted) instead of the OpenDAL OSS
+    backend: Daft's File.open() stat over OpenDAL/OSS fails to issue the request on some
+    Daft builds, while the S3 client works (OSS is S3-API compatible). Other schemes
+    (s3://, local) reuse the shared builder unchanged.
+    """
+    warehouse = catalog_options.get("warehouse", "")
+    if (urlparse(warehouse).scheme if warehouse else "") != "oss":
+        return _convert_paimon_catalog_options_to_io_config(catalog_options)
+
+    endpoint = catalog_options.get("fs.oss.endpoint")
+    if endpoint and not endpoint.startswith(("http://", "https://")):
+        endpoint = f"https://{endpoint}"
+    key_id = catalog_options.get("fs.oss.accessKeyId")
+    if not endpoint and not key_id:
+        return None
+    return IOConfig(
+        s3=S3Config(
+            endpoint_url=endpoint,
+            region_name=catalog_options.get("fs.oss.region"),
+            key_id=key_id,
+            access_key=catalog_options.get("fs.oss.accessKeySecret"),
+            session_token=catalog_options.get("fs.oss.securityToken"),
+            force_virtual_addressing=True,
+        ),
+        protocol_aliases={"oss": "s3"},
+    )
