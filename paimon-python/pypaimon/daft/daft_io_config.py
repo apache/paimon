@@ -138,10 +138,11 @@ def _convert_paimon_catalog_options_to_file_io_config(
     key_id = catalog_options.get("fs.oss.accessKeyId")
     access_key = catalog_options.get("fs.oss.accessKeySecret")
     token = catalog_options.get("fs.oss.securityToken")
-    # Require a complete key pair. An endpoint or a half credential is not credentials,
-    # so fall through (to explicit io_config / env) rather than overriding a user config.
-    if require_credentials and not (key_id and access_key):
-        return None
+    if not (key_id and access_key):
+        # No complete key pair: fall through if required, else drop it so the S3 env chain is used.
+        if require_credentials:
+            return None
+        key_id = access_key = token = None
     return IOConfig(
         s3=S3Config(
             endpoint_url=endpoint,

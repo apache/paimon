@@ -106,6 +106,15 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         ):
             self.assertEqual(blob_key(opts), "USERKEY")
 
+    def test_oss_partial_credentials_cleared_for_env(self):
+        # OSS half key pair (no secret): keep only the oss->s3 alias, drop the partial key.
+        opts = {"warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com",
+                "fs.oss.accessKeyId": "PARTIAL"}
+        self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts))
+        cfg = _convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False)
+        self.assertIsNone(cfg.s3.key_id)
+        self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
+
     def test_non_oss_partial_config_left_null_for_env(self):
         # Non-OSS endpoint-only (no key pair) -> null, so Daft's s3:// uses its env cred chain.
         opts = {"warehouse": "s3://b", "fs.s3.endpoint": "https://s3.example.com"}
