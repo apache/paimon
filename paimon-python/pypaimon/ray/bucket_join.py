@@ -92,6 +92,10 @@ def bucket_join(
         raise ValueError(
             f"bucket_join requires the join key to be the bucket-key {lkey}; got on={on_cols}. "
             "Equal keys only co-locate by bucket when joining on the bucket-key.")
+    if join_type != "inner":
+        # Outer joins would need the union of buckets (a bucket missing on one side
+        # still emits rows); only inner is correct with the per-bucket intersection.
+        raise ValueError(f"bucket_join currently supports only join_type='inner'; got {join_type!r}.")
 
     # Plan each side's manifest once, then dispatch per-bucket splits to the tasks.
     left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection)
@@ -100,16 +104,14 @@ def bucket_join(
     def _join_bucket(left_splits, right_splits):
         left_t = _read_splits(left, catalog_options, left_projection, left_splits)
         right_t = _read_splits(right, catalog_options, right_projection, right_splits)
-        if left_t.num_rows == 0 or right_t.num_rows == 0:
-            return None
         return left_t.join(right_t, keys=on_cols, join_type=join_type)
 
     # ``@ray.remote()`` (empty parens) is rejected by Ray, so wrap conditionally.
     remote_fn = ray.remote(**ray_remote_args)(_join_bucket) if ray_remote_args else ray.remote(_join_bucket)
-    # Inner join: only buckets present on both sides can contribute matches.
+    # Inner join: only buckets present on both sides can match.
     buckets = sorted(set(left_by_bucket) & set(right_by_bucket))
-    refs = [remote_fn.remote(left_by_bucket[b], right_by_bucket[b]) for b in buckets]
-    parts = [p for p in ray.get(refs) if p is not None and p.num_rows > 0]
-    if not parts:
+    if not buckets:
         return ray.data.from_items([])
-    return ray.data.from_arrow(parts)
+    # Keep each bucket's result as a distributed object ref -- never pulled into the driver.
+    refs = [remote_fn.remote(left_by_bucket[b], right_by_bucket[b]) for b in buckets]
+    return ray.data.from_arrow_refs(refs)

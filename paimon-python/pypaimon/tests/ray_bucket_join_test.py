@@ -113,6 +113,14 @@ class RayBucketJoinTest(unittest.TestCase):
         with self.assertRaises(ValueError):  # on=k but bucket-key=url
             bucket_join("default.k1", "default.k2", self.catalog_options, on="k")
 
+    def test_rejects_non_inner_join(self):
+        sch = pa.schema([("url", pa.string())])
+        self._create_bucketed("default.ji1", sch, "url", 8)
+        self._create_bucketed("default.ji2", sch, "url", 8)
+        with self.assertRaises(ValueError):
+            bucket_join("default.ji1", "default.ji2", self.catalog_options,
+                        on="url", join_type="left outer")
+
 
 if __name__ == "__main__":
     unittest.main()
