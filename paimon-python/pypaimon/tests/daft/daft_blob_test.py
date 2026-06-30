@@ -88,8 +88,8 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(dict(env.protocol_aliases)["oss"], "s3")
 
     def test_explicit_io_config_used_when_no_derivable_credentials(self):
-        # The explicit io_config passed to read_paimon must reach blob File columns when
-        # nothing is derivable -- including endpoint-only options (endpoint is not credentials).
+        # The explicit io_config passed to read_paimon must reach blob File columns when no
+        # complete credentials are derivable -- an endpoint or a half key pair is not enough.
         explicit = serialize_io_config(IOConfig(s3=S3Config(key_id="USERKEY", access_key="SK")))
 
         def blob_key(catalog_options):
@@ -100,8 +100,9 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(blob_key({}), "USERKEY")
         for opts in (
             {"warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com"},
+            {"warehouse": "oss://b", "fs.oss.accessKeyId": "PARTIAL"},  # no secret
             {"warehouse": "s3://b", "fs.s3.endpoint": "https://s3.example.com"},
-            {"warehouse": "s3a://b", "fs.s3.endpoint": "https://s3.example.com"},
+            {"warehouse": "s3a://b", "fs.s3.accessKeyId": "PARTIAL"},  # no secret
         ):
             self.assertEqual(blob_key(opts), "USERKEY")
 

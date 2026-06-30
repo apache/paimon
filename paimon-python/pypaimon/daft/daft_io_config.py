@@ -124,11 +124,10 @@ def _convert_paimon_catalog_options_to_file_io_config(
     """
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
-        # Non-OSS (s3://, s3a://, local): an endpoint alone is not credentials, so fall
-        # through (to explicit io_config / env) when no AK/SK/token is set.
-        if require_credentials and not any(
-            catalog_options.get(k)
-            for k in ("fs.s3.accessKeyId", "fs.s3.accessKeySecret", "fs.s3.securityToken")
+        # Non-OSS (s3://, s3a://, local): require a complete key pair. An endpoint or a
+        # half credential is not credentials, so fall through to explicit io_config / env.
+        if require_credentials and not (
+            catalog_options.get("fs.s3.accessKeyId") and catalog_options.get("fs.s3.accessKeySecret")
         ):
             return None
         return _convert_paimon_catalog_options_to_io_config(catalog_options)
@@ -139,9 +138,9 @@ def _convert_paimon_catalog_options_to_file_io_config(
     key_id = catalog_options.get("fs.oss.accessKeyId")
     access_key = catalog_options.get("fs.oss.accessKeySecret")
     token = catalog_options.get("fs.oss.securityToken")
-    # An endpoint alone is not credentials: fall through (to explicit io_config / env)
-    # when only the endpoint is set, so a user-supplied io_config isn't overridden.
-    if require_credentials and not (key_id or access_key or token):
+    # Require a complete key pair. An endpoint or a half credential is not credentials,
+    # so fall through (to explicit io_config / env) rather than overriding a user config.
+    if require_credentials and not (key_id and access_key):
         return None
     return IOConfig(
         s3=S3Config(
