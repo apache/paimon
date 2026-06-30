@@ -132,21 +132,20 @@ public class CompactChainTableProcedure extends BaseProcedure {
             DataSourceV2Relation relation,
             String partitionStr,
             boolean overwrite) {
-        String partition = SparkProcedureUtils.toWhere(partitionStr);
         FileStoreTable snapshotTable = table.wrapped();
 
         ChainGroupReadTable.ChainTableBatchScan scan =
                 (ChainGroupReadTable.ChainTableBatchScan) table.newScan();
         PartitionPredicate partitionPredicate =
-                SparkProcedureUtils.convertToPartitionPredicate(
-                        partition, table.schema().logicalPartitionType(), spark(), relation);
+                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                        partitionStr, snapshotTable, spark());
 
         // Check if target partition already exists in snapshot branch
-        boolean partitionExists = checkPartitionExists(snapshotTable, partition, relation);
+        boolean partitionExists = checkPartitionExists(snapshotTable, partitionStr);
         if (partitionExists) {
             if (overwrite) {
                 scan.skipPreloadTargetSnapshot().withPartitionFilter(partitionPredicate);
-                LOG.info("Found existing partition {}, will overwrite it.", partition);
+                LOG.info("Found existing partition {}, will overwrite it.", partitionStr);
             } else {
                 LOG.info(
                         "Partition {} already exists in snapshot branch, skipping compaction.",
@@ -187,14 +186,10 @@ public class CompactChainTableProcedure extends BaseProcedure {
         return true;
     }
 
-    private boolean checkPartitionExists(
-            FileStoreTable snapshotTable, String partition, DataSourceV2Relation relation) {
+    private boolean checkPartitionExists(FileStoreTable snapshotTable, String partition) {
         PartitionPredicate snapshotPartitionPredicate =
-                SparkProcedureUtils.convertToPartitionPredicate(
-                        partition,
-                        snapshotTable.schema().logicalPartitionType(),
-                        spark(),
-                        relation);
+                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                        partition, snapshotTable, spark());
 
         return !snapshotTable
                 .newScan()

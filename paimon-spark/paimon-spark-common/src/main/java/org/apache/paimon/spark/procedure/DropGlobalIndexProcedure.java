@@ -108,9 +108,7 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         : args.getString(3);
         boolean dryRun = !args.isNullAt(4) && args.getBoolean(4);
 
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
-
-        LOG.info("Starting to drop index for table " + tableIdent + " WHERE: " + finalWhere);
+        LOG.info("Starting to drop index for table {} with partitions: {}", tableIdent, partitions);
 
         List<String> indexColumns =
                 Arrays.stream(column.split(","))
@@ -142,11 +140,8 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                                         .collect(Collectors.toList());
                         DataSourceV2Relation relation = createRelation(tableIdent);
                         PartitionPredicate partitionPredicate =
-                                SparkProcedureUtils.convertToPartitionPredicate(
-                                        finalWhere,
-                                        table.schema().logicalPartitionType(),
-                                        spark(),
-                                        relation);
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
 
                         Snapshot snapshot =
                                 t.latestSnapshot()
