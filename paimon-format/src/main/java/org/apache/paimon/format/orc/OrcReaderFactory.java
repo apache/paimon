@@ -158,7 +158,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
-            final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
+            final VectorizedRowBatch orcBatch =
+                    createBatchWrapper(schema, Math.max(1, batchSize / numBatches));
             final OrcReaderBatch batch =
                     createReaderBatch(filePath, orcBatch, pool.recycler(), fileIO);
             pool.add(batch);
