@@ -52,6 +52,10 @@ Choose the index type based on the trade-off you want:
 
 ## Build Vector Index
 
+<Tabs groupId="vector-build">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 -- Create IVF-PQ vector index on 'embedding' column
 CALL sys.create_global_index(
@@ -70,6 +74,52 @@ CALL sys.create_global_index(
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create IVF-PQ vector index on 'embedding' column.
+added_files = table.create_global_index(
+    "embedding",
+    index_type="ivf-pq",
+    options={
+        "ivf-pq.dimension": "768",
+        "ivf-pq.distance.metric": "cosine",
+        "ivf-pq.nlist": "256",
+        "ivf-pq.pq.m": "16",
+    },
+)
+print(added_files)
+```
+
+You can also build only selected partitions or tune the row-id shard size used
+by non-sorted global indexes:
+
+```python
+added_files = table.create_global_index(
+    "embedding",
+    index_type="ivf-flat",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={
+        "ivf-flat.dimension": "768",
+        "global-index.row-count-per-shard": "100000",
+    },
+)
+print(added_files)
+```
+
+PyPaimon vector index build currently supports the paimon-vindex IVF identifiers:
+`ivf-flat`, `ivf-pq`, `ivf-hnsw-flat`, and `ivf-hnsw-sq`. Use SQL to build
+Lumina indexes. Install `paimon-vindex` or `pypaimon[vindex]` before building
+or querying IVF vector indexes from Python.
+
+</TabItem>
+
+</Tabs>
+
 Use `index_type => 'lumina'` for new Lumina indexes. The legacy `lumina-vector-ann` identifier is
 kept only so existing tables can still load old indexes.
 
@@ -77,6 +127,48 @@ For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-typ
 IVF indexes or `lumina.index.dimension` for Lumina indexes. For `VECTOR<FLOAT>` columns, Paimon uses
 the dimension from the column type. When `lumina.index.dimension` is explicitly set for a
 `VECTOR<FLOAT>` column, it must match the vector type length.
+
+## Drop Vector Index
+
+<Tabs groupId="vector-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'embedding',
+    index_type => 'ivf-pq'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("embedding", index_type="ivf-pq")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "embedding",
+    index_type="ivf-pq",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
 
 Supported IVF vector index options:
 
@@ -123,6 +215,10 @@ as `<field-name>`. Field-level vector options do not include the index-type pref
 use `fields.image_embedding.nlist` to override the shared `ivf-pq.nlist` option for
 `image_embedding`:
 
+<Tabs groupId="vector-per-field-options">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 CREATE TABLE my_table (
     id INT,
@@ -141,6 +237,40 @@ CREATE TABLE my_table (
     'fields.image_embedding.nlist' = '512'
 );
 ```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+import pyarrow as pa
+
+from pypaimon import Schema
+
+schema = Schema.from_pyarrow_schema(
+    pa.schema([
+        pa.field("id", pa.int32()),
+        pa.field("title_embedding", pa.list_(pa.float32())),
+        pa.field("image_embedding", pa.list_(pa.float32())),
+    ]),
+    options={
+        "bucket": "-1",
+        "row-tracking.enabled": "true",
+        "data-evolution.enabled": "true",
+        "global-index.enabled": "true",
+        "fields.title_embedding.dimension": "768",
+        "fields.image_embedding.dimension": "512",
+        "ivf-pq.nlist": "256",
+        "fields.image_embedding.nlist": "512",
+    },
+)
+
+catalog.create_table("db.my_table", schema, ignore_if_exists=False)
+```
+
+</TabItem>
+
+</Tabs>
 
 With the properties above, `title_embedding` is indexed with `nlist=256` while `image_embedding`
 uses `nlist=512`.

@@ -48,6 +48,10 @@ For keyword-style text retrieval, use [Full-Text Index](./full-text) instead.
 
 ## Build BTree Index
 
+<Tabs groupId="btree-build">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 -- Create BTree index on 'name' column
 CALL sys.create_global_index(
@@ -67,6 +71,77 @@ CALL sys.create_global_index(
     partitions => 'dt=2026-06-18;dt=2026-06-19'
 );
 ```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create BTree index on 'name' column.
+added_files = table.create_global_index("name", index_type="btree")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass BTree build
+options and restrict the build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={"sorted-index.records-per-range": "10000000"},
+)
+print(added_files)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Drop BTree Index
+
+<Tabs groupId="btree-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("name", index_type="btree")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
 
 ## BTree Options
 
