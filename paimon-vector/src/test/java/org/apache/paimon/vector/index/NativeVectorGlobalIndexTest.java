@@ -198,6 +198,18 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
+    public void testSampleIndexSequenceIsUniform() {
+        assertThat(
+                        new long[] {
+                            NativeVectorGlobalIndexWriter.sampleIndex(0, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(1, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(2, 10, 4),
+                            NativeVectorGlobalIndexWriter.sampleIndex(3, 10, 4)
+                        })
+                .containsExactly(0L, 2L, 5L, 7L);
+    }
+
+    @Test
     public void testVectorBatchSizeProtectsSingleJavaArrayAllocation() {
         assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 128)).isEqualTo(4096);
         assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(10000, 128)).isEqualTo(10000);

@@ -522,7 +522,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         return left * right;
     }
 
-    private static long sampleIndex(long sampleOrdinal, long vectorCount, int trainCount) {
+    static long sampleIndex(long sampleOrdinal, long vectorCount, int trainCount) {
         long quotient = vectorCount / trainCount;
         long remainder = vectorCount % trainCount;
         return sampleOrdinal * quotient + sampleOrdinal * remainder / trainCount;

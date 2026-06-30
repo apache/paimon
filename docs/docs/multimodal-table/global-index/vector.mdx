@@ -69,6 +69,7 @@ Supported vector index options:
 |---|---|---|
 | `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
 | `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
+| `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
 | `<index-type>.nlist` | `256` | Number of IVF clusters used during index build. Higher values create more partitions and can improve recall for large datasets, but may increase build cost. |
 | `<index-type>.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. Higher values usually improve recall with larger index files. |
 | `<index-type>.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
@@ -101,12 +102,14 @@ CREATE TABLE my_table (
     'fields.image_embedding.dimension' = '512',
     -- shared by every ivf-pq column, overridden only for 'image_embedding'
     'ivf-pq.nlist' = '256',
-    'fields.image_embedding.nlist' = '512'
+    'fields.image_embedding.nlist' = '512',
+    -- per-column training sample ratio
+    'fields.image_embedding.train.sample-ratio' = '0.5'
 );
 ```
 
 With the properties above, `title_embedding` is indexed with `nlist=256` while `image_embedding`
-uses `nlist=512`.
+uses `nlist=512` and trains with half of the non-null vectors.
 
 ## Vector Search
 
