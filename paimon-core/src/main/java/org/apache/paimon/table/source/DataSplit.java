@@ -72,6 +72,11 @@ public class DataSplit implements Split {
     @Nullable private Integer totalBuckets;
 
     private List<DataFileMeta> dataFiles;
+
+    /**
+     * This list should have the same size as dataFiles. For data evolution tables, only anchor
+     * files would have corresponding deletion file.
+     */
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
     private boolean isStreaming = false;
@@ -141,7 +146,7 @@ public class DataSplit implements Split {
     }
 
     private boolean rawMergedRowCountAvailable() {
-        return rawConvertible
+        return rawConvertible()
                 && (dataDeletionFiles == null
                         || dataDeletionFiles.stream()
                                 .allMatch(f -> f == null || f.cardinality() != null));
@@ -168,6 +173,14 @@ public class DataSplit implements Split {
                 return false;
             }
         }
+
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null && deletionFile.cardinality() == null) {
+                    return false;
+                }
+            }
+        }
         return true;
     }
 
@@ -181,6 +194,13 @@ public class DataSplit implements Split {
                 maxCount = Math.max(maxCount, file.rowCount());
             }
             sum += maxCount;
+        }
+        if (dataDeletionFiles != null) {
+            for (DeletionFile deletionFile : dataDeletionFiles) {
+                if (deletionFile != null) {
+                    sum -= deletionFile.cardinality();
+                }
+            }
         }
         return sum;
     }
@@ -245,7 +265,7 @@ public class DataSplit implements Split {
 
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
-        if (rawConvertible) {
+        if (rawConvertible()) {
             return Optional.of(
                     dataFiles.stream()
                             .map(f -> makeRawTableFile(bucketPath, f))

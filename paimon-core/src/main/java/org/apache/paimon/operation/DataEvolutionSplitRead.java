@@ -23,6 +23,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -45,6 +47,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
@@ -78,6 +81,7 @@ import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -160,6 +164,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private RecordReader<InternalRow> createReader(
             DataSplit dataSplit, List<Range> rowRanges, RowType readRowType) throws IOException {
         List<DataFileMeta> files = dataSplit.dataFiles();
+
+        List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
+        DeletionVector.Factory deletionVectorFactory =
+                deletionFiles == null || deletionFiles.stream().allMatch(Objects::isNull)
+                        ? null
+                        : DeletionVector.factory(fileIO, files, deletionFiles);
+
         BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(partition, dataSplit.bucket());
@@ -182,25 +193,33 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             if (needMergeFiles.size() == 1 || readRowType.getFields().isEmpty()) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
-                        () ->
-                                createFileReader(
-                                        partition,
-                                        dataFilePathFactory,
-                                        needMergeFiles.get(0),
-                                        formatBuilder,
-                                        rowRanges,
-                                        readRowType));
+                        () -> {
+                            DeletionVectorWithRange deletionVector =
+                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            return createFileReader(
+                                    partition,
+                                    dataFilePathFactory,
+                                    needMergeFiles.get(0),
+                                    formatBuilder,
+                                    rowRanges,
+                                    readRowType,
+                                    deletionVector);
+                        });
 
             } else {
                 suppliers.add(
-                        () ->
-                                createUnionReader(
-                                        needMergeFiles,
-                                        partition,
-                                        dataFilePathFactory,
-                                        formatBuilder,
-                                        rowRanges,
-                                        readRowType));
+                        () -> {
+                            DeletionVectorWithRange deletionVector =
+                                    readDeletionVector(needMergeFiles, deletionVectorFactory);
+                            return createUnionReader(
+                                    needMergeFiles,
+                                    partition,
+                                    dataFilePathFactory,
+                                    formatBuilder,
+                                    rowRanges,
+                                    readRowType,
+                                    deletionVector);
+                        });
             }
         }
 
@@ -222,7 +241,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             Builder formatBuilder,
             List<Range> rowRanges,
-            RowType readRowType)
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         List<FieldBunch> fieldsFiles =
                 splitFieldBunches(
@@ -318,7 +338,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                         dataFilePathFactory,
                                         formatReaderMapping,
                                         rowRanges,
-                                        partialReadRowType));
+                                        partialReadRowType,
+                                        deletionVector));
             }
         }
 
@@ -341,7 +362,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
-            RowType readRowType)
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         if (bunch instanceof DataBunch) {
             // for data bunch, directly read the single file
@@ -351,11 +373,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     dataFilePathFactory,
                     formatReaderMapping,
                     rowRanges,
-                    readRowType);
+                    readRowType,
+                    deletionVector);
         } else if (bunch instanceof VectorFileBunch) {
             // for vector bunch, sequential read all data files and concat them
             return sequentialReadFiles(
-                    bunch.files(), partition, dataFilePathFactory, formatReaderMapping, rowRanges);
+                    bunch.files(),
+                    partition,
+                    dataFilePathFactory,
+                    formatReaderMapping,
+                    rowRanges,
+                    deletionVector);
         } else if (bunch instanceof BlobFileBunch) {
             // for blob bunch, fallback on placeholders
 
@@ -366,7 +394,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         partition,
                         dataFilePathFactory,
                         formatReaderMapping,
-                        rowRanges);
+                        rowRanges,
+                        deletionVector);
             }
             int blobIndex = findBlobFieldIndex(readRowType);
             checkArgument(blobIndex >= 0, "Blob bunch read type should contain a blob field.");
@@ -379,7 +408,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     dataFilePathFactory,
                                     formatReaderMapping,
                                     rowRanges,
-                                    readRowType),
+                                    readRowType,
+                                    deletionVector),
+                    (reader, range) -> applyDeletionVector(reader, range, deletionVector),
                     rowRanges,
                     readRowType,
                     blobIndex);
@@ -393,30 +424,24 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
-            List<Range> rowRanges)
+            List<Range> rowRanges,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         List<ReaderSupplier<InternalRow>> readerSuppliers = new ArrayList<>();
         for (DataFileMeta file : files) {
-            RoaringBitmap32 selection = file.toFileSelection(rowRanges);
-            FormatReaderContext formatReaderContext =
-                    new FormatReaderContext(
-                            fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
             readerSuppliers.add(
                     () ->
-                            new DataFileRecordReader(
+                            createFileReader(
+                                    partition,
+                                    file,
+                                    formatReaderMapping,
+                                    rowRanges,
                                     readRowType,
-                                    formatReaderMapping.getReaderFactory(),
-                                    formatReaderContext,
-                                    coreOptions.scanIgnoreCorruptFile(),
-                                    coreOptions.scanIgnoreLostFile(),
-                                    formatReaderMapping.getIndexMapping(),
-                                    formatReaderMapping.getCastMapping(),
-                                    PartitionUtils.create(
-                                            formatReaderMapping.getPartitionPair(), partition),
-                                    true,
-                                    file.firstRowId(),
-                                    file.maxSequenceNumber(),
-                                    formatReaderMapping.getSystemFields()));
+                                    new FileReadTarget(
+                                            DataFilePathFactory.formatIdentifier(file.fileName()),
+                                            dataFilePathFactory.toPath(file),
+                                            file.fileSize()),
+                                    deletionVector));
         }
         return ConcatRecordReader.create(readerSuppliers);
     }
@@ -436,7 +461,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFileMeta file,
             Builder formatBuilder,
             List<Range> rowRanges,
-            RowType readRowType)
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         FileReadTarget readTarget = readTarget(file, dataFilePathFactory, rowRanges);
         String formatIdentifier = readTarget.formatIdentifier;
@@ -452,7 +478,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                                 ? schema
                                                 : schemaFetcher.apply(schemaId)));
         return createFileReader(
-                partition, file, formatReaderMapping, rowRanges, readRowType, readTarget);
+                partition,
+                file,
+                formatReaderMapping,
+                rowRanges,
+                readRowType,
+                readTarget,
+                deletionVector);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -461,7 +493,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             DataFilePathFactory dataFilePathFactory,
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
-            RowType readRowType)
+            RowType readRowType,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         return createFileReader(
                 partition,
@@ -469,7 +502,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 formatReaderMapping,
                 rowRanges,
                 readRowType,
-                readTarget(file, dataFilePathFactory, rowRanges));
+                readTarget(file, dataFilePathFactory, rowRanges),
+                deletionVector);
     }
 
     private FileRecordReader<InternalRow> createFileReader(
@@ -478,24 +512,67 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             FormatReaderMapping formatReaderMapping,
             List<Range> rowRanges,
             RowType readRowType,
-            FileReadTarget readTarget)
+            FileReadTarget readTarget,
+            @Nullable DeletionVectorWithRange deletionVector)
             throws IOException {
         RoaringBitmap32 selection = file.toFileSelection(rowRanges);
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(fileIO, readTarget.path, readTarget.fileSize, selection);
-        return new DataFileRecordReader(
-                readRowType,
-                formatReaderMapping.getReaderFactory(),
-                formatReaderContext,
-                coreOptions.scanIgnoreCorruptFile(),
-                coreOptions.scanIgnoreLostFile(),
-                formatReaderMapping.getIndexMapping(),
-                formatReaderMapping.getCastMapping(),
-                PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
-                true,
-                file.firstRowId(),
-                file.maxSequenceNumber(),
-                formatReaderMapping.getSystemFields());
+        FileRecordReader<InternalRow> fileRecordReader =
+                new DataFileRecordReader(
+                        readRowType,
+                        formatReaderMapping.getReaderFactory(),
+                        formatReaderContext,
+                        coreOptions.scanIgnoreCorruptFile(),
+                        coreOptions.scanIgnoreLostFile(),
+                        formatReaderMapping.getIndexMapping(),
+                        formatReaderMapping.getCastMapping(),
+                        PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
+                        true,
+                        file.firstRowId(),
+                        file.maxSequenceNumber(),
+                        formatReaderMapping.getSystemFields());
+        return applyDeletionVector(fileRecordReader, file.nonNullRowIdRange(), deletionVector);
+    }
+
+    private FileRecordReader<InternalRow> applyDeletionVector(
+            FileRecordReader<InternalRow> reader,
+            Range readerRange,
+            @Nullable DeletionVectorWithRange deletionVector) {
+        if (deletionVector == null || deletionVector.deletionVector.isEmpty()) {
+            return reader;
+        }
+
+        checkArgument(
+                deletionVector.range.from <= readerRange.from
+                        && deletionVector.range.to >= readerRange.to,
+                "Deletion vector range %s should contain reader range %s.",
+                deletionVector.range,
+                readerRange);
+
+        return new ApplyDeletionVectorReader(
+                reader,
+                deletionVector.deletionVector,
+                // Convert anchor-range DV positions to this reader's local returned positions.
+                readerRange.from - deletionVector.range.from);
+    }
+
+    @Nullable
+    private DeletionVectorWithRange readDeletionVector(
+            List<DataFileMeta> group, @Nullable DeletionVector.Factory deletionVectorFactory)
+            throws IOException {
+        if (deletionVectorFactory == null) {
+            return null;
+        }
+
+        // pack row ranges and deletion vector
+        DataFileMeta anchor = retrieveAnchorFile(group, Function.identity());
+        Range range = anchor.nonNullRowIdRange();
+
+        return deletionVectorFactory
+                .create(anchor.fileName())
+                .map(dv -> new DeletionVectorWithRange(range, dv))
+                .orElse(null);
     }
 
     private FileReadTarget readTarget(
@@ -600,6 +677,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             this.formatIdentifier = formatIdentifier;
             this.path = path;
             this.fileSize = fileSize;
+        }
+    }
+
+    private static class DeletionVectorWithRange {
+
+        private final Range range;
+        private final DeletionVector deletionVector;
+
+        private DeletionVectorWithRange(Range range, DeletionVector deletionVector) {
+            this.range = range;
+            this.deletionVector = deletionVector;
         }
     }
 

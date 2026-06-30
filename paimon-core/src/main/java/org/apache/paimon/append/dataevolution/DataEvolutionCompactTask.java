@@ -96,6 +96,11 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
     }
 
     public CommitMessage doCompact(FileStoreTable table, String commitUser) throws Exception {
+        CoreOptions options = table.coreOptions();
+        checkArgument(
+                !options.deletionVectorsEnabled(),
+                "Data evolution compaction does not support deletion vectors.");
+
         if (blobTask) {
             return doCompactBlobFiles(table, commitUser);
         }
@@ -103,8 +108,6 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             // TODO: support vector-store file compaction
             throw new UnsupportedOperationException("Vector-store task is not supported");
         }
-
-        CoreOptions options = table.coreOptions();
 
         Set<String> fieldsInDedicatedFile =
                 SetUtils.union(
