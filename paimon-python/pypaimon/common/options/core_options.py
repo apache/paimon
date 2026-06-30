@@ -667,6 +667,13 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_ROW_COUNT_PER_SHARD: ConfigOption[int] = (
+        ConfigOptions.key("global-index.row-count-per-shard")
+        .long_type()
+        .default_value(100000)
+        .with_description("Row count per shard for global index.")
+    )
+
     GLOBAL_INDEX_COLUMN_UPDATE_ACTION: ConfigOption[GlobalIndexColumnUpdateAction] = (
         ConfigOptions.key("global-index.column-update-action")
         .enum_type(GlobalIndexColumnUpdateAction)
@@ -1196,6 +1203,9 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def global_index_row_count_per_shard(self) -> int:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
 
     def btree_index_fallback_scan_max_size(self) -> int:
         return self.options.get(

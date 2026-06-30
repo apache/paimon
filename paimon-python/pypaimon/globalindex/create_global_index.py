@@ -31,6 +31,12 @@ from pypaimon.globalindex.btree.btree_index_writer import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
+    VINDEX_IDENTIFIERS,
+)
+from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
+    VindexVectorIndexWriter,
+)
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.read.split import DataSplit
@@ -76,7 +82,7 @@ def create_global_index(
 
 
 class GlobalIndexBuilder:
-    """Small Python builder for sorted global indexes."""
+    """Small Python builder for global indexes."""
 
     def __init__(
         self,
@@ -95,15 +101,15 @@ class GlobalIndexBuilder:
         self._options = _merged_options(table, options)
         self._core_options = CoreOptions(self._options)
 
-        if self._index_type != BTREE_IDENTIFIER:
+        if self._index_type != BTREE_IDENTIFIER and self._index_type not in VINDEX_IDENTIFIERS:
             raise ValueError(
-                "Python global index build currently supports only '%s', got '%s'."
-                % (BTREE_IDENTIFIER, index_type)
+                "Python global index build currently supports '%s' and %s, got '%s'."
+                % (BTREE_IDENTIFIER, VINDEX_IDENTIFIERS, index_type)
             )
         if len(self._index_columns) != 1:
             raise ValueError(
-                "Python '%s' global index build currently supports one column, got %s."
-                % (BTREE_IDENTIFIER, self._index_columns)
+                "Python global index build currently supports one column, got %s."
+                % self._index_columns
             )
         if not self._table.options.row_tracking_enabled():
             raise ValueError(
@@ -116,6 +122,8 @@ class GlobalIndexBuilder:
                     "Column '%s' does not exist in table '%s'."
                     % (column, self._table.identifier)
                 )
+        if self._index_type in VINDEX_IDENTIFIERS:
+            self._validate_vindex_table()
 
     def build(self) -> List[CommitMessage]:
         read_builder = self._table.new_read_builder()
@@ -129,11 +137,11 @@ class GlobalIndexBuilder:
             return []
 
         index_field = self._table.field_dict[self._index_columns[0]]
-        key_serializer = create_serializer(index_field.type)
-        block_size = self._core_options.btree_index_block_size()
-        records_per_range = self._core_options.sorted_index_records_per_range()
-        if records_per_range <= 0:
-            raise ValueError("sorted-index.records-per-range must be positive.")
+        if self._index_type in VINDEX_IDENTIFIERS:
+            splits = _filter_non_indexable_splits(
+                self._table, splits, self._index_columns)
+            if not splits:
+                return []
 
         read_type = [index_field, SpecialFields.ROW_ID]
         from pypaimon.read.table_read import TableRead
@@ -145,6 +153,19 @@ class GlobalIndexBuilder:
         )
         index_path_factory = self._table.path_factory().global_index_path_factory()
         index_path = index_path_factory.global_index_root_path()
+
+        if self._index_type == BTREE_IDENTIFIER:
+            return self._build_btree(splits, index_field, table_read, index_path)
+        return self._build_vindex(splits, index_field, table_read, index_path)
+
+    def _build_btree(
+        self, splits, index_field, table_read, index_path: str
+    ) -> List[CommitMessage]:
+        key_serializer = create_serializer(index_field.type)
+        block_size = self._core_options.btree_index_block_size()
+        records_per_range = self._core_options.sorted_index_records_per_range()
+        if records_per_range <= 0:
+            raise ValueError("sorted-index.records-per-range must be positive.")
 
         messages = []
         for split in _split_by_contiguous_row_range(splits):
@@ -191,6 +212,77 @@ class GlobalIndexBuilder:
                     )
                 )
         return messages
+
+    def _build_vindex(
+        self, splits, index_field, table_read, index_path: str
+    ) -> List[CommitMessage]:
+        rows_per_shard = self._core_options.global_index_row_count_per_shard()
+        if rows_per_shard <= 0:
+            raise ValueError(
+                "Option 'global-index.row-count-per-shard' must be greater than 0."
+            )
+
+        messages = []
+        for split, row_range in _split_by_global_index_shard(
+            splits, rows_per_shard
+        ):
+            table = table_read.to_arrow([split])
+            if table is None or table.num_rows == 0:
+                continue
+
+            writer = VindexVectorIndexWriter(
+                self._table.file_io,
+                index_path,
+                index_field.type,
+                self._index_type,
+                self._options.to_map(),
+                index_field.name,
+            )
+            try:
+                for vector, row_id in _extract_vector_rows(
+                    table,
+                    self._index_columns[0],
+                    SpecialFields.ROW_ID.name,
+                    row_range,
+                ):
+                    writer.write(vector, row_id - row_range.from_)
+
+                index_adds = _to_index_manifest_entries(
+                    self._table,
+                    split.partition,
+                    row_range,
+                    index_field.id,
+                    self._index_type,
+                    writer.finish(),
+                )
+            finally:
+                writer.close()
+            if index_adds:
+                messages.append(
+                    CommitMessage(
+                        partition=tuple(split.partition.values),
+                        bucket=0,
+                        new_files=[],
+                        index_adds=index_adds,
+                    )
+                )
+        return messages
+
+    def _validate_vindex_table(self) -> None:
+        bucket = self._core_options.bucket()
+        if bucket != -1:
+            raise ValueError(
+                "Generic global index only supports unaware-bucket tables "
+                "(bucket = -1), but table '%s' has bucket = %s."
+                % (self._table.identifier, bucket)
+            )
+        if self._core_options.deletion_vectors_enabled():
+            raise ValueError(
+                "Generic global index does not support tables with deletion "
+                "vectors enabled. Table '%s' has "
+                "'deletion-vectors.enabled' = true."
+                % self._table.identifier
+            )
 
     def _resolve_partition_filter(self, read_builder) -> Optional[Predicate]:
         if self._partition_filter is not None:
@@ -257,6 +349,148 @@ def _split_by_contiguous_row_range(splits):
     for split in splits:
         result.extend(_split_one_by_contiguous_row_range(split))
     return result
+
+
+def _filter_non_indexable_splits(table, splits, index_columns):
+    boundary = _find_min_non_indexable_row_id(
+        table.schema_manager,
+        [file for split in splits for file in split.files],
+        index_columns,
+    )
+    if boundary is None:
+        return splits
+
+    result = []
+    for split in splits:
+        files = [
+            file for file in split.files
+            if file.row_id_range() is not None
+            and file.row_id_range().from_ < boundary
+        ]
+        if files:
+            result.append(_copy_split_with_files(split, files))
+    return result
+
+
+def _find_min_non_indexable_row_id(schema_manager, files, index_columns):
+    schema_contains_columns = {}
+    index_column_set = set(index_columns)
+    boundary = None
+    for file in files:
+        row_range = file.row_id_range()
+        if row_range is None:
+            continue
+
+        schema_id = file.schema_id
+        if schema_id not in schema_contains_columns:
+            schema = schema_manager.get_schema(schema_id)
+            schema_field_names = {field.name for field in schema.fields}
+            schema_contains_columns[schema_id] = (
+                index_column_set.issubset(schema_field_names)
+            )
+        if not schema_contains_columns[schema_id]:
+            if boundary is None or row_range.from_ < boundary:
+                boundary = row_range.from_
+    return boundary
+
+
+def _split_by_global_index_shard(splits, rows_per_shard):
+    if rows_per_shard <= 0:
+        raise ValueError(
+            "Option 'global-index.row-count-per-shard' must be greater than 0."
+        )
+
+    groups = {}
+    for split in splits:
+        key = (_partition_key(split.partition), split.bucket)
+        if key not in groups:
+            groups[key] = {
+                "partition": split.partition,
+                "bucket": split.bucket,
+                "files": [],
+            }
+        for file in split.files:
+            if file.row_id_range() is None:
+                continue
+            groups[key]["files"].append(file)
+
+    result = []
+    for group in groups.values():
+        files_by_shard = {}
+        for file in group["files"]:
+            file_range = file.row_id_range()
+            start_shard = file_range.from_ // rows_per_shard
+            end_shard = file_range.to // rows_per_shard
+            for shard_id in range(start_shard, end_shard + 1):
+                shard_start = shard_id * rows_per_shard
+                files_by_shard.setdefault(shard_start, []).append(file)
+
+        for shard_start in sorted(files_by_shard):
+            shard_end = shard_start + rows_per_shard - 1
+            shard_files = sorted(
+                files_by_shard[shard_start],
+                key=lambda file: file.row_id_range().from_,
+            )
+            current_group = []
+            current_group_end = None
+            for file in shard_files:
+                file_range = file.row_id_range()
+                if not current_group:
+                    current_group.append(file)
+                    current_group_end = file_range.to
+                elif file_range.from_ <= current_group_end + 1:
+                    current_group.append(file)
+                    current_group_end = max(current_group_end, file_range.to)
+                else:
+                    _append_shard_split(
+                        result,
+                        current_group,
+                        shard_start,
+                        shard_end,
+                        group["partition"],
+                        group["bucket"],
+                    )
+                    current_group = [file]
+                    current_group_end = file_range.to
+
+            if current_group:
+                _append_shard_split(
+                    result,
+                    current_group,
+                    shard_start,
+                    shard_end,
+                    group["partition"],
+                    group["bucket"],
+                )
+
+    return result
+
+
+def _partition_key(partition):
+    values = getattr(partition, "values", None)
+    return tuple(values) if values is not None else partition
+
+
+def _append_shard_split(
+    result,
+    files,
+    shard_start,
+    shard_end,
+    partition,
+    bucket,
+):
+    group_start = min(file.row_id_range().from_ for file in files)
+    group_end = max(file.row_id_range().to for file in files)
+    row_range = Range(max(group_start, shard_start), min(group_end, shard_end))
+    result.append((
+        DataSplit(
+            files=list(files),
+            partition=partition,
+            bucket=bucket,
+            raw_convertible=False,
+        ),
+        row_range,
+    ))
 
 
 def _split_one_by_contiguous_row_range(split):
@@ -340,6 +574,25 @@ def _extract_sorted_rows(
         return comparator(left_key, right_key)
 
     return sorted(rows, key=cmp_to_key(compare))
+
+
+def _extract_vector_rows(
+    table: pa.Table,
+    index_column: str,
+    row_id_column: str,
+    row_range: Optional[Range] = None,
+):
+    vectors = table.column(index_column).to_pylist()
+    row_ids = table.column(row_id_column).to_pylist()
+    rows = []
+    for vector, row_id in zip(vectors, row_ids):
+        if row_id is None:
+            raise ValueError("Cannot build global index because _ROW_ID is null.")
+        row_id = int(row_id)
+        if row_range is not None and not row_range.contains(row_id):
+            continue
+        rows.append((vector, row_id))
+    return rows
 
 
 def _chunks(rows, size):
