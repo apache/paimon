@@ -1805,6 +1805,186 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         # Must not be empty despite shard_a being empty (no short-circuit).
         self.assertEqual([7], hits)
 
+    def test_extra_field_groups_are_padded_before_and(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a")
+        b_field = _field(1, "b")
+        c_field = _field(2, "c")
+
+        short = _entry(None, field_id=0, index_type="btree",
+                       file_name="a-c.index",
+                       row_range_start=0, row_range_end=4).index_file
+        short.global_index_meta.extra_field_ids = [2]
+        long = _entry(None, field_id=1, index_type="btree",
+                      file_name="b-c.index",
+                      row_range_start=0, row_range_end=9).index_file
+        long.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def __init__(self_inner, file_name):
+                self_inner._file_name = file_name
+
+            def visit_equal(self_inner, field_ref, literal):
+                bm = RoaringBitmap64()
+                if self_inner._file_name == "a-c.index":
+                    for row_id in [1, 3, 4]:
+                        bm.add(row_id)
+                else:
+                    for row_id in [1, 3, 7, 8]:
+                        bm.add(row_id)
+                return _completed_future(GlobalIndexResult.create(bm))
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader(io_meta.file_name) for io_meta in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[short, long],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=2, field="c",
+                              literals=[42]))
+            finally:
+                scanner.close()
+
+        self.assertIsNotNone(result)
+        # The short group is all-hit padded for rows 5..9 before AND-ing with
+        # the long group. Row 4 is filtered out by the long group, while tail
+        # rows 7 and 8 survive because the short group has not indexed them.
+        self.assertEqual([1, 3, 7, 8], sorted(list(result.results())))
+
+    def test_extra_field_groups_pad_missing_coverage_before_and(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a")
+        b_field = _field(1, "b")
+        c_field = _field(2, "c")
+
+        a_early = _entry(None, field_id=0, index_type="btree",
+                         file_name="a-c-early.index",
+                         row_range_start=2, row_range_end=3).index_file
+        a_early.global_index_meta.extra_field_ids = [2]
+        a_late = _entry(None, field_id=0, index_type="btree",
+                        file_name="a-c-late.index",
+                        row_range_start=7, row_range_end=9).index_file
+        a_late.global_index_meta.extra_field_ids = [2]
+        b_full = _entry(None, field_id=1, index_type="btree",
+                        file_name="b-c-full.index",
+                        row_range_start=0, row_range_end=9).index_file
+        b_full.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def __init__(self_inner, file_name):
+                self_inner._file_name = file_name
+
+            def visit_equal(self_inner, field_ref, literal):
+                bm = RoaringBitmap64()
+                if self_inner._file_name == "a-c-early.index":
+                    bm.add(0)  # global 2 after offset
+                elif self_inner._file_name == "a-c-late.index":
+                    for row_id in [0, 1]:  # global 7, 8 after offset
+                        bm.add(row_id)
+                else:
+                    for row_id in [1, 2, 5, 7, 8]:
+                        bm.add(row_id)
+                return _completed_future(GlobalIndexResult.create(bm))
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader(io_meta.file_name) for io_meta in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[a_early, a_late, b_full],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=2, field="c",
+                              literals=[42]))
+            finally:
+                scanner.close()
+
+        self.assertIsNotNone(result)
+        # The first group has not indexed [0,1] and [4,6], so these ranges are
+        # neutral under AND. Its indexed ranges still filter normally.
+        self.assertEqual([1, 2, 5, 7, 8], sorted(list(result.results())))
+
+    def test_extra_field_padding_does_not_convert_none_to_hits(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a", "STRING")
+        b_field = _field(1, "b", "STRING")
+        c_field = _field(2, "c", "STRING")
+
+        short = _entry(None, field_id=0, index_type="btree",
+                       file_name="a-c.index",
+                       row_range_start=0, row_range_end=4).index_file
+        short.global_index_meta.extra_field_ids = [2]
+        long = _entry(None, field_id=1, index_type="btree",
+                      file_name="b-c.index",
+                      row_range_start=0, row_range_end=9).index_file
+        long.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def visit_contains(self_inner, field_ref, literal):
+                return _completed_future(None)
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader() for _ in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[short, long],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="contains", index=2, field="c",
+                              literals=["x"]))
+            finally:
+                scanner.close()
+
+        self.assertIsNone(result)
+
     def test_tantivy_fulltext_index_is_dispatched_by_scanner(self):
         """Non-btree scalar global indexes (tantivy-fulltext, etc.) must be
         instantiated by GlobalIndexScanner — previously only 'btree' was
