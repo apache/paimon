@@ -131,6 +131,21 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(out, blob)
         self.assertEqual(IOConfig._from_serialized(out).s3.key_id, "EXPLICIT")
 
+    def test_endpoint_only_does_not_override_explicit(self):
+        # An endpoint with no AK/SK/token is not credentials, so the explicit io_config
+        # the caller passed must still win for blob File columns.
+        from pypaimon.daft.daft_datasource import _PaimonPKSplitTask
+
+        explicit = serialize_io_config(IOConfig(s3=S3Config(key_id="USERKEY", access_key="SK")))
+        task = _PaimonPKSplitTask(
+            {"warehouse": "oss://b", "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com"},
+            None, None, {}, None, None,
+            blob_column_names={"x"},
+            explicit_io_config_bytes=explicit,
+        )
+        out = task._blob_io_config_bytes(None)
+        self.assertEqual(IOConfig._from_serialized(out).s3.key_id, "USERKEY")
+
     @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):
         # The crux of the fix: embedded bytes must survive cast to DataType.file() so a native

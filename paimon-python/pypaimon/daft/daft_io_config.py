@@ -130,15 +130,19 @@ def _convert_paimon_catalog_options_to_file_io_config(
     if endpoint and not endpoint.startswith(("http://", "https://")):
         endpoint = f"https://{endpoint}"
     key_id = catalog_options.get("fs.oss.accessKeyId")
-    if require_credentials and not endpoint and not key_id:
+    access_key = catalog_options.get("fs.oss.accessKeySecret")
+    token = catalog_options.get("fs.oss.securityToken")
+    # An endpoint alone is not credentials: fall through (to explicit io_config / env)
+    # when only the endpoint is set, so a user-supplied io_config isn't overridden.
+    if require_credentials and not (key_id or access_key or token):
         return None
     return IOConfig(
         s3=S3Config(
             endpoint_url=endpoint,
             region_name=catalog_options.get("fs.oss.region"),
             key_id=key_id,
-            access_key=catalog_options.get("fs.oss.accessKeySecret"),
-            session_token=catalog_options.get("fs.oss.securityToken"),
+            access_key=access_key,
+            session_token=token,
             force_virtual_addressing=True,
         ),
         protocol_aliases={"oss": "s3"},
