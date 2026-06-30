@@ -24,6 +24,8 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.VectorIndexTrainer;
+import org.apache.paimon.index.vector.VectorIndexTraining;
 import org.apache.paimon.index.vector.VectorIndexWriter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -247,12 +249,11 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         long buildStart = System.currentTimeMillis();
 
         NativeVectorIndexLoader.loadJni();
-        try (VectorIndexWriter writer = new VectorIndexWriter(nativeOptions)) {
-
-            // Phase 1: Train
-            long phaseStart = System.currentTimeMillis();
-            LOG.info("{} train phase started", identifier);
-            trainFromTempFile(writer);
+        // Phase 1: Train
+        long phaseStart = System.currentTimeMillis();
+        LOG.info("{} train phase started", identifier);
+        try (VectorIndexTraining training = trainFromTempFile();
+                VectorIndexWriter writer = new VectorIndexWriter(training)) {
             LOG.info(
                     "{} train phase done in {} ms",
                     identifier,
@@ -294,13 +295,14 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         return FILE_NAME_PREFIX + "-" + identifier;
     }
 
-    private void trainFromTempFile(VectorIndexWriter writer) throws IOException {
+    private VectorIndexTraining trainFromTempFile() throws IOException {
         int trainCount = trainingVectorCount(count, trainMaxSamples);
         int trainBatchSize = vectorBatchSize(TRAIN_BATCH_SIZE, dim);
         float[] batchVectors = new float[trainBatchSize * dim];
         logTrainingMemoryEstimate(trainCount);
 
-        try (RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
+        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(nativeOptions);
+                RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
             ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
             readBuf.order(ByteOrder.nativeOrder());
@@ -322,7 +324,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                     selected++;
                     batchCount++;
                     if (batchCount == trainBatchSize) {
-                        writer.addTrainingVectors(batchVectors, batchCount);
+                        trainer.addTrainingVectors(batchVectors, batchCount);
                         batchCount = 0;
                     }
                     if (selected < trainCount) {
@@ -334,7 +336,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
             }
 
             if (batchCount > 0) {
-                writer.addTrainingVectors(
+                trainer.addTrainingVectors(
                         Arrays.copyOf(batchVectors, batchCount * dim), batchCount);
             }
             if (selected != trainCount) {
@@ -344,9 +346,9 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
                                 + " training vectors, but selected "
                                 + selected);
             }
-        }
 
-        writer.finishTraining();
+            return trainer.finishTraining();
+        }
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {

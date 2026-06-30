@@ -77,14 +77,14 @@ public class NativeVectorGlobalIndexTest {
             options.setInteger("ivf-flat.dimension", 2);
             options.setString("ivf-flat.metric", "l2");
             options.setInteger("ivf-flat.nlist", 1);
-            try (org.apache.paimon.index.vector.VectorIndexWriter ignored =
-                    new org.apache.paimon.index.vector.VectorIndexWriter(
+            try (org.apache.paimon.index.vector.VectorIndexTrainer ignored =
+                    org.apache.paimon.index.vector.VectorIndexTrainer.create(
                             NativeVectorGlobalIndexerFactory.nativeOptions(
                                     new ArrayType(new FloatType()),
                                     options,
                                     IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
                                     "vec"))) {
-                // Closed immediately; constructing the writer is enough to validate JNI loading.
+                // Closed immediately; constructing the trainer is enough to validate JNI loading.
             }
             return true;
         } catch (Throwable t) {
