@@ -110,7 +110,6 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             f"Expected at most {2 * total_files} DataFileMeta constructions, "
             f"got {construction_count[0]}")
 
-
     def test_add_delete_pair_not_broken_by_early_filter(self):
         """Guard ADD/DELETE merge semantics: when a file is overwritten,
         its ADD and DELETE entries share the same _FIRST_ROW_ID. The early
@@ -135,7 +134,8 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             for nf in m.new_files:
                 nf.first_row_id = 0
         tc.commit(cmts)
-        tw.close(); tc.close()
+        tw.close()
+        tc.close()
 
         # Commit 2: overwrite same row_id 0-9 with new data
         # This creates DELETE(old_file, row_id=0) + ADD(new_file, row_id=0)
@@ -148,7 +148,8 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             for nf in m.new_files:
                 nf.first_row_id = 0
         tc.commit(cmts)
-        tw.close(); tc.close()
+        tw.close()
+        tc.close()
 
         # Commit 3: write file at row_id 100-109 (unrelated, outside query range)
         tw, tc = wb.new_write(), wb.new_commit()
@@ -159,7 +160,8 @@ class TestManifestReadRowRangePerformance(unittest.TestCase):
             for nf in m.new_files:
                 nf.first_row_id = 100
         tc.commit(cmts)
-        tw.close(); tc.close()
+        tw.close()
+        tc.close()
 
         # Query row_id [0, 9]: should return the NEW data, not the old
         predicate = Predicate(method='between', index=None,
