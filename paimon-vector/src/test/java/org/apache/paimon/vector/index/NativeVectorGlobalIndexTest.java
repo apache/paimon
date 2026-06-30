@@ -181,24 +181,33 @@ public class NativeVectorGlobalIndexTest {
     }
 
     @Test
-    public void testTrainingVectorCountUsesOnlyConfiguredSampleLimit() {
-        int oldJavaArrayLimitFor1024Dim =
-                NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH / 1024;
-        int requestedSamples = oldJavaArrayLimitFor1024Dim + 1;
+    public void testTrainingVectorCountUsesConfiguredSampleRatio() {
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 1.0))
+                .isEqualTo(10_000);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 0.25))
+                .isEqualTo(2_500);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(3L, 0.01)).isEqualTo(1);
+        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(0L, 0.25)).isEqualTo(0);
 
-        assertThat(
-                        NativeVectorGlobalIndexWriter.trainingVectorCount(
-                                requestedSamples, requestedSamples))
-                .isEqualTo(requestedSamples);
-        assertThat(NativeVectorGlobalIndexWriter.trainingVectorCount(10_000L, 64)).isEqualTo(64);
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.trainingVectorCount(10L, 1.1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("less than or equal to 1");
     }
 
     @Test
-    public void testTrainingBatchSizeProtectsSingleJavaArrayAllocation() {
+    public void testVectorBatchSizeProtectsSingleJavaArrayAllocation() {
         assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 128)).isEqualTo(4096);
+        assertThat(NativeVectorGlobalIndexWriter.vectorBatchSize(10000, 128)).isEqualTo(10000);
         assertThat(
                         NativeVectorGlobalIndexWriter.vectorBatchSize(
                                 4096, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
+                .isEqualTo(1);
+        assertThat(
+                        NativeVectorGlobalIndexWriter.vectorBatchSize(
+                                10000, NativeVectorGlobalIndexWriter.MAX_FLOAT_ARRAY_LENGTH))
                 .isEqualTo(1);
         assertThatThrownBy(() -> NativeVectorGlobalIndexWriter.vectorBatchSize(4096, 0))
                 .isInstanceOf(IllegalArgumentException.class)

@@ -219,66 +219,66 @@ public class NativeVectorGlobalIndexerFactoryTest {
     }
 
     @Test
-    public void testTrainMaxSamplesDefaultAndOverrides() {
+    public void testTrainSampleRatioDefaultAndOverrides() {
         Options options = new Options();
 
         assertThat(
-                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                        NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                 options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
-                .isEqualTo(NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_MAX_SAMPLES);
+                .isEqualTo(NativeVectorGlobalIndexerFactory.DEFAULT_TRAIN_SAMPLE_RATIO);
 
-        options.setString("ivf-flat.train.max-samples", "1024");
+        options.setString("ivf-flat.train.sample-ratio", "0.25");
         assertThat(
-                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                        NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                 options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
-                .isEqualTo(1024);
+                .isEqualTo(0.25);
 
-        options.setString("fields.vec.train.max-samples", "2048");
+        options.setString("fields.vec.train.sample-ratio", "0.5");
         assertThat(
-                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                        NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                 options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "vec"))
-                .isEqualTo(2048);
+                .isEqualTo(0.5);
 
         assertThat(
-                        NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                        NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                 options, IvfFlatVectorGlobalIndexerFactory.IDENTIFIER, "other"))
-                .isEqualTo(1024);
+                .isEqualTo(0.25);
     }
 
     @Test
-    public void testInvalidTrainMaxSamples() {
+    public void testInvalidTrainSampleRatio() {
         Options options = new Options();
-        options.setString("ivf-flat.train.max-samples", "0");
+        options.setString("ivf-flat.train.sample-ratio", "0");
 
         assertThatThrownBy(
                         () ->
-                                NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                         options,
                                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
                                         "vec"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ivf-flat.train.max-samples")
-                .hasMessageContaining("positive integer");
+                .hasMessageContaining("ivf-flat.train.sample-ratio")
+                .hasMessageContaining("greater than 0");
 
-        options.setString("fields.vec.train.max-samples", "bad");
+        options.setString("fields.vec.train.sample-ratio", "bad");
         assertThatThrownBy(
                         () ->
-                                NativeVectorGlobalIndexerFactory.trainMaxSamples(
+                                NativeVectorGlobalIndexerFactory.trainSampleRatio(
                                         options,
                                         IvfFlatVectorGlobalIndexerFactory.IDENTIFIER,
                                         "vec"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("fields.vec.train.max-samples")
-                .hasMessageContaining("positive integer");
+                .hasMessageContaining("fields.vec.train.sample-ratio")
+                .hasMessageContaining("less than or equal to 1");
     }
 
     @Test
-    public void testTrainMaxSamplesIsNotNativeOption() {
+    public void testTrainSampleRatioIsNotNativeOption() {
         Options options = new Options();
         options.setString("ivf-flat.dimension", "32");
         options.setString("ivf-flat.nlist", "128");
-        options.setString("ivf-flat.train.max-samples", "1024");
-        options.setString("fields.vec.train.max-samples", "2048");
+        options.setString("ivf-flat.train.sample-ratio", "0.25");
+        options.setString("fields.vec.train.sample-ratio", "0.5");
 
         Map<String, String> nativeOptions =
                 NativeVectorGlobalIndexerFactory.nativeOptions(
@@ -290,6 +290,6 @@ public class NativeVectorGlobalIndexerFactoryTest {
         assertThat(nativeOptions)
                 .containsEntry("dimension", "32")
                 .containsEntry("nlist", "128")
-                .doesNotContainKey("train.max-samples");
+                .doesNotContainKey("train.sample-ratio");
     }
 }

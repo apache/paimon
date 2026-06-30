@@ -32,8 +32,8 @@ import java.util.Map;
 public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerFactory {
 
     private static final int DEFAULT_DIMENSION = 128;
-    static final String TRAIN_MAX_SAMPLES_OPTION = "train.max-samples";
-    static final int DEFAULT_TRAIN_MAX_SAMPLES = 65536;
+    static final String TRAIN_SAMPLE_RATIO_OPTION = "train.sample-ratio";
+    static final double DEFAULT_TRAIN_SAMPLE_RATIO = 1.0;
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
@@ -42,7 +42,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
                 field.type(),
                 nativeOptions(field.type(), options, identifier, field.name()),
                 identifier,
-                trainMaxSamples(options, identifier, field.name()));
+                trainSampleRatio(options, identifier, field.name()));
     }
 
     static Map<String, String> nativeOptions(
@@ -81,30 +81,34 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         return nativeOptions;
     }
 
-    static int trainMaxSamples(Options tableOptions, String identifier, String fieldName) {
+    static double trainSampleRatio(Options tableOptions, String identifier, String fieldName) {
         Map<String, String> tableOptionsMap = tableOptions.toMap();
         String key =
                 resolveFieldOverriddenKey(
-                        tableOptionsMap, identifier, fieldName, TRAIN_MAX_SAMPLES_OPTION);
+                        tableOptionsMap, identifier, fieldName, TRAIN_SAMPLE_RATIO_OPTION);
         if (key == null) {
-            return DEFAULT_TRAIN_MAX_SAMPLES;
+            return DEFAULT_TRAIN_SAMPLE_RATIO;
         }
         String value = tableOptionsMap.get(key);
 
         try {
-            int parsed = Integer.parseInt(value.trim());
-            if (parsed > 0) {
+            double parsed = Double.parseDouble(value.trim());
+            if (!Double.isNaN(parsed) && !Double.isInfinite(parsed) && parsed > 0 && parsed <= 1) {
                 return parsed;
             }
-            throw invalidTrainMaxSamples(key, value);
+            throw invalidTrainSampleRatio(key, value);
         } catch (NumberFormatException e) {
-            throw invalidTrainMaxSamples(key, value);
+            throw invalidTrainSampleRatio(key, value);
         }
     }
 
-    private static IllegalArgumentException invalidTrainMaxSamples(String key, String value) {
+    private static IllegalArgumentException invalidTrainSampleRatio(String key, String value) {
         return new IllegalArgumentException(
-                "Invalid value for '" + key + "': " + value + ". Must be a positive integer.");
+                "Invalid value for '"
+                        + key
+                        + "': "
+                        + value
+                        + ". Must be greater than 0 and less than or equal to 1.");
     }
 
     /**
@@ -115,7 +119,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
      *
      * <p>This is the same index/field precedence applied in bulk by {@link #nativeOptions}; the
      * difference is that this helper resolves a single option so it can stay local (for example
-     * {@code train.max-samples}) instead of being forwarded to the native writer.
+     * {@code train.sample-ratio}) instead of being forwarded to the native writer.
      */
     private static String resolveFieldOverriddenKey(
             Map<String, String> tableOptionsMap,
