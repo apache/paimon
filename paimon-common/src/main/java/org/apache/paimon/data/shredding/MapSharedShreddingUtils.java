@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -102,6 +103,38 @@ public class MapSharedShreddingUtils {
         return new RowType(logicalSchema.isNullable(), physicalFields);
     }
 
+    public static RowType buildPhysicalReadType(
+            RowType logicalReadType,
+            Map<String, MapSharedShreddingFieldMeta> sharedShreddingFieldMetas) {
+        if (sharedShreddingFieldMetas.isEmpty()) {
+            return logicalReadType;
+        }
+
+        List<DataField> physicalReadFields = new ArrayList<>();
+        boolean converted = false;
+        for (DataField logicalReadField : logicalReadType.getFields()) {
+            MapSharedShreddingFieldMeta fieldMeta =
+                    sharedShreddingFieldMetas.get(logicalReadField.name());
+            if (fieldMeta == null || !(logicalReadField.type() instanceof MapType)) {
+                physicalReadFields.add(logicalReadField);
+                continue;
+            }
+
+            MapType mapType = (MapType) logicalReadField.type();
+            DataType physicalType =
+                    buildSpecificPhysicalStructType(
+                                    mapType.getValueType(),
+                                    fieldMeta.numColumns(),
+                                    !fieldMeta.overflowFieldSet().isEmpty())
+                            .copy(logicalReadField.type().isNullable());
+            physicalReadFields.add(logicalReadField.newType(physicalType));
+            converted = true;
+        }
+        return converted
+                ? new RowType(logicalReadType.isNullable(), physicalReadFields)
+                : logicalReadType;
+    }
+
     public static Map<String, Integer> buildColumnToNumColumns(
             List<String> shreddingFieldNames, CoreOptions options) {
         Map<String, Integer> fieldToNumColumns = new HashMap<>();
@@ -113,8 +146,8 @@ public class MapSharedShreddingUtils {
 
     public static void serializeMetadata(
             MapSharedShreddingFieldMeta fieldMeta,
-            @Nullable String compression,
-            Map<String, String> metadata) {
+            Map<String, String> metadata,
+            @Nullable String compression) {
         metadata.put(
                 MapShreddingDefine.STORAGE_LAYOUT,
                 MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
@@ -122,14 +155,18 @@ public class MapSharedShreddingUtils {
                 MapSharedShreddingDefine.VERSION,
                 String.valueOf(MapSharedShreddingDefine.CURRENT_VERSION));
 
+        String fieldDictCompression = normalizeFieldDictCompression(compression);
         String fieldDictJson = toJson(new TreeMap<>(fieldMeta.nameToId()));
+        metadata.put(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, fieldDictCompression);
         metadata.put(
                 MapSharedShreddingDefine.FIELD_DICT_ORIGINAL_SIZE,
                 String.valueOf(fieldDictJson.getBytes(StandardCharsets.UTF_8).length));
         metadata.put(
                 MapSharedShreddingDefine.FIELD_DICT,
                 bytesToString(
-                        compress(fieldDictJson.getBytes(StandardCharsets.UTF_8), compression)));
+                        compress(
+                                fieldDictJson.getBytes(StandardCharsets.UTF_8),
+                                fieldDictCompression)));
         metadata.put(
                 MapSharedShreddingDefine.FIELD_COLUMNS,
                 toJson(sortedFieldColumns(fieldMeta.fieldToColumns())));
@@ -142,7 +179,7 @@ public class MapSharedShreddingUtils {
     }
 
     public static MapSharedShreddingFieldMeta deserializeMetadata(
-            @Nullable Map<String, String> metadata, @Nullable String compression) {
+            @Nullable Map<String, String> metadata) {
         if (!hasShreddingMetadata(metadata)) {
             throw new IllegalArgumentException(
                     "metadata is null or storage layout is not shared-shredding");
@@ -162,7 +199,9 @@ public class MapSharedShreddingUtils {
                 decompress(
                         stringToBytes(requiredValue(metadata, MapSharedShreddingDefine.FIELD_DICT)),
                         originalLength,
-                        compression);
+                        metadata.getOrDefault(
+                                MapSharedShreddingDefine.FIELD_DICT_COMPRESSION,
+                                MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION));
         Map<String, Integer> nameToId =
                 fromJson(
                         new String(fieldDictBytes, StandardCharsets.UTF_8),
@@ -195,6 +234,19 @@ public class MapSharedShreddingUtils {
             builder.field(MapSharedShreddingDefine.physicalColumnName(i), valueType);
         }
         builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        return builder.build();
+    }
+
+    private static RowType buildSpecificPhysicalStructType(
+            DataType valueType, int numColumns, boolean includeOverflow) {
+        RowType.Builder builder = RowType.builder();
+        builder.field(MapSharedShreddingDefine.FIELD_MAPPING, new ArrayType(new IntType()));
+        for (int i = 0; i < numColumns; i++) {
+            builder.field(MapSharedShreddingDefine.physicalColumnName(i), valueType);
+        }
+        if (includeOverflow) {
+            builder.field(MapSharedShreddingDefine.OVERFLOW, new MapType(new IntType(), valueType));
+        }
         return builder.build();
     }
 
@@ -235,11 +287,7 @@ public class MapSharedShreddingUtils {
         }
     }
 
-    private static byte[] compress(byte[] input, @Nullable String compression) {
-        if (isNoCompression(compression)) {
-            return input;
-        }
-
+    private static byte[] compress(byte[] input, String compression) {
         BlockCompressionFactory factory =
                 BlockCompressionFactory.create(new CompressOptions(compression, 1));
         if (factory == null) {
@@ -251,12 +299,7 @@ public class MapSharedShreddingUtils {
         return Arrays.copyOf(output, actualSize);
     }
 
-    private static byte[] decompress(
-            byte[] input, int originalLength, @Nullable String compression) {
-        if (isNoCompression(compression)) {
-            return input;
-        }
-
+    private static byte[] decompress(byte[] input, int originalLength, String compression) {
         BlockCompressionFactory factory =
                 BlockCompressionFactory.create(new CompressOptions(compression, 1));
         if (factory == null) {
@@ -270,6 +313,22 @@ public class MapSharedShreddingUtils {
 
     private static boolean isNoCompression(@Nullable String compression) {
         return compression == null || "none".equalsIgnoreCase(compression);
+    }
+
+    private static String normalizeFieldDictCompression(@Nullable String compression) {
+        if (isNoCompression(compression)) {
+            return "none";
+        }
+
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "zstd":
+            case "lz4":
+            case "lzo":
+                return normalized;
+            default:
+                return MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION;
+        }
     }
 
     private static String bytesToString(byte[] bytes) {

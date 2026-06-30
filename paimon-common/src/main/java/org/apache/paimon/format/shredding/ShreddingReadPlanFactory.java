@@ -16,20 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.format.shredding;
 
-import java.io.IOException;
+import org.apache.paimon.data.shredding.ShreddingReadPlan;
+import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
+
 import java.util.Map;
 
-/** Reader capability for formats that can recover top-level field metadata. */
-public interface SupportsReaderFieldMetadata {
+/** Creates per-file shredding read plans from file metadata. */
+public interface ShreddingReadPlanFactory {
 
-    /**
-     * Reads metadata from top-level file fields.
-     *
-     * <p>The returned map is keyed by field name. Each value contains the metadata key-value pairs
-     * attached to that field. Implementations return an empty map when the file does not contain
-     * field metadata.
-     */
-    Map<String, Map<String, String>> readFieldMetadata() throws IOException;
+    RowType logicalRowType();
+
+    boolean shouldCreateReadPlan(
+            Map<String, Map<String, String>> fieldMetadata, @Nullable Object fileSchema);
+
+    ShreddingReadPlan createReadPlan(
+            Map<String, Map<String, String>> fieldMetadata, @Nullable Object fileSchema);
 }

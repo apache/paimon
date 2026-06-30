@@ -45,6 +45,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SetUtils;
@@ -621,6 +622,7 @@ public class SchemaValidation {
             fieldMap.put(field.name(), field);
         }
 
+        boolean hasSharedShredding = false;
         for (String key : options.toMap().keySet()) {
             if (!key.startsWith(FIELDS_PREFIX + ".") || !key.endsWith(layoutSuffix)) {
                 continue;
@@ -650,6 +652,7 @@ public class SchemaValidation {
                 continue;
             }
 
+            hasSharedShredding = true;
             if (!MapSharedShreddingUtils.isShreddingKeyMap(fieldType)) {
                 throw new IllegalArgumentException(
                         String.format(
@@ -657,6 +660,77 @@ public class SchemaValidation {
                                 fieldName));
             }
             options.mapSharedShreddingMaxColumns(fieldName);
+        }
+
+        if (hasSharedShredding) {
+            validateMapSharedShreddingFileFormats(options);
+            validateNoVariantWithMapSharedShredding(schema);
+            if (!schema.primaryKeys().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently only supports append-only tables.");
+            }
+            if (options.bucket() != -1 && !options.writeOnly()) {
+                throw new IllegalArgumentException(
+                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+            }
+        }
+    }
+
+    private static void validateNoVariantWithMapSharedShredding(TableSchema schema) {
+        if (containsVariantFields(new RowType(schema.fields()))) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with Variant fields.");
+        }
+    }
+
+    private static boolean containsVariantFields(DataType dataType) {
+        if (dataType instanceof VariantType) {
+            return true;
+        }
+        if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                if (containsVariantFields(field.type())) {
+                    return true;
+                }
+            }
+        } else if (dataType instanceof ArrayType) {
+            return containsVariantFields(((ArrayType) dataType).getElementType());
+        } else if (dataType instanceof MultisetType) {
+            return containsVariantFields(((MultisetType) dataType).getElementType());
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            return containsVariantFields(mapType.getKeyType())
+                    || containsVariantFields(mapType.getValueType());
+        } else if (dataType instanceof VectorType) {
+            return containsVariantFields(((VectorType) dataType).getElementType());
+        }
+        return false;
+    }
+
+    private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.FILE_FORMAT.key(), options.fileFormatString());
+        for (Map.Entry<Integer, String> entry : options.fileFormatPerLevel().entrySet()) {
+            validateMapSharedShreddingFileFormat(
+                    CoreOptions.FILE_FORMAT_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
+        validateMapSharedShreddingFileFormat(
+                CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
+    }
+
+    private static void validateMapSharedShreddingFileFormat(String optionKey, String format) {
+        if (StringUtils.isEmpty(format)) {
+            return;
+        }
+        if (!CoreOptions.FILE_FORMAT_PARQUET.equals(format)
+                && !CoreOptions.FILE_FORMAT_ORC.equals(format)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports parquet/orc file formats, but %s is %s.",
+                            optionKey, format));
         }
     }
 
@@ -700,6 +774,11 @@ public class SchemaValidation {
                                 + "Only CHAR/VARCHAR/STRING is supported.",
                         columnName,
                         keyType);
+                checkArgument(
+                        options.mapStorageLayout(columnName) != MapStorageLayout.SHARED_SHREDDING,
+                        "Column '%s' is configured with map.storage-layout=shared-shredding, "
+                                + "which does not support nested file index.",
+                        columnName);
             }
 
             for (String indexType : entry.getValue().keySet()) {

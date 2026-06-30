@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.data.shredding.MapShreddingDefine;
@@ -32,7 +31,7 @@ import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.SupportsReaderFieldMetadata;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.orc.OrcFileFormat;
 import org.apache.paimon.format.orc.OrcTypeUtil;
 import org.apache.paimon.format.parquet.ParquetFileFormat;
@@ -41,7 +40,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -70,7 +68,7 @@ class ShreddingWritePlanFormatTest {
         Map<String, Map<String, String>> fieldMetadata =
                 writeAndReadFieldMetadata(format, "parquet", "none");
 
-        assertMapSharedShreddingMetadata(fieldMetadata, "none");
+        assertMapSharedShreddingMetadata(fieldMetadata);
         assertThat(fieldMetadata.get("id"))
                 .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0");
         assertThat(fieldMetadata.get("tags"))
@@ -85,7 +83,7 @@ class ShreddingWritePlanFormatTest {
         Map<String, Map<String, String>> fieldMetadata =
                 writeAndReadFieldMetadata(format, "orc", "none");
 
-        assertMapSharedShreddingMetadata(fieldMetadata, "none");
+        assertMapSharedShreddingMetadata(fieldMetadata);
         assertThat(fieldMetadata.get("id")).containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "0");
         assertThat(fieldMetadata.get("tags"))
                 .containsEntry(OrcTypeUtil.PAIMON_ORC_FIELD_ID_KEY, "1");
@@ -106,14 +104,9 @@ class ShreddingWritePlanFormatTest {
         writer.close();
         out.close();
 
-        RowType emptyRowType = new RowType(Collections.emptyList());
         FormatReaderContext readerContext =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        try (FileRecordReader<InternalRow> reader =
-                format.createReaderFactory(emptyRowType, emptyRowType, Collections.emptyList())
-                        .createReader(readerContext)) {
-            return ((SupportsReaderFieldMetadata) reader).readFieldMetadata();
-        }
+        return ((SupportsFieldMetadata) format).readFieldMetadata(readerContext);
     }
 
     private static RowType logicalRowType() {
@@ -130,7 +123,7 @@ class ShreddingWritePlanFormatTest {
     }
 
     private static void assertMapSharedShreddingMetadata(
-            Map<String, Map<String, String>> fieldMetadata, String compression) {
+            Map<String, Map<String, String>> fieldMetadata) {
         assertThat(fieldMetadata).containsKey("tags");
         assertThat(fieldMetadata.get("tags"))
                 .containsEntry(
@@ -138,7 +131,7 @@ class ShreddingWritePlanFormatTest {
                         MapShreddingDefine.STORAGE_LAYOUT_SHARED_SHREDDING);
 
         MapSharedShreddingFieldMeta fieldMeta =
-                MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get("tags"), compression);
+                MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get("tags"));
         assertThat(fieldMeta.nameToId())
                 .containsEntry("a", 0)
                 .containsEntry("b", 1)
