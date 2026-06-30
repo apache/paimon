@@ -104,11 +104,15 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
 def _build_early_row_range_filter(row_ranges):
     """Skip entries whose row-id range doesn't intersect ``row_ranges``.
 
-    Runs on the raw fastavro record dict before constructing
-    DataFileMeta/BinaryRow/SimpleStats. Safe for DELETE entries because
-    ADD and DELETE for the same file share the same ``_FIRST_ROW_ID``.
+    Runs on the raw fastavro record (OrderedDict) before the expensive
+    Python object construction (BinaryRow, GenericRow, SimpleStats,
+    DataFileMeta). fastavro has already parsed the Avro bytes; this
+    filter avoids the construction cost, not I/O or parsing.
+
+    Safe for DELETE entries because ADD and DELETE for the same file
+    share the same ``_FIRST_ROW_ID``.
     """
-    if row_ranges is None:
+    if row_ranges is None or not row_ranges:
         return None
 
     from pypaimon.utils.range import Range

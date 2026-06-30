@@ -97,7 +97,9 @@ class ManifestFileManager:
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
-        early_record_filter: ``(record) -> bool``, skip before constructing DataFileMeta.
+        early_record_filter: ``(fastavro record dict) -> bool``, skip before constructing
+            DataFileMeta. Separate from early_entry_filter because it operates on the full
+            record (can inspect _FILE sub-fields) rather than just bucket/total_buckets.
         """
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
