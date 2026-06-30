@@ -212,19 +212,38 @@ class _PaimonPKSplitTask(DataSourceTask):
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
 
+        blob_io_config = self._blob_io_config_bytes(table) if self._blob_column_names else None
         reader = read_builder.new_read().to_arrow_batch_reader([self._split])
         for batch in iter(reader.read_next_batch, None):
             if self._output_columns is not None:
                 batch = batch.select(self._output_columns)
             if self._blob_column_names:
-                batch = _convert_blob_columns(batch, self._blob_column_names)
+                batch = _convert_blob_columns(batch, self._blob_column_names, blob_io_config)
             rb = RecordBatch.from_arrow_record_batches([batch], batch.schema)
             if self._blob_column_names:
                 rb = _cast_blob_columns_to_file(rb, self._blob_column_names)
             yield rb
 
+    def _blob_io_config_bytes(self, table: FileStoreTable) -> bytes | None:
+        """Serialized IOConfig embedded into blob File columns so native Daft File ops
+        carry object-store credentials. Built from the just-loaded table so REST/DLF STS
+        tokens are refreshed at read time rather than frozen at plan time."""
+        from pypaimon.daft.daft_io_config import (
+            _convert_paimon_catalog_options_to_io_config,
+            serialize_io_config,
+        )
+        from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
 
-def _convert_blob_columns(batch: pa.RecordBatch, blob_column_names: set[str]) -> pa.RecordBatch:
+        enriched = _enrich_options_with_rest_token(self._table_catalog_options, table)
+        io_config = _convert_paimon_catalog_options_to_io_config(enriched)
+        return serialize_io_config(io_config) if io_config is not None else None
+
+
+def _convert_blob_columns(
+    batch: pa.RecordBatch,
+    blob_column_names: set[str],
+    io_config_bytes: bytes | None = None,
+) -> pa.RecordBatch:
     """Replace serialized BlobDescriptor columns with the File physical struct layout."""
     from pypaimon.daft.daft_blob import FILE_PHYSICAL_TYPE, blob_column_to_file_array
 
@@ -233,7 +252,7 @@ def _convert_blob_columns(batch: pa.RecordBatch, blob_column_names: set[str]) ->
     for i, field in enumerate(batch.schema):
         col = batch.column(i)
         if field.name in blob_column_names and (pa.types.is_large_binary(field.type) or pa.types.is_binary(field.type)):
-            arrays.append(blob_column_to_file_array(col))
+            arrays.append(blob_column_to_file_array(col, io_config_bytes))
             fields.append(pa.field(field.name, FILE_PHYSICAL_TYPE, nullable=field.nullable))
         else:
             arrays.append(col)

@@ -23,6 +23,15 @@ from urllib.parse import urlparse
 from daft.io import IOConfig, S3Config
 
 
+def serialize_io_config(io_config: IOConfig) -> bytes:
+    """Serialize an IOConfig to the bytes layout Daft's File physical struct expects.
+
+    Daft pickles IOConfig via ``__reduce__`` -> ``(IOConfig._from_serialized, (bytes,))``;
+    those bytes are exactly what the File struct's ``io_config`` field is deserialized from.
+    """
+    return io_config.__reduce__()[1][0]
+
+
 def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]) -> IOConfig | None:
     """Convert pypaimon catalog options to Daft IOConfig.
 
