@@ -277,4 +277,23 @@ public class SparkFilterConverterTest {
         assertThat(converter.convert(not, true)).isNull();
         assertThat(converter.convertIgnoreFailure(not)).isNull();
     }
+
+    @Test
+    public void testNestedField() {
+        RowType nestedType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "b", new IntType()),
+                                new DataField(1, "c", new VarCharType(10))));
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "a", nestedType)));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+
+        EqualTo eq = EqualTo.apply("a.b", 1);
+        Predicate actual = converter.convert(eq);
+        assertThat(actual.toString()).isEqualTo("Equal(a.b, 1)");
+
+        IsNull isNull = IsNull.apply("a.c");
+        Predicate actualIsNull = converter.convert(isNull);
+        assertThat(actualIsNull.toString()).isEqualTo("IsNull(a.c)");
+    }
 }
