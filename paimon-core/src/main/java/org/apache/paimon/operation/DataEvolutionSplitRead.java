@@ -553,6 +553,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         return new ApplyDeletionVectorReader(
                 reader,
                 deletionVector.deletionVector,
+                // Convert anchor-range DV positions to this reader's local returned positions.
                 readerRange.from - deletionVector.range.from);
     }
 

@@ -21,8 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Comparator;
 import java.util.function.Function;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -33,31 +32,30 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class DataEvolutionUtils {
 
     /**
-     * Retrieve the anchor file of a row range group. Always the oldest normal file. Note that in
-     * current framework, it's impossible to have multiple normal files with same max_seq_num.
+     * Retrieve the anchor file of a row range group. Always the oldest normal file. Files are
+     * compared by (max_seq, fileName) pairs.
      */
     public static <T> T retrieveAnchorFile(
             Collection<T> entries, Function<T, DataFileMeta> fileMetaFunc) {
         T anchor = null;
-        long min = Long.MAX_VALUE;
-        Set<Long> maxSequenceNumbers = new HashSet<>();
+        DataFileMeta minMeta = null;
+
+        Comparator<DataFileMeta> fileComparator =
+                Comparator.comparingLong(DataFileMeta::maxSequenceNumber)
+                        .thenComparing(DataFileMeta::fileName);
+
         for (T entry : entries) {
             DataFileMeta meta = fileMetaFunc.apply(entry);
             if (isBlobFile(meta.fileName()) || isVectorStoreFile(meta.fileName())) {
                 continue;
             }
 
-            long maxSequenceNumber = meta.maxSequenceNumber();
-            checkState(
-                    maxSequenceNumbers.add(maxSequenceNumber),
-                    "More than one normal data file has the same max sequence number %s "
-                            + "in a data-evolution row range group.",
-                    maxSequenceNumber);
-            if (maxSequenceNumber < min) {
+            if (minMeta == null || fileComparator.compare(meta, minMeta) < 0) {
+                minMeta = meta;
                 anchor = entry;
-                min = maxSequenceNumber;
             }
         }
+
         checkState(
                 anchor != null,
                 "Data-evolution deletion vectors should have a normal anchor file in each row range group.");

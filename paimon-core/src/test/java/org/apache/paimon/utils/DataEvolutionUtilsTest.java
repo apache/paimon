@@ -62,16 +62,15 @@ public class DataEvolutionUtilsTest {
     }
 
     @Test
-    public void testRetrieveAnchorFileFailsWithDuplicatedMaxSequenceNumber() {
-        assertThatThrownBy(
-                        () ->
-                                DataEvolutionUtils.retrieveAnchorFile(
-                                        Arrays.asList(
-                                                dataFile("normal-1.parquet", 1),
-                                                dataFile("normal-2.parquet", 1)),
-                                        Function.identity()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("same max sequence number 1");
+    public void testRetrieveAnchorFileTieBreaksWithFileName() {
+        DataFileMeta largerFileName = dataFile("normal-2.parquet", 1);
+        DataFileMeta smallerFileName = dataFile("normal-1.parquet", 1);
+
+        assertThat(
+                        DataEvolutionUtils.retrieveAnchorFile(
+                                Arrays.asList(largerFileName, smallerFileName),
+                                Function.identity()))
+                .isSameAs(smallerFileName);
     }
 
     private static DataFileMeta dataFile(String fileName, long maxSequenceNumber) {

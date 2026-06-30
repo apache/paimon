@@ -32,32 +32,33 @@ public class ApplyDeletionVectorReader implements FileRecordReader<InternalRow> 
 
     private final FileRecordReader<InternalRow> reader;
 
-    private final DeletionVector deletionVector;
-
-    /**
-     * The file offset of this reader comparing to the deletion vector. This is useful in
-     * data-evolution scenario, where a blob/vector file may only cover a partial range of the
-     * deletion vector.
-     */
-    private final long fileOffset;
+    private final DeletionVectorJudger deletionVector;
 
     public ApplyDeletionVectorReader(
             FileRecordReader<InternalRow> reader, DeletionVector deletionVector) {
         this(reader, deletionVector, 0L);
     }
 
+    /**
+     * @param fileOffset offset from this reader's local returned position to the deletion vector
+     *     position. The wrapped judger is converted to reader-local positions here, so both {@link
+     *     ApplyDeletionFileRecordIterator#next()} and external consumers of {@link
+     *     DeletionFileRecordIterator#deletionVector()} use the same position mapping.
+     */
     public ApplyDeletionVectorReader(
             FileRecordReader<InternalRow> reader, DeletionVector deletionVector, long fileOffset) {
         this.reader = reader;
-        this.deletionVector = deletionVector;
-        this.fileOffset = fileOffset;
+        this.deletionVector =
+                fileOffset == 0
+                        ? deletionVector
+                        : position -> deletionVector.isDeleted(fileOffset + position);
     }
 
     public RecordReader<InternalRow> reader() {
         return reader;
     }
 
-    public DeletionVector deletionVector() {
+    public DeletionVectorJudger deletionVector() {
         return deletionVector;
     }
 
@@ -70,7 +71,7 @@ public class ApplyDeletionVectorReader implements FileRecordReader<InternalRow> 
             return null;
         }
 
-        return new ApplyDeletionFileRecordIterator(batch, deletionVector, fileOffset);
+        return new ApplyDeletionFileRecordIterator(batch, deletionVector);
     }
 
     @Override
