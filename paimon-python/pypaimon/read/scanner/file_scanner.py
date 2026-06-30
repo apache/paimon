@@ -101,6 +101,31 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
     return visit(predicate)
 
 
+def _build_early_row_range_filter(row_ranges):
+    """Skip Avro records whose row-id range doesn't intersect row_ranges."""
+    if row_ranges is None:
+        return None
+
+    def _filter(record):
+        file_dict = record.get('_FILE')
+        if file_dict is None:
+            return True
+        first_row_id = file_dict.get('_FIRST_ROW_ID')
+        if first_row_id is None:
+            return True
+        row_count = file_dict.get('_ROW_COUNT')
+        if row_count is None:
+            return True
+        file_start = int(first_row_id)
+        file_end = file_start + int(row_count) - 1
+        for r in row_ranges:
+            if file_start <= r.to and file_end >= r.from_:
+                return True
+        return False
+
+    return _filter
+
+
 def _filter_manifest_files_by_row_ranges(
         manifest_files: List[ManifestFileMeta],
         row_ranges: List) -> List[ManifestFileMeta]:
@@ -341,7 +366,7 @@ class FileScanner:
         if row_ranges is not None:
             manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
 
-        entries = self.read_manifest_entries(manifest_files)
+        entries = self.read_manifest_entries(manifest_files, row_ranges=row_ranges)
 
         if row_ranges is not None:
             entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
@@ -391,7 +416,8 @@ class FileScanner:
         except Exception:
             return None
 
-    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
+    def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],
+                              row_ranges=None) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if self.scan_stats is not None:
             self.scan_stats.manifest_files_total += len(manifest_files)
@@ -407,11 +433,17 @@ class FileScanner:
             self.scan_stats.manifest_files_after_partition += len(manifest_files)
             # Force single-threaded so we can mutate stats without locking.
             max_workers = 1
+        # Disable early_record_filter when scan_stats is active (explain mode)
+        # so that all entries flow through _filter_manifest_entry for accurate
+        # funnel counting.
+        early_row_filter = None if self.scan_stats is not None \
+            else _build_early_row_range_filter(row_ranges)
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
             self._filter_manifest_entry,
             max_workers=max_workers,
             early_entry_filter=self._build_early_bucket_filter(),
+            early_record_filter=early_row_filter,
         )
 
     def _build_early_bucket_filter(self):
