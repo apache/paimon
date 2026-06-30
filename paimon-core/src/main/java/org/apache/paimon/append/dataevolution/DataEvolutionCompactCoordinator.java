@@ -118,7 +118,7 @@ public class DataEvolutionCompactCoordinator {
 
     public List<DataEvolutionCompactTask> plan() {
         if (deletionVectorsEnabled) {
-            return Collections.emptyList();
+            throw new EndOfScanException();
         }
 
         // scan files in snapshot

@@ -201,6 +201,44 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         "14|name-14|updated-14|14");
     }
 
+    @Test
+    public void testLimitPushDownWithHeavilyDeletedFirstRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        assertBaseFileLayout(table);
+        commitDeletionVectors(
+                table, Collections.singletonList(new DvSpec(new Range(0, 4), 1, 2, 3, 4)));
+
+        table = getTableDefault();
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 B");
+        dynamicOptions.put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1 B");
+        table = table.copy(dynamicOptions);
+
+        ReadBuilder readBuilder = table.newReadBuilder().withLimit(2);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        List<DataSplit> splits =
+                plan.splits().stream()
+                        .map(DataEvolutionDeletionVectorTest::toDataSplit)
+                        .sorted(Comparator.comparingLong(split -> splitRowRange(split).from))
+                        .collect(Collectors.toList());
+
+        // Limit pushdown works at split level. If the first split's DV cardinality is ignored,
+        // limit=2 would incorrectly keep only the first split even though it has one visible row.
+        assertThat(splits).hasSize(2);
+        assertThat(splits.get(0).mergedRowCount()).hasValue(1L);
+        assertThat(splits.get(1).mergedRowCount()).hasValue(5L);
+        assertThat(readRows(table.newReadBuilder(), plan))
+                .containsExactly(
+                        "0|name-0|base-0|0",
+                        "5|name-5|base-5|5",
+                        "6|name-6|base-6|6",
+                        "7|name-7|base-7|7",
+                        "8|name-8|base-8|8",
+                        "9|name-9|base-9|9");
+    }
+
     @Override
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();

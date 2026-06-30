@@ -143,6 +143,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (inputFilter != null
                 || limit == null
                 || limit <= 0
+                || deletionVectorsEnabled
                 || !allContainsRowId(manifestFiles)) {
             return super.readManifestEntries(manifestFiles, useSequential);
         }

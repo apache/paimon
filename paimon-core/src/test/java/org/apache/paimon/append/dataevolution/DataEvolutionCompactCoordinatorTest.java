@@ -34,6 +34,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -556,8 +557,9 @@ public class DataEvolutionCompactCoordinatorTest {
     }
 
     @Test
-    public void testPlanReturnsNoTaskWhenDeletionVectorsEnabled() {
+    public void testPlanEndsScanWhenDeletionVectorsEnabled() {
         Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
         options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
         FileStoreTable table = mock(FileStoreTable.class);
         when(table.coreOptions()).thenReturn(new CoreOptions(options));
@@ -565,7 +567,7 @@ public class DataEvolutionCompactCoordinatorTest {
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, false, false);
 
-        assertThat(coordinator.plan()).isEmpty();
+        assertThatThrownBy(coordinator::plan).isInstanceOf(EndOfScanException.class);
     }
 
     @Test
