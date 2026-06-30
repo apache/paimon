@@ -37,6 +37,29 @@ class SortedIndexFileMeta:
     def only_nulls(self) -> bool:
         return self.first_key is None and self.last_key is None
 
+    def serialize(self) -> bytes:
+        result = bytearray()
+        null_key_flags = 0
+
+        if self.first_key is None:
+            result.extend(struct.pack('<I', 0))
+            null_key_flags |= self.FIRST_KEY_IS_NULL
+        else:
+            result.extend(struct.pack('<I', len(self.first_key)))
+            result.extend(self.first_key)
+
+        if self.last_key is None:
+            result.extend(struct.pack('<I', 0))
+            null_key_flags |= self.LAST_KEY_IS_NULL
+        else:
+            result.extend(struct.pack('<I', len(self.last_key)))
+            result.extend(self.last_key)
+
+        result.extend(struct.pack('<B', 1 if self.has_nulls else 0))
+        result.extend(struct.pack('<B', self.FORMAT_VERSION_WITH_NULL_FLAGS))
+        result.extend(struct.pack('<B', null_key_flags))
+        return bytes(result)
+
     @classmethod
     def deserialize(cls, data: bytes) -> 'SortedIndexFileMeta':
         offset = 0

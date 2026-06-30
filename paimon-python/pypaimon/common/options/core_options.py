@@ -20,6 +20,7 @@ import warnings
 from datetime import timedelta
 from enum import Enum
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -646,6 +647,16 @@ class CoreOptions:
         )
     )
 
+    GLOBAL_INDEX_EXTERNAL_PATH: ConfigOption[str] = (
+        ConfigOptions.key("global-index.external-path")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Global index root directory. If not set, global index files are "
+            "stored under the table index directory."
+        )
+    )
+
     GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
         ConfigOptions.key("global-index.thread-num")
         .int_type()
@@ -672,6 +683,29 @@ class CoreOptions:
         .default_value(MemorySize.of_mebi_bytes(256))
         .with_description(
             "The maximum total BTree global index file size to allow fallback index scans."
+        )
+    )
+
+    BTREE_INDEX_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("btree-index.block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(64))
+        .with_description("The block size to use for BTree global indexes.")
+    )
+
+    SORTED_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("sorted-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description("The expected number of records per sorted global index file.")
+    )
+
+    BTREE_INDEX_RECORDS_PER_RANGE: ConfigOption[int] = (
+        ConfigOptions.key("btree-index.records-per-range")
+        .long_type()
+        .default_value(10_000_000)
+        .with_description(
+            "The expected number of records per BTree global index file."
         )
     )
 
@@ -1149,6 +1183,17 @@ class CoreOptions:
     def global_index_search_mode(self):
         return self.options.get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE)
 
+    def global_index_external_path(self, default=None):
+        value = self.options.get(CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH, default)
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        if not urlparse(value).scheme:
+            raise ValueError("scheme should not be null: %s" % value)
+        return value
+
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
 
@@ -1156,6 +1201,14 @@ class CoreOptions:
         return self.options.get(
             CoreOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
+
+    def btree_index_block_size(self) -> int:
+        return self.options.get(CoreOptions.BTREE_INDEX_BLOCK_SIZE).get_bytes()
+
+    def sorted_index_records_per_range(self) -> int:
+        if self.options.contains(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE):
+            return self.options.get(CoreOptions.SORTED_INDEX_RECORDS_PER_RANGE)
+        return self.options.get(CoreOptions.BTREE_INDEX_RECORDS_PER_RANGE)
 
     def bitmap_index_fallback_scan_max_size(self) -> int:
         return self.options.get(
