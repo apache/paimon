@@ -21,8 +21,10 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
@@ -127,6 +129,58 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 .containsEntry(1, javaMapOf("x", 21L, "y", 22L, "z", 23L))
                 .containsEntry(2, javaMapOf())
                 .containsEntry(3, javaMapOf("x", 41L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testAppendOnlyTableReadWriteWithComplexValue(String format) throws Exception {
+        Table table = createComplexValueTable(format);
+
+        write(
+                table,
+                GenericRow.of(
+                        1,
+                        complexMapOf(
+                                "a",
+                                complexValue(11L, stringArray("x", "y"), longMapOf("p", 101L)),
+                                "b",
+                                complexValue(12L, stringArray("z"), longMapOf("q", 102L)),
+                                "c",
+                                complexValue(13L, null, longMapOf("r", null)))),
+                GenericRow.of(
+                        2,
+                        complexMapOf(
+                                "overflow",
+                                complexValue(
+                                        null,
+                                        stringArray("overflow-tag"),
+                                        longMapOf("k1", 201L, "k2", 202L)))));
+
+        Map<Integer, Map<String, ComplexValue>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), toJavaComplexMap(row.getMap(1)));
+        }
+
+        assertThat(actual)
+                .containsEntry(
+                        1,
+                        javaComplexMapOf(
+                                "a",
+                                new ComplexValue(
+                                        11L, Arrays.asList("x", "y"), javaMapOf("p", 101L)),
+                                "b",
+                                new ComplexValue(
+                                        12L, Collections.singletonList("z"), javaMapOf("q", 102L)),
+                                "c",
+                                new ComplexValue(13L, null, javaMapOf("r", null))))
+                .containsEntry(
+                        2,
+                        javaComplexMapOf(
+                                "overflow",
+                                new ComplexValue(
+                                        null,
+                                        Collections.singletonList("overflow-tag"),
+                                        javaMapOf("k1", 201L, "k2", 202L))));
     }
 
     @ParameterizedTest
@@ -360,6 +414,37 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return catalog.getTable(identifier(format));
     }
 
+    private Table createComplexValueTable(String format) throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(
+                                        DataTypes.STRING(),
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(0, "count", DataTypes.BIGINT()),
+                                                DataTypes.FIELD(
+                                                        1,
+                                                        "tags",
+                                                        DataTypes.ARRAY(DataTypes.STRING())),
+                                                DataTypes.FIELD(
+                                                        2,
+                                                        "attrs",
+                                                        DataTypes.MAP(
+                                                                DataTypes.STRING(),
+                                                                DataTypes.BIGINT())))))
+                        .option("bucket", "-1")
+                        .option("file.format", format)
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(format));
+    }
+
     private void writeWithWriteType(Table table, RowType writeType, InternalRow... rows)
             throws Exception {
         writeWithWriteType(table, writeType, null, rows);
@@ -474,6 +559,34 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return new GenericMap(map);
     }
 
+    private GenericMap complexMapOf(Object... entries) {
+        Map<BinaryString, GenericRow> map = new LinkedHashMap<>();
+        for (int i = 0; i < entries.length; i += 2) {
+            map.put(BinaryString.fromString((String) entries[i]), (GenericRow) entries[i + 1]);
+        }
+        return new GenericMap(map);
+    }
+
+    private GenericRow complexValue(Long count, GenericArray tags, GenericMap attrs) {
+        return GenericRow.of(count, tags, attrs);
+    }
+
+    private GenericArray stringArray(String... values) {
+        BinaryString[] strings = new BinaryString[values.length];
+        for (int i = 0; i < values.length; i++) {
+            strings[i] = BinaryString.fromString(values[i]);
+        }
+        return new GenericArray(strings);
+    }
+
+    private GenericMap longMapOf(Object... entries) {
+        Map<BinaryString, Long> map = new LinkedHashMap<>();
+        for (int i = 0; i < entries.length; i += 2) {
+            map.put(BinaryString.fromString((String) entries[i]), (Long) entries[i + 1]);
+        }
+        return new GenericMap(map);
+    }
+
     private Map<String, Long> toJavaMap(InternalMap map) {
         Map<String, Long> result = new LinkedHashMap<>();
         for (int i = 0; i < map.size(); i++) {
@@ -488,6 +601,51 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         Map<String, Long> map = new LinkedHashMap<>();
         for (int i = 0; i < entries.length; i += 2) {
             map.put((String) entries[i], (Long) entries[i + 1]);
+        }
+        return map;
+    }
+
+    private Map<String, ComplexValue> toJavaComplexMap(InternalMap map) {
+        Map<String, ComplexValue> result = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(
+                    keys.getString(i).toString(),
+                    values.isNullAt(i) ? null : toJavaComplexValue(values.getRow(i, 3)));
+        }
+        return result;
+    }
+
+    private ComplexValue toJavaComplexValue(InternalRow row) {
+        return new ComplexValue(
+                row.isNullAt(0) ? null : row.getLong(0),
+                row.isNullAt(1) ? null : toJavaStringList(row.getArray(1)),
+                row.isNullAt(2) ? null : toJavaLongMap(row.getMap(2)));
+    }
+
+    private List<String> toJavaStringList(InternalArray array) {
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < array.size(); i++) {
+            result.add(array.isNullAt(i) ? null : array.getString(i).toString());
+        }
+        return result;
+    }
+
+    private Map<String, Long> toJavaLongMap(InternalMap map) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(keys.getString(i).toString(), values.isNullAt(i) ? null : values.getLong(i));
+        }
+        return result;
+    }
+
+    private Map<String, ComplexValue> javaComplexMapOf(Object... entries) {
+        Map<String, ComplexValue> map = new LinkedHashMap<>();
+        for (int i = 0; i < entries.length; i += 2) {
+            map.put((String) entries[i], (ComplexValue) entries[i + 1]);
         }
         return map;
     }
@@ -507,6 +665,43 @@ public class MapSharedShreddingTableTest extends TableTestBase {
             this.partition = partition;
             this.bucket = bucket;
             this.dataFile = dataFile;
+        }
+    }
+
+    private static class ComplexValue {
+
+        private final Long count;
+        private final List<String> tags;
+        private final Map<String, Long> attrs;
+
+        private ComplexValue(Long count, List<String> tags, Map<String, Long> attrs) {
+            this.count = count;
+            this.tags = tags;
+            this.attrs = attrs;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof ComplexValue)) {
+                return false;
+            }
+            ComplexValue that = (ComplexValue) o;
+            return java.util.Objects.equals(count, that.count)
+                    && java.util.Objects.equals(tags, that.tags)
+                    && java.util.Objects.equals(attrs, that.attrs);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(count, tags, attrs);
+        }
+
+        @Override
+        public String toString() {
+            return "ComplexValue{" + "count=" + count + ", tags=" + tags + ", attrs=" + attrs + '}';
         }
     }
 }
