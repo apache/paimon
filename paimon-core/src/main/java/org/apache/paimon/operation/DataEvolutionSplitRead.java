@@ -167,7 +167,9 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         List<DeletionFile> deletionFiles = dataSplit.deletionFiles().orElse(null);
         DeletionVector.Factory deletionVectorFactory =
-                DeletionVector.factory(fileIO, files, deletionFiles);
+                deletionFiles == null || deletionFiles.stream().allMatch(Objects::isNull)
+                        ? null
+                        : DeletionVector.factory(fileIO, files, deletionFiles);
 
         BinaryRow partition = dataSplit.partition();
         DataFilePathFactory dataFilePathFactory =
@@ -556,8 +558,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     @Nullable
     private DeletionVectorWithRange readDeletionVector(
-            List<DataFileMeta> group, DeletionVector.Factory deletionVectorFactory)
+            List<DataFileMeta> group, @Nullable DeletionVector.Factory deletionVectorFactory)
             throws IOException {
+        if (deletionVectorFactory == null) {
+            return null;
+        }
+
         // pack row ranges and deletion vector
         DataFileMeta anchor = retrieveAnchorFile(group, Function.identity());
         Range range = anchor.nonNullRowIdRange();
