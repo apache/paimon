@@ -48,8 +48,8 @@ def _descriptor_column(specs):
     return pa.array(out, type=pa.large_binary())
 
 
-@pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
 class BlobColumnToFileArrayTest(unittest.TestCase):
+    # Pure config/arrow tests run on any installed Daft; only File-cast needs file ranges.
 
     def _io_field(self, arr):
         return arr.field("io_config")
@@ -104,6 +104,16 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertTrue(cfg.s3.force_virtual_addressing)
         self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
 
+    def test_file_io_config_oss_alias_without_credentials(self):
+        # env-credential case: with nothing derivable, OSS still returns the oss->s3 alias
+        # (require_credentials=False) so Daft's S3 client can use env/instance credentials.
+        from pypaimon.daft.daft_io_config import _convert_paimon_catalog_options_to_file_io_config
+
+        opts = {"warehouse": "oss://mybucket"}
+        self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts))
+        cfg = _convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False)
+        self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
+
     def test_blob_io_config_falls_back_to_explicit(self):
         # When no credentials are derivable from catalog options / REST token, the
         # io_config the caller passed to read_paimon must still reach blob File columns.
@@ -121,6 +131,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(out, blob)
         self.assertEqual(IOConfig._from_serialized(out).s3.key_id, "EXPLICIT")
 
+    @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):
         # The crux of the fix: embedded bytes must survive cast to DataType.file() so a native
         # Daft File carries the credentials. Round-trip through daft and read the io_config back.

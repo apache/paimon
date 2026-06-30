@@ -107,14 +107,20 @@ def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]
     return io_config if any_props_set else None
 
 
-def _convert_paimon_catalog_options_to_file_io_config(catalog_options: dict[str, str]) -> IOConfig | None:
+def _convert_paimon_catalog_options_to_file_io_config(
+    catalog_options: dict[str, str], require_credentials: bool = True
+) -> IOConfig | None:
     """IOConfig for Daft native File ops (open/read/as_image) on blob columns.
 
     Same as _convert_paimon_catalog_options_to_io_config, except OSS is routed through
     Daft's S3 client (oss:// aliased to s3, virtual-hosted) instead of the OpenDAL OSS
     backend: Daft's File.open() stat over OpenDAL/OSS fails to issue the request on some
-    Daft builds, while the S3 client works (OSS is S3-API compatible). Other schemes
+    Daft builds, while the S3 client works (OSS is S3-API compatible). Non-OSS schemes
     (s3://, local) reuse the shared builder unchanged.
+
+    With require_credentials=False, OSS returns the oss->s3 alias even when no credentials
+    are derivable, so Daft's S3 client can fall back to environment/instance credentials
+    (matches Daft's Iceberg OSS handling).
     """
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
@@ -124,7 +130,7 @@ def _convert_paimon_catalog_options_to_file_io_config(catalog_options: dict[str,
     if endpoint and not endpoint.startswith(("http://", "https://")):
         endpoint = f"https://{endpoint}"
     key_id = catalog_options.get("fs.oss.accessKeyId")
-    if not endpoint and not key_id:
+    if require_credentials and not endpoint and not key_id:
         return None
     return IOConfig(
         s3=S3Config(

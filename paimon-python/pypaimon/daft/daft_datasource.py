@@ -228,9 +228,14 @@ class _PaimonPKSplitTask(DataSourceTask):
 
     def _blob_io_config_bytes(self, table: FileStoreTable) -> bytes | None:
         """Serialized IOConfig embedded into blob File columns so native Daft File ops
-        carry object-store credentials. Prefer the just-loaded table's REST/DLF token so
-        STS credentials are refreshed at read time; otherwise fall back to the io_config
-        the caller passed to read_paimon. OSS is routed through Daft's S3 client (see
+        carry object-store credentials, in priority order:
+        1. catalog options / refreshed REST-DLF token (STS refreshed at read time);
+        2. the explicit io_config passed to read_paimon;
+        3. for OSS, the oss->s3 alias alone, so Daft's S3 client can use env credentials.
+
+        Note: unlike the table-scan StorageConfig (where an explicit io_config wins), the
+        refreshed token takes precedence here so long reads don't freeze a short-lived STS
+        token. OSS is routed through Daft's S3 client (see
         _convert_paimon_catalog_options_to_file_io_config)."""
         from pypaimon.daft.daft_io_config import (
             _convert_paimon_catalog_options_to_file_io_config,
@@ -242,7 +247,10 @@ class _PaimonPKSplitTask(DataSourceTask):
         io_config = _convert_paimon_catalog_options_to_file_io_config(enriched)
         if io_config is not None:
             return serialize_io_config(io_config)
-        return self._explicit_io_config_bytes
+        if self._explicit_io_config_bytes is not None:
+            return self._explicit_io_config_bytes
+        io_config = _convert_paimon_catalog_options_to_file_io_config(enriched, require_credentials=False)
+        return serialize_io_config(io_config) if io_config is not None else None
 
 
 def _convert_blob_columns(
