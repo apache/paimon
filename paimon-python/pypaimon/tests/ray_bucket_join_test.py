@@ -92,6 +92,38 @@ class RayBucketJoinTest(unittest.TestCase):
         self.assertEqual(got["u399"], 399)
         self.assertTrue(all(got[f"u{i}"] == i for i in range(400)))
 
+    def test_fan_out_one_url_many_row_ids(self):
+        # A url may map to several locator rows; every match must be emitted.
+        loc_schema = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
+        in_schema = pa.schema([("url", pa.string())])
+        self._bucketed_table(
+            "default.loc_fan", loc_schema, "url",
+            pa.Table.from_pydict({"url": ["u0", "u0", "u1"], "row_id": [0, 1, 2]},
+                                 schema=loc_schema))
+        self._bucketed_table(
+            "default.in_fan", in_schema, "url",
+            pa.Table.from_pydict({"url": ["u0"]}, schema=in_schema))
+        ds = bucket_join(
+            "default.in_fan", "default.loc_fan", self.catalog_options,
+            on="url", left_projection=["url"], right_projection=["url", "row_id"])
+        self.assertEqual(sorted(r["row_id"] for r in ds.take_all()), [0, 1])
+
+    def test_empty_result_keeps_schema(self):
+        # No shared bucket -> 0 rows, but the join schema must survive.
+        loc_schema = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
+        in_schema = pa.schema([("url", pa.string())])
+        self._bucketed_table(
+            "default.loc_empty", loc_schema, "url",
+            pa.Table.from_pydict({"url": ["u0", "u1"], "row_id": [0, 1]}, schema=loc_schema))
+        self._bucketed_table(
+            "default.in_empty", in_schema, "url",
+            pa.Table.from_pydict({"url": []}, schema=in_schema))  # no rows -> no buckets
+        ds = bucket_join(
+            "default.in_empty", "default.loc_empty", self.catalog_options,
+            on="url", left_projection=["url"], right_projection=["url", "row_id"])
+        self.assertEqual(ds.count(), 0)
+        self.assertIn("row_id", ds.schema().names)
+
     def test_rejects_different_bucket_count(self):
         sch = pa.schema([("url", pa.string())])
         self._create_bucketed("default.cnt_8", sch, "url", 8)

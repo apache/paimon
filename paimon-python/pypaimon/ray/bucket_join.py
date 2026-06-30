@@ -38,14 +38,29 @@ def _bucketing(table):
     return count, ([k.strip() for k in key.split(",")] if key else [])
 
 
-def _read_builder(table_id, catalog_options, projection):
+# Per-process table cache so a worker reuses table metadata across the many buckets
+# it runs, instead of reloading the catalog per bucket. Only used when reading given
+# splits (snapshot-independent); planning always loads a fresh table.
+_TABLE_CACHE: Dict = {}
+
+
+def _get_table(table_id, catalog_options, use_cache):
     from pypaimon.catalog.catalog_factory import CatalogFactory
-    rb = CatalogFactory.create(catalog_options).get_table(table_id).new_read_builder()
+    if not use_cache:
+        return CatalogFactory.create(catalog_options).get_table(table_id)
+    key = (table_id, tuple(sorted(catalog_options.items())))
+    if key not in _TABLE_CACHE:
+        _TABLE_CACHE[key] = CatalogFactory.create(catalog_options).get_table(table_id)
+    return _TABLE_CACHE[key]
+
+
+def _read_builder(table_id, catalog_options, projection, use_cache=False):
+    rb = _get_table(table_id, catalog_options, use_cache).new_read_builder()
     return rb.with_projection(projection) if projection is not None else rb
 
 
 def _plan_splits_by_bucket(table_id, catalog_options, projection):
-    """Plan the manifest once and group splits by bucket (driver-side)."""
+    """Plan the manifest once and group splits by bucket (driver-side, fresh snapshot)."""
     by_bucket = {}
     for s in _read_builder(table_id, catalog_options, projection).new_scan().plan().splits():
         by_bucket.setdefault(s.bucket, []).append(s)
@@ -53,7 +68,8 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection):
 
 
 def _read_splits(table_id, catalog_options, projection, splits):
-    return _read_builder(table_id, catalog_options, projection).new_read().to_arrow(splits)
+    # Reading given splits is snapshot-independent, so the cached table is safe here.
+    return _read_builder(table_id, catalog_options, projection, use_cache=True).new_read().to_arrow(splits)
 
 
 def bucket_join(
@@ -68,8 +84,9 @@ def bucket_join(
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> "ray.data.Dataset":
     """Join two co-bucketed tables (same bucket count + bucket-key, joined on the
-    bucket-key) with no global shuffle. ``on`` must equal the bucket-key. Returns a
-    ``ray.data.Dataset``."""
+    bucket-key) with no global shuffle. ``on`` must equal the bucket-key. The two
+    sides must not share column names other than the join key (pyarrow ``join``
+    would otherwise collide). Returns a ``ray.data.Dataset``."""
     import ray
     from pypaimon.catalog.catalog_factory import CatalogFactory
 
@@ -97,7 +114,8 @@ def bucket_join(
         # still emits rows); only inner is correct with the per-bucket intersection.
         raise ValueError(f"bucket_join currently supports only join_type='inner'; got {join_type!r}.")
 
-    # Plan each side's manifest once, then dispatch per-bucket splits to the tasks.
+    # Plan each side's manifest once (driver-side, split metadata only -- the join
+    # results stay distributed below), then dispatch per-bucket splits to the tasks.
     left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection)
     right_by_bucket = _plan_splits_by_bucket(right, catalog_options, right_projection)
 
@@ -111,7 +129,11 @@ def bucket_join(
     # Inner join: only buckets present on both sides can match.
     buckets = sorted(set(left_by_bucket) & set(right_by_bucket))
     if not buckets:
-        return ray.data.from_items([])
+        # No shared bucket: empty result, but keep the join schema (join two empties).
+        empty = _read_splits(left, catalog_options, left_projection, []).join(
+            _read_splits(right, catalog_options, right_projection, []),
+            keys=on_cols, join_type=join_type)
+        return ray.data.from_arrow(empty)
     # Keep each bucket's result as a distributed object ref -- never pulled into the driver.
     refs = [remote_fn.remote(left_by_bucket[b], right_by_bucket[b]) for b in buckets]
     return ray.data.from_arrow_refs(refs)
