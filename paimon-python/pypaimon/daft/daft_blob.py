@@ -60,11 +60,10 @@ def _deserialize_one(data: bytes) -> tuple[str, int, int]:
 
 
 def blob_column_to_file_array(column: pa.Array, io_config_bytes: bytes | None = None) -> pa.Array:
-    """Convert a large_binary column of serialized BlobDescriptors to a FileReference-compatible struct.
+    """Convert a large_binary column of serialized BlobDescriptors to a File-compatible struct.
 
-    ``io_config_bytes`` is a serialized Daft IOConfig (see ``serialize_io_config``) embedded into
-    each File so native Daft File ops (open/read/as_image) carry object-store credentials. When None
-    the io_config is left null and native File ops fall back to Daft's global IOConfig.
+    ``io_config_bytes`` (serialized IOConfig) is embedded into each File so native File ops carry
+    credentials; when None the io_config is left null and ops fall back to Daft's global IOConfig.
     """
     urls: list[str | None] = []
     offsets: list[int | None] = []

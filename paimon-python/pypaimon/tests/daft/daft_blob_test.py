@@ -71,8 +71,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(IOConfig._from_serialized(serialize_io_config(cfg)).opendal_backends["oss"], oss)
 
     def test_file_io_config_routes_oss_through_s3(self):
-        # OSS -> Daft S3 client (oss:// aliased to s3, virtual-hosted); File.open() over
-        # OpenDAL/OSS fails to issue the request on some Daft builds.
+        # OSS -> Daft S3 client (File.open() over OpenDAL/OSS is broken on some Daft builds).
         cfg = _convert_paimon_catalog_options_to_file_io_config({
             "warehouse": "oss://b", "fs.oss.endpoint": "oss-test.example.com",
             "fs.oss.region": "test-region", "fs.oss.accessKeyId": "AK",
@@ -88,8 +87,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(dict(env.protocol_aliases)["oss"], "s3")
 
     def test_explicit_io_config_used_when_no_derivable_credentials(self):
-        # The explicit io_config passed to read_paimon must reach blob File columns when no
-        # complete credentials are derivable -- an endpoint or a half key pair is not enough.
+        # Explicit io_config must reach blob File columns when no complete creds are derivable.
         explicit = serialize_io_config(IOConfig(s3=S3Config(key_id="USERKEY", access_key="SK")))
 
         def blob_key(catalog_options):
@@ -142,8 +140,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
         self.assertEqual(dict(cfg.protocol_aliases)["oss"], "s3")
 
     def test_non_oss_endpoint_kept_for_env_without_credentials(self):
-        # Custom-endpoint S3 (MinIO/Ceph): no complete key pair -> None when required (explicit
-        # wins); env tier keeps endpoint/region but embeds no (half) credentials.
+        # Custom-endpoint S3 (MinIO/Ceph), no key pair: None when required; env keeps endpoint, no creds.
         opts = {"warehouse": "s3a://b", "fs.s3.endpoint": "https://minio.example.com"}
         self.assertIsNone(_convert_paimon_catalog_options_to_file_io_config(opts))
         env = _convert_paimon_catalog_options_to_file_io_config(opts, require_credentials=False)
@@ -158,8 +155,7 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
 
     @pytest.mark.skipif(not has_file_range_reads(), reason="daft >= 0.7.11 required for File range metadata")
     def test_cast_to_file_reconstructs_io_config(self):
-        # The crux: embedded bytes must survive the cast to DataType.file() so a native
-        # Daft File carries the credentials.
+        # The crux: embedded bytes must survive the cast to DataType.file().
         blob = serialize_io_config(IOConfig(s3=S3Config(key_id="AK", region_name="test-region")))
         arr = blob_column_to_file_array(_descriptor_column([("s3://b/k", 0, 4)]), blob)
         df = daft.from_arrow(pa.table({"f": arr}))

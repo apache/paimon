@@ -24,12 +24,7 @@ from daft.io import IOConfig, S3Config
 
 
 def serialize_io_config(io_config: IOConfig) -> bytes:
-    """Serialize an IOConfig to the bytes layout Daft's File physical struct expects.
-
-    Daft pickles IOConfig via ``__reduce__`` -> ``(IOConfig._from_serialized, (bytes,))``;
-    those bytes are exactly what the File struct's ``io_config`` field is deserialized from.
-    Validate that shape so a future Daft serialization change fails loudly, not silently.
-    """
+    """Serialize an IOConfig to the bytes Daft's File struct embeds, via its __reduce__."""
     reducer = io_config.__reduce__()
     if (reducer[0] is not IOConfig._from_serialized
             or not isinstance(reducer[1], tuple) or not reducer[1]
@@ -110,25 +105,14 @@ def _convert_paimon_catalog_options_to_io_config(catalog_options: dict[str, str]
 def _convert_paimon_catalog_options_to_file_io_config(
     catalog_options: dict[str, str], require_credentials: bool = True
 ) -> IOConfig | None:
-    """IOConfig for Daft native File ops (open/read/as_image) on blob columns.
-
-    Same as _convert_paimon_catalog_options_to_io_config, except OSS is routed through
-    Daft's S3 client (oss:// aliased to s3, virtual-hosted) instead of the OpenDAL OSS
-    backend: Daft's File.open() stat over OpenDAL/OSS fails to issue the request on some
-    Daft builds, while the S3 client works (OSS is S3-API compatible). Non-OSS schemes
-    (s3://, local) reuse the shared builder unchanged.
-
-    With require_credentials=False, OSS returns the oss->s3 alias even when no credentials
-    are derivable, so Daft's S3 client can fall back to environment/instance credentials
-    (matches Daft's Iceberg OSS handling).
-    """
+    """IOConfig for blob File ops. OSS routes through Daft's S3 client (oss:// aliased to s3,
+    virtual-hosted) because File.open() over OpenDAL/OSS is broken on some Daft builds.
+    require_credentials=False keeps a config without a key pair so the env chain is used."""
     warehouse = catalog_options.get("warehouse", "")
     if (urlparse(warehouse).scheme if warehouse else "") != "oss":
-        # Non-OSS (s3://, s3a://, local). With a complete key pair, embed the full config.
         if catalog_options.get("fs.s3.accessKeyId") and catalog_options.get("fs.s3.accessKeySecret"):
             return _convert_paimon_catalog_options_to_io_config(catalog_options)
-        # No complete pair: fall through (None) when required so an explicit io_config wins; else
-        # keep endpoint/region only (custom S3 like MinIO/Ceph) for the env credential chain.
+        # No complete pair: None when required (explicit wins), else endpoint/region-only for env.
         if require_credentials:
             return None
         endpoint = catalog_options.get("fs.s3.endpoint")
@@ -144,7 +128,7 @@ def _convert_paimon_catalog_options_to_file_io_config(
     access_key = catalog_options.get("fs.oss.accessKeySecret")
     token = catalog_options.get("fs.oss.securityToken")
     if not (key_id and access_key):
-        # No complete key pair: fall through if required, else drop it so the S3 env chain is used.
+        # No complete pair: None when required (explicit wins), else alias only for the env chain.
         if require_credentials:
             return None
         key_id = access_key = token = None
@@ -162,8 +146,8 @@ def _convert_paimon_catalog_options_to_file_io_config(
 
 
 def _with_oss_alias(io_config: IOConfig) -> IOConfig:
-    """Make oss:// use Daft's S3 client (alias + virtual-hosted) on a caller-supplied io_config,
-    deriving creds from an OpenDAL OSS backend when the S3 config has none, so File.open() works."""
+    """Add the oss->s3 alias + virtual-hosted to a caller's io_config, deriving creds from an
+    OpenDAL OSS backend if the S3 config has none, so File.open() works on oss:// blobs."""
     s3 = io_config.s3
     if s3 is None or s3.key_id is None:
         oss = (io_config.opendal_backends or {}).get("oss") or {}
