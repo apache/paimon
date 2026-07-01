@@ -205,8 +205,7 @@ class MapSharedShreddingUtilsTest {
                 new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, overflowSet, 3, 2);
 
         String expectedDict = "{\"age\":0,\"name\":1}";
-        for (String compression :
-                Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "lzo", "LZO", "zstd")) {
+        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
             Map<String, String> metadata = new HashMap<>();
             MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
 
@@ -249,8 +248,7 @@ class MapSharedShreddingUtilsTest {
         MapSharedShreddingFieldMeta original =
                 new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, overflowSet, 6, 3);
 
-        for (String compression :
-                Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "lzo", "LZO", "zstd")) {
+        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
             Map<String, String> metadata = new HashMap<>();
             MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
             assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION))
@@ -265,14 +263,39 @@ class MapSharedShreddingUtilsTest {
                 new MapSharedShreddingFieldMeta(
                         new TreeMap<>(), new TreeMap<>(), new HashSet<>(), 0, 0);
 
-        for (String compression :
-                Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "lzo", "LZO", "zstd")) {
+        for (String compression : Arrays.asList(null, "none", "NONE", "lz4", "LZ4", "zstd")) {
             Map<String, String> metadata = new HashMap<>();
             MapSharedShreddingUtils.serializeMetadata(original, metadata, compression);
             assertThat(metadata.get(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION))
                     .isEqualTo(expectedCompression(compression));
             assertThat(MapSharedShreddingUtils.deserializeMetadata(metadata)).isEqualTo(original);
         }
+    }
+
+    @Test
+    void testUnknownMetadataCompressionFailsFast() {
+        Map<String, Integer> nameToId = new TreeMap<>();
+        nameToId.put("age", 0);
+        Map<Integer, List<Integer>> fieldToColumns = new TreeMap<>();
+        fieldToColumns.put(0, Arrays.asList(0));
+        MapSharedShreddingFieldMeta original =
+                new MapSharedShreddingFieldMeta(nameToId, fieldToColumns, new HashSet<>(), 1, 1);
+
+        assertThatThrownBy(
+                        () ->
+                                MapSharedShreddingUtils.serializeMetadata(
+                                        original, new HashMap<>(), "snappy"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Unsupported shared-shredding field dictionary compression: snappy");
+
+        Map<String, String> metadata = new HashMap<>();
+        MapSharedShreddingUtils.serializeMetadata(original, metadata, "zstd");
+        metadata.put(MapSharedShreddingDefine.FIELD_DICT_COMPRESSION, "snappy");
+        assertThatThrownBy(() -> MapSharedShreddingUtils.deserializeMetadata(metadata))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Unsupported shared-shredding field dictionary compression: snappy");
     }
 
     @Test

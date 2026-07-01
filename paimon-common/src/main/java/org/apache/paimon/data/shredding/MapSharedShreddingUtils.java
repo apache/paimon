@@ -199,9 +199,10 @@ public class MapSharedShreddingUtils {
                 decompress(
                         stringToBytes(requiredValue(metadata, MapSharedShreddingDefine.FIELD_DICT)),
                         originalLength,
-                        metadata.getOrDefault(
-                                MapSharedShreddingDefine.FIELD_DICT_COMPRESSION,
-                                MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION));
+                        normalizeFieldDictCompression(
+                                metadata.getOrDefault(
+                                        MapSharedShreddingDefine.FIELD_DICT_COMPRESSION,
+                                        MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION)));
         Map<String, Integer> nameToId =
                 fromJson(
                         new String(fieldDictBytes, StandardCharsets.UTF_8),
@@ -324,10 +325,11 @@ public class MapSharedShreddingUtils {
         switch (normalized) {
             case "zstd":
             case "lz4":
-            case "lzo":
                 return normalized;
             default:
-                return MapSharedShreddingDefine.DEFAULT_DICT_COMPRESSION;
+                throw new IllegalArgumentException(
+                        "Unsupported shared-shredding field dictionary compression: "
+                                + compression);
         }
     }
 
