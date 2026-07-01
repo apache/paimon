@@ -197,7 +197,11 @@ class SplitRead(ABC):
                              read_fields: List[str], row_tracking_enabled: bool,
                              row_ranges: Optional[List[Range]] = None,
                              shard_range: Optional[Tuple[int, int]] = None) -> RecordBatchReader:
-        (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
+        (
+            read_file_fields,
+            read_arrow_predicate,
+            read_paimon_predicate,
+        ) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
         file_path = file.external_path if file.external_path else file.file_path
@@ -309,8 +313,13 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on Mosaic files")
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            row_group_predicate = (
+                read_paimon_predicate
+                if file.schema_id == self.table.table_schema.id else None
+            )
             format_reader = FormatMosaicReader(self.table.file_io, file_path, ordered_read_fields,
-                                               read_arrow_predicate, batch_size=batch_size)
+                                               read_arrow_predicate, batch_size=batch_size,
+                                               row_group_predicate=row_group_predicate)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
             ordered_nested_paths = (
@@ -483,7 +492,11 @@ class SplitRead(ABC):
             ]
             read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
             read_arrow_predicate = read_predicate.to_arrow() if read_predicate else None
-            self.schema_id_2_fields[key] = (read_file_fields, read_arrow_predicate)
+            self.schema_id_2_fields[key] = (
+                read_file_fields,
+                read_arrow_predicate,
+                read_predicate,
+            )
         return self.schema_id_2_fields[key]
 
     @abstractmethod

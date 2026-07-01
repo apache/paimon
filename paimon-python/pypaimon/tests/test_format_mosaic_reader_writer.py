@@ -22,6 +22,7 @@ import pyarrow as pa
 import pytest
 
 import mosaic
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read.reader.format_mosaic_reader import FormatMosaicReader
 from pypaimon.schema.data_types import AtomicType, DataField
 
@@ -36,15 +37,17 @@ class SimpleFileIO:
         return open(path, 'rb')
 
 
-def _write_mosaic_file(path, data: pa.Table):
+def _write_mosaic_file(path, data: pa.Table, options=None):
     with open(path, 'wb') as f:
-        mosaic.write_table(data, f)
+        mosaic.write_table(data, f, options=options)
 
 
-def _read_mosaic_file(path, read_fields, push_down_predicate=None):
+def _read_mosaic_file(path, read_fields, push_down_predicate=None,
+                      row_group_predicate=None):
     file_io = SimpleFileIO()
     reader = FormatMosaicReader(file_io, path, read_fields,
-                                push_down_predicate, batch_size=1024)
+                                push_down_predicate, batch_size=1024,
+                                row_group_predicate=row_group_predicate)
     batches = []
     while True:
         batch = reader.read_arrow_batch()
@@ -250,6 +253,135 @@ class TestFormatMosaicReaderWriter:
             result = _read_mosaic_file(path, fields, push_down_predicate=predicate)
             assert result.num_rows == 4
             assert all(v > 95 for v in result.column("id").to_pylist())
+        finally:
+            os.unlink(path)
+
+    def test_predicate_skips_row_groups_by_stats(self, monkeypatch):
+        import pyarrow.compute as pc
+
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        num_rows = 5000
+        data = pa.table({
+            "id": pa.array(list(range(num_rows)), type=pa.int32()),
+            "name": pa.array([f"user_{i}" for i in range(num_rows)], type=pa.string()),
+        })
+
+        with tempfile.NamedTemporaryFile(suffix=".mosaic", delete=False) as tmp:
+            path = tmp.name
+
+        original_from_input_file = mosaic.MosaicReader.from_input_file
+        readers = []
+
+        class CountingReader:
+            def __init__(self, reader):
+                self.reader = reader
+                self.read_row_groups = []
+
+            def __getattr__(self, name):
+                return getattr(self.reader, name)
+
+            def read_row_group(self, row_group_index):
+                self.read_row_groups.append(row_group_index)
+                return self.reader.read_row_group(row_group_index)
+
+        def from_input_file(read_at, file_length):
+            reader = CountingReader(original_from_input_file(read_at, file_length))
+            readers.append(reader)
+            return reader
+
+        monkeypatch.setattr(
+            mosaic.MosaicReader, "from_input_file", staticmethod(from_input_file))
+
+        try:
+            options = mosaic.WriterOptions(
+                compression=mosaic.WriterOptions.COMPRESSION_NONE,
+                num_buckets=1,
+                row_group_max_size=1024,
+                stats_columns=["id"])
+            with open(path, 'wb') as f:
+                with mosaic.MosaicWriter(f, data.schema, options) as writer:
+                    for batch in data.to_batches(max_chunksize=250):
+                        writer.write(batch)
+
+            predicate = PredicateBuilder(fields).greater_than("id", num_rows + 1)
+            result = _read_mosaic_file(
+                path,
+                fields,
+                push_down_predicate=pc.field("id") > num_rows + 1,
+                row_group_predicate=predicate)
+
+            assert result.num_rows == 0
+            assert len(readers) == 1
+            assert readers[0].num_row_groups > 1
+            assert readers[0].read_row_groups == []
+        finally:
+            os.unlink(path)
+
+    def test_predicate_skips_non_matching_row_groups_by_stats(self, monkeypatch):
+        import pyarrow.compute as pc
+
+        fields = [
+            DataField(0, "id", AtomicType("INT")),
+            DataField(1, "name", AtomicType("STRING")),
+        ]
+        num_rows = 5000
+        data = pa.table({
+            "id": pa.array(list(range(num_rows)), type=pa.int32()),
+            "name": pa.array([f"user_{i}" for i in range(num_rows)], type=pa.string()),
+        })
+
+        with tempfile.NamedTemporaryFile(suffix=".mosaic", delete=False) as tmp:
+            path = tmp.name
+
+        original_from_input_file = mosaic.MosaicReader.from_input_file
+        readers = []
+
+        class CountingReader:
+            def __init__(self, reader):
+                self.reader = reader
+                self.read_row_groups = []
+
+            def __getattr__(self, name):
+                return getattr(self.reader, name)
+
+            def read_row_group(self, row_group_index):
+                self.read_row_groups.append(row_group_index)
+                return self.reader.read_row_group(row_group_index)
+
+        def from_input_file(read_at, file_length):
+            reader = CountingReader(original_from_input_file(read_at, file_length))
+            readers.append(reader)
+            return reader
+
+        monkeypatch.setattr(
+            mosaic.MosaicReader, "from_input_file", staticmethod(from_input_file))
+
+        try:
+            options = mosaic.WriterOptions(
+                compression=mosaic.WriterOptions.COMPRESSION_NONE,
+                num_buckets=1,
+                row_group_max_size=1024,
+                stats_columns=["id"])
+            with open(path, 'wb') as f:
+                with mosaic.MosaicWriter(f, data.schema, options) as writer:
+                    for batch in data.to_batches(max_chunksize=250):
+                        writer.write(batch)
+
+            predicate = PredicateBuilder(fields).greater_than("id", 4900)
+            result = _read_mosaic_file(
+                path,
+                fields,
+                push_down_predicate=pc.field("id") > 4900,
+                row_group_predicate=predicate)
+
+            assert result.column("id").to_pylist() == list(range(4901, num_rows))
+            assert len(readers) == 1
+            assert readers[0].num_row_groups > 1
+            assert 0 not in readers[0].read_row_groups
+            assert len(readers[0].read_row_groups) < readers[0].num_row_groups
         finally:
             os.unlink(path)
 
