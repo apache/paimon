@@ -3,6 +3,8 @@ title: "Data Evolution"
 sidebar_position: 5
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -36,25 +38,43 @@ To use partial updates / data evolution, enable both options when creating the t
 
 ## Batch vs Stream
 
-Data evolution supports both batch and stream modes. The API differs as follows:
+Data evolution supports both batch and stream modes.
 
-|                     | Batch                                        | Stream                                         |
-|---------------------|----------------------------------------------|------------------------------------------------|
-| Builder             | `table.new_batch_write_builder()`            | `table.new_stream_write_builder()`             |
-| Write               | `BatchTableWrite`                            | `StreamTableWrite`                             |
-| Update              | `BatchTableUpdate`                           | `StreamTableUpdate`                            |
-| Commit              | `BatchTableCommit`                           | `StreamTableCommit`                            |
-| `commit_identifier` | Not required                                 | Required (monotonically increasing integer)    |
-| Lifecycle           | One-shot: each instance can commit only once | Reusable: same instance can commit many rounds |
+<Tabs groupId="pypaimon-data-evolution-mode">
 
-Method signatures that differ between modes:
+<TabItem value="batch" label="Batch">
 
-| Method                          | Batch                                          | Stream                                                            |
-|---------------------------------|------------------------------------------------|-------------------------------------------------------------------|
-| `prepare_commit()`              | `write.prepare_commit()`                       | `write.prepare_commit(commit_identifier)`                         |
-| `update_by_arrow_with_row_id()` | `update.update_by_arrow_with_row_id(table)`    | `update.update_by_arrow_with_row_id(table, commit_identifier)`    |
-| `upsert_by_arrow_with_key()`    | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |
-| `commit()`                      | `commit.commit(messages)`                      | `commit.commit(messages, commit_identifier)`                      |
+- Builder: `table.new_batch_write_builder()`
+- Write: `BatchTableWrite`
+- Update: `BatchTableUpdate`
+- Commit: `BatchTableCommit`
+- `commit_identifier`: not required
+- Lifecycle: one-shot; each instance can commit only once
+- `prepare_commit()`: `write.prepare_commit()`
+- `update_by_arrow_with_row_id()`: `update.update_by_arrow_with_row_id(table)`
+- `update_by_predicate()`: `update.update_by_predicate(predicate, assignments)`
+- `upsert_by_arrow_with_key()`: `update.upsert_by_arrow_with_key(table, keys)`
+- `commit()`: `commit.commit(messages)`
+
+</TabItem>
+
+<TabItem value="stream" label="Stream">
+
+- Builder: `table.new_stream_write_builder()`
+- Write: `StreamTableWrite`
+- Update: `StreamTableUpdate`
+- Commit: `StreamTableCommit`
+- `commit_identifier`: required; use a monotonically increasing integer
+- Lifecycle: reusable; the same instance can commit many rounds
+- `prepare_commit()`: `write.prepare_commit(commit_identifier)`
+- `update_by_arrow_with_row_id()`: `update.update_by_arrow_with_row_id(table, commit_identifier)`
+- `update_by_predicate()`: `update.update_by_predicate(predicate, assignments, commit_identifier)`
+- `upsert_by_arrow_with_key()`: `update.upsert_by_arrow_with_key(table, keys, commit_identifier)`
+- `commit()`: `commit.commit(messages, commit_identifier)`
+
+</TabItem>
+
+</Tabs>
 
 ## Update Columns By Row ID
 
@@ -67,7 +87,9 @@ to its corresponding `first_row_id`, then group rows with the same `first_row_id
 
 - **Update columns only**: include `_ROW_ID` plus the columns you want to update (partial schema is OK).
 
-### Batch Mode
+<Tabs groupId="pypaimon-data-evolution-mode">
+
+<TabItem value="batch" label="Batch">
 
 ```python
 import pyarrow as pa
@@ -118,7 +140,9 @@ table_commit.close()
 #   'f1': [-1001, 1002]
 ```
 
-### Stream Mode
+</TabItem>
+
+<TabItem value="stream" label="Stream">
 
 ```python
 import pyarrow as pa
@@ -170,6 +194,90 @@ table_commit.commit(cmts2, commit_identifier=2)
 table_commit.close()
 ```
 
+</TabItem>
+
+</Tabs>
+
+## Update Columns By Predicate
+
+You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
+operations. The `Predicate` identifies rows to update, and the assignment map
+contains literal values for updated columns.
+When global indexes are available, `update_by_predicate` discovers matching
+`_ROW_ID` values with `global-index.search-mode=full` on the configured
+point-in-time scan snapshot or, if none is configured, the latest snapshot.
+
+<Tabs groupId="pypaimon-data-evolution-mode">
+
+<TabItem value="batch" label="Batch">
+
+```python
+import pyarrow as pa
+from pypaimon import CatalogFactory, Schema
+
+catalog = CatalogFactory.create({'warehouse': '/tmp/warehouse'})
+catalog.create_database('default', False)
+
+pa_schema = pa.schema([
+    ('id', pa.int32()),
+    ('name', pa.string()),
+    ('age', pa.int32()),
+])
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+)
+catalog.create_table('default.users_update', schema, False)
+table = catalog.get_table('default.users_update')
+
+# write initial data
+write_builder = table.new_batch_write_builder()
+write = write_builder.new_write()
+commit = write_builder.new_commit()
+write.write_arrow(pa.Table.from_pydict(
+    {'id': [1, 2, 3], 'name': ['Alice', 'Bob', 'Charlie'], 'age': [30, 25, 28]},
+    schema=pa_schema,
+))
+commit.commit(write.prepare_commit())
+write.close()
+commit.close()
+
+# UPDATE users_update SET age = 99 WHERE id IN (1, 3)
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+predicate = table_update.new_predicate_builder().is_in('id', [1, 3])
+messages = table_update.update_by_predicate(predicate, {'age': 99})
+
+commit = write_builder.new_commit()
+commit.commit(messages)
+commit.close()
+```
+
+</TabItem>
+
+<TabItem value="stream" label="Stream">
+
+Pass the `commit_identifier` to both `update_by_predicate` and `commit`:
+
+```python
+stream_builder = table.new_stream_write_builder()
+table_update = stream_builder.new_update()
+table_commit = stream_builder.new_commit()
+
+predicate = table_update.new_predicate_builder().equal('id', 2)
+messages = table_update.update_by_predicate(
+    predicate,
+    {'name': 'Bob_v2'},
+    commit_identifier=1,
+)
+table_commit.commit(messages, commit_identifier=1)
+table_commit.close()
+```
+
+</TabItem>
+
+</Tabs>
+
 ## Filter by _ROW_ID
 
 Requires the same [Prerequisites](#prerequisites) (row-tracking and data-evolution enabled). On such tables you can filter by `_ROW_ID` to prune files at scan time. Supported: `equal('_ROW_ID', id)`, `is_in('_ROW_ID', [id1, ...])`, `between('_ROW_ID', low, high)`.
@@ -196,7 +304,9 @@ If you want to **upsert** (update-or-insert) rows by one or more business key co
   **automatically stripped** from `upsert_keys` during matching (since each partition is processed independently),
   so you do **not** need to include them in `upsert_keys`.
 
-### Batch Mode
+<Tabs groupId="pypaimon-data-evolution-mode">
+
+<TabItem value="batch" label="Batch">
 
 **Example: basic upsert**
 
@@ -310,7 +420,9 @@ table_commit.close()
 - Duplicate keys in the input data are automatically deduplicated — the **last occurrence** is kept.
 - The upsert is atomic per commit — all matched updates and new appends are included in the same commit.
 
-### Stream Mode
+</TabItem>
+
+<TabItem value="stream" label="Stream">
 
 ```python
 import pyarrow as pa
@@ -367,6 +479,10 @@ table_commit.close()
 
 The `with_update_type` and partitioned table patterns shown in Batch Mode also work in Stream Mode — just add `commit_identifier` to the `upsert_by_arrow_with_key` and `commit` calls.
 
+</TabItem>
+
+</Tabs>
+
 ## Update Columns By Shards
 
 If you want to **compute a derived column** (or **update an existing column based on other columns**) without providing
@@ -379,7 +495,9 @@ If you want to **compute a derived column** (or **update an existing column base
 
 This is useful for backfilling a newly added column, or recomputing a column from other columns.
 
-### Batch Mode
+<Tabs groupId="pypaimon-data-evolution-mode">
+
+<TabItem value="batch" label="Batch">
 
 **Example: compute `d = c + b - a`**
 
@@ -462,7 +580,9 @@ commit.commit(commit_messages)
 commit.close()
 ```
 
-### Stream Mode
+</TabItem>
+
+<TabItem value="stream" label="Stream">
 
 ```python
 import pyarrow as pa
@@ -517,6 +637,10 @@ for batch in iter(reader.read_next_batch, None):
 commit_messages = upd.prepare_commit()
 table_commit.commit(commit_messages, commit_identifier=1)
 ```
+
+</TabItem>
+
+</Tabs>
 
 **Notes**
 
