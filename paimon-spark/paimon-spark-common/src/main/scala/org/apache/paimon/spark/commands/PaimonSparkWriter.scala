@@ -184,9 +184,16 @@ case class PaimonSparkWriter(
 
   private def writePerPartition(ctx: WriteContext, dataFrame: DataFrame)(
       writeRow: (PaimonDataWrite, Row) => Unit): Dataset[InnerTableWriteTaskResult] = {
+    writePerPartitionWithFactory(ctx, dataFrame)(() => writeRow)
+  }
+
+  private def writePerPartitionWithFactory(ctx: WriteContext, dataFrame: DataFrame)(
+      writeRowFactory: () => (PaimonDataWrite, Row) => Unit)
+    : Dataset[InnerTableWriteTaskResult] = {
     ctx.sparkSession.createDataset(dataFrame.rdd.mapPartitions {
       iter =>
         {
+          val writeRow = writeRowFactory.apply()
           val write = ctx.newWrite()
           try {
             iter.foreach(row => writeRow(write, row))
@@ -227,8 +234,10 @@ case class PaimonSparkWriter(
       ctx: WriteContext,
       dataFrame: DataFrame,
       funcFactory: () => Row => Int): Dataset[InnerTableWriteTaskResult] = {
-    val assigner = funcFactory.apply()
-    writePerPartition(ctx, dataFrame)((write, row) => write.write(row, assigner.apply(row)))
+    writePerPartitionWithFactory(ctx, dataFrame) { () =>
+      val assigner = funcFactory.apply()
+      (write, row) => write.write(row, assigner.apply(row))
+    }
   }
 
   private def writeKeyDynamic(ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
