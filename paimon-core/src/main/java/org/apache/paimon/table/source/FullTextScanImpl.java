@@ -33,6 +33,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -101,15 +102,29 @@ public class FullTextScanImpl implements FullTextScan {
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
 
+        // A searched text column can be covered by more than one full-text-capable global index
+        // (e.g. a dedicated full-text index whose primary field is the column, and a vector index
+        // that carries the column as an extra field). These are different index definitions and
+        // must not be merged into one reader input. Pick exactly one index definition per column,
+        // preferring the one where the column is the primary indexFieldId (dedicated full-text)
+        // over an extra-field match, so every split carries files from a single index identity.
+        Map<String, IndexIdentity> chosenByColumn =
+                chooseIndexPerColumn(allIndexFiles, textColumnIds, idToColumn);
+
         // Group full-text index files by column and row range. A multi-column index serves a text
         // column through either its primary indexFieldId or its extraFieldIds, and one file may
         // cover more than one searched text column.
         Map<String, Map<Range, List<IndexFileMeta>>> byColumnAndRange = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            IndexIdentity identity = IndexIdentity.of(indexFile);
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
                 String columnName = checkNotNull(idToColumn.get(columnId));
+                if (!identity.equals(chosenByColumn.get(columnName))) {
+                    // This column is served by a different (preferred) index definition.
+                    continue;
+                }
                 byColumnAndRange
                         .computeIfAbsent(columnName, k -> new HashMap<>())
                         .computeIfAbsent(range, k -> new ArrayList<>())
@@ -153,6 +168,93 @@ public class FullTextScanImpl implements FullTextScan {
             }
         }
         return matched;
+    }
+
+    /**
+     * Chooses exactly one index definition to serve each searched text column. A column that is the
+     * primary {@code indexFieldId} of some index (a dedicated full-text index) prefers that index;
+     * otherwise it falls back to an index that carries the column as an extra field. Ties are
+     * broken deterministically by index identity so the choice is stable across planning runs.
+     */
+    private static Map<String, IndexIdentity> chooseIndexPerColumn(
+            List<IndexFileMeta> allIndexFiles,
+            Set<Integer> textColumnIds,
+            Map<Integer, String> idToColumn) {
+        // columnId -> candidate identity -> whether the column is that index's primary field
+        Map<Integer, Map<IndexIdentity, Boolean>> candidates = new HashMap<>();
+        for (IndexFileMeta indexFile : allIndexFiles) {
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            IndexIdentity identity = IndexIdentity.of(indexFile);
+            for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
+                boolean primary = meta.indexFieldId() == columnId;
+                candidates
+                        .computeIfAbsent(columnId, k -> new HashMap<>())
+                        .merge(identity, primary, (a, b) -> a || b);
+            }
+        }
+
+        Map<String, IndexIdentity> chosen = new HashMap<>();
+        for (Map.Entry<Integer, Map<IndexIdentity, Boolean>> entry : candidates.entrySet()) {
+            String columnName = checkNotNull(idToColumn.get(entry.getKey()));
+            IndexIdentity best = null;
+            boolean bestPrimary = false;
+            for (Map.Entry<IndexIdentity, Boolean> candidate : entry.getValue().entrySet()) {
+                IndexIdentity identity = candidate.getKey();
+                boolean primary = candidate.getValue();
+                boolean better =
+                        best == null
+                                || (primary && !bestPrimary)
+                                || (primary == bestPrimary
+                                        && identity.key().compareTo(best.key()) < 0);
+                if (better) {
+                    best = identity;
+                    bestPrimary = primary;
+                }
+            }
+            chosen.put(columnName, best);
+        }
+        return chosen;
+    }
+
+    /**
+     * Identity of a global index definition — its index type, primary {@code indexFieldId} and
+     * extra field ids. Two index files with the same identity belong to the same index definition
+     * (differing only by row range/shard); files with different identities must not be merged into
+     * one reader input.
+     */
+    private static final class IndexIdentity {
+        private final String key;
+
+        private IndexIdentity(String key) {
+            this.key = key;
+        }
+
+        static IndexIdentity of(IndexFileMeta indexFile) {
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
+            int[] extra = meta.extraFieldIds();
+            int[] sortedExtra = extra == null ? new int[0] : extra.clone();
+            Arrays.sort(sortedExtra);
+            return new IndexIdentity(
+                    indexFile.indexType()
+                            + '|'
+                            + meta.indexFieldId()
+                            + '|'
+                            + Arrays.toString(sortedExtra));
+        }
+
+        String key() {
+            return key;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof IndexIdentity && key.equals(((IndexIdentity) o).key);
+        }
+
+        @Override
+        public int hashCode() {
+            return key.hashCode();
+        }
     }
 
     private static boolean supportsFullTextSearch(String indexType) {

@@ -556,6 +556,47 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchPrefersDedicatedIndexOverExtraFieldCoverage() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+
+        // Two full-text-capable indexes cover the same text column over the same row range:
+        //  (a) a dedicated full-text index whose PRIMARY field is the text column, and
+        //  (b) a multi-column index whose primary is "id" and carries the text column as an EXTRA
+        //      field.
+        // These are different index definitions and must not be merged into one reader input; the
+        // dedicated index (a) takes precedence, so each split carries a single index file.
+        buildAndCommitIndex(table, documents); // (a) primary = content
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Arrays.asList(
+                        table.rowType().getField("id"),
+                        table.rowType().getField(TEXT_FIELD_NAME))); // (b) content as extra
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2);
+
+        List<FullTextSearchSplit> splits = searchBuilder.newFullTextScan().scan().splits();
+        assertThat(splits).isNotEmpty();
+        int textFieldId = table.rowType().getField(TEXT_FIELD_NAME).id();
+        for (FullTextSearchSplit split : splits) {
+            // Files from different index definitions are never merged into one split ...
+            assertThat(split.fullTextIndexFiles()).hasSize(1);
+            // ... and the chosen definition is the dedicated one (text column is its primary
+            // field).
+            assertThat(split.fullTextIndexFiles().get(0).globalIndexMeta().indexFieldId())
+                    .isEqualTo(textFieldId);
+        }
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isFalse();
+    }
+
+    @Test
     public void testFullTextSearchSkipsIndexNotCoveringTextColumn() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
