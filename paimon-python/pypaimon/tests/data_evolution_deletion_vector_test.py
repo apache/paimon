@@ -26,10 +26,13 @@ from pypaimon.deletionvectors.apply_deletion_vector_reader import (
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.read.reader.concat_batch_reader import BlobFallbackBatchReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import DataSplit
+from pypaimon.table.row.blob import Blob, BlobData
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
 from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
 
 
@@ -46,6 +49,22 @@ class _OneBatchReader(RecordBatchReader):
 
     def close(self):
         pass
+
+
+class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
+    def __init__(self, files, values_by_file_name, deletion_vector=None):
+        super().__init__(
+            [(file, lambda: None) for file in files],
+            "blob_col",
+            pa.binary(),
+            row_ranges=None,
+            blob_as_descriptor=False,
+            deletion_vector=deletion_vector,
+        )
+        self._values_by_file_name = values_by_file_name
+
+    def _read_blob_values(self, file, supplier):
+        return self._values_by_file_name[file.file_name]
 
 
 def _file(name, first_row_id, row_count, max_sequence_number):
@@ -126,6 +145,43 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
         self.assertEqual([0, 4], batch.column(0).to_pylist())
         self.assertTrue(reader.deletion_vector().is_deleted(1))
         self.assertFalse(reader.deletion_vector().is_deleted(2))
+
+    def test_blob_fallback_batch_reader_applies_deletion_vector(self):
+        files = [
+            _file("blob-old.blob", 0, 5, 1),
+            _file("blob-new.blob", 0, 5, 2),
+        ]
+        deletion_vector = BitmapDeletionVector()
+        deletion_vector.delete(1)
+        deletion_vector.delete(4)
+
+        reader = _BlobFallbackBatchReaderForTest(
+            files,
+            {
+                "blob-old.blob": [
+                    BlobData(b"old-0"),
+                    BlobData(b"old-1"),
+                    BlobData(b"old-2"),
+                    BlobData(b"old-3"),
+                    BlobData(b"old-4"),
+                ],
+                "blob-new.blob": [
+                    Blob.PLACE_HOLDER,
+                    BlobData(b"new-1"),
+                    BlobData(b"new-2"),
+                    Blob.PLACE_HOLDER,
+                    BlobData(b"new-4"),
+                ],
+            },
+            deletion_vector=(Range(0, 4), deletion_vector),
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertEqual(
+            [b"old-0", b"new-2", b"old-3"],
+            batch.column(0).to_pylist(),
+        )
+        self.assertIsNone(reader.read_arrow_batch())
 
 
 if __name__ == "__main__":

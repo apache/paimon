@@ -1239,7 +1239,10 @@ class DataEvolutionSplitRead(SplitRead):
                 table_fields = self.read_fields
                 self.read_fields = read_fields  # create reader based on read_fields
                 batch_size = self.table.options.read_batch_size()
-                # Create reader for this bunch
+                # DataEvolutionMergeReader aligns fields by row ordinal, so every
+                # non-empty bunch reader created below must return the same row-id
+                # sequence. Keep row_ranges and the group-level deletion vector
+                # applied uniformly across normal, blob, and vector bunches.
                 if len(bunch.files()) == 1:
                     suppliers = [lambda r=self._create_file_reader(
                         bunch.files()[0], read_field_names, deletion_vector
