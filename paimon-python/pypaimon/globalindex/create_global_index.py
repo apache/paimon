@@ -29,6 +29,10 @@ from pypaimon.globalindex.btree.btree_index_writer import (
     BTREE_IDENTIFIER,
     BTreeIndexWriter,
 )
+from pypaimon.globalindex.bitmap.bitmap_index_writer import (
+    BITMAP_IDENTIFIER,
+    BitmapIndexWriter,
+)
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
@@ -81,6 +85,9 @@ def create_global_index(
     return sum(len(message.index_adds) for message in messages)
 
 
+_SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
+
+
 class GlobalIndexBuilder:
     """Small Python builder for global indexes."""
 
@@ -101,10 +108,13 @@ class GlobalIndexBuilder:
         self._options = _merged_options(table, options)
         self._core_options = CoreOptions(self._options)
 
-        if self._index_type != BTREE_IDENTIFIER and self._index_type not in VINDEX_IDENTIFIERS:
+        if (
+            self._index_type not in _SORTED_INDEX_IDENTIFIERS
+            and self._index_type not in VINDEX_IDENTIFIERS
+        ):
             raise ValueError(
-                "Python global index build currently supports '%s' and %s, got '%s'."
-                % (BTREE_IDENTIFIER, VINDEX_IDENTIFIERS, index_type)
+                "Python global index build currently supports %s and %s, got '%s'."
+                % (_SORTED_INDEX_IDENTIFIERS, VINDEX_IDENTIFIERS, index_type)
             )
         if len(self._index_columns) != 1:
             raise ValueError(
@@ -154,15 +164,15 @@ class GlobalIndexBuilder:
         index_path_factory = self._table.path_factory().global_index_path_factory()
         index_path = index_path_factory.global_index_root_path()
 
-        if self._index_type == BTREE_IDENTIFIER:
-            return self._build_btree(splits, index_field, table_read, index_path)
+        if self._index_type in _SORTED_INDEX_IDENTIFIERS:
+            return self._build_sorted_index(
+                splits, index_field, table_read, index_path)
         return self._build_vindex(splits, index_field, table_read, index_path)
 
-    def _build_btree(
+    def _build_sorted_index(
         self, splits, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
         key_serializer = create_serializer(index_field.type)
-        block_size = self._core_options.btree_index_block_size()
         records_per_range = self._core_options.sorted_index_records_per_range()
         if records_per_range <= 0:
             raise ValueError("sorted-index.records-per-range must be positive.")
@@ -183,12 +193,8 @@ class GlobalIndexBuilder:
                 continue
             index_adds = []
             for chunk in _chunks(rows, records_per_range):
-                writer = BTreeIndexWriter(
-                    self._table.file_io,
-                    index_path,
-                    key_serializer,
-                    block_size=block_size,
-                )
+                writer = self._create_sorted_index_writer(
+                    index_path, key_serializer)
                 for key, row_id in chunk:
                     writer.write(key, row_id - row_range.from_)
                 result_entries = writer.finish()
@@ -212,6 +218,25 @@ class GlobalIndexBuilder:
                     )
                 )
         return messages
+
+    def _create_sorted_index_writer(self, index_path: str, key_serializer):
+        if self._index_type == BTREE_IDENTIFIER:
+            return BTreeIndexWriter(
+                self._table.file_io,
+                index_path,
+                key_serializer,
+                block_size=self._core_options.btree_index_block_size(),
+            )
+        if self._index_type == BITMAP_IDENTIFIER:
+            return BitmapIndexWriter(
+                self._table.file_io,
+                index_path,
+                key_serializer,
+                dictionary_block_size=(
+                    self._core_options.bitmap_index_dictionary_block_size()),
+                compression=self._core_options.bitmap_index_compression(),
+            )
+        raise ValueError("Unsupported sorted global index type: %s" % self._index_type)
 
     def _build_vindex(
         self, splits, index_field, table_read, index_path: str

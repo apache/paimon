@@ -725,6 +725,31 @@ class CoreOptions:
         )
     )
 
+    BITMAP_INDEX_DICTIONARY_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("bitmap-index.dictionary-block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(16))
+        .with_description(
+            "The target dictionary block size for bitmap global indexes."
+        )
+    )
+
+    BITMAP_INDEX_COMPRESSION: ConfigOption[str] = (
+        ConfigOptions.key("bitmap-index.compression")
+        .string_type()
+        .default_value("none")
+        .with_description("Compression algorithm for bitmap global index blocks.")
+    )
+
+    BITMAP_INDEX_COMPRESSION_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("bitmap-index.compression-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Compression level for bitmap global index block compression."
+        )
+    )
+
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("local-cache.enabled")
         .boolean_type()
@@ -1224,6 +1249,17 @@ class CoreOptions:
         return self.options.get(
             CoreOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
+
+    def bitmap_index_dictionary_block_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE
+        ).get_bytes()
+
+    def bitmap_index_compression(self) -> str:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION)
+
+    def bitmap_index_compression_level(self) -> int:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION_LEVEL)
 
     def local_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)

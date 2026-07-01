@@ -221,6 +221,79 @@ class GlobalIndexBuildTest(
             index_read_builder.new_scan().plan().splits())
         self.assertEqual(0, index_table.num_rows)
 
+    def test_create_bitmap_global_index_from_python(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3, 4, 5],
+                'name': ['a', 'b', 'c', 'd', 'e'],
+                'age': [10, 20, 30, 40, 50],
+                'city': ['vip', 'trial', None, 'vip', 'blocked'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        added = table.create_global_index(
+            'city',
+            index_type='bitmap',
+            options={
+                'sorted-index.records-per-range': '2',
+                'bitmap-index.dictionary-block-size': '1 b',
+            },
+        )
+
+        self.assertEqual(3, added)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = IndexFileHandler(table).scan(snapshot)
+        self.assertEqual(3, len(entries))
+        self.assertEqual({'bitmap'}, {e.index_file.index_type for e in entries})
+        self.assertEqual([1, 2, 2],
+                         sorted(e.index_file.row_count for e in entries))
+        self.assertEqual(
+            {0},
+            {e.index_file.global_index_meta.row_range_start for e in entries},
+        )
+        self.assertEqual(
+            {4},
+            {e.index_file.global_index_meta.row_range_end for e in entries},
+        )
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        cases = [
+            (predicate_builder.is_in('city', ['vip', 'trial']),
+             [Range(0, 1), Range(3, 3)]),
+            (predicate_builder.is_null('city'), [Range(2, 2)]),
+            (predicate_builder.not_equal('city', 'blocked'),
+             [Range(0, 1), Range(3, 3)]),
+        ]
+        for predicate, expected in cases:
+            with GlobalIndexScanner.create(
+                    table,
+                    predicate=predicate,
+                    snapshot=snapshot) as scanner:
+                result = scanner.scan(predicate)
+            self.assertEqual(expected, result.results().to_range_list())
+
+    def test_create_bitmap_global_index_rejects_unsupported_compression(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1],
+                'name': ['a'],
+                'age': [10],
+                'city': ['vip'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        with self.assertRaisesRegex(ValueError, 'bitmap-index.compression=none'):
+            table.create_global_index(
+                'city',
+                index_type='bitmap',
+                options={'bitmap-index.compression': 'lz4'},
+            )
+
     def test_create_global_index_uses_external_path(self):
         external_root = 'file://%s' % os.path.join(
             self.tempdir, 'global-index-external')
