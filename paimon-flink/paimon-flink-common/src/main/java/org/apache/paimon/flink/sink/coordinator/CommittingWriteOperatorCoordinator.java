@@ -149,7 +149,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
 
     @Override
     public void checkpointCoordinator(long checkpointId, CompletableFuture<byte[]> result) {
-        runInEventLoop(
+        runCheckpointInEventLoop(
                 () -> {
                     if (state != State.RUNNING) {
                         // if checkpoint is executed before finishing restoring, just fail it
@@ -167,6 +167,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                                             commitUser, stateStore.getSerializedStates()));
                     result.complete(checkpointData);
                 },
+                result,
                 "taking checkpoint %d",
                 checkpointId);
     }
@@ -450,6 +451,31 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                                 "Uncaught exception in CommittingWriteOperatorCoordinator while {}. Triggering job failover.",
                                 String.format(actionName, actionNameFormatParameters),
                                 t);
+                        context.failJob(t);
+                    }
+                });
+    }
+
+    /**
+     * Same as {@link #runInEventLoop} but also completes {@code result} exceptionally on failure,
+     * so that Flink's checkpoint coordinator can abort the checkpoint immediately instead of
+     * waiting for the checkpoint timeout.
+     */
+    private void runCheckpointInEventLoop(
+            ThrowingRunnable<Throwable> action,
+            CompletableFuture<?> result,
+            String actionName,
+            Object... actionNameFormatParameters) {
+        commitExecutor.execute(
+                () -> {
+                    try {
+                        action.run();
+                    } catch (Throwable t) {
+                        LOG.error(
+                                "Uncaught exception in CommittingWriteOperatorCoordinator while {}. Triggering job failover.",
+                                String.format(actionName, actionNameFormatParameters),
+                                t);
+                        result.completeExceptionally(t);
                         context.failJob(t);
                     }
                 });
