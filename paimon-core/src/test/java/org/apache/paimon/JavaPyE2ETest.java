@@ -1713,7 +1713,7 @@ public class JavaPyE2ETest {
                 table,
                 Arrays.asList(
                         new E2eDvSpec(new Range(0, 4), 1, 4),
-                        new E2eDvSpec(new Range(5, 9), 6),
+                        new E2eDvSpec(new Range(5, 9), 5, 6, 7, 8, 9),
                         new E2eDvSpec(new Range(10, 14), 10, 12)));
 
         LOG.info("data_evolution_dv_test: written 15 rows with deletion vectors");

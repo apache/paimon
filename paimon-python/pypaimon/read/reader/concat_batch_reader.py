@@ -126,6 +126,7 @@ class MergeAllBatchReader(RecordBatchReader):
                     )
         else:
             self.merged_batch = None
+            return None
         dataset = ds.InMemoryDataset(self.merged_batch)
         self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
         return self.reader.read_next_batch()

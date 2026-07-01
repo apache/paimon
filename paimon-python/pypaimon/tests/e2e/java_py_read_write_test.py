@@ -1482,7 +1482,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         result = table_read.to_arrow(table_scan.plan().splits())
         result = table_sort_by(result, 'f0')
 
-        expected_ids = [0, 2, 3, 5, 7, 8, 9, 11, 13, 14]
+        expected_ids = [0, 2, 3, 11, 13, 14]
         self.assertEqual(result.num_rows, len(expected_ids))
         self.assertEqual(result.column('f0').to_pylist(), expected_ids)
         self.assertEqual(

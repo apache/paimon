@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.reader.concat_batch_reader import (
     BlobFallbackBatchReader,
     DataEvolutionMergeReader,
+    MergeAllBatchReader,
 )
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import DataSplit
@@ -49,25 +50,6 @@ class _OneBatchReader(RecordBatchReader):
             return None
         self._returned = True
         return self._batch
-
-    def close(self):
-        pass
-
-
-class _MultiBatchReader(RecordBatchReader):
-    def __init__(self, value_batches, name="v"):
-        self._batches = [
-            pa.record_batch([pa.array(values, type=pa.int64())], names=[name])
-            for values in value_batches
-        ]
-        self._next = 0
-
-    def read_arrow_batch(self):
-        if self._next >= len(self._batches):
-            return None
-        batch = self._batches[self._next]
-        self._next += 1
-        return batch
 
     def close(self):
         pass
@@ -168,30 +150,24 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
         self.assertTrue(reader.deletion_vector().is_deleted(1))
         self.assertFalse(reader.deletion_vector().is_deleted(2))
 
-    def test_apply_deletion_vector_reader_skips_empty_filtered_batches(self):
+    def test_data_evolution_merge_reader_handles_fully_deleted_file(self):
         deletion_vector = BitmapDeletionVector()
         deletion_vector.delete(0)
         deletion_vector.delete(1)
 
+        field_reader = MergeAllBatchReader([
+            lambda: ApplyDeletionVectorReader(
+                _OneBatchReader([0, 1]),
+                deletion_vector,
+            )
+        ])
         reader = DataEvolutionMergeReader(
-            row_offsets=[0, 1],
-            field_offsets=[0, 0],
-            readers=[
-                ApplyDeletionVectorReader(
-                    _MultiBatchReader([[0, 1], [2, 3]], "v"),
-                    deletion_vector,
-                ),
-                ApplyDeletionVectorReader(
-                    _MultiBatchReader([[10, 11], [12, 13]], "w"),
-                    deletion_vector,
-                ),
-            ],
-            schema=pa.schema([pa.field("v", pa.int64()), pa.field("w", pa.int64())]),
+            row_offsets=[0],
+            field_offsets=[0],
+            readers=[field_reader],
+            schema=pa.schema([pa.field("v", pa.int64())]),
         )
 
-        batch = reader.read_arrow_batch()
-        self.assertEqual([2, 3], batch.column(0).to_pylist())
-        self.assertEqual([12, 13], batch.column(1).to_pylist())
         self.assertIsNone(reader.read_arrow_batch())
 
     def test_blob_fallback_batch_reader_applies_deletion_vector(self):
