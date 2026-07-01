@@ -93,6 +93,12 @@ under the License.
             <td>Whether to resolve blob-view-field values from upstream tables at read time. Set to false to preserve BlobViewStruct references when forwarding blob view values to another blob-view table.</td>
         </tr>
         <tr>
+            <td><h5>blob-write-null-on-fetch-failure</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to write NULL for a descriptor BLOB value when the referenced resource cannot be fetched during Flink writes (e.g. invalid URI or HTTP errors other than 404). HTTP 404 is handled by 'blob-write-null-on-missing-file'. When false, the write fails when the descriptor is read.</td>
+        </tr>
+        <tr>
             <td><h5>blob-write-null-on-missing-file</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
