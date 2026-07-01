@@ -145,8 +145,7 @@ class GlobalIndexBuilderUtilsTest {
 
     @Test
     void testCreateShardIndexedSplitsUsesUnindexedRanges() {
-        List<ManifestEntry> entries =
-                Arrays.asList(createEntry(0L, 100), createEntry(100L, 100));
+        List<ManifestEntry> entries = Arrays.asList(createEntry(0L, 100), createEntry(100L, 100));
 
         List<IndexedSplit> splits =
                 GlobalIndexBuilderUtils.createShardIndexedSplits(
@@ -157,8 +156,7 @@ class GlobalIndexBuilderUtilsTest {
 
         assertThat(splits).hasSize(1);
         assertThat(splits.get(0).rowRanges()).containsExactly(new Range(0, 99));
-        assertThat(splits.get(0).dataSplit().dataFiles())
-                .containsExactly(entries.get(0).file());
+        assertThat(splits.get(0).dataSplit().dataFiles()).containsExactly(entries.get(0).file());
     }
 
     @Test
