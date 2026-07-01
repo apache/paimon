@@ -36,7 +36,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_C
 import org.apache.paimon.spark.sort.TableSorter
 import org.apache.paimon.spark.util.OptionUtils.paimonExtensionEnabled
 import org.apache.paimon.spark.util.SparkRowUtils
-import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskResult}
+import org.apache.paimon.spark.write.{InnerTableWriteTaskResult, PaimonDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.{FileStoreTable, PostponeUtils, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
@@ -58,6 +58,34 @@ case class PaimonSparkWriter(
     writeRowTracking: Boolean = false,
     batchId: Option[Long] = None)
   extends WriteHelper {
+
+  private case class WriteContext(
+      sparkSession: SparkSession,
+      data: DataFrame,
+      preparedData: DataFrame,
+      rowKindColIdx: Int,
+      bucketColIdx: Int,
+      encoderGroupWithBucketCol: EncoderSerDeGroup,
+      postponePartitionBucketComputer: Option[BinaryRow => Integer]) {
+
+    def newWrite(): PaimonDataWrite =
+      PaimonDataWrite(
+        writeBuilder,
+        writeType,
+        rowKindColIdx,
+        writeRowTracking,
+        fullCompactionDeltaCommits,
+        batchId,
+        catalogContextForBlobDescriptor,
+        postponePartitionBucketComputer
+      )
+
+    def sparkParallelism: Int = {
+      val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+      val numShufflePartitions = sparkSession.sessionState.conf.numShufflePartitions
+      Math.max(defaultParallelism, numShufflePartitions)
+    }
+  }
 
   private lazy val tableSchema = table.schema
 
@@ -106,10 +134,23 @@ case class PaimonSparkWriter(
   }
 
   def write(data: DataFrame): Seq[CommitMessage] = {
-    val sparkSession = data.sparkSession
-    import sparkSession.implicits._
+    val ctx = createWriteContext(data)
+    val written = bucketMode match {
+      case KEY_DYNAMIC => writeKeyDynamic(ctx)
+      case HASH_DYNAMIC => writeHashDynamic(ctx)
+      case POSTPONE_MODE if coreOptions.postponeBatchWriteFixedBucket() =>
+        writePostponeFixedBucket(ctx)
+      case BUCKET_UNAWARE | POSTPONE_MODE => writeBucketUnawareOrPostpone(ctx)
+      case HASH_FIXED => writeHashFixed(ctx)
+      case _ =>
+        throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
+    }
 
-    val withInitBucketCol = bucketMode match {
+    WriteTaskResult.merge(written.collect())
+  }
+
+  private def createWriteContext(data: DataFrame): WriteContext = {
+    val preparedData = bucketMode match {
       case BUCKET_UNAWARE => data
       case KEY_DYNAMIC if !data.schema.fieldNames.contains(ROW_KIND_COL) =>
         data
@@ -117,233 +158,217 @@ case class PaimonSparkWriter(
           .withColumn(BUCKET_COL, lit(-1))
       case _ => data.withColumn(BUCKET_COL, lit(-1))
     }
-    val rowKindColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, ROW_KIND_COL)
-    val bucketColIdx = SparkRowUtils.getFieldIndex(withInitBucketCol.schema, BUCKET_COL)
-    val encoderGroupWithBucketCol = EncoderSerDeGroup(withInitBucketCol.schema)
+    val rowKindColIdx = SparkRowUtils.getFieldIndex(preparedData.schema, ROW_KIND_COL)
+    val bucketColIdx = SparkRowUtils.getFieldIndex(preparedData.schema, BUCKET_COL)
+    val encoderGroupWithBucketCol = EncoderSerDeGroup(preparedData.schema)
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
       if (postponeBatchWriteFixedBucket) {
         val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
         val defaultPostponeNumBuckets = Math.min(
-          withInitBucketCol.rdd.getNumPartitions,
+          preparedData.rdd.getNumPartitions,
           table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
         Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
       } else {
         None
       }
 
-    def newWrite() = PaimonDataWrite(
-      writeBuilder,
-      writeType,
+    WriteContext(
+      data.sparkSession,
+      data,
+      preparedData,
       rowKindColIdx,
-      writeRowTracking,
-      fullCompactionDeltaCommits,
-      batchId,
-      catalogContextForBlobDescriptor,
-      postponePartitionBucketComputer
-    )
+      bucketColIdx,
+      encoderGroupWithBucketCol,
+      postponePartitionBucketComputer)
+  }
 
-    def sparkParallelism = {
-      val defaultParallelism = sparkSession.sparkContext.defaultParallelism
-      val numShufflePartitions = sparkSession.sessionState.conf.numShufflePartitions
-      Math.max(defaultParallelism, numShufflePartitions)
-    }
-
-    def writeWithoutBucket(dataFrame: DataFrame) = {
-      dataFrame.mapPartitions {
-        iter =>
-          {
-            val write = newWrite()
-            try {
-              iter.foreach(row => write.write(row))
-              Iterator.apply(write.commit)
-            } finally {
-              write.close()
-            }
-          }
-      }
-    }
-
-    def writeWithBucket(dataFrame: DataFrame) = {
-      dataFrame.mapPartitions {
-        iter =>
-          {
-            val write = newWrite()
-            try {
-              iter.foreach(row => write.write(row, row.getInt(bucketColIdx)))
-              Iterator.apply(write.commit)
-            } finally {
-              write.close()
-            }
-          }
-      }
-    }
-
-    def writeWithBucketProcessor(dataFrame: DataFrame, processor: BucketProcessor[Row]) = {
-      val repartitioned = repartitionByPartitionsAndBucket(
-        dataFrame
-          .mapPartitions(processor.processPartition)(encoderGroupWithBucketCol.encoder)
-          .toDF())
-      writeWithBucket(repartitioned)
-    }
-
-    def writeWithBucketAssigner(dataFrame: DataFrame, funcFactory: () => Row => Int) = {
-      dataFrame.mapPartitions {
-        iter =>
-          {
-            val assigner = funcFactory.apply()
-            val write = newWrite()
-            try {
-              iter.foreach(row => write.write(row, assigner.apply(row)))
-              Iterator.apply(write.commit)
-            } finally {
-              write.close()
-            }
-          }
-      }
-    }
-
-    val written = bucketMode match {
-      case KEY_DYNAMIC =>
-        // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
-        val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
-        val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
-          .map(_.toInt)
-          .getOrElse(sparkParallelism)
-        val bootstrapped =
-          bootstrapAndRepartitionByKeyHash(withInitBucketCol, assignerParallelism, rowKindColIdx)
-
-        val globalDynamicBucketProcessor =
-          GlobalDynamicBucketProcessor(
-            table,
-            rowType,
-            assignerParallelism,
-            encoderGroupWithBucketCol)
-        val repartitioned = repartitionByPartitionsAndBucket(
-          sparkSession.createDataFrame(
-            bootstrapped.mapPartitions(globalDynamicBucketProcessor.processPartition),
-            withInitBucketCol.schema))
-
-        writeWithBucket(repartitioned)
-
-      case HASH_DYNAMIC =>
-        val assignerParallelism = {
-          val parallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
-            .map(_.toInt)
-            .getOrElse(sparkParallelism)
-          if (coreOptions.dynamicBucketMaxBuckets() != -1) {
-            Math.min(coreOptions.dynamicBucketMaxBuckets().toInt, parallelism)
-          } else {
-            parallelism
+  private def writePerPartition(ctx: WriteContext, dataFrame: DataFrame)(
+      writeRow: (PaimonDataWrite, Row) => Unit): Dataset[InnerTableWriteTaskResult] = {
+    ctx.sparkSession.createDataset(dataFrame.rdd.mapPartitions {
+      iter =>
+        {
+          val write = ctx.newWrite()
+          try {
+            iter.foreach(row => writeRow(write, row))
+            Iterator.single(write.commit)
+          } finally {
+            write.close()
           }
         }
-        val numAssigners = Option(coreOptions.dynamicBucketInitialBuckets)
-          .map(initialBuckets => Math.min(initialBuckets.toInt, assignerParallelism))
-          .getOrElse(assignerParallelism)
+    })(Encoders.kryo[InnerTableWriteTaskResult])
+  }
 
-        def partitionByKey(): DataFrame = {
-          repartitionByKeyPartitionHash(
-            sparkSession,
-            withInitBucketCol,
-            assignerParallelism,
-            numAssigners)
-        }
+  private def writeWithoutBucket(
+      ctx: WriteContext,
+      dataFrame: DataFrame): Dataset[InnerTableWriteTaskResult] = {
+    writePerPartition(ctx, dataFrame)((write, row) => write.write(row))
+  }
 
-        if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
-          // bootstrap mode
-          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner
-          writeWithBucketAssigner(
-            partitionByKey(),
-            () => {
-              val extractor = new RowPartitionKeyExtractor(table.schema)
-              val assigner =
-                new SimpleHashBucketAssigner(
-                  numAssigners,
-                  TaskContext.getPartitionId(),
-                  coreOptions.dynamicBucketTargetRowNum,
-                  coreOptions.dynamicBucketMaxBuckets
-                )
-              row => {
-                val sparkRow =
-                  new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
-                assigner.assign(
-                  extractor.partition(sparkRow),
-                  extractor.trimmedPrimaryKey(sparkRow).hashCode)
-              }
-            }
-          )
-        } else {
-          // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
-          writeWithBucketProcessor(
-            partitionByKey(),
-            DynamicBucketProcessor(
-              table,
-              bucketColIdx,
-              assignerParallelism,
+  private def writeWithBucket(
+      ctx: WriteContext,
+      dataFrame: DataFrame): Dataset[InnerTableWriteTaskResult] = {
+    writePerPartition(ctx, dataFrame) {
+      (write, row) => write.write(row, row.getInt(ctx.bucketColIdx))
+    }
+  }
+
+  private def writeWithBucketProcessor(
+      ctx: WriteContext,
+      dataFrame: DataFrame,
+      processor: BucketProcessor[Row]): Dataset[InnerTableWriteTaskResult] = {
+    val repartitioned = repartitionByPartitionsAndBucket(
+      dataFrame
+        .mapPartitions(processor.processPartition)(ctx.encoderGroupWithBucketCol.encoder)
+        .toDF())
+    writeWithBucket(ctx, repartitioned)
+  }
+
+  private def writeWithBucketAssigner(
+      ctx: WriteContext,
+      dataFrame: DataFrame,
+      funcFactory: () => Row => Int): Dataset[InnerTableWriteTaskResult] = {
+    val assigner = funcFactory.apply()
+    writePerPartition(ctx, dataFrame)((write, row) => write.write(row, assigner.apply(row)))
+  }
+
+  private def writeKeyDynamic(ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
+    val rowType = SparkTypeUtils.toPaimonType(ctx.preparedData.schema).asInstanceOf[RowType]
+    val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
+      .map(_.toInt)
+      .getOrElse(ctx.sparkParallelism)
+    val bootstrapped =
+      bootstrapAndRepartitionByKeyHash(ctx.preparedData, assignerParallelism, ctx.rowKindColIdx)
+
+    val globalDynamicBucketProcessor =
+      GlobalDynamicBucketProcessor(
+        table,
+        rowType,
+        assignerParallelism,
+        ctx.encoderGroupWithBucketCol)
+    val repartitioned = repartitionByPartitionsAndBucket(
+      ctx.sparkSession.createDataFrame(
+        bootstrapped.mapPartitions(globalDynamicBucketProcessor.processPartition),
+        ctx.preparedData.schema))
+
+    writeWithBucket(ctx, repartitioned)
+  }
+
+  private def writeHashDynamic(ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
+    val assignerParallelism = {
+      val parallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
+        .map(_.toInt)
+        .getOrElse(ctx.sparkParallelism)
+      if (coreOptions.dynamicBucketMaxBuckets() != -1) {
+        Math.min(coreOptions.dynamicBucketMaxBuckets().toInt, parallelism)
+      } else {
+        parallelism
+      }
+    }
+    val numAssigners = Option(coreOptions.dynamicBucketInitialBuckets)
+      .map(initialBuckets => Math.min(initialBuckets.toInt, assignerParallelism))
+      .getOrElse(assignerParallelism)
+
+    def partitionByKey(): DataFrame = {
+      repartitionByKeyPartitionHash(
+        ctx.sparkSession,
+        ctx.preparedData,
+        assignerParallelism,
+        numAssigners)
+    }
+
+    if (table.snapshotManager().latestSnapshotFromFileSystem() == null) {
+      writeWithBucketAssigner(
+        ctx,
+        partitionByKey(),
+        () => {
+          val extractor = new RowPartitionKeyExtractor(table.schema)
+          val assigner =
+            new SimpleHashBucketAssigner(
               numAssigners,
-              encoderGroupWithBucketCol)
-          )
-        }
-
-      case POSTPONE_MODE if coreOptions.postponeBatchWriteFixedBucket() =>
-        // Topology: input -> bucket-assigner -> shuffle by partition & bucket
-        writeWithBucketProcessor(
-          withInitBucketCol,
-          PostponeFixBucketProcessor(
-            table,
-            bucketColIdx,
-            encoderGroupWithBucketCol,
-            postponePartitionBucketComputer.get))
-
-      case BUCKET_UNAWARE | POSTPONE_MODE =>
-        var input = data
-        if (tableSchema.partitionKeys().size() > 0) {
-          coreOptions.partitionSinkStrategy match {
-            case PartitionSinkStrategy.HASH =>
-              input = data.repartition(partitionCols(data): _*)
-            case _ =>
+              TaskContext.getPartitionId(),
+              coreOptions.dynamicBucketTargetRowNum,
+              coreOptions.dynamicBucketMaxBuckets
+            )
+          row => {
+            val sparkRow =
+              new SparkRow(writeType, row, RowKind.INSERT, catalogContextForBlobDescriptor)
+            assigner.assign(
+              extractor.partition(sparkRow),
+              extractor.trimmedPrimaryKey(sparkRow).hashCode)
           }
         }
-        val clusteringColumns = coreOptions.clusteringColumns()
-        if (
-          table.bucketMode() != POSTPONE_MODE &&
-          (!coreOptions.clusteringIncrementalEnabled() || coreOptions
-            .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
-        ) {
-          val strategy = coreOptions.clusteringStrategy(clusteringColumns.size())
-          val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
-          input = sorter.sort(data)
-        }
-        writeWithoutBucket(input)
-
-      case HASH_FIXED =>
-        if (paimonExtensionEnabled(sparkSession) && BucketFunction.supportsTable(table)) {
-          // Topology: input -> shuffle by partition & bucket
-          val bucketNumber = coreOptions.bucket()
-          val bucketKeyCol = tableSchema
-            .bucketKeys()
-            .asScala
-            .map(tableSchema.fieldNames().indexOf(_))
-            .map(x => col(data.schema.fieldNames(x)))
-            .toSeq
-          val args = Seq(
-            lit(new CoreOptions(tableSchema.options()).bucketFunctionType().toString),
-            lit(bucketNumber)) ++ bucketKeyCol
-          val repartitioned =
-            repartitionByPartitionsAndBucket(
-              data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))
-          writeWithBucket(repartitioned)
-        } else {
-          // Topology: input -> bucket-assigner -> shuffle by partition & bucket
-          writeWithBucketProcessor(
-            withInitBucketCol,
-            CommonBucketProcessor(table, bucketColIdx, encoderGroupWithBucketCol))
-        }
-
-      case _ =>
-        throw new UnsupportedOperationException(s"Spark doesn't support $bucketMode mode.")
+      )
+    } else {
+      writeWithBucketProcessor(
+        ctx,
+        partitionByKey(),
+        DynamicBucketProcessor(
+          table,
+          ctx.bucketColIdx,
+          assignerParallelism,
+          numAssigners,
+          ctx.encoderGroupWithBucketCol)
+      )
     }
+  }
 
-    WriteTaskResult.merge(written.collect())
+  private def writePostponeFixedBucket(ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
+    writeWithBucketProcessor(
+      ctx,
+      ctx.preparedData,
+      PostponeFixBucketProcessor(
+        table,
+        ctx.bucketColIdx,
+        ctx.encoderGroupWithBucketCol,
+        ctx.postponePartitionBucketComputer.get))
+  }
+
+  private def writeBucketUnawareOrPostpone(
+      ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
+    var input = ctx.data
+    if (tableSchema.partitionKeys().size() > 0) {
+      coreOptions.partitionSinkStrategy match {
+        case PartitionSinkStrategy.HASH =>
+          input = ctx.data.repartition(partitionCols(ctx.data): _*)
+        case _ =>
+      }
+    }
+    val clusteringColumns = coreOptions.clusteringColumns()
+    if (
+      table.bucketMode() != POSTPONE_MODE &&
+      (!coreOptions.clusteringIncrementalEnabled() || coreOptions
+        .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
+    ) {
+      val strategy = coreOptions.clusteringStrategy(clusteringColumns.size())
+      val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
+      input = sorter.sort(ctx.data)
+    }
+    writeWithoutBucket(ctx, input)
+  }
+
+  private def writeHashFixed(ctx: WriteContext): Dataset[InnerTableWriteTaskResult] = {
+    if (paimonExtensionEnabled(ctx.sparkSession) && BucketFunction.supportsTable(table)) {
+      val bucketNumber = coreOptions.bucket()
+      val bucketKeyCol = tableSchema
+        .bucketKeys()
+        .asScala
+        .map(tableSchema.fieldNames().indexOf(_))
+        .map(x => col(ctx.data.schema.fieldNames(x)))
+        .toSeq
+      val args = Seq(
+        lit(new CoreOptions(tableSchema.options()).bucketFunctionType().toString),
+        lit(bucketNumber)) ++ bucketKeyCol
+      val repartitioned =
+        repartitionByPartitionsAndBucket(
+          ctx.data.withColumn(BUCKET_COL, call_udf(BucketExpression.FIXED_BUCKET, args: _*)))
+      writeWithBucket(ctx, repartitioned)
+    } else {
+      // Topology: input -> bucket-assigner -> shuffle by partition & bucket
+      writeWithBucketProcessor(
+        ctx,
+        ctx.preparedData,
+        CommonBucketProcessor(table, ctx.bucketColIdx, ctx.encoderGroupWithBucketCol))
+    }
   }
 
   /**
