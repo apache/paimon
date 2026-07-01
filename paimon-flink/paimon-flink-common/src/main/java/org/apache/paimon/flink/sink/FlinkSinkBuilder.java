@@ -223,7 +223,8 @@ public class FlinkSinkBuilder {
                         this.input,
                         table.rowType(),
                         contextForDescriptor,
-                        table.coreOptions().blobWriteNullOnMissingFile());
+                        table.coreOptions().blobWriteNullOnMissingFile(),
+                        table.coreOptions().blobWriteNullOnFetchFailure());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -256,7 +257,7 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
-        return mapToInternalRow(input, rowType, catalogContext, false);
+        return mapToInternalRow(input, rowType, catalogContext, false, false);
     }
 
     public static DataStream<InternalRow> mapToInternalRow(
@@ -264,6 +265,15 @@ public class FlinkSinkBuilder {
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
+        return mapToInternalRow(input, rowType, catalogContext, checkBlobDescriptorExists, false);
+    }
+
+    public static DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
         Set<Integer> blobFields =
                 checkBlobDescriptorExists
                         ? FlinkRowWrapper.blobFieldIndexes(rowType)
@@ -276,6 +286,7 @@ public class FlinkSinkBuilder {
                                                         r,
                                                         catalogContext,
                                                         checkBlobDescriptorExists,
+                                                        writeNullOnFetchFailure,
                                                         blobFields))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(

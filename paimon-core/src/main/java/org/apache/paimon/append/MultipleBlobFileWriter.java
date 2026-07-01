@@ -63,12 +63,16 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean statsDenseStore,
             long targetFileSize,
             @Nullable BlobConsumer blobConsumer,
-            Set<String> blobInlineFields) {
+            Set<String> blobInlineFields,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure) {
         RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
             BlobFileFormat blobFileFormat = new BlobFileFormat();
             blobFileFormat.setWriteConsumer(blobConsumer);
+            blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
+            blobFileFormat.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
             blobWriters.add(
                     new BlobProjectedFileWriter(
                             () ->
