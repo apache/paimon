@@ -552,20 +552,46 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             totalBuckets = restoredTotalBuckets;
         }
         if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            String partInfo =
-                    partitionType.getFieldCount() > 0
-                            ? "partition "
-                                    + getPartitionComputer(
-                                                    partitionType,
-                                                    PARTITION_DEFAULT_NAME.defaultValue(),
-                                                    legacyPartitionName)
-                                            .generatePartValues(partition)
-                            : "table";
-            throw new RuntimeException(
-                    String.format(
-                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                    + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, numBuckets, totalBuckets));
+            if (partitionType.getFieldCount() > 0) {
+                // For partitioned tables, allow per-partition bucket counts.
+                // The partition's existing bucket count takes precedence over the
+                // table-level default. This supports rescale operations where different
+                // partitions may have different bucket counts.
+                Object partInfo =
+                        getPartitionComputer(
+                                        partitionType,
+                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                        legacyPartitionName)
+                                .generatePartValues(partition);
+                if (bucket >= totalBuckets) {
+                    // This validation reject buckets outside the partition's layout.
+                    // A bucket id that is out of range for the partition's actual
+                    // bucket count means the caller computed it against the wrong number of
+                    // buckets (e.g. the table default instead of the partition's count), so
+                    // the row would land outside the partition's hash-bucketing scheme and
+                    // silently corrupt data. Fail fast instead of accepting it.
+                    throw new RuntimeException(
+                            String.format(
+                                    "Trying to write bucket %d to partition %s, but the partition only has %d "
+                                            + "buckets (table default: %d). The bucket was likely computed using a "
+                                            + "different bucket number than the partition's actual bucket count. "
+                                            + "Recompute the bucket using the partition's bucket count, or rescale "
+                                            + "the partition via INSERT OVERWRITE.",
+                                    bucket, partInfo, totalBuckets, numBuckets));
+                }
+                LOG.info(
+                        "Partition {} uses {} buckets (table default: {}). "
+                                + "Accepting per-partition bucket count.",
+                        partInfo,
+                        totalBuckets,
+                        numBuckets);
+            } else {
+                throw new RuntimeException(
+                        String.format(
+                                "Try to write table with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                numBuckets, totalBuckets));
+            }
         }
         return restored;
     }

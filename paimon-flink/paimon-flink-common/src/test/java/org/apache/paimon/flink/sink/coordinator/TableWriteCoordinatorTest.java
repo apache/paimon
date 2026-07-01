@@ -21,6 +21,8 @@ package org.apache.paimon.flink.sink.coordinator;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
@@ -30,6 +32,11 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SegmentsCache;
 
@@ -39,7 +46,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
@@ -129,10 +138,13 @@ class TableWriteCoordinatorTest extends TableTestBase {
     @Test
     public void testPrefetchWarmsAllManifestsAfterScan() throws Exception {
         Identifier identifier = new Identifier("db", "table");
-        // a fixed-bucket table so the data spans multiple buckets
+        // a partitioned, fixed-bucket table so the data spans multiple partitions (and multiple
+        // buckets within each partition)
         Schema schema =
                 Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
                         .column("f0", DataTypes.INT())
+                        .partitionKeys("pt")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "f0")
                         .build();
@@ -140,15 +152,22 @@ class TableWriteCoordinatorTest extends TableTestBase {
         catalog.createTable(identifier, schema, false);
         FileStoreTable table = getTable(identifier);
 
-        // write each bucket in its own commit so manifests are confined to a single bucket: a scan
-        // for one bucket must skip the other bucket's manifest at the manifest-file level
-        writeWithBucketAssigner(table, row -> 0, GenericRow.of(1));
-        writeWithBucketAssigner(table, row -> 1, GenericRow.of(2));
+        // write each partition in its own commit so manifests are confined to a single partition: a
+        // scan for one partition must skip the other partition's manifest at the manifest-file
+        // level. Within each commit both buckets are written, so scanning a partition has to load
+        // all of that partition's buckets.
+        writeWithBucketAssigner(
+                table, row -> row.getInt(1) % 2, GenericRow.of(0, 1), GenericRow.of(0, 2));
+        writeWithBucketAssigner(
+                table, row -> row.getInt(1) % 2, GenericRow.of(1, 1), GenericRow.of(1, 2));
 
-        // the scan returns the entries of both buckets, confirming the table spans more than one
+        // the scan returns the entries of both partitions, each spanning both buckets, confirming
+        // the table spans more than one partition and that every partition spans more than one
         // bucket
         Snapshot latest = table.latestSnapshot().get();
         List<ManifestEntry> entries = table.store().newScan().withSnapshot(latest).plan().files();
+        assertThat(entries.stream().map(e -> e.partition().getInt(0)).collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder(0, 1);
         assertThat(entries.stream().map(ManifestEntry::bucket).collect(Collectors.toSet()))
                 .containsExactlyInAnyOrder(0, 1);
 
@@ -165,19 +184,20 @@ class TableWriteCoordinatorTest extends TableTestBase {
         TableWriteCoordinator coordinator = new TableWriteCoordinator(table);
         assertThat(table.getManifestCache().totalCacheBytes()).isZero();
 
-        // a scan request for bucket 0 reads only the bucket-0 manifest, skipping the bucket-1
-        // manifest at the manifest-file level: the cache therefore holds only a single bucket's
-        // manifest, proving the bucket filter is active (and leaving the stale bucket state on the
-        // shared scan)
+        // a scan request for partition 0 reads only the partition-0 manifest, skipping the
+        // partition-1 manifest at the manifest-file level: the cache therefore holds only a single
+        // partition's manifest, proving the partition filter is active (and leaving the stale
+        // partition state on the shared scan)
         ScanCoordinationRequest request =
-                new ScanCoordinationRequest(serializeBinaryRow(EMPTY_ROW), 0, false, false);
+                new ScanCoordinationRequest(serializeBinaryRow(partitionRow(0)), 0, false, false);
         coordinator.scan(request);
         long filteredCacheBytes = table.getManifestCache().totalCacheBytes();
         assertThat(filteredCacheBytes).isGreaterThan(0);
 
         // enable prefetch via reflection (to avoid widening the coordinator's interface) and run a
         // checkpoint refresh; the prefetch must warm the full set of manifests rather than
-        // inheriting the stale bucket state, so the cache grows beyond the single-bucket subset
+        // inheriting the stale partition state, so the cache grows beyond the single-partition
+        // subset
         Field prefetchManifests = TableWriteCoordinator.class.getDeclaredField("prefetchManifests");
         prefetchManifests.setAccessible(true);
         prefetchManifests.setBoolean(coordinator, true);
@@ -224,5 +244,98 @@ class TableWriteCoordinatorTest extends TableTestBase {
         table.setManifestCache(null);
         assertThatThrownBy(() -> new TableWriteCoordinator(table))
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    /**
+     * Tests that when a partition has been rescaled (different bucket count than the table
+     * default), the coordinator returns the correct per-partition bucket count even for buckets
+     * with no data files.
+     *
+     * <p>Scenario:
+     *
+     * <ul>
+     *   <li>Table bucket (default): 32
+     *   <li>Partition A bucket: 2 (rescaled)
+     *   <li>Partition A bucket=0: has data files, totalBuckets=2
+     *   <li>Partition A bucket=1: no data files
+     * </ul>
+     *
+     * <p>When scanning bucket=1 of partition A (empty bucket), the response {@code totalBuckets}
+     * must be 2 (from the per-partition mapping), not 32 (the table default).
+     */
+    @Test
+    public void testEmptyBucketUsesPartitionBucketCount() throws Exception {
+        // Table default: 32 buckets; partition A was rescaled to 2
+        int tableBuckets = 32;
+        int partitionBuckets = 2;
+
+        Identifier identifier = new Identifier("db2", "table");
+        catalog.createDatabase("db2", false);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .primaryKey("pt", "k")
+                        .partitionKeys("pt")
+                        .option(CoreOptions.BUCKET.key(), String.valueOf(tableBuckets))
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        // Write to partition A, bucket=0 with totalBuckets=2 (rescaled partition)
+        String commitUser = UUID.randomUUID().toString();
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        List<CommitMessage> messages;
+        try (StreamTableWrite write = writeBuilder.newWrite()) {
+            write.write(GenericRow.of(1, 1, 100), 0);
+            messages = write.prepareCommit(false, 0);
+        }
+
+        // Override totalBuckets to simulate partition rescale to 2
+        CommitMessageImpl original = (CommitMessageImpl) messages.get(0);
+        CommitMessageImpl rescaled =
+                new CommitMessageImpl(
+                        original.partition(),
+                        original.bucket(),
+                        partitionBuckets,
+                        original.newFilesIncrement(),
+                        original.compactIncrement());
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.commit(0, Collections.<CommitMessage>singletonList(rescaled));
+        }
+
+        // Reload the table and create coordinator
+        FileStoreTable freshTable = getTable(identifier);
+        TableWriteCoordinator coordinator = new TableWriteCoordinator(freshTable);
+
+        BinaryRow partitionA = partitionRow(1);
+
+        // Scan bucket=0 (has files): totalBuckets should be 2
+        ScanCoordinationRequest requestBucket0 =
+                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 0, false, false);
+        ScanCoordinationResponse responseBucket0 = coordinator.scan(requestBucket0);
+        assertThat(responseBucket0.totalBuckets())
+                .as("bucket=0 (has files) should use per-partition bucket count 2")
+                .isEqualTo(partitionBuckets);
+        assertThat(responseBucket0.extractDataFiles()).isNotEmpty();
+
+        // Scan bucket=1 (empty): totalBuckets must be 2, not the table default 32
+        ScanCoordinationRequest requestBucket1 =
+                new ScanCoordinationRequest(serializeBinaryRow(partitionA), 1, false, false);
+        ScanCoordinationResponse responseBucket1 = coordinator.scan(requestBucket1);
+        assertThat(responseBucket1.totalBuckets())
+                .as(
+                        "bucket=1 (empty bucket) must use per-partition bucket count 2, not table default 32")
+                .isEqualTo(partitionBuckets);
+        assertThat(responseBucket1.extractDataFiles()).isEmpty();
+    }
+
+    private BinaryRow partitionRow(int partitionValue) {
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, partitionValue);
+        writer.complete();
+        return row;
     }
 }

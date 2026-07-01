@@ -28,14 +28,15 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -68,10 +69,7 @@ public class TableWriteCoordinator {
         this.table = table;
         checkNotNull(table.getManifestCache());
         this.latestCommittedIdentifiers = new ConcurrentHashMap<>();
-        this.scan = table.store().newScan();
-        if (table.coreOptions().manifestDeleteFileDropStats()) {
-            scan.dropStats();
-        }
+        this.scan = newScan();
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.pageSize =
                 (int)
@@ -106,11 +104,7 @@ public class TableWriteCoordinator {
             // warm bytes instead of each performing a cold manifest read. A fresh scan is
             // used so the shared request `scan`'s bucket/partition state never narrows the
             // warm-up.
-            FileStoreScan prefetchScan = table.store().newScan().withSnapshot(snapshot);
-            if (table.coreOptions().manifestDeleteFileDropStats()) {
-                prefetchScan.dropStats();
-            }
-            prefetchScan.plan();
+            newScan().withSnapshot(snapshot).plan();
         }
     }
 
@@ -167,9 +161,10 @@ public class TableWriteCoordinator {
         BinaryRow partition = deserializeBinaryRow(request.partition());
         int bucket = request.bucket();
 
-        List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
+        List<DataFileMeta> restoreFiles = WriteRestore.extractDataFiles(entries);
+        PartitionBucketMapping mapping = singlePartitionBucketMapping(partition);
+        Integer totalBuckets = WriteRestore.extractTotalBuckets(entries, partition, mapping);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (request.scanDynamicBucketIndex()) {
@@ -210,6 +205,23 @@ public class TableWriteCoordinator {
         refresh();
         // refresh latest committed identifiers for all users
         latestCommittedIdentifiers.clear();
+    }
+
+    private PartitionBucketMapping singlePartitionBucketMapping(BinaryRow partition) {
+        FileStoreScan partitionScan =
+                newScan()
+                        .withSnapshot(snapshot)
+                        .withPartitionFilter(Collections.singletonList(partition));
+
+        return PartitionBucketMapping.loadFromScan(partitionScan, table.schema().numBuckets());
+    }
+
+    private FileStoreScan newScan() {
+        FileStoreScan newScan = table.store().newScan();
+        if (table.coreOptions().manifestDeleteFileDropStats()) {
+            newScan.dropStats();
+        }
+        return newScan;
     }
 
     private static class CoordinationKey {

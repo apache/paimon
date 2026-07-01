@@ -21,9 +21,11 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Restore for write to restore data files by partition and bucket from file system. */
@@ -37,9 +39,44 @@ public interface WriteRestore {
             boolean scanDynamicBucketIndex,
             boolean scanDeleteVectorsIndex);
 
+    /**
+     * Resolves the {@code totalBuckets} for a (partition, bucket) pair given the manifest entries
+     * for that bucket and the table's partition-bucket mapping.
+     *
+     * <ul>
+     *   <li>Non-empty bucket: use the value stamped on the existing data files so that
+     *       committer-side bucket-count mismatch detection (e.g. rescale-without-overwrite) still
+     *       fires.
+     *   <li>Empty bucket on a partitioned table: look up the per-partition override in {@code
+     *       mapping}; returns {@code null} if the partition uses the table default.
+     *   <li>Empty bucket on an unpartitioned table: returns {@code null} so the write path falls
+     *       back to {@code numBuckets} and the committer-side check still fires.
+     * </ul>
+     */
     @Nullable
-    static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {
+    static Integer extractTotalBuckets(
+            List<ManifestEntry> entries, BinaryRow partition, PartitionBucketMapping mapping) {
+        if (!entries.isEmpty()) {
+            return entries.get(0).totalBuckets();
+        }
+        if (partition.getFieldCount() > 0) {
+            return mapping.resolveNumBuckets(partition);
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the {@link DataFileMeta} list from the given manifest entries, validating that all
+     * entries agree on {@code totalBuckets}.
+     *
+     * @param entries manifest entries for a single (partition, bucket) pair
+     * @return the list of data files; empty if {@code entries} is empty
+     * @throws RuntimeException if entries carry inconsistent {@code totalBuckets} values, which
+     *     indicates a corrupted manifest
+     */
+    static List<DataFileMeta> extractDataFiles(List<ManifestEntry> entries) {
         Integer totalBuckets = null;
+        List<DataFileMeta> dataFiles = new ArrayList<>();
         for (ManifestEntry entry : entries) {
             if (totalBuckets != null && totalBuckets != entry.totalBuckets()) {
                 throw new RuntimeException(
@@ -50,6 +87,6 @@ public interface WriteRestore {
             totalBuckets = entry.totalBuckets();
             dataFiles.add(entry.file());
         }
-        return totalBuckets;
+        return dataFiles;
     }
 }
