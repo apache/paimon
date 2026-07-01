@@ -39,8 +39,10 @@ case class UpdatePaimonDataEvolutionTableCommand(
   with SupportsSubquery {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val targetRowId = rowIdAttribute(relation)
-    val sourceTable = updatedRowIdSource(targetRowId)
+    val (updateTable, updateRelation) =
+      MergeIntoPaimonDataEvolutionTable.withMatchedUpdateScanOptions(v2Table, relation)
+    val targetRowId = rowIdAttribute(updateRelation)
+    val sourceTable = updatedRowIdSource(updateTable, updateRelation, targetRowId)
     val sourceRowId = sourceTable.output.head.asInstanceOf[AttributeReference]
 
     val matchedCondition = EqualTo(targetRowId, sourceRowId)
@@ -49,8 +51,8 @@ case class UpdatePaimonDataEvolutionTableCommand(
       alignedExpressions.map { case (expression, attribute) => Assignment(attribute, expression) })
 
     MergeIntoPaimonDataEvolutionTable(
-      v2Table,
-      relation,
+      updateTable,
+      updateRelation,
       sourceTable,
       matchedCondition,
       Seq(updateAction),
@@ -58,13 +60,16 @@ case class UpdatePaimonDataEvolutionTableCommand(
       Nil).run(sparkSession)
   }
 
-  private def updatedRowIdSource(targetRowId: AttributeReference): Project = {
+  private def updatedRowIdSource(
+      updateTable: SparkTable,
+      updateRelation: DataSourceV2Relation,
+      targetRowId: AttributeReference): Project = {
     val conditionReferences = condition.references.toSeq.collect {
       case attr: AttributeReference => attr
     }
     val readOutput = deduplicateByExprId(conditionReferences :+ targetRowId)
     val sourceScan =
-      SparkShimLoader.shim.copyDataSourceV2Relation(relation, v2Table, readOutput)
+      SparkShimLoader.shim.copyDataSourceV2Relation(updateRelation, updateTable, readOutput)
     // Keep the Filter visible for conditional UPDATEs. The data-evolution MERGE command uses a
     // self-merge shortcut for Project(PaimonRelation); if a WHERE update were shaped that way, the
     // shortcut would bypass the source join path and update every row.
