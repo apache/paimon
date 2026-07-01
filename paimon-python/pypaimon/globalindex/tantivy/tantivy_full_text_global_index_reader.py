@@ -513,9 +513,8 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             return
 
         analyzer_builder = tantivy.TextAnalyzerBuilder(tokenizer)
-        if self._index_options.max_token_length != 40:
-            analyzer_builder = analyzer_builder.filter(
-                tantivy.Filter.remove_long(self._index_options.max_token_length))
+        analyzer_builder = analyzer_builder.filter(
+            tantivy.Filter.remove_long(self._index_options.max_token_length))
         if self._index_options.lower_case:
             analyzer_builder = analyzer_builder.filter(tantivy.Filter.lowercase())
         if self._index_options.ascii_folding:
@@ -694,14 +693,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         missing = []
         if self._index_options.tokenizer != "jieba":
-            required_classes = ["TextAnalyzerBuilder", "Tokenizer"]
-            if (self._index_options.lower_case
-                    or self._index_options.max_token_length != 40
-                    or self._index_options.ascii_folding
-                    or self._index_options.stem
-                    or self._index_options.remove_stop_words
-                    or self._index_options.stop_word_list()):
-                required_classes.append("Filter")
+            required_classes = ["TextAnalyzerBuilder", "Tokenizer", "Filter"]
         else:
             required_classes = ["Query", "Occur"]
         for name in required_classes:
@@ -724,9 +716,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 and not hasattr(tokenizer, tokenizer_api)):
             missing.append("Tokenizer.%s" % tokenizer_api)
         if self._index_options.tokenizer != "jieba" and filter_ is not None:
-            filter_checks = []
-            if self._index_options.max_token_length != 40:
-                filter_checks.append(("remove_long", "Filter.remove_long"))
+            filter_checks = [("remove_long", "Filter.remove_long")]
             if self._index_options.lower_case:
                 filter_checks.append(("lowercase", "Filter.lowercase"))
             if self._index_options.ascii_folding:

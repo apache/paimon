@@ -705,7 +705,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                          tantivy.last_schema.fields)
         self.assertEqual(
             (TANTIVY_NGRAM_TOKENIZER,
-             ("ngram", 2, 3, True, ("lowercase",))),
+             ("ngram", 2, 3, True, (("remove_long", 40), "lowercase"))),
             tantivy.last_index.registered_tokenizer)
         self.assertEqual([7], sorted(list(result.results())))
 
