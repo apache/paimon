@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
@@ -36,6 +37,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil
 import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
@@ -52,6 +54,8 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.{BooleanType, StructType}
+
+import java.util.{HashMap => JHashMap}
 
 import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
@@ -87,7 +91,19 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   import MergeIntoPaimonDataEvolutionTable._
 
-  override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+  private lazy val originalTargetRelation: DataSourceV2Relation =
+    PaimonRelation.getPaimonRelation(targetTable)
+
+  private lazy val matchedUpdateScanTarget: (SparkTable, DataSourceV2Relation) =
+    if (matchedActions.nonEmpty) {
+      withMatchedUpdateScanOptions(v2Table, originalTargetRelation)
+    } else {
+      (v2Table, originalTargetRelation)
+    }
+
+  private lazy val targetSparkTable: SparkTable = matchedUpdateScanTarget._1
+
+  override lazy val table: FileStoreTable = targetSparkTable.getTable.asInstanceOf[FileStoreTable]
 
   private val updateColumns: Set[AttributeReference] = {
     val columns = mutable.Set[AttributeReference]()
@@ -121,7 +137,9 @@ case class MergeIntoPaimonDataEvolutionTable(
   private lazy val isSelfMergeOnRowId: Boolean = {
     if (!isPaimonTable(sourceTable)) {
       false
-    } else if (!targetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)) {
+    } else if (
+      !originalTargetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)
+    ) {
       false
     } else {
       matchedCondition match {
@@ -139,10 +157,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       "NOT MATCHED BY SOURCE are not supported."
   )
 
-  private lazy val targetRelation: DataSourceV2Relation =
-    PaimonRelation.getPaimonRelation(targetTable)
+  private lazy val targetRelation: DataSourceV2Relation = matchedUpdateScanTarget._2
 
-  lazy val tableSchema: StructType = v2Table.schema
+  lazy val tableSchema: StructType = targetSparkTable.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     // Persist the schema that the analyzer evolved in memory (commit deferred to execution).
@@ -819,6 +836,47 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val ROW_ID_NAME = "_ROW_ID"
   final private val FIRST_ROW_ID_NAME = "_FIRST_ROW_ID";
   final private val RAW_BLOB_PLACEHOLDER_MARKER_PREFIX = "__paimon_raw_blob_placeholder_"
+
+  private[commands] def withMatchedUpdateScanOptions(
+      v2Table: SparkTable,
+      relation: DataSourceV2Relation): (SparkTable, DataSourceV2Relation) = {
+    val table = v2Table.getTable.asInstanceOf[FileStoreTable]
+    val fullSearchMode = CoreOptions.GlobalIndexSearchMode.FULL.toString
+    Option(TimeTravelUtil.tryTravelOrLatest(table)) match {
+      case None =>
+        (v2Table, relation)
+      case Some(snapshot) =>
+        val configuredSnapshotId =
+          Option(table.options().get(CoreOptions.SCAN_SNAPSHOT_ID.key()))
+        val snapshotId = snapshot.id().toString
+        if (
+          configuredSnapshotId.contains(snapshotId) &&
+          fullSearchMode.equalsIgnoreCase(
+            table.options().get(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key()))
+        ) {
+          (v2Table, relation)
+        } else {
+          val dynamicOptions = new JHashMap[String, String]()
+          timeTravelOptionKeys.foreach(dynamicOptions.put(_, null))
+          dynamicOptions.put(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), fullSearchMode)
+          dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), snapshotId)
+
+          val scanTable = SparkTable.of(table.copy(dynamicOptions))
+          val scanRelation =
+            SparkShimLoader.shim.copyDataSourceV2Relation(relation, scanTable, relation.output)
+          (scanTable, scanRelation)
+        }
+    }
+  }
+
+  private def timeTravelOptionKeys: Seq[String] = Seq(
+    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+    CoreOptions.SCAN_TAG_NAME.key(),
+    CoreOptions.SCAN_WATERMARK.key(),
+    CoreOptions.SCAN_TIMESTAMP.key(),
+    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+    CoreOptions.SCAN_VERSION.key()
+  )
 
   private[commands] def isModifiedAssignment(assignment: Assignment): Boolean = {
     !sameAttributeReference(assignment.key, assignment.value)

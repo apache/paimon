@@ -1027,6 +1027,62 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
+  test("Data Evolution: V1 update with global index updates unindexed rows") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'btree-index.records-per-range' = '1000')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'old', 10)")
+        sql(
+          "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+            "index_type => 'btree')")
+        sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+        sql("UPDATE t SET b = 21 WHERE name = 'new'")
+
+        checkAnswer(
+          sql("SELECT id, name, b FROM t ORDER BY id"),
+          Seq(Row(1, "old", 10), Row(2, "new", 21))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: merge with global index updates unindexed rows") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (dummy INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 21)")
+
+      sql("""
+            |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'btree-index.records-per-range' = '1000')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old', 10)")
+      sql(
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.name = 'new' AND s.dummy = 1
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name, b FROM t ORDER BY id"),
+        Seq(Row(1, "old", 10), Row(2, "new", 21))
+      )
+    }
+  }
+
   test("Data Evolution: V1 update table with data-evolution without condition") {
     withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
       withTable("t") {
