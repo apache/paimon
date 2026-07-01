@@ -263,6 +263,23 @@ class CoreOptions:
         .with_description("Define the data block size.")
     )
 
+    MOSAIC_STATS_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("mosaic.stats-columns")
+        .string_type()
+        .default_value("")
+        .with_description(
+            "Comma-separated list of column names to collect statistics for. "
+            "Empty means no statistics collection."
+        )
+    )
+
+    MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("mosaic.num-buckets")
+        .int_type()
+        .no_default_value()
+        .with_description("Number of column buckets for parallel IO.")
+    )
+
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
@@ -939,6 +956,19 @@ class CoreOptions:
 
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
+
+    def mosaic_stats_columns(self, default=None):
+        value = self.options.get(CoreOptions.MOSAIC_STATS_COLUMNS, default)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [column.strip() for column in value.split(",") if column.strip()]
+        if isinstance(value, (list, set, tuple)):
+            return [str(column).strip() for column in value if str(column).strip()]
+        return []
+
+    def mosaic_num_buckets(self, default=None):
+        return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
 
     def metadata_stats_enabled(self, default=None):
         return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
