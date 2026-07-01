@@ -282,7 +282,9 @@ public class DataEvolutionBatchScan implements DataTableScan {
             Optional<GlobalIndexResult> result = scanner.scan(filter);
             if (result.isPresent()) {
                 LOG.info("Scan table '{}' with global index.", table.name());
-                return Optional.of(result.get().or(scanner.unindexedRows(filter)));
+                GlobalIndexResult unindexedRows =
+                        scanner.unindexedRows(filter, options.globalIndexSearchMode());
+                return Optional.of(result.get().or(unindexedRows));
             }
             return Optional.empty();
         } catch (IOException e) {

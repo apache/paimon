@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex;
 
-import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -74,30 +73,34 @@ public class GlobalIndexCoverage {
         }
     }
 
-    public List<Range> unindexedRanges(RowType rowType, @Nullable Predicate predicate) {
-        return unindexedRanges(collectFieldIds(rowType, predicate));
+    public List<Range> fullUnindexedRanges(RowType rowType, @Nullable Predicate predicate) {
+        return fullUnindexedRanges(collectFieldIds(rowType, predicate));
     }
 
-    public List<Range> unindexedRanges(int fieldId) {
-        return unindexedRanges(Collections.singleton(fieldId));
+    public List<Range> fullUnindexedRanges(int fieldId) {
+        return fullUnindexedRanges(Collections.singleton(fieldId));
     }
 
-    public List<Range> unindexedRanges(Collection<Integer> fieldIds) {
-        GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
-        if (searchMode == GlobalIndexSearchMode.FAST) {
+    public List<Range> fullUnindexedRanges(Collection<Integer> fieldIds) {
+        return unindexedRanges(fieldIds, dataRangesBySnapshotNextRowId());
+    }
+
+    public List<Range> detailUnindexedRanges(RowType rowType, @Nullable Predicate predicate) {
+        return detailUnindexedRanges(collectFieldIds(rowType, predicate));
+    }
+
+    public List<Range> detailUnindexedRanges(int fieldId) {
+        return detailUnindexedRanges(Collections.singleton(fieldId));
+    }
+
+    public List<Range> detailUnindexedRanges(Collection<Integer> fieldIds) {
+        return unindexedRanges(fieldIds, dataRangesByDataFiles());
+    }
+
+    private List<Range> unindexedRanges(Collection<Integer> fieldIds, List<Range> dataRanges) {
+        if (dataRanges.isEmpty()) {
             return Collections.emptyList();
         }
-        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
-            return Collections.emptyList();
-        }
-
-        List<Range> dataRanges;
-        if (searchMode == GlobalIndexSearchMode.DETAIL) {
-            dataRanges = dataRangesByDataFiles();
-        } else {
-            dataRanges = Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
-        }
-
         List<Range> predicateIndexedRanges =
                 Range.sortAndMergeOverlap(indexedRanges(fieldIds), true);
         List<Range> unindexedRanges = new ArrayList<>();
@@ -124,7 +127,17 @@ public class GlobalIndexCoverage {
         return ranges == null ? Collections.emptyList() : Range.sortAndMergeOverlap(ranges, true);
     }
 
+    private List<Range> dataRangesBySnapshotNextRowId() {
+        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
+            return Collections.emptyList();
+        }
+        return Collections.singletonList(new Range(0, snapshot.nextRowId() - 1));
+    }
+
     private List<Range> dataRangesByDataFiles() {
+        if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
+            return Collections.emptyList();
+        }
         SnapshotReader snapshotReader =
                 table.newSnapshotReader()
                         .withPartitionFilter(partitionFilter)

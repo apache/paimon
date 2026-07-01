@@ -197,7 +197,9 @@ public abstract class AbstractVectorRead implements Serializable {
                 return null;
             }
             include.or(result.get().results());
-            include.or(scanner.unindexedRows(filter).results());
+            include.or(
+                    scanner.unindexedRows(filter, table.coreOptions().globalIndexSearchMode())
+                            .results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

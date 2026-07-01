@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
 import org.apache.paimon.Snapshot
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.globalindex.GlobalIndexScanner
 import org.apache.paimon.index.GlobalIndexMeta
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.IndexManifestEntry
@@ -39,12 +40,13 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader
 import org.apache.paimon.types.DataTypeRoot.BLOB
 import org.apache.paimon.types.RowType
 import org.apache.paimon.types.VectorType.isVectorStoreFile
+import org.apache.paimon.utils.{Range => RowIdRange}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils._
 import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, AttributeReference, EqualTo, Expression, ExprId, Literal, Or, PythonUDF, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.{LeftAnti, LeftOuter}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -118,23 +120,55 @@ case class MergeIntoPaimonDataEvolutionTable(
    *
    * without any extra shuffle, join, or sort.
    */
-  private lazy val isSelfMergeOnRowId: Boolean = {
-    if (!isPaimonTable(sourceTable)) {
-      false
-    } else if (!targetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)) {
-      false
+  private lazy val selfMergeOnRowIdFilter: Option[Expression] = {
+    def isTargetSource(plan: LogicalPlan): Boolean = {
+      isPaimonTable(plan) &&
+      targetRelation.name.equals(PaimonRelation.getPaimonRelation(plan).name)
+    }
+
+    val matchedOnRowId = matchedCondition match {
+      case EqualTo(left: AttributeReference, right: AttributeReference)
+          if left.name == ROW_ID_NAME && right.name == ROW_ID_NAME =>
+        true
+      case _ => false
+    }
+
+    if (!matchedOnRowId) {
+      None
     } else {
-      matchedCondition match {
-        case EqualTo(left: AttributeReference, right: AttributeReference)
-            if left.name == ROW_ID_NAME && right.name == ROW_ID_NAME =>
-          true
-        case _ => false
+      sourceTable match {
+        case Project(_, Filter(condition, child)) if isTargetSource(child) =>
+          Some(condition)
+        case _ if isTargetSource(sourceTable) =>
+          Some(TrueLiteral)
+        case _ =>
+          None
       }
     }
   }
 
+  private lazy val useSelfMergeOnRowIdShortcut: Boolean = {
+    selfMergeOnRowIdFilter.isDefined &&
+    notMatchedActions.isEmpty &&
+    notMatchedBySourceActions.isEmpty
+  }
+
+  private lazy val isUnfilteredSelfMergeOnRowId: Boolean = {
+    selfMergeOnRowIdFilter.contains(TrueLiteral)
+  }
+
+  private lazy val selfMergeOnRowIdFilterOutput: Seq[Attribute] = {
+    sourceTable match {
+      case Project(_, Filter(_, child)) =>
+        child.output ++ child.metadataOutput
+      case _ =>
+        sourceTable.output ++ sourceTable.metadataOutput
+    }
+  }
+
   assert(
-    !(isSelfMergeOnRowId && (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
+    !(selfMergeOnRowIdFilter.isDefined &&
+      (notMatchedActions.nonEmpty || notMatchedBySourceActions.nonEmpty)),
     "Self-Merge on _ROW_ID only supports WHEN MATCHED THEN UPDATE. WHEN NOT MATCHED and WHEN " +
       "NOT MATCHED BY SOURCE are not supported."
   )
@@ -155,6 +189,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     val snapshotReader = table.newSnapshotReader()
     pushDownMergePartitionFilter(snapshotReader)
     val plan = snapshotReader.read()
+    val snapshot = Option(plan.snapshotId()).map(id => table.snapshotManager().snapshot(id)).orNull
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
@@ -208,6 +243,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       // step 1: find the related data splits, make it target file plan
       val dataSplits: Seq[DataSplit] = targetRelatedSplits(
         sparkSession,
+        snapshot,
         tableSplits,
         firstRowIds,
         firstRowIdToBlobFirstRowIds,
@@ -281,13 +317,14 @@ case class MergeIntoPaimonDataEvolutionTable(
 
   private def targetRelatedSplits(
       sparkSession: SparkSession,
+      snapshot: Snapshot,
       tableSplits: Seq[DataSplit],
       firstRowIds: immutable.IndexedSeq[Long],
       firstRowIdToBlobFirstRowIds: Map[Long, List[Long]],
       persistSourceDss: Option[Dataset[Row]]): Seq[DataSplit] = {
-    // Self-Merge shortcut:
-    // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
-    if (isSelfMergeOnRowId) {
+    // Unfiltered self-merge shortcut:
+    // every row in the table may be updated, so we scan all splits.
+    if (isUnfilteredSelfMergeOnRowId) {
       return tableSplits
     }
 
@@ -298,29 +335,33 @@ case class MergeIntoPaimonDataEvolutionTable(
       return tableSplits
     }
 
-    val sourceDss = persistSourceDss.getOrElse(createDataset(sparkSession, sourceTable))
+    val firstRowIdsTouched =
+      firstRowIdsTouchedByGlobalIndexFull(snapshot, tableSplits, firstRowIdToBlobFirstRowIds)
+        .getOrElse {
+          val sourceDss = persistSourceDss.getOrElse(createDataset(sparkSession, sourceTable))
 
-    val firstRowIdsTouched = extractSourceRowIdMapping match {
-      case Some(sourceRowIdAttr) =>
-        // Shortcut: Directly get _FIRST_ROW_IDs from the source table.
-        findRelatedFirstRowIds(
-          sourceDss,
-          sparkSession,
-          firstRowIds,
-          firstRowIdToBlobFirstRowIds,
-          sourceRowIdAttr.name).toSet
+          extractSourceRowIdMapping match {
+            case Some(sourceRowIdAttr) =>
+              // Shortcut: Directly get _FIRST_ROW_IDs from the source table.
+              findRelatedFirstRowIds(
+                sourceDss,
+                sparkSession,
+                firstRowIds,
+                firstRowIdToBlobFirstRowIds,
+                sourceRowIdAttr.name).toSet
 
-      case None =>
-        // Perform the full join to find related _FIRST_ROW_IDs.
-        val targetDss = createDataset(sparkSession, targetRelation)
-        findRelatedFirstRowIds(
-          targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
-          sparkSession,
-          firstRowIds,
-          firstRowIdToBlobFirstRowIds,
-          "_left." + ROW_ID_NAME
-        ).toSet
-    }
+            case None =>
+              // Perform the full join to find related _FIRST_ROW_IDs.
+              val targetDss = createDataset(sparkSession, targetRelation)
+              findRelatedFirstRowIds(
+                targetDss.alias("_left").join(sourceDss, toColumn(matchedCondition), "inner"),
+                sparkSession,
+                firstRowIds,
+                firstRowIdToBlobFirstRowIds,
+                "_left." + ROW_ID_NAME
+              ).toSet
+          }
+        }
 
     tableSplits
       .map(
@@ -329,6 +370,74 @@ case class MergeIntoPaimonDataEvolutionTable(
             file => file.firstRowId() != null && firstRowIdsTouched.contains(file.firstRowId())))
       .filter(optional => optional.isPresent)
       .map(_.get())
+  }
+
+  private def firstRowIdsTouchedByGlobalIndexFull(
+      snapshot: Snapshot,
+      tableSplits: Seq[DataSplit],
+      firstRowIdToBlobFirstRowIds: Map[Long, List[Long]]): Option[Set[Long]] = {
+    if (!useSelfMergeOnRowIdShortcut || isUnfilteredSelfMergeOnRowId) {
+      return None
+    }
+
+    val predicate = convertConditionToPaimonPredicate(
+      selfMergeOnRowIdFilter.get,
+      selfMergeOnRowIdFilterOutput,
+      rowType,
+      ignorePartialFailure = true)
+    if (predicate.isEmpty) {
+      return None
+    }
+
+    val scanner = GlobalIndexScanner.create(table, snapshot, null, predicate.get)
+    if (!scanner.isPresent) {
+      return None
+    }
+
+    try {
+      val indexedRows = scanner.get().scan(predicate.get)
+      if (!indexedRows.isPresent) {
+        return None
+      }
+
+      val touchedRowRanges =
+        indexedRows.get().or(scanner.get().fullUnindexedRows(predicate.get)).results().toRangeList()
+      Some(
+        firstRowIdsTouchedByRowRanges(
+          tableSplits,
+          touchedRowRanges.asScala,
+          firstRowIdToBlobFirstRowIds))
+    } finally {
+      scanner.get().close()
+    }
+  }
+
+  private def firstRowIdsTouchedByRowRanges(
+      tableSplits: Seq[DataSplit],
+      rowRanges: Seq[RowIdRange],
+      firstRowIdToBlobFirstRowIds: Map[Long, List[Long]]): Set[Long] = {
+    if (rowRanges.isEmpty) {
+      return Set.empty
+    }
+
+    def intersects(range: RowIdRange): Boolean = {
+      rowRanges.exists(_.hasIntersection(range))
+    }
+
+    tableSplits
+      .flatMap(_.dataFiles().asScala)
+      .filter(
+        file =>
+          file.firstRowId() != null &&
+            !isBlobFile(file.fileName()) &&
+            !isVectorStoreFile(file.fileName()) &&
+            intersects(file.nonNullRowIdRange()))
+      .flatMap {
+        file =>
+          val firstRowId = file.firstRowId().asInstanceOf[Long]
+          firstRowIdToBlobFirstRowIds.getOrElse(firstRowId, List(firstRowId))
+      }
+      .toSet
   }
 
   private def updateActionInvoke(
@@ -478,7 +587,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       }
     }
 
-    val toWrite = if (isSelfMergeOnRowId) {
+    val toWrite = if (useSelfMergeOnRowIdShortcut) {
       // Self-Merge shortcut:
       // - Scan the target table only (no source scan, no join), and read all columns required by
       //   merge condition and update expressions.
@@ -492,14 +601,10 @@ case class MergeIntoPaimonDataEvolutionTable(
           .map { case (_, attrs) => attrs.head }
           .toSeq
 
-      val neededNames: Set[String] = (allFields ++ metadataColumns).map(_.name).toSet
-      val allReadFieldsOnTarget: Seq[AttributeReference] =
-        targetAttrsDedup.filter(a => neededNames.exists(n => resolver(n, a.name)))
-      val readPlan = touchedFileTargetRelation.copy(output = allReadFieldsOnTarget)
-
-      // Build mapping: source exprId -> target attr (matched by column name).
+      // Build mapping from source attributes to target attributes. The fallback by name also
+      // covers attributes referenced by a source Filter but not emitted by the source Project.
+      val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
       val sourceToTarget = {
-        val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
         val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
         sourceAttrs.flatMap {
           s => targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
@@ -511,8 +616,29 @@ case class MergeIntoPaimonDataEvolutionTable(
           m: Map[ExprId, AttributeReference]): Expression = {
         expr.transform {
           case a: AttributeReference if m.contains(a.exprId) => m(a.exprId)
+          case a: AttributeReference =>
+            targetAttrs.find(t => resolver(t.name, a.name)).getOrElse(a)
         }
       }
+
+      def andCondition(left: Expression, right: Expression): Expression = {
+        if (left == TrueLiteral) {
+          right
+        } else if (right == TrueLiteral) {
+          left
+        } else {
+          And(left, right)
+        }
+      }
+
+      val selfMergeFilterOnTarget =
+        rewriteSourceToTarget(selfMergeOnRowIdFilter.get, sourceToTarget)
+
+      val neededNames: Set[String] =
+        (allFields ++ metadataColumns ++ extractFields(selfMergeFilterOnTarget)).map(_.name).toSet
+      val allReadFieldsOnTarget: Seq[AttributeReference] =
+        targetAttrsDedup.filter(a => neededNames.exists(n => resolver(n, a.name)))
+      val readPlan = touchedFileTargetRelation.copy(output = allReadFieldsOnTarget)
 
       val rawBlobModifiedByAction = realUpdateActions.map(modifiedRawBlobNames)
 
@@ -534,7 +660,7 @@ case class MergeIntoPaimonDataEvolutionTable(
             case (action, rawBlobModified) =>
               SparkShimLoader.shim
                 .mergeRowsKeepUpdate(
-                  action.condition.getOrElse(TrueLiteral),
+                  andCondition(selfMergeFilterOnTarget, action.condition.getOrElse(TrueLiteral)),
                   updateOutput(action, rawBlobModified))
                 .asInstanceOf[MergeRows.Instruction]
           } ++ Seq(

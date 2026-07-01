@@ -34,6 +34,7 @@ import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{Await, Future}
@@ -736,6 +737,104 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           }
         }
       }
+  }
+
+  test("Data Evolution: update with filter uses row-id self-merge shortcut") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, name STRING, v INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'name_1', 10)")
+      sql("INSERT INTO T VALUES (2, 'name_2', 20)")
+      sql("INSERT INTO T VALUES (3, 'name_3', 30)")
+      assert(
+        loadTable("T")
+          .newSnapshotReader()
+          .read()
+          .splits()
+          .asScala
+          .map(_.asInstanceOf[DataSplit].dataFiles().size())
+          .sum == 3)
+
+      val output =
+        sql(
+          "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+            " options => 'btree-index.records-per-range=10')")
+          .collect()
+          .head
+      assert(output.getBoolean(0))
+
+      executeUpdateAndAssertSelfMergeShortcut(
+        "UPDATE T SET v = v + 1 WHERE name = 'name_2'",
+        expectedTargetResultedTableFiles = 1)
+      sql("INSERT INTO T VALUES (4, 'name_4', 40)")
+      executeUpdateAndAssertSelfMergeShortcut(
+        "UPDATE T SET v = v + 1 WHERE name = 'name_4'",
+        expectedTargetResultedTableFiles = 1)
+
+      checkAnswer(
+        sql("SELECT id, name, v FROM T ORDER BY id"),
+        Seq(Row(1, "name_1", 10), Row(2, "name_2", 21), Row(3, "name_3", 30), Row(4, "name_4", 41)))
+    }
+  }
+
+  private def executeUpdateAndAssertSelfMergeShortcut(
+      updateSql: String,
+      expectedTargetResultedTableFiles: Long): Unit = {
+    val sawMergeRows = new AtomicBoolean(false)
+    val sawJoinUnderMergeRows = new AtomicBoolean(false)
+    val targetResultedTableFiles = new java.util.concurrent.CopyOnWriteArrayList[Long]()
+    val listener = new QueryExecutionListener {
+      override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
+        checkPlan(qe.analyzed)
+        collectTargetScanMetrics(qe)
+      }
+
+      override def onFailure(funcName: String, qe: QueryExecution, exception: Exception): Unit = {
+        checkPlan(qe.analyzed)
+        collectTargetScanMetrics(qe)
+      }
+
+      private def checkPlan(plan: LogicalPlan): Unit = {
+        plan.collect {
+          case mergeRows: MergeRows =>
+            sawMergeRows.set(true)
+            if (mergeRows.child.collectFirst { case _: Join => true }.nonEmpty) {
+              sawJoinUnderMergeRows.set(true)
+            }
+        }
+      }
+
+      private def collectTargetScanMetrics(qe: QueryExecution): Unit = {
+        collect(qe.executedPlan) {
+          case scanExec: BatchScanExec if scanExec.scan.isInstanceOf[PaimonSplitScan] =>
+            val scan = scanExec.scan.asInstanceOf[PaimonSplitScan]
+            metric(scan.reportDriverMetrics(), RESULTED_TABLE_FILES)
+        }.foreach(resultedTableFile => targetResultedTableFiles.add(resultedTableFile))
+      }
+    }
+
+    spark.listenerManager.register(listener)
+    try {
+      sql(updateSql)
+      Utils.waitUntilEventEmpty(spark)
+    } finally {
+      spark.listenerManager.unregister(listener)
+    }
+
+    assert(sawMergeRows.get(), "Expected UPDATE to execute through MergeRows.")
+    assert(
+      !sawJoinUnderMergeRows.get(),
+      "Expected filtered UPDATE to use the row-id self-merge shortcut without a source-target join.")
+    assert(
+      targetResultedTableFiles.asScala.contains(expectedTargetResultedTableFiles),
+      "Expected filtered UPDATE to scan only touched target files, but got resulted table files: " +
+        targetResultedTableFiles.asScala.mkString(", ")
+    )
   }
 
   private def executeMergeIntoAndAssertFilePruning(mergeSql: String, filePruning: Boolean): Unit = {

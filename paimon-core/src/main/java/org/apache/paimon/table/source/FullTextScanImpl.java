@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
@@ -128,15 +129,30 @@ public class FullTextScanImpl implements FullTextScan {
         }
 
         if (!allIndexFiles.isEmpty()) {
-            List<Range> rawRowRanges =
-                    new GlobalIndexCoverage(table, snapshot, partitionFilter, allIndexFiles)
-                            .unindexedRanges(textColumnIds);
+            GlobalIndexCoverage coverage =
+                    new GlobalIndexCoverage(table, snapshot, partitionFilter, allIndexFiles);
+            List<Range> rawRowRanges = unindexedRanges(coverage, textColumnIds);
             if (!rawRowRanges.isEmpty()) {
                 splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }
         }
 
         return () -> splits;
+    }
+
+    private List<Range> unindexedRanges(GlobalIndexCoverage coverage, Set<Integer> textColumnIds) {
+        GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
+        switch (searchMode) {
+            case FAST:
+                return Collections.emptyList();
+            case FULL:
+                return coverage.fullUnindexedRanges(textColumnIds);
+            case DETAIL:
+                return coverage.detailUnindexedRanges(textColumnIds);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported global index search mode: " + searchMode);
+        }
     }
 
     private static boolean supportsFullTextSearch(String indexType) {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.GlobalIndexSearchMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -140,19 +141,21 @@ public class VectorScanImpl implements VectorScan {
         }
 
         List<Range> rawRowRanges =
-                new GlobalIndexCoverage(table, snapshot, partitionFilter, vectorIndexFiles)
-                        .unindexedRanges(vectorColumn.id());
+                unindexedRanges(
+                        new GlobalIndexCoverage(table, snapshot, partitionFilter, vectorIndexFiles),
+                        vectorColumn.id());
         if (filter != null) {
             rawRowRanges =
                     Range.sortAndMergeOverlap(
                             addAll(
                                     rawRowRanges,
-                                    new GlobalIndexCoverage(
+                                    unindexedRanges(
+                                            new GlobalIndexCoverage(
                                                     table,
                                                     snapshot,
                                                     partitionFilter,
-                                                    scalarIndexFiles(allIndexFiles))
-                                            .unindexedRanges(table.rowType(), filter)),
+                                                    scalarIndexFiles(allIndexFiles)),
+                                            filter)),
                             true);
         }
         if (!rawRowRanges.isEmpty()) {
@@ -173,6 +176,36 @@ public class VectorScanImpl implements VectorScan {
 
     private static boolean isPrimaryColumn(GlobalIndexMeta meta, int fieldId) {
         return meta.indexFieldId() == fieldId;
+    }
+
+    private List<Range> unindexedRanges(GlobalIndexCoverage coverage, int fieldId) {
+        GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
+        switch (searchMode) {
+            case FAST:
+                return Collections.emptyList();
+            case FULL:
+                return coverage.fullUnindexedRanges(fieldId);
+            case DETAIL:
+                return coverage.detailUnindexedRanges(fieldId);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported global index search mode: " + searchMode);
+        }
+    }
+
+    private List<Range> unindexedRanges(GlobalIndexCoverage coverage, Predicate predicate) {
+        GlobalIndexSearchMode searchMode = table.coreOptions().globalIndexSearchMode();
+        switch (searchMode) {
+            case FAST:
+                return Collections.emptyList();
+            case FULL:
+                return coverage.fullUnindexedRanges(table.rowType(), predicate);
+            case DETAIL:
+                return coverage.detailUnindexedRanges(table.rowType(), predicate);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported global index search mode: " + searchMode);
+        }
     }
 
     private List<IndexFileMeta> scalarIndexFiles(List<IndexFileMeta> allIndexFiles) {

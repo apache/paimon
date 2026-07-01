@@ -29,6 +29,7 @@ import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -188,9 +190,47 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
             assertThat(scanner.scan(predicate).get().results().toRangeList())
                     .containsExactly(new Range(100L, 100L));
-            assertThat(scanner.unindexedRows(predicate).results().toRangeList())
+            assertThat(scanner.fullUnindexedRows(predicate).results().toRangeList())
                     .containsExactly(new Range(500L, 999L));
         }
+    }
+
+    @Test
+    public void testGlobalIndexScannerExtractsPartitionFilterFromFilter() throws Exception {
+        createPartitionedTable();
+        appendPartitionedRows();
+        createIndex("f1");
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        Predicate valuePredicate = builder.equal(2, BinaryString.fromString("same"));
+        Predicate partitionAndValuePredicate =
+                PredicateBuilder.and(
+                        builder.equal(0, BinaryString.fromString("p0")), valuePredicate);
+
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, null, valuePredicate).get()) {
+            assertThat(scanner.scan(valuePredicate).get().results().getLongCardinality())
+                    .isEqualTo(2);
+        }
+
+        RoaringNavigableMap64 inferredPartitionRows;
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, null, partitionAndValuePredicate).get()) {
+            inferredPartitionRows = scanner.scan(partitionAndValuePredicate).get().results();
+        }
+
+        RoaringNavigableMap64 explicitPartitionRows;
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(
+                                table, partitionFilter(table, "p0"), partitionAndValuePredicate)
+                        .get()) {
+            explicitPartitionRows = scanner.scan(partitionAndValuePredicate).get().results();
+        }
+
+        assertThat(inferredPartitionRows.getLongCardinality()).isEqualTo(1);
+        assertThat(inferredPartitionRows.toRangeList())
+                .containsExactlyElementsOf(explicitPartitionRows.toRangeList());
     }
 
     @Test
@@ -366,6 +406,41 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
             }
             commit.commit(write.prepareCommit());
         }
+    }
+
+    private void createPartitionedTable() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("dt", DataTypes.STRING());
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.partitionKeys(Collections.singletonList("dt"));
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+    }
+
+    private void appendPartitionedRows() throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("p0"), 0, BinaryString.fromString("same")));
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString("p1"), 1, BinaryString.fromString("same")));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private PartitionPredicate partitionFilter(FileStoreTable table, String partition) {
+        RowType partitionType = table.rowType().project("dt");
+        Predicate predicate =
+                PartitionPredicate.createPartitionPredicate(
+                        partitionType,
+                        Collections.singletonMap("dt", BinaryString.fromString(partition)));
+        return PartitionPredicate.fromPredicate(partitionType, predicate);
     }
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
