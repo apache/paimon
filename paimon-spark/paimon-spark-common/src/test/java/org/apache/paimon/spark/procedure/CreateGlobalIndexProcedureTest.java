@@ -232,6 +232,34 @@ public class CreateGlobalIndexProcedureTest {
     }
 
     @Test
+    void testGroupFilesIntoShardsByPartitionUsesUnindexedRanges() {
+        BinaryRow partition = createPartition(0);
+        DataFileMeta indexedLaterFile = createDataFileMeta(1000L, 100L);
+        DataFileMeta unindexedEarlierFile = createDataFileMeta(0L, 100L);
+
+        Map<BinaryRow, List<ManifestEntry>> entriesByPartition = new HashMap<>();
+        entriesByPartition.put(
+                partition,
+                Arrays.asList(
+                        createManifestEntry(partition, indexedLaterFile),
+                        createManifestEntry(partition, unindexedEarlierFile)));
+
+        Map<BinaryRow, List<IndexedSplit>> result =
+                DefaultGlobalIndexTopoBuilder.groupFilesIntoShardsByPartition(
+                        entriesByPartition,
+                        1000L,
+                        pathFactory,
+                        Collections.singletonList(new Range(0L, 99L)));
+
+        assertThat(result).hasSize(1);
+        List<IndexedSplit> shardSplits = result.get(partition);
+        assertThat(shardSplits).hasSize(1);
+        assertThat(shardSplits.get(0).rowRanges()).containsExactly(new Range(0L, 99L));
+        assertThat(shardSplits.get(0).dataSplit().dataFiles())
+                .containsExactly(unindexedEarlierFile);
+    }
+
+    @Test
     void testGroupFilesIntoShardsByPartitionMultiplePartitions() {
         // Create two partitions
         BinaryRow partition1 = createPartition(0);

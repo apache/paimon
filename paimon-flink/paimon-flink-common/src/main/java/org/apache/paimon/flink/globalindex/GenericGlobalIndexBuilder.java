@@ -40,6 +40,7 @@ public class GenericGlobalIndexBuilder implements Serializable {
     protected final FileStoreTable table;
 
     @Nullable protected PartitionPredicate partitionPredicate;
+    @Nullable private Snapshot scanSnapshot;
 
     public GenericGlobalIndexBuilder(FileStoreTable table) {
         this.table = table;
@@ -73,17 +74,22 @@ public class GenericGlobalIndexBuilder implements Serializable {
                         + "deleted rows to be indexed.",
                 table.name());
 
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        if (snapshot == null) {
+        scanSnapshot = table.snapshotManager().latestSnapshot();
+        if (scanSnapshot == null) {
             return Collections.emptyList();
         }
 
         return table.store()
                 .newScan()
-                .withSnapshot(snapshot)
+                .withSnapshot(scanSnapshot)
                 .withPartitionFilter(partitionPredicate)
                 .plan()
                 .files();
+    }
+
+    @Nullable
+    public Snapshot scanSnapshot() {
+        return scanSnapshot;
     }
 
     /** Returns old index file entries that should be deleted after new indexes are built. */
