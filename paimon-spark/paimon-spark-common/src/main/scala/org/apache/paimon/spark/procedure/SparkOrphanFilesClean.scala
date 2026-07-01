@@ -88,6 +88,18 @@ case class SparkOrphanFilesClean(
       .toDS()
       .cache()
 
+    if (usedManifestFiles.isEmpty) {
+      logWarning("Collected used files is empty, aborting orphan files clean to prevent data loss.")
+      val abortedDataset =
+        if (deletedFilesCountInLocal.get() != 0 || deletedFilesLenInBytesInLocal.get() != 0) {
+          spark.createDataset(
+            Seq((deletedFilesCountInLocal.get(), deletedFilesLenInBytesInLocal.get())))
+        } else {
+          spark.emptyDataset[(Long, Long)]
+        }
+      return (abortedDataset, usedManifestFiles)
+    }
+
     // find all data files
     val dataFiles = usedManifestFiles
       .filter(_.isManifestFile)

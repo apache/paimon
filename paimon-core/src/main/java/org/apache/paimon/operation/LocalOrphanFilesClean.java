@@ -114,6 +114,15 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         .flatMap(branch -> getUsedFiles(branch).stream())
                         .collect(Collectors.toSet());
 
+        if (usedFiles.isEmpty()) {
+            LOG.warn(
+                    "Collected used files is empty while {} candidates are present, "
+                            + "aborting orphan files clean to prevent data loss.",
+                    candidateDeletes.size());
+            return new CleanOrphanFilesResult(
+                    deleteFiles.size(), deletedFilesLenInBytes.get(), deleteFiles);
+        }
+
         // delete unused files
         candidateDeletes.removeAll(usedFiles);
         candidateDeletes.stream()
