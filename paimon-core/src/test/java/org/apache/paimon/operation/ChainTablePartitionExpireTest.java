@@ -596,8 +596,9 @@ public class ChainTablePartitionExpireTest {
     }
 
     @Test
-    public void testRestoreRejectedWhenDroppingAnchorSnapshotPartition() throws Exception {
-        Path tablePath = tablePath("restore_reject_anchor");
+    public void testRollbackToAsLatestRejectedWhenDroppingAnchorSnapshotPartition()
+            throws Exception {
+        Path tablePath = tablePath("rollback_reject_anchor");
         createChainTable(tablePath, true);
 
         FileStoreTable snapshotTable = loadTable(tablePath).switchToBranch("snapshot");
@@ -610,16 +611,16 @@ public class ChainTablePartitionExpireTest {
         // delta branch: a CN delta that uses CN/20250301 as its only anchor.
         writeGrouped(deltaTable, "CN", "20250315", "v3");
 
-        // Restoring the snapshot branch back to snapshot #1 would drop CN/20250301, the only anchor
-        // of the CN/20250315 delta. The pre-commit callback must reject this restore (same as a
+        // Rolling back the snapshot branch to snapshot #1 would drop CN/20250301, the only anchor
+        // of the CN/20250315 delta. The pre-commit callback must reject this rollback (same as a
         // regular overwrite) instead of silently breaking the chain.
         FileStoreTable snapshotBranch = loadTable(tablePath).switchToBranch("snapshot");
         Snapshot target = snapshotBranch.snapshotManager().snapshot(1);
         try (TableCommitImpl commit = snapshotBranch.newCommit(commitUser)) {
-            assertThatThrownBy(() -> commit.restoreAsLatest(target))
+            assertThatThrownBy(() -> commit.rollbackToAsLatest(target))
                     .hasMessageContaining("Snapshot partition cannot be dropped");
         }
-        // The dangerous restore was aborted, so the latest snapshot is unchanged.
+        // The dangerous rollback was aborted, so the latest snapshot is unchanged.
         assertThat(
                         loadTable(tablePath)
                                 .switchToBranch("snapshot")

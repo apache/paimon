@@ -40,11 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** IT cases for restore_as_latest procedure. */
-public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
+/** IT cases for rollback_to_as_latest procedure. */
+public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
 
     @Test
-    public void testRestoreSnapshotAsLatest() throws Exception {
+    public void testRollbackToSnapshotAsLatest() throws Exception {
         sql("CREATE TABLE T (id INT, name STRING)");
 
         FileStoreTable table = paimonTable("T");
@@ -55,20 +55,20 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
         commitRow(table, 3, "c");
         assertEquals(3, snapshotManager.latestSnapshotId());
 
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 1)"))
                 .containsExactly(Row.of(3L, 1L, 4L));
 
         assertEquals(4, snapshotManager.latestSnapshotId());
-        assertRestoreDelta(table, 4, 0, 2, -2L);
+        assertRollbackDelta(table, 4, 0, 2, -2L);
         assertTrue(snapshotManager.snapshotExists(2));
         assertTrue(snapshotManager.snapshotExists(3));
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
 
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 3)"))
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 3)"))
                 .containsExactly(Row.of(4L, 3L, 5L));
 
         assertEquals(5, snapshotManager.latestSnapshotId());
-        assertRestoreDelta(table, 5, 2, 0, 2L);
+        assertRollbackDelta(table, 5, 2, 0, 2L);
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, "a"), Row.of(2, "b"), Row.of(3, "c"));
 
@@ -80,7 +80,7 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRestoreTagAsLatest() throws Exception {
+    public void testRollbackToTagAsLatest() throws Exception {
         sql("CREATE TABLE T (id INT, name STRING)");
 
         FileStoreTable table = paimonTable("T");
@@ -93,18 +93,18 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
 
         sql("CALL sys.create_tag(`table` => 'default.T', tag => 'tag-1', snapshot_id => 1)");
 
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', tag => 'tag-1')"))
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', tag => 'tag-1')"))
                 .containsExactly(Row.of(3L, 1L, 4L));
 
         assertEquals(4, snapshotManager.latestSnapshotId());
-        assertRestoreDelta(table, 4, 0, 2, -2L);
+        assertRollbackDelta(table, 4, 0, 2, -2L);
         assertTrue(snapshotManager.snapshotExists(2));
         assertTrue(snapshotManager.snapshotExists(3));
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
     }
 
     @Test
-    public void testRestoreDoesNotExpireKeptSnapshots() throws Exception {
+    public void testRollbackDoesNotExpireKeptSnapshots() throws Exception {
         sql("CREATE TABLE T (id INT, name STRING)");
 
         FileStoreTable table = paimonTable("T");
@@ -121,11 +121,11 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
                         + "'snapshot.num-retained.min' = '1', "
                         + "'snapshot.num-retained.max' = '1')");
 
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 1)"))
                 .containsExactly(Row.of(3L, 1L, 4L));
 
-        // Restore-as-latest must not delete snapshots whose id is larger than the restored one,
-        // even with snapshot.num-retained.max = 1. The restore path skips automatic expiration.
+        // rollback_to_as_latest must not delete snapshots whose id is larger than the target one,
+        // even with snapshot.num-retained.max = 1. The rollback path skips automatic expiration.
         assertEquals(4, snapshotManager.latestSnapshotId());
         assertTrue(snapshotManager.snapshotExists(1));
         assertTrue(snapshotManager.snapshotExists(2));
@@ -133,7 +133,7 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testRestoreKeepsRowIdMonotonic() throws Exception {
+    public void testRollbackKeepsRowIdMonotonic() throws Exception {
         sql("CREATE TABLE RT (id INT, name STRING) WITH ('row-tracking.enabled' = 'true')");
 
         FileStoreTable table = paimonTable("RT");
@@ -147,19 +147,19 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
         Long latestNextRowId = snapshotManager.latestSnapshot().nextRowId();
         assertThat(latestNextRowId).isNotNull();
 
-        // Restore the first snapshot, whose own nextRowId is smaller than the current latest.
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.RT', snapshot_id => 1)"))
+        // Roll back to the first snapshot, whose own nextRowId is smaller than the current latest.
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.RT', snapshot_id => 1)"))
                 .containsExactly(Row.of(3L, 1L, 4L));
 
         // nextRowId must not move backwards: otherwise new appends would reuse row ids already
-        // assigned by snapshots 2 and 3, breaking the global uniqueness of _ROW_ID. The restore
+        // assigned by snapshots 2 and 3, breaking the global uniqueness of _ROW_ID. The rollback
         // snapshot keeps the larger of the previous latest and the target nextRowId.
-        Snapshot restored = table.snapshot(4);
-        assertThat(restored.nextRowId()).isEqualTo(latestNextRowId);
+        Snapshot rolledBack = table.snapshot(4);
+        assertThat(rolledBack.nextRowId()).isEqualTo(latestNextRowId);
     }
 
     @Test
-    public void testRestoreTriggersCommitCallback() throws Exception {
+    public void testRollbackTriggersCommitCallback() throws Exception {
         sql(
                 "CREATE TABLE T (id INT, name STRING) WITH ("
                         + "'metadata.iceberg.storage' = 'table-location')");
@@ -172,18 +172,18 @@ public class RestoreAsLatestProcedureITCase extends CatalogITCaseBase {
         commitRow(table, 3, "c");
         assertEquals(3, snapshotManager.latestSnapshotId());
 
-        assertThat(sql("CALL sys.restore_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 1)"))
                 .containsExactly(Row.of(3L, 1L, 4L));
         assertEquals(4, snapshotManager.latestSnapshotId());
 
-        // The restore must trigger the commit callbacks like a regular commit, so external views
-        // stay in sync with the restored state. With Iceberg compatibility enabled, that means
-        // Iceberg metadata is generated for the restore snapshot.
+        // The rollback must trigger the commit callbacks like a regular commit, so external views
+        // stay in sync with the rolled-back state. With Iceberg compatibility enabled, that means
+        // Iceberg metadata is generated for the rollback snapshot.
         Path icebergMetadata = new Path(table.location(), "metadata/v4.metadata.json");
         assertTrue(table.fileIO().exists(icebergMetadata));
     }
 
-    private void assertRestoreDelta(
+    private void assertRollbackDelta(
             FileStoreTable table,
             long snapshotId,
             long expectedNumAddedFiles,

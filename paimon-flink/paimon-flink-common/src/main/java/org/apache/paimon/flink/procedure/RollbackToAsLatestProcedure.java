@@ -41,19 +41,19 @@ import java.util.SortedMap;
 import java.util.UUID;
 
 /**
- * Restore as latest procedure. Usage:
+ * Rollback to as latest procedure. Usage:
  *
  * <pre><code>
- *  -- restore a snapshot as the latest snapshot
- *  CALL sys.restore_as_latest(`table` => 'tableId', snapshot_id => snapshotId)
+ *  -- roll back to a snapshot as the latest snapshot
+ *  CALL sys.rollback_to_as_latest(`table` => 'tableId', snapshot_id => snapshotId)
  *
- *  -- restore a tag as the latest snapshot
- *  CALL sys.restore_as_latest(`table` => 'tableId', tag => 'tagName')
+ *  -- roll back to a tag as the latest snapshot
+ *  CALL sys.rollback_to_as_latest(`table` => 'tableId', tag => 'tagName')
  * </code></pre>
  */
-public class RestoreAsLatestProcedure extends ProcedureBase {
+public class RollbackToAsLatestProcedure extends ProcedureBase {
 
-    public static final String IDENTIFIER = "restore_as_latest";
+    public static final String IDENTIFIER = "rollback_to_as_latest";
 
     @ProcedureHint(
             argument = {
@@ -65,7 +65,7 @@ public class RestoreAsLatestProcedure extends ProcedureBase {
                         isOptional = true)
             })
     public @DataTypeHint(
-            "ROW<previous_snapshot_id BIGINT, restored_snapshot_id BIGINT, current_snapshot_id BIGINT>")
+            "ROW<previous_snapshot_id BIGINT, rolled_back_snapshot_id BIGINT, current_snapshot_id BIGINT>")
     Row[] call(ProcedureContext procedureContext, String tableId, String tagName, Long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
@@ -73,7 +73,7 @@ public class RestoreAsLatestProcedure extends ProcedureBase {
 
         FileStore<?> store = fileStoreTable.store();
         Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
-        Preconditions.checkNotNull(latestSnapshot, "Latest snapshot is null, can not restore.");
+        Preconditions.checkNotNull(latestSnapshot, "Latest snapshot is null, can not roll back.");
 
         boolean hasTag = !StringUtils.isNullOrWhitespaceOnly(tagName);
         boolean hasSnapshot = snapshotId != null;
@@ -88,14 +88,15 @@ public class RestoreAsLatestProcedure extends ProcedureBase {
         }
 
         try (TableCommitImpl commit =
-                fileStoreTable.newCommit("restore-as-latest-" + UUID.randomUUID().toString())) {
+                fileStoreTable.newCommit("rollback-to-as-latest-" + UUID.randomUUID().toString())) {
             Preconditions.checkState(
-                    commit.restoreAsLatest(targetSnapshot),
-                    "Failed to restore snapshot %s as latest.",
+                    commit.rollbackToAsLatest(targetSnapshot),
+                    "Failed to roll back to snapshot %s as latest.",
                     targetSnapshot.id());
         } catch (Exception e) {
             throw new RuntimeException(
-                    String.format("Failed to restore snapshot %s as latest.", targetSnapshot.id()),
+                    String.format(
+                            "Failed to roll back to snapshot %s as latest.", targetSnapshot.id()),
                     e);
         }
 
@@ -123,7 +124,7 @@ public class RestoreAsLatestProcedure extends ProcedureBase {
         }
 
         throw new IllegalArgumentException(
-                String.format("Restore snapshot '%s' doesn't exist.", snapshotId));
+                String.format("Snapshot '%s' to roll back to doesn't exist.", snapshotId));
     }
 
     @Override

@@ -26,7 +26,6 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
@@ -90,7 +89,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1168,11 +1166,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public boolean restoreAsLatest(Snapshot targetSnapshot) {
+    public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
         Snapshot latest =
                 checkNotNull(
                         snapshotManager.latestSnapshot(),
-                        "Latest snapshot is null, can not restore.");
+                        "Latest snapshot is null, can not roll back.");
 
         Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
         FileEntry.mergeEntries(
@@ -1217,23 +1215,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        // Include data files whose deletion vector changed between the previous latest and the
-        // target while the data file itself stayed the same. A DV-only delete/update does not
-        // rewrite the data file, so the identifier diff above misses it and leaves an empty data
-        // delta that streaming overwrite readers would skip. Re-emitting such files as
-        // DELETE(latest) + ADD(target) makes the restore transition visible. The physical row count
-        // is unchanged, so the pair nets to zero in the delta record count, consistent with the
-        // unchanged totalRecordCount.
-        addDeletionVectorOnlyChanges(
-                latest, targetSnapshot, latestEntries, targetEntries, deltaFiles);
-
         Pair<String, Long> baseManifestList =
                 manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
         Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
-        // For row-tracking tables nextRowId must stay monotonic: restoring an older snapshot must
-        // not move it backwards, otherwise new appends would reuse row ids already assigned by the
-        // snapshots between the target and the previous latest, breaking the global uniqueness of
-        // _ROW_ID. Keep the larger of the previous latest and the target nextRowId.
+        // For row-tracking tables nextRowId must stay monotonic: a rollback to an older snapshot
+        // must not move it backwards, otherwise new appends would reuse row ids already assigned by
+        // the snapshots between the target and the previous latest, breaking the global uniqueness
+        // of _ROW_ID. Keep the larger of the previous latest and the target nextRowId.
         Long nextRowId = maxNextRowId(latest.nextRowId(), targetSnapshot.nextRowId());
         Snapshot newSnapshot =
                 new Snapshot(
@@ -1258,24 +1246,24 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         targetSnapshot.properties(),
                         nextRowId);
 
-        // The restore is an overwrite from the previous latest to the target, so the base files,
+        // The rollback is an overwrite from the previous latest to the target, so the base files,
         // delta files and index changes describe the transition the callbacks need. These are
         // shared by the pre- and post-commit callbacks below.
         List<SimpleFileEntry> baseFiles =
                 SimpleFileEntry.from(new ArrayList<>(latestEntries.values()));
-        List<IndexManifestEntry> indexChanges = restoreIndexChanges(latest, targetSnapshot);
+        List<IndexManifestEntry> indexChanges = rollbackIndexChanges(latest, targetSnapshot);
 
         // Like a regular commit, run the pre-commit callbacks before the snapshot becomes visible.
-        // They may veto the restore by throwing (e.g. a chain-table snapshot branch rejects a
+        // They may veto the rollback by throwing (e.g. a chain-table snapshot branch rejects a
         // pure-DELETE overwrite that would drop a snapshot partition still anchoring delta
-        // partitions), in which case the restore snapshot is never created.
+        // partitions), in which case the rollback snapshot is never created.
         commitPreCallbacks.forEach(
                 callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
 
         boolean success =
                 commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
         if (success) {
-            // Notify the post-commit callbacks so external views stay in sync with the restored
+            // Notify the post-commit callbacks so external views stay in sync with the rolled-back
             // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
             CommitCallback.Context context =
                     new CommitCallback.Context(
@@ -1290,12 +1278,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     /**
-     * Computes the index file changes between the previous latest snapshot and the restore target,
+     * Computes the index file changes between the previous latest snapshot and the rollback target,
      * mirroring how the data delta files are derived: entries that only exist in the previous
      * latest are marked as {@link FileKind#DELETE}, entries that only exist in the target are kept
      * as ADD.
      */
-    private List<IndexManifestEntry> restoreIndexChanges(Snapshot latest, Snapshot target) {
+    private List<IndexManifestEntry> rollbackIndexChanges(Snapshot latest, Snapshot target) {
         Set<IndexManifestEntry> latestIndexEntries = readIndexEntries(latest.indexManifest());
         Set<IndexManifestEntry> targetIndexEntries = readIndexEntries(target.indexManifest());
 
@@ -1318,124 +1306,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return Collections.emptySet();
         }
         return new HashSet<>(indexManifestFile.read(indexManifest));
-    }
-
-    /**
-     * Adds, to {@code deltaFiles}, data files whose deletion vector differs between the previous
-     * latest and the target snapshot but whose data file itself is unchanged (i.e. a DV-only
-     * delete/update). Such files are present in both snapshots, so the data-file identifier diff
-     * does not emit them; without this, a DV-only restore produces an empty data delta that
-     * streaming overwrite readers skip. They are re-emitted as DELETE(latest) + ADD(target).
-     */
-    private void addDeletionVectorOnlyChanges(
-            Snapshot latest,
-            Snapshot target,
-            Map<FileEntry.Identifier, ManifestEntry> latestEntries,
-            Map<FileEntry.Identifier, ManifestEntry> targetEntries,
-            List<ManifestEntry> deltaFiles) {
-        Map<DeletionVectorKey, DeletionVectorMeta> latestDvs =
-                readDeletionVectors(latest.indexManifest());
-        Map<DeletionVectorKey, DeletionVectorMeta> targetDvs =
-                readDeletionVectors(target.indexManifest());
-        if (latestDvs.isEmpty() && targetDvs.isEmpty()) {
-            return;
-        }
-
-        Map<DeletionVectorKey, ManifestEntry> latestByFile =
-                indexByDataFile(latestEntries.values());
-        Map<DeletionVectorKey, ManifestEntry> targetByFile =
-                indexByDataFile(targetEntries.values());
-
-        Set<DeletionVectorKey> keys = new HashSet<>(latestDvs.keySet());
-        keys.addAll(targetDvs.keySet());
-        for (DeletionVectorKey key : keys) {
-            if (Objects.equals(latestDvs.get(key), targetDvs.get(key))) {
-                continue;
-            }
-            ManifestEntry latestEntry = latestByFile.get(key);
-            ManifestEntry targetEntry = targetByFile.get(key);
-            // Only handle DV-only changes here: the data file must be present in both snapshots. A
-            // file added/removed across the restore is already in deltaFiles via the identifier
-            // diff.
-            if (latestEntry != null && targetEntry != null) {
-                deltaFiles.add(toDeltaEntry(FileKind.DELETE, latestEntry));
-                deltaFiles.add(toDeltaEntry(FileKind.ADD, targetEntry));
-            }
-        }
-    }
-
-    private Map<DeletionVectorKey, DeletionVectorMeta> readDeletionVectors(
-            @Nullable String indexManifest) {
-        if (indexManifest == null) {
-            return Collections.emptyMap();
-        }
-        Map<DeletionVectorKey, DeletionVectorMeta> result = new HashMap<>();
-        for (IndexManifestEntry entry : indexManifestFile.read(indexManifest)) {
-            if (entry.kind() != FileKind.ADD
-                    || !DELETION_VECTORS_INDEX.equals(entry.indexFile().indexType())) {
-                continue;
-            }
-            LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
-            if (dvRanges == null) {
-                continue;
-            }
-            for (DeletionVectorMeta meta : dvRanges.values()) {
-                result.put(
-                        new DeletionVectorKey(
-                                entry.partition(), entry.bucket(), meta.dataFileName()),
-                        meta);
-            }
-        }
-        return result;
-    }
-
-    private static Map<DeletionVectorKey, ManifestEntry> indexByDataFile(
-            Collection<ManifestEntry> entries) {
-        Map<DeletionVectorKey, ManifestEntry> result = new HashMap<>();
-        for (ManifestEntry entry : entries) {
-            result.put(
-                    new DeletionVectorKey(
-                            entry.partition(), entry.bucket(), entry.file().fileName()),
-                    entry);
-        }
-        return result;
-    }
-
-    private static ManifestEntry toDeltaEntry(FileKind kind, ManifestEntry entry) {
-        return ManifestEntry.create(
-                kind, entry.partition(), entry.bucket(), entry.totalBuckets(), entry.file());
-    }
-
-    /** Identifies a data file (partition, bucket, file name) for deletion-vector comparison. */
-    private static class DeletionVectorKey {
-        private final BinaryRow partition;
-        private final int bucket;
-        private final String dataFileName;
-
-        DeletionVectorKey(BinaryRow partition, int bucket, String dataFileName) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.dataFileName = dataFileName;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            DeletionVectorKey that = (DeletionVectorKey) o;
-            return bucket == that.bucket
-                    && Objects.equals(partition, that.partition)
-                    && Objects.equals(dataFileName, that.dataFileName);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(partition, bucket, dataFileName);
-        }
     }
 
     @Nullable
