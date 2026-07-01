@@ -36,7 +36,7 @@ _DELETION_VECTOR_META_SCHEMA = {
     "name": "DeletionVectorMeta",
     "fields": [
         {"name": "f0", "type": "string"},
-        {"name": "f1", "type": "long"},
+        {"name": "f1", "type": "int"},
         {"name": "f2", "type": "int"},
         {"name": "_CARDINALITY", "type": ["null", "long"], "default": None},
     ],
@@ -77,6 +77,8 @@ INDEX_MANIFEST_ENTRY_SCHEMA = {
 }
 
 _INDEX_ENTRY_VERSION = 1
+_ADD = 0
+_HASH_INDEX = "HASH"
 
 
 class IndexManifestFile:
@@ -85,12 +87,14 @@ class IndexManifestFile:
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.manifest import avro_codec
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = table.file_io
         self.partition_keys_fields = self.table.partition_keys_fields
+        self._codec = avro_codec(table.options.manifest_compression())
 
     def read(self, index_manifest_name: str) -> List[IndexManifestEntry]:
         index_manifest_path = f"{self.manifest_path}/{index_manifest_name}"
@@ -232,14 +236,24 @@ class IndexManifestFile:
         previous_name: Optional[str],
         deletes: List[IndexManifestEntry],
     ) -> Optional[str]:
-        if not deletes:
+        return self.combine_changes(previous_name, [], deletes)
+
+    def combine_changes(
+        self,
+        previous_name: Optional[str],
+        adds: List[IndexManifestEntry],
+        deletes: List[IndexManifestEntry],
+    ) -> Optional[str]:
+        if not adds and not deletes:
             return previous_name
         previous = self.read(previous_name) if previous_name else []
         delete_names = {e.index_file.file_name for e in deletes}
         survivors = [e for e in previous if e.index_file.file_name not in delete_names]
-        if not survivors:
+        _validate_retained_global_index_files(survivors, adds)
+        combined = survivors + adds
+        if not combined:
             return None
-        return self.write(survivors)
+        return self.write(combined)
 
     def write(self, entries: List[IndexManifestEntry]) -> str:
         file_name = f"{FileStorePathFactory.INDEX_MANIFEST_PREFIX}{uuid.uuid4()}"
@@ -247,7 +261,9 @@ class IndexManifestFile:
         records = [self._to_avro_record(e) for e in entries]
         try:
             buffer = BytesIO()
-            fastavro.writer(buffer, INDEX_MANIFEST_ENTRY_SCHEMA, records)
+            fastavro.writer(
+                buffer, INDEX_MANIFEST_ENTRY_SCHEMA, records,
+                codec=self._codec)
             with self.file_io.new_output_stream(path) as output_stream:
                 output_stream.write(buffer.getvalue())
         except Exception as e:
@@ -289,3 +305,64 @@ class IndexManifestFile:
             "_EXTERNAL_PATH": index_file.external_path,
             "_GLOBAL_INDEX": global_index,
         }
+
+
+def _validate_retained_global_index_files(
+    retained_entries: List[IndexManifestEntry],
+    added_entries: List[IndexManifestEntry],
+) -> None:
+    for retained in retained_entries:
+        retained_file = retained.index_file
+        retained_meta = retained_file.global_index_meta
+        if retained_meta is None or not _is_global_index(retained_file.index_type):
+            continue
+
+        for added in added_entries:
+            added_file = added.index_file
+            added_meta = added_file.global_index_meta
+            if (
+                added.kind != _ADD
+                or added_meta is None
+                or added_file.index_type != retained_file.index_type
+                or retained_meta.index_field_id != added_meta.index_field_id
+                or _can_keep_existing_global_index(retained_meta, added_meta)
+            ):
+                continue
+
+            raise RuntimeError(
+                "Trying to add global index file %s of type %s for index field %s"
+                " with row range [%s, %s], but previous file %s still exists"
+                " with overlapping row range [%s, %s]. Remove the previous file first."
+                % (
+                    added_file.file_name,
+                    added_file.index_type,
+                    added_meta.index_field_id,
+                    added_meta.row_range_start,
+                    added_meta.row_range_end,
+                    retained_file.file_name,
+                    retained_meta.row_range_start,
+                    retained_meta.row_range_end,
+                )
+            )
+
+
+def _is_global_index(index_type: str) -> bool:
+    return index_type not in (IndexManifestFile.DELETION_VECTORS_INDEX, _HASH_INDEX)
+
+
+def _can_keep_existing_global_index(retained_meta, added_meta) -> bool:
+    return (
+        _extra_field_ids(retained_meta) == _extra_field_ids(added_meta)
+        and not _row_ranges_intersect(retained_meta, added_meta)
+    )
+
+
+def _extra_field_ids(global_index_meta) -> Optional[List[int]]:
+    return global_index_meta.extra_field_ids or None
+
+
+def _row_ranges_intersect(left, right) -> bool:
+    return (
+        left.row_range_start <= right.row_range_end
+        and right.row_range_start <= left.row_range_end
+    )

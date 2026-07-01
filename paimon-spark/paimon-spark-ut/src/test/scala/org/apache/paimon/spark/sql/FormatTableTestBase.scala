@@ -480,6 +480,49 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  for (onlyValueInPath <- Seq(false, true)) {
+    val suffix = if (onlyValueInPath) " (partition-path-only-value)" else ""
+    test(s"Paimon format table: OR cross-field partition pruning$suffix") {
+      withTable("dwd_fact") {
+        val props =
+          if (onlyValueInPath) {
+            "'format-table.implementation'='paimon', 'format-table.partition-path-only-value'='true'"
+          } else {
+            "'format-table.implementation'='paimon'"
+          }
+        sql(s"""
+               |CREATE TABLE dwd_fact (id INT, amount DOUBLE, dt STRING, hour STRING)
+               |USING PARQUET
+               |TBLPROPERTIES ($props)
+               |PARTITIONED BY (dt, hour)
+               |""".stripMargin)
+
+        sql("""
+              |INSERT INTO dwd_fact VALUES
+              |(1, 10.0, '20260625', '10'),
+              |(2, 20.0, '20260625', '18'),
+              |(3, 30.0, '20260624', '20'),
+              |(4, 40.0, '20260624', '08'),
+              |(5, 50.0, '20260101', '10')
+              |""".stripMargin)
+
+        val df =
+          sql("""
+                |SELECT id, dt, hour FROM dwd_fact
+                |WHERE (dt = '20260625' AND hour < '16') OR (dt = '20260624' AND hour >= '16')
+                |ORDER BY id
+                |""".stripMargin)
+
+        checkAnswer(df, Seq(Row(1, "20260625", "10"), Row(3, "20260624", "20")))
+
+        // The cross-field OR is pushed down as a partition filter, so only the two matching
+        // partitions produce splits. (Pruning effectiveness is covered by FormatTableScanTest.)
+        val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "dwd_fact")
+        assert(filteredSplits.size == 2)
+      }
+    }
+  }
+
   def collectFilteredInputSplits(plan: SparkPlan, tableName: String): Seq[Split] = {
     flatMap(plan) {
       case s: BatchScanExec =>

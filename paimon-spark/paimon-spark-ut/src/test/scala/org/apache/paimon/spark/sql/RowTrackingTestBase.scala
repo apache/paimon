@@ -1011,16 +1011,113 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
-  test("Data Evolution: update table throws exception") {
-    withTable("t") {
+  test("Data Evolution: V1 update table with data-evolution") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22 WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with global index updates unindexed rows") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'btree-index.records-per-range' = '1000')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'old', 10)")
+        sql(
+          "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+            "index_type => 'btree')")
+        sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+        sql("UPDATE t SET b = 21 WHERE name = 'new'")
+
+        checkAnswer(
+          sql("SELECT id, name, b FROM t ORDER BY id"),
+          Seq(Row(1, "old", 10), Row(2, "new", 21))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: merge with global index updates unindexed rows") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (dummy INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 21)")
+
+      sql("""
+            |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'btree-index.records-per-range' = '1000')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old', 10)")
       sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-      assert(
-        intercept[RuntimeException] {
-          sql("UPDATE t SET b = 22")
-        }.getMessage
-          .contains("Update operation is not supported when data evolution is enabled yet."))
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.name = 'new' AND s.dummy = 1
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name, b FROM t ORDER BY id"),
+        Seq(Row(1, "old", 10), Row(2, "new", 21))
+      )
+    }
+  }
+
+  test("Data Evolution: V1 update table with data-evolution without condition") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 22, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update partition column throws exception") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, b INT, dt STRING)
+              |PARTITIONED BY (dt)
+              |TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 1, 'p1'), (2, 2, 'p2')")
+
+        assert(
+          intercept[RuntimeException] {
+            sql("UPDATE t SET dt = 'p3' WHERE id = 1")
+          }.getMessage
+            .contains("Update to partition columns is not supported for data evolution tables."))
+
+        sql("UPDATE t SET b = 10 WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 10, "p1"), Row(2, 2, "p2")))
+      }
     }
   }
 
@@ -1033,7 +1130,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         intercept[RuntimeException] {
           sql("DELETE FROM t WHERE id = 2")
         }.getMessage
-          .contains("Delete operation is not supported when data evolution is enabled yet."))
+          .contains(
+            "Can only perform deletion operation on data evolution tables with DeletionVector enabled."))
     }
   }
 

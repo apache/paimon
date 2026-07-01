@@ -46,4 +46,29 @@ class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
     rows = spark.sql("SELECT sum(num_deleted_files) FROM `T$manifests`").collectAsList()
     Assertions.assertThat(rows.get(0).getLong(0)).isEqualTo(0L)
   }
+
+  test("Paimon Procedure: compact manifest dry run") {
+    spark.sql(s"""
+                 |CREATE TABLE T2 (id INT, value STRING, dt STRING, hh INT)
+                 |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2')
+                 |PARTITIONED BY (dt, hh)
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T2 VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+    spark.sql(s"INSERT OVERWRITE T2 VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+    spark.sql(s"INSERT OVERWRITE T2 VALUES (5, '5', '2024-01-02', 0), (6, '6', '2024-01-02', 1)")
+
+    var rows = spark.sql("SELECT sum(num_deleted_files) FROM `T2$manifests`").collectAsList()
+    val deletedBefore = rows.get(0).getLong(0)
+    Assertions.assertThat(deletedBefore).isGreaterThan(0L)
+
+    val dryRunRows = spark
+      .sql("CALL sys.compact_manifest(table => 'T2', dry_run => true)")
+      .collectAsList()
+    Assertions.assertThat(dryRunRows.get(0).getBoolean(0)).isTrue
+
+    // verify dry run did not actually compact
+    rows = spark.sql("SELECT sum(num_deleted_files) FROM `T2$manifests`").collectAsList()
+    Assertions.assertThat(rows.get(0).getLong(0)).isEqualTo(deletedBefore)
+  }
 }

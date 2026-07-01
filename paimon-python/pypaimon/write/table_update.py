@@ -16,16 +16,25 @@
 # under the License.
 
 from collections import defaultdict
-from typing import List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
 import pyarrow as pa
 
 from pypaimon.common.memory_size import MemorySize
+from pypaimon.common.options.core_options import (
+    CoreOptions,
+    GlobalIndexSearchMode,
+    StartupMode,
+)
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
+from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
@@ -118,6 +127,9 @@ class TableUpdate:
     def with_read_projection(self, projection: List[str]):
         self.projection = projection
 
+    def new_predicate_builder(self) -> PredicateBuilder:
+        return self.table.new_read_builder().new_predicate_builder()
+
     def new_shard_updator(self, shard_num: int, total_shard_count: int):
         """Create a shard updater for scan+rewrite style updates.
 
@@ -173,6 +185,156 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier
         ).upsert(table, upsert_keys, self.update_cols)
 
+    def _merge_into(
+            self,
+            source: Any,
+            on,
+            when_matched: Sequence,
+            when_not_matched: Sequence,
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        from pypaimon.table.data_evolution_merge_into import merge_into
+
+        return merge_into(
+            self.table,
+            source,
+            on=on,
+            when_matched=when_matched,
+            when_not_matched=when_not_matched,
+            commit_user=self.commit_user,
+            commit_identifier=commit_identifier,
+        )
+
+    def _update_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+            assignments: Mapping[str, Any],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Shared implementation for SQL-like ``UPDATE ... WHERE ...``.
+
+        ``predicate`` identifies the target rows. ``assignments`` maps target
+        column names to literal values. The method reads matching ``_ROW_ID``
+        values, builds an Arrow update table, then delegates to the existing
+        row-id update path.
+        """
+        self._validate_predicate_update(assignments)
+
+        scan_table = self._matched_update_scan_table()
+        read_builder = scan_table.new_read_builder()
+        if predicate is not None:
+            read_builder.with_filter(predicate)
+            read_builder.with_projection(
+                list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
+            )
+        else:
+            read_builder.with_projection([SpecialFields.ROW_ID.name])
+
+        splits = read_builder.new_scan().plan().splits()
+        matched = read_builder.new_read().to_arrow(splits)
+        if matched.num_rows == 0:
+            return []
+
+        update_table = self._build_predicate_update_table(
+            matched[SpecialFields.ROW_ID.name],
+            assignments,
+            matched.num_rows,
+        )
+        return TableUpdateByRowId(
+            self.table, self.commit_user, commit_identifier,
+        ).update_columns(update_table, list(assignments.keys()))
+
+    def _matched_update_scan_table(self):
+        snapshot_manager = self.table.snapshot_manager()
+        snapshot = TimeTravelUtil.try_travel_to_snapshot(
+            self.table.options.options,
+            self.table.tag_manager(),
+            snapshot_manager,
+        )
+        if snapshot is None:
+            snapshot = snapshot_manager.get_latest_snapshot()
+        if snapshot is None:
+            return self.table
+
+        dynamic_options = {
+            CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key():
+                GlobalIndexSearchMode.FULL.value,
+            CoreOptions.SCAN_MODE.key(): StartupMode.DEFAULT.value,
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot.id),
+        }
+        for scan_key in SCAN_KEYS:
+            if (
+                    scan_key != CoreOptions.SCAN_SNAPSHOT_ID.key()
+                    and self.table.options.options.contains_key(scan_key)
+            ):
+                dynamic_options[scan_key] = None
+
+        return self.table.copy(dynamic_options)
+
+    def _validate_predicate_update(self, assignments: Mapping[str, Any]):
+        if not self.table.options.data_evolution_enabled():
+            raise ValueError(
+                "update_by_predicate requires "
+                "'data-evolution.enabled' = 'true'."
+            )
+        if not self.table.options.row_tracking_enabled():
+            raise ValueError(
+                "update_by_predicate requires "
+                "'row-tracking.enabled' = 'true'."
+            )
+        if not assignments:
+            raise ValueError("assignments must not be empty.")
+
+        partition_keys = set(self.table.partition_keys)
+        for col in assignments:
+            if col not in self.table.field_names:
+                raise ValueError(f"Column {col} is not in table schema.")
+            if col in partition_keys:
+                raise ValueError(
+                    "update_by_predicate does not support updating "
+                    f"partition column '{col}'."
+                )
+
+    def _build_predicate_update_table(
+            self,
+            row_ids,
+            assignments: Mapping[str, Any],
+            row_count: int,
+    ) -> pa.Table:
+        table_schema = PyarrowFieldParser.from_paimon_schema(
+            self.table.table_schema.fields
+        )
+        arrays = [row_ids]
+        fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
+        for col, value in assignments.items():
+            target_field = table_schema.field(col)
+            arrays.append(
+                self._assignment_to_array(value, target_field.type, row_count)
+            )
+            fields.append(target_field)
+        return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
+    @staticmethod
+    def _assignment_to_array(
+            value: Any, data_type: pa.DataType, row_count: int):
+        if isinstance(value, pa.ChunkedArray):
+            array = value.combine_chunks()
+        elif isinstance(value, pa.Array):
+            array = value
+        else:
+            if isinstance(value, pa.Scalar):
+                value = value.as_py()
+            return pa.array([value] * row_count, type=data_type)
+
+        if len(array) != row_count:
+            raise ValueError(
+                "Assignment array length must match matched row count: "
+                f"{len(array)} != {row_count}."
+            )
+        if array.type != data_type:
+            array = array.cast(data_type)
+        return array
+
 
 class BatchTableUpdate(TableUpdate):
     """Batch-mode table update; commit messages always use
@@ -188,6 +350,33 @@ class BatchTableUpdate(TableUpdate):
         """Upsert rows into an append-only table by one or more key columns."""
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, BATCH_COMMIT_IDENTIFIER
+        )
+
+    def update_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+            assignments: Mapping[str, Any],
+    ) -> List[CommitMessage]:
+        """Update rows matching ``predicate`` with literal assignments."""
+        return self._update_by_predicate(
+            predicate, assignments, BATCH_COMMIT_IDENTIFIER
+        )
+
+    def merge_into(
+            self,
+            source: Any,
+            *,
+            on,
+            when_matched: Sequence = (),
+            when_not_matched: Sequence = (),
+    ) -> List[CommitMessage]:
+        """Prepare batch MERGE INTO commit messages."""
+        return self._merge_into(
+            source,
+            on,
+            when_matched,
+            when_not_matched,
+            BATCH_COMMIT_IDENTIFIER,
         )
 
 
@@ -212,6 +401,36 @@ class StreamTableUpdate(TableUpdate):
         tagging the produced commit messages with ``commit_identifier``."""
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, commit_identifier
+        )
+
+    def update_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+            assignments: Mapping[str, Any],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Update rows matching ``predicate`` with literal assignments,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._update_by_predicate(
+            predicate, assignments, commit_identifier
+        )
+
+    def merge_into(
+            self,
+            source: Any,
+            *,
+            on,
+            when_matched: Sequence = (),
+            when_not_matched: Sequence = (),
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Prepare stream MERGE INTO commit messages."""
+        return self._merge_into(
+            source,
+            on,
+            when_matched,
+            when_not_matched,
+            commit_identifier,
         )
 
 

@@ -91,6 +91,31 @@ public class DataSplitCompatibleTest {
     }
 
     @Test
+    public void testDeletionFilesSerialize() throws Exception {
+        List<DataFileMeta> dataFiles =
+                Collections.singletonList(
+                        newDataFile(10, SimpleStats.EMPTY_STATS, null).assignFirstRowId(0));
+        List<DeletionFile> deletionFiles =
+                Collections.singletonList(new DeletionFile("p", 1, 2, 3L));
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(1)
+                        .withBucketPath("my path")
+                        .rawConvertible(true)
+                        .withDataFiles(dataFiles)
+                        .withDataDeletionFiles(deletionFiles)
+                        .build();
+
+        DataSplit actual = InstantiationUtil.clone(split);
+
+        assertThat(actual.rawConvertible()).isTrue();
+        assertThat(actual.deletionFiles()).hasValue(deletionFiles);
+        assertThat(actual.mergedRowCount()).hasValue(7L);
+    }
+
+    @Test
     public void testSplitMinMaxValue() {
         Map<Long, List<DataField>> schemas = new HashMap<>();
 

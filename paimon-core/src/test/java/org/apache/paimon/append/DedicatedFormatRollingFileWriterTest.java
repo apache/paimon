@@ -222,54 +222,6 @@ public class DedicatedFormatRollingFileWriterTest {
     }
 
     @Test
-    public void testBundleWritingWithExternalStorageFallback() throws IOException {
-        Options options = new Options();
-        options.set(CoreOptions.BLOB_DESCRIPTOR_FIELD, "f2");
-        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD, "f2");
-        java.nio.file.Path externalStoragePath = tempDir.resolve("external-storage-blob-path");
-        options.set(CoreOptions.BLOB_EXTERNAL_STORAGE_PATH, externalStoragePath.toString());
-        writer =
-                new DedicatedFormatRollingFileWriter(
-                        LocalFileIO.create(),
-                        SCHEMA_ID,
-                        FileFormat.fromIdentifier("parquet", new Options()),
-                        null,
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        SCHEMA,
-                        pathFactory,
-                        () -> seqNumCounter,
-                        COMPRESSION,
-                        new StatsCollectorFactories(new CoreOptions(options)),
-                        new FileIndexOptions(),
-                        FileSource.APPEND,
-                        false,
-                        BlobFileContext.create(SCHEMA, new CoreOptions(options)));
-
-        List<InternalRow> rows =
-                Arrays.asList(
-                        GenericRow.of(
-                                1, BinaryString.fromString("test1"), new BlobData(testBlobData)),
-                        GenericRow.of(
-                                2, BinaryString.fromString("test2"), new BlobData(testBlobData)),
-                        GenericRow.of(
-                                3, BinaryString.fromString("test3"), new BlobData(testBlobData)));
-
-        writer.writeBundle(new SingleUseBundleRecords(rows));
-        writer.close();
-        List<DataFileMeta> metasResult = writer.result();
-
-        assertThat(writer.recordCount()).isEqualTo(3);
-        assertThat(metasResult).hasSize(1);
-        assertThat(metasResult.get(0).rowCount()).isEqualTo(3);
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            assertThat(stream.anyMatch(p -> p.getFileName().toString().endsWith(".blob"))).isTrue();
-        }
-    }
-
-    @Test
     public void testDoubleClose() throws IOException {
         // Write some data
         InternalRow row =

@@ -18,8 +18,13 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.PagedList;
+import org.apache.paimon.TableType;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -31,6 +36,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_FIELDS;
 import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
@@ -92,7 +99,100 @@ public class SystemTableLoader {
                 .orElse(null);
     }
 
+    public static List<String> loadGlobalTableNames(Options catalogOptions) {
+        List<String> tableNames = new ArrayList<>(GLOBAL_SYSTEM_TABLES);
+        if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+            tableNames.remove(CATALOG_OPTIONS);
+        }
+        return tableNames;
+    }
+
+    public static PagedList<String> loadGlobalTableNamesPaged(
+            Options catalogOptions,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType) {
+        validatePrefixSqlPattern(tableNamePattern);
+        List<String> tableNames =
+                loadGlobalTableNames(catalogOptions).stream()
+                        .filter(tableName -> matchesNamePattern(tableName, tableNamePattern))
+                        .filter(tableName -> matchesTableType(tableType))
+                        .sorted()
+                        .collect(Collectors.toList());
+
+        Integer pageSize = maxResults != null && maxResults > 0 ? maxResults : null;
+        List<String> pagedTableNames = new ArrayList<>();
+        for (String tableName : tableNames) {
+            if (pageToken != null && tableName.compareTo(pageToken) <= 0) {
+                continue;
+            }
+            if (pageSize != null && pagedTableNames.size() >= pageSize) {
+                break;
+            }
+            pagedTableNames.add(tableName);
+        }
+
+        String nextPageToken =
+                pageSize != null && pagedTableNames.size() == pageSize
+                        ? pagedTableNames.get(pagedTableNames.size() - 1)
+                        : null;
+        return new PagedList<>(pagedTableNames, nextPageToken);
+    }
+
     public static List<String> loadGlobalTableNames() {
-        return GLOBAL_SYSTEM_TABLES;
+        return loadGlobalTableNames(new Options());
+    }
+
+    private static boolean matchesNamePattern(String name, @Nullable String namePattern) {
+        if (StringUtils.isEmpty(namePattern)) {
+            return true;
+        }
+        return Pattern.compile(sqlPatternToRegex(namePattern)).matcher(name).matches();
+    }
+
+    private static boolean matchesTableType(@Nullable String tableType) {
+        return StringUtils.isEmpty(tableType) || TableType.TABLE.toString().equals(tableType);
+    }
+
+    private static void validatePrefixSqlPattern(@Nullable String pattern) {
+        if (StringUtils.isEmpty(pattern)) {
+            return;
+        }
+
+        boolean escaped = false;
+        boolean inWildcardZone = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '%') {
+                inWildcardZone = true;
+            } else if (inWildcardZone) {
+                throw new IllegalArgumentException(
+                        "Can only support prefix sql like pattern query now.");
+            }
+        }
+    }
+
+    private static String sqlPatternToRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (escaped) {
+                regex.append(c);
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '%') {
+                regex.append(".*");
+            } else {
+                regex.append(c);
+            }
+        }
+        return "^" + regex + "$";
     }
 }

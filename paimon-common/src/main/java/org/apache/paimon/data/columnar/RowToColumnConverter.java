@@ -23,10 +23,12 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
+import org.apache.paimon.data.columnar.heap.HeapVectorColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBooleanVector;
 import org.apache.paimon.data.columnar.writable.WritableByteVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
@@ -284,7 +286,31 @@ public class RowToColumnConverter {
 
             @Override
             public TypeConverter visit(VectorType vectorType) {
-                throw new UnsupportedOperationException();
+                TypeConverter elementConverter =
+                        getConverterForType(vectorType.getElementType().notNull());
+                return createConverter(
+                        vectorType.isNullable(),
+                        (row, column, cv) -> {
+                            HeapVectorColumnVector vectorColumn = (HeapVectorColumnVector) cv;
+                            if (vectorColumn.getVectorSize() != vectorType.getLength()) {
+                                throw new IllegalArgumentException(
+                                        "Vector column length mismatch: expected "
+                                                + vectorType.getLength()
+                                                + " but got "
+                                                + vectorColumn.getVectorSize());
+                            }
+
+                            InternalVector values = row.getVector(column);
+                            checkVectorLength(values, vectorType.getLength());
+                            checkVectorElementsNonNull(values);
+                            vectorColumn.appendVector();
+
+                            WritableColumnVector vectorData =
+                                    (WritableColumnVector) vectorColumn.getColumnVector();
+                            for (int i = 0; i < values.size(); i++) {
+                                elementConverter.append(values, i, vectorData);
+                            }
+                        });
             }
 
             @Override
@@ -373,6 +399,25 @@ public class RowToColumnConverter {
                                         "Unsupported column vector: " + cv);
                             }
                         });
+            }
+
+            private static void checkVectorLength(InternalVector vector, int expectedLength) {
+                if (vector.size() != expectedLength) {
+                    throw new IllegalArgumentException(
+                            "Vector length mismatch: expected "
+                                    + expectedLength
+                                    + " but got "
+                                    + vector.size());
+                }
+            }
+
+            private static void checkVectorElementsNonNull(InternalVector vector) {
+                for (int i = 0; i < vector.size(); i++) {
+                    if (vector.isNullAt(i)) {
+                        throw new UnsupportedOperationException(
+                                "Vector elements must not be null.");
+                    }
+                }
             }
         }
     }

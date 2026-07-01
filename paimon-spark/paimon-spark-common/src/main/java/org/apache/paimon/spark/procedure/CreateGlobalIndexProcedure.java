@@ -116,9 +116,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         : args.getString(3);
         String optionString = args.isNullAt(4) ? null : args.getString(4);
 
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
-
-        LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
+        LOG.info(
+                "Starting to build index for table {} with partitions: {}", tableIdent, partitions);
 
         return modifySparkTable(
                 tableIdent,
@@ -160,11 +159,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         }
                         DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
-                                SparkProcedureUtils.convertToPartitionPredicate(
-                                        finalWhere,
-                                        table.schema().logicalPartitionType(),
-                                        spark(),
-                                        relation);
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
 
                         List<DataField> indexFields =
                                 indexColumns.stream()

@@ -126,6 +126,7 @@ class MergeAllBatchReader(RecordBatchReader):
                     )
         else:
             self.merged_batch = None
+            return None
         dataset = ds.InMemoryDataset(self.merged_batch)
         self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
         return self.reader.read_next_batch()
@@ -240,12 +241,17 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
-                 blob_as_descriptor: bool = False):
+                 blob_as_descriptor: bool = False, deletion_vector=None):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
         self._blob_as_descriptor = blob_as_descriptor
+        if deletion_vector is None:
+            self._deletion_vector_range = None
+            self._deletion_vector = None
+        else:
+            self._deletion_vector_range, self._deletion_vector = deletion_vector
         self._returned = False
         self._readers: List[RecordBatchReader] = []
 
@@ -319,7 +325,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
         ]
         if self._row_ranges is not None:
             ranges = Range.and_(ranges, self._row_ranges)
-        return self._expand_ranges(ranges)
+        return [
+            row_id
+            for row_id in self._expand_ranges(ranges)
+            if not self._is_deleted(row_id)
+        ]
 
     def _selected_row_ids(self, file: DataFileMeta) -> List[int]:
         ranges = [file.row_id_range()]
@@ -334,6 +344,18 @@ class BlobFallbackBatchReader(RecordBatchReader):
             for row_range in ranges
             for row_id in range(row_range.from_, row_range.to + 1)
         ]
+
+    def _is_deleted(self, row_id: int) -> bool:
+        if self._deletion_vector is None:
+            return False
+        if not self._deletion_vector_range.contains(row_id):
+            raise ValueError(
+                f"Deletion vector range {self._deletion_vector_range} "
+                f"should contain blob row id {row_id}."
+            )
+        return self._deletion_vector.is_deleted(
+            row_id - self._deletion_vector_range.from_
+        )
 
     def _read_blob_values(self, file: DataFileMeta, supplier: Callable) -> List[object]:
         reader = supplier()

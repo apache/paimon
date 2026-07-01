@@ -39,7 +39,7 @@ except ImportError:
     _HAS_DATAFUSION = False
 
 _SKIP_CONDITION = not _HAS_DATAFUSION
-_SKIP_REASON = "datafusion not installed"
+_SKIP_REASON = "pypaimon[sql] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
 
@@ -500,21 +500,103 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             )
         self.assertIn("multiple source rows", str(ctx.exception))
 
-    def test_blob_columns_excluded(self):
-        import types
-
-        from pypaimon.ray.data_evolution_merge_into import _blob_col_names
-        from pypaimon.schema.data_types import AtomicType, DataField
-
-        fake_table = types.SimpleNamespace(
-            table_schema=types.SimpleNamespace(
-                fields=[
-                    DataField(0, 'id', AtomicType('INT')),
-                    DataField(1, 'payload', AtomicType('BLOB')),
-                ]
-            )
+    def test_blob_table_merge_into_updates_and_inserts_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+        self._write(
+            name,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['Alice', 'Bob'],
+                    'payload': pa.array(
+                        [b'blob-1', b'blob-2'], type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
         )
-        self.assertEqual({'payload'}, _blob_col_names(fake_table))
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([2, 3], type=pa.int32()),
+                    'name': ['Bobby', 'Cindy'],
+                    'payload': pa.array(
+                        [b'blob-2-updated', b'blob-3'],
+                        type=pa.large_binary()),
+                },
+                schema=blob_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched(update='*')],
+            when_not_matched=[WhenNotMatched(insert='*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1, 2, 3])
+        self.assertEqual(out['name'], ['Alice', 'Bobby', 'Cindy'])
+        self.assertEqual(
+            out['payload'], [b'blob-1', b'blob-2-updated', b'blob-3'])
+        self.assertEqual(metrics, {
+            'num_matched': 1, 'num_inserted': 1, 'num_unchanged': 0,
+        })
+
+    def test_blob_table_merge_into_inserts_null_for_unspecified_blob_column(self):
+        blob_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', pa.large_binary()),
+        ])
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        name = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            blob_schema, options=self.de_options)
+        self.catalog.create_table(name, schema, False)
+
+        metrics = merge_into(
+            target=name,
+            source=pa.Table.from_pydict(
+                {
+                    'id': pa.array([1], type=pa.int32()),
+                    'name': ['Alice'],
+                },
+                schema=source_schema,
+            ),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_not_matched=[WhenNotMatched(insert={
+                'id': source_col('id'),
+                'name': source_col('name'),
+            })],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        table = self.catalog.get_table(name)
+        rb = table.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        out = rb.new_read().to_arrow(splits).sort_by('id').to_pydict()
+        self.assertEqual(out['id'], [1])
+        self.assertEqual(out['name'], ['Alice'])
+        self.assertEqual(out['payload'], [None])
+        self.assertEqual(metrics, {
+            'num_matched': 0, 'num_inserted': 1, 'num_unchanged': 0,
+        })
 
     def test_blob_table_feature_update(self):
         blob_schema = pa.schema([
@@ -2147,7 +2229,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['name'], ['updated', 'updated'])
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
-    def test_self_merge_blob_target_condition_rejected(self):
+    def test_self_merge_blob_target_condition_allowed(self):
         blob_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -2169,20 +2251,22 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        with self.assertRaises(ValueError) as ctx:
-            merge_into(
-                target=tbl_name,
-                source=tbl_name,
-                catalog_options=self.catalog_options,
-                on=['_ROW_ID'],
-                when_matched=[
-                    WhenMatched(
-                        update={'name': lit('x')},
-                        condition='t.picture IS NOT NULL',
-                    ),
-                ],
-            )
-        self.assertIn('blob', str(ctx.exception).lower())
+        result = merge_into(
+            target=tbl_name,
+            source=tbl_name,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched(
+                    update={'name': lit('x')},
+                    condition='t.picture IS NOT NULL',
+                ),
+            ],
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        out = self._read_sorted(tbl_name)
+        self.assertEqual(out['name'], ['a'])
 
 
 class TargetProjectionTest(unittest.TestCase):

@@ -79,6 +79,24 @@ public class ChainSplit implements Split {
         return fileBucketPathMapping;
     }
 
+    /**
+     * Creates a {@link ChainSplit} from a {@link DataSplit} where all data files belong to the same
+     * branch.
+     */
+    public static ChainSplit from(DataSplit dataSplit, String branch) {
+        HashMap<String, String> fileBranchMapping = new HashMap<>();
+        HashMap<String, String> fileBucketPathMapping = new HashMap<>();
+        for (DataFileMeta file : dataSplit.dataFiles()) {
+            fileBranchMapping.put(file.fileName(), branch);
+            fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
+        }
+        return new ChainSplit(
+                dataSplit.partition(),
+                dataSplit.dataFiles(),
+                fileBranchMapping,
+                fileBucketPathMapping);
+    }
+
     @Override
     public long rowCount() {
         long sum = 0;

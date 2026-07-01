@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.operation.ManifestCompactDryRun;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -29,9 +31,12 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
@@ -39,14 +44,18 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  *
  * <pre><code>
  *  CALL sys.compact_manifest(table => 'tableId')
+ *  CALL sys.compact_manifest(table => 'tableId', dry_run => true)
  * </code></pre>
  */
 public class CompactManifestProcedure extends BaseProcedure {
 
+    private static final Logger LOG = LoggerFactory.getLogger(CompactManifestProcedure.class);
+
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("options", StringType)
+                ProcedureParameter.optional("options", StringType),
+                ProcedureParameter.optional("dry_run", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -74,11 +83,18 @@ public class CompactManifestProcedure extends BaseProcedure {
 
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String options = args.isNullAt(1) ? null : args.getString(1);
+        boolean dryRun = !args.isNullAt(2) && args.getBoolean(2);
 
         Table table = loadSparkTable(tableIdent).getTable();
         HashMap<String, String> dynamicOptions = new HashMap<>();
         ProcedureUtils.putAllOptions(dynamicOptions, options);
         table = table.copy(dynamicOptions);
+
+        if (dryRun) {
+            String message = ManifestCompactDryRun.execute((FileStoreTable) table);
+            LOG.info(message);
+            return new InternalRow[] {newInternalRow(true)};
+        }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();

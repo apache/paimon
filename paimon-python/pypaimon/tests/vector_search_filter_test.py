@@ -345,6 +345,24 @@ class _FakeQuery:
         return ("empty",)
 
     @staticmethod
+    def boost_query(query, boost):
+        return ("boost", query, boost)
+
+    @staticmethod
+    def fuzzy_term_query(
+            schema, field_name, text, distance=1,
+            transposition_cost_one=True, prefix=False):
+        return (
+            "fuzzy",
+            schema,
+            field_name,
+            text,
+            distance,
+            transposition_cost_one,
+            prefix,
+        )
+
+    @staticmethod
     def term_query(schema, field_name, field_value, index_option="position"):
         return ("term", schema, field_name, field_value, index_option)
 
@@ -360,19 +378,39 @@ class _FakeOccur:
 
 
 class _FakeSearchResults:
-    hits = [(2.0, "addr")]
+    def __init__(self, hits=None):
+        self.hits = hits if hits is not None else [(2.0, "addr")]
 
 
 class _FakeSearcher:
     def __init__(self):
         self.query = None
+        self.queries = []
 
     def search(self, query, limit):
         self.query = query
+        self.queries.append(query)
+        query_text = _fake_query_text(query)
+        if query_text == "positive":
+            return _FakeSearchResults([(10.0, ("addr", 1)), (5.0, ("addr", 2))])
+        if query_text == "negative":
+            return _FakeSearchResults([(7.0, ("addr", 2))])
         return _FakeSearchResults()
 
     def fast_field_values(self, name, addresses):
-        return [7]
+        return [
+            address[1] if isinstance(address, tuple) else 7
+            for address in addresses
+        ]
+
+
+def _fake_query_text(query):
+    if isinstance(query, tuple) and query:
+        if query[0] == "boost":
+            return _fake_query_text(query[1])
+        if isinstance(query[0], str):
+            return query[0]
+    return None
 
 
 class _FakeIndex:
@@ -667,7 +705,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                          tantivy.last_schema.fields)
         self.assertEqual(
             (TANTIVY_NGRAM_TOKENIZER,
-             ("ngram", 2, 3, True, ("lowercase",))),
+             ("ngram", 2, 3, True, (("remove_long", 40), "lowercase"))),
             tantivy.last_index.registered_tokenizer)
         self.assertEqual([7], sorted(list(result.results())))
 
@@ -773,6 +811,170 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
               (("remove_long", 16), "lowercase", "ascii_fold", ("stemmer", "english"),
                ("stopword", "english"), ("custom_stopword", ("paimon", "lake"))))),
             tantivy.last_index.registered_tokenizer)
+
+    def test_match_reader_aligns_java_boost_and_fuzziness(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch(
+                        MatchQuery(
+                            "paimon",
+                            "content",
+                            boost=2.0,
+                            fuzziness=1,
+                            operator="and",
+                        ),
+                        10,
+                    )
+                ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual(
+            ("boost",
+             ("paimon",
+              ("text",),
+              {"conjunction_by_default": True,
+               "fuzzy_fields": {"text": (False, 1, True)}}),
+             2.0),
+            tantivy.last_index.searcher_instance.query,
+        )
+
+    def test_boost_reader_demotes_negative_matches_like_java(self):
+        from pypaimon.globalindex.full_text_query import BoostQuery
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch(
+                        BoostQuery(
+                            MatchQuery("positive", "content"),
+                            MatchQuery("negative", "content"),
+                            negative_boost=0.2,
+                        ),
+                        10,
+                    )
+                ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual([1, 2], sorted(list(result.results())))
+        score_getter = result.score_getter()
+        self.assertEqual(10.0, score_getter(1))
+        self.assertEqual(1.0, score_getter(2))
+        self.assertEqual(
+            ["positive", "negative"],
+            [_fake_query_text(q) for q in tantivy.last_index.searcher_instance.queries],
+        )
+
+    def test_reader_rejects_java_unsupported_match_options(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                with self.assertRaisesRegex(ValueError, "max_expansions"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MatchQuery(
+                                "paimon",
+                                "content",
+                                max_expansions=10,
+                            ),
+                            10,
+                        )
+                    ).result()
+                with self.assertRaisesRegex(ValueError, "prefix_length"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MatchQuery(
+                                "paimon",
+                                "content",
+                                prefix_length=1,
+                            ),
+                            10,
+                        )
+                    ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+    def test_reader_rejects_single_column_multi_match_like_java(self):
+        from pypaimon.globalindex.full_text_query import MultiMatchQuery
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                with self.assertRaisesRegex(ValueError, "multi_match"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MultiMatchQuery("paimon", ["title", "content"]),
+                            10,
+                        )
+                    ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
 
     def test_ngram_reader_requires_custom_tokenizer_api(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
@@ -1804,6 +2006,186 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
         # Must be the GLOBAL row id (7 = 5 + 2), not the local (2).
         # Must not be empty despite shard_a being empty (no short-circuit).
         self.assertEqual([7], hits)
+
+    def test_extra_field_groups_are_padded_before_and(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a")
+        b_field = _field(1, "b")
+        c_field = _field(2, "c")
+
+        short = _entry(None, field_id=0, index_type="btree",
+                       file_name="a-c.index",
+                       row_range_start=0, row_range_end=4).index_file
+        short.global_index_meta.extra_field_ids = [2]
+        long = _entry(None, field_id=1, index_type="btree",
+                      file_name="b-c.index",
+                      row_range_start=0, row_range_end=9).index_file
+        long.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def __init__(self_inner, file_name):
+                self_inner._file_name = file_name
+
+            def visit_equal(self_inner, field_ref, literal):
+                bm = RoaringBitmap64()
+                if self_inner._file_name == "a-c.index":
+                    for row_id in [1, 3, 4]:
+                        bm.add(row_id)
+                else:
+                    for row_id in [1, 3, 7, 8]:
+                        bm.add(row_id)
+                return _completed_future(GlobalIndexResult.create(bm))
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader(io_meta.file_name) for io_meta in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[short, long],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=2, field="c",
+                              literals=[42]))
+            finally:
+                scanner.close()
+
+        self.assertIsNotNone(result)
+        # The short group is all-hit padded for rows 5..9 before AND-ing with
+        # the long group. Row 4 is filtered out by the long group, while tail
+        # rows 7 and 8 survive because the short group has not indexed them.
+        self.assertEqual([1, 3, 7, 8], sorted(list(result.results())))
+
+    def test_extra_field_groups_pad_missing_coverage_before_and(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a")
+        b_field = _field(1, "b")
+        c_field = _field(2, "c")
+
+        a_early = _entry(None, field_id=0, index_type="btree",
+                         file_name="a-c-early.index",
+                         row_range_start=2, row_range_end=3).index_file
+        a_early.global_index_meta.extra_field_ids = [2]
+        a_late = _entry(None, field_id=0, index_type="btree",
+                        file_name="a-c-late.index",
+                        row_range_start=7, row_range_end=9).index_file
+        a_late.global_index_meta.extra_field_ids = [2]
+        b_full = _entry(None, field_id=1, index_type="btree",
+                        file_name="b-c-full.index",
+                        row_range_start=0, row_range_end=9).index_file
+        b_full.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def __init__(self_inner, file_name):
+                self_inner._file_name = file_name
+
+            def visit_equal(self_inner, field_ref, literal):
+                bm = RoaringBitmap64()
+                if self_inner._file_name == "a-c-early.index":
+                    bm.add(0)  # global 2 after offset
+                elif self_inner._file_name == "a-c-late.index":
+                    for row_id in [0, 1]:  # global 7, 8 after offset
+                        bm.add(row_id)
+                else:
+                    for row_id in [1, 2, 5, 7, 8]:
+                        bm.add(row_id)
+                return _completed_future(GlobalIndexResult.create(bm))
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader(io_meta.file_name) for io_meta in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[a_early, a_late, b_full],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="equal", index=2, field="c",
+                              literals=[42]))
+            finally:
+                scanner.close()
+
+        self.assertIsNotNone(result)
+        # The first group has not indexed [0,1] and [4,6], so these ranges are
+        # neutral under AND. Its indexed ranges still filter normally.
+        self.assertEqual([1, 2, 5, 7, 8], sorted(list(result.results())))
+
+    def test_extra_field_padding_does_not_convert_none_to_hits(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.global_index_scanner import (
+            GlobalIndexScanner,
+        )
+
+        a_field = _field(0, "a", "STRING")
+        b_field = _field(1, "b", "STRING")
+        c_field = _field(2, "c", "STRING")
+
+        short = _entry(None, field_id=0, index_type="btree",
+                       file_name="a-c.index",
+                       row_range_start=0, row_range_end=4).index_file
+        short.global_index_meta.extra_field_ids = [2]
+        long = _entry(None, field_id=1, index_type="btree",
+                      file_name="b-c.index",
+                      row_range_start=0, row_range_end=9).index_file
+        long.global_index_meta.extra_field_ids = [2]
+
+        class _StubReader(GlobalIndexReader):
+            def visit_contains(self_inner, field_ref, literal):
+                return _completed_future(None)
+
+            def close(self_inner):
+                pass
+
+        def _stub_create_inner_readers(
+                index_type, file_io, index_path, field, io_metas,
+                executor=None, options=None):
+            return [_StubReader() for _ in io_metas]
+
+        with mock.patch(
+                "pypaimon.globalindex.global_index_scanner._create_inner_readers",
+                side_effect=_stub_create_inner_readers):
+            scanner = GlobalIndexScanner(
+                fields=[a_field, b_field, c_field],
+                file_io=object(),
+                index_path="/unused",
+                index_files=[short, long],
+            )
+            try:
+                result = scanner.scan(
+                    Predicate(method="contains", index=2, field="c",
+                              literals=["x"]))
+            finally:
+                scanner.close()
+
+        self.assertIsNone(result)
 
     def test_tantivy_fulltext_index_is_dispatched_by_scanner(self):
         """Non-btree scalar global indexes (tantivy-fulltext, etc.) must be

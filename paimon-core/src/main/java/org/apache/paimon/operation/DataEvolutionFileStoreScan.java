@@ -62,12 +62,14 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
     private boolean dropStats = false;
     @Nullable private RowType readType;
+    private final boolean deletionVectorsEnabled;
 
     // Cache file's physical field id set per (schemaId, writeCols) to avoid recomputing during
     // per-file column pruning in postFilterManifestEntries.
@@ -94,6 +96,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 false,
                 deletionVectorsEnabled,
                 true);
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     @Override
@@ -140,6 +143,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         if (inputFilter != null
                 || limit == null
                 || limit <= 0
+                || deletionVectorsEnabled
                 || !allContainsRowId(manifestFiles)) {
             return super.readManifestEntries(manifestFiles, useSequential);
         }
@@ -212,11 +216,16 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
      * <p>When every file in the group lacks a requested column (e.g. an ADD COLUMN projection over
      * a row-disjoint pre-ALTER group), one file is kept as a row-count representative so the reader
      * can emit the right number of NULL-filled rows.
+     *
+     * <p>If Deletion-Vector is enabled, we always keep the oldest normal file for each group as the
+     * anchor file to lookup corresponding Deletion Files.
      */
     private List<ManifestEntry> pruneByReadType(List<ManifestEntry> group) {
         if (readType == null || group.size() <= 1) {
             return group;
         }
+        ManifestEntry anchor =
+                deletionVectorsEnabled ? retrieveAnchorFile(group, ManifestEntry::file) : null;
         Set<Integer> readFieldIds = new HashSet<>();
         for (DataField f : readType.getFields()) {
             readFieldIds.add(f.id());
@@ -230,6 +239,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                     break;
                 }
             }
+        }
+        if (anchor != null && !kept.contains(anchor)) {
+            kept.add(anchor);
         }
         // Group must contribute at least one file so the reader sees rowCount and can NULL-fill
         // missing columns for the projection's rows.

@@ -64,6 +64,7 @@ public class DataEvolutionCompactCoordinator {
     private static final int FILES_BATCH = 100_000;
     private static final int BLOB_COMPACT_MIN_FILE_NUM = 2;
 
+    private final boolean deletionVectorsEnabled;
     private final CompactScanner scanner;
     private final CompactPlanner planner;
 
@@ -78,6 +79,13 @@ public class DataEvolutionCompactCoordinator {
             boolean compactBlob,
             boolean compactVector) {
         CoreOptions options = table.coreOptions();
+        this.deletionVectorsEnabled = options.deletionVectorsEnabled();
+        if (deletionVectorsEnabled) {
+            this.scanner = null;
+            this.planner = null;
+            return;
+        }
+
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
         long compactMinFileNum = options.compactionMinFileNum();
@@ -109,6 +117,10 @@ public class DataEvolutionCompactCoordinator {
     }
 
     public List<DataEvolutionCompactTask> plan() {
+        if (deletionVectorsEnabled) {
+            throw new EndOfScanException();
+        }
+
         // scan files in snapshot
         List<ManifestEntry> entries = scanner.scan();
         if (!entries.isEmpty()) {

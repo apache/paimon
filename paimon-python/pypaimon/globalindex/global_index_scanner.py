@@ -22,7 +22,7 @@ from typing import Collection, Optional
 
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader, _map_future
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
@@ -64,13 +64,15 @@ class GlobalIndexScanner:
 
     def _create_evaluator(self, fields, file_io, index_path, index_files):
         index_metas = {}
+        extra_index_metas = {}
         for index_file in index_files:
             global_index_meta = index_file.global_index_meta
             if global_index_meta is None:
                 continue
 
             index_type = index_file.index_type
-            field_ids = [global_index_meta.index_field_id]
+            index_field_id = global_index_meta.index_field_id
+            field_ids = [index_field_id]
             if global_index_meta.extra_field_ids is not None:
                 field_ids.extend(global_index_meta.extra_field_ids)
 
@@ -83,21 +85,48 @@ class GlobalIndexScanner:
             range_key = Range(
                 global_index_meta.row_range_start,
                 global_index_meta.row_range_end)
-            for field_id in field_ids:
-                if field_id not in index_metas:
-                    index_metas[field_id] = {}
-                if index_type not in index_metas[field_id]:
-                    index_metas[field_id][index_type] = {}
-                if range_key not in index_metas[field_id][index_type]:
-                    index_metas[field_id][index_type][range_key] = []
-                index_metas[field_id][index_type][range_key].append(io_meta)
+            group = index_metas.get(index_field_id)
+            if group is None:
+                group = _IndexMetaFileGroup(index_field_id, field_ids)
+                index_metas[index_field_id] = group
+                for extra_field_id in field_ids[1:]:
+                    extra_index_metas.setdefault(extra_field_id, []).append(group)
+            elif group.field_ids != tuple(field_ids):
+                raise ValueError(
+                    "Primary field %s owns multiple indexes with different "
+                    "columns %s and %s; a primary column can own at most one "
+                    "index." % (index_field_id, list(group.field_ids), field_ids)
+                )
+            group.add_file(index_type, range_key, io_meta)
 
         executor = self._executor
         options = self._options
 
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(
-                file_io, index_path, index_metas.get(field.id), field, executor, options)
+            group = index_metas.get(field.id)
+            if group is not None:
+                return _create_readers(
+                    file_io, index_path, group.metas, field, executor, options)
+
+            extra_groups = extra_index_metas.get(field.id)
+            if not extra_groups:
+                return []
+            union_coverage = Range.sort_and_merge_overlap(
+                [
+                    range_key
+                    for group in extra_groups
+                    for range_key in group.coverage_ranges
+                ],
+                True,
+            )
+            readers = []
+            for group in extra_groups:
+                pad_ranges = _exclude_ranges(union_coverage, group.coverage_ranges)
+                readers.extend(
+                    _create_readers(
+                        file_io, index_path, group.metas, field, executor,
+                        options, pad_ranges=pad_ranges))
+            return readers
 
         return GlobalIndexEvaluator(fields, readers_function)
 
@@ -199,6 +228,80 @@ class GlobalIndexScanner:
         self.close()
 
 
+class _IndexMetaFileGroup:
+    def __init__(self, index_field_id, field_ids):
+        self.index_field_id = index_field_id
+        self.field_ids = tuple(field_ids)
+        self.metas = {}
+        self.coverage_ranges = []
+
+    def add_file(self, index_type, range_key, io_meta):
+        self.coverage_ranges.append(range_key)
+        self.metas.setdefault(index_type, {}).setdefault(range_key, []).append(io_meta)
+
+
+class _PaddingGlobalIndexReader(GlobalIndexReader):
+    def __init__(self, wrapped, padding):
+        self._wrapped = wrapped
+        self._padding = padding
+
+    def _pad(self, future):
+        return _map_future(
+            future,
+            lambda result: None if result is None else result.or_(self._padding))
+
+    def visit_equal(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_equal(field_ref, literal))
+
+    def visit_not_equal(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_not_equal(field_ref, literal))
+
+    def visit_less_than(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_less_than(field_ref, literal))
+
+    def visit_less_or_equal(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_less_or_equal(field_ref, literal))
+
+    def visit_greater_than(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_greater_than(field_ref, literal))
+
+    def visit_greater_or_equal(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_greater_or_equal(field_ref, literal))
+
+    def visit_is_null(self, field_ref):
+        return self._pad(self._wrapped.visit_is_null(field_ref))
+
+    def visit_is_not_null(self, field_ref):
+        return self._pad(self._wrapped.visit_is_not_null(field_ref))
+
+    def visit_in(self, field_ref, literals):
+        return self._pad(self._wrapped.visit_in(field_ref, literals))
+
+    def visit_not_in(self, field_ref, literals):
+        return self._pad(self._wrapped.visit_not_in(field_ref, literals))
+
+    def visit_starts_with(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_starts_with(field_ref, literal))
+
+    def visit_ends_with(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_ends_with(field_ref, literal))
+
+    def visit_contains(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_contains(field_ref, literal))
+
+    def visit_like(self, field_ref, literal):
+        return self._pad(self._wrapped.visit_like(field_ref, literal))
+
+    def visit_between(self, field_ref, from_v, to_v):
+        return self._pad(self._wrapped.visit_between(field_ref, from_v, to_v))
+
+    def visit_not_between(self, field_ref, from_v, to_v):
+        return self._pad(self._wrapped.visit_not_between(field_ref, from_v, to_v))
+
+    def close(self):
+        self._wrapped.close()
+
+
 def _resolve_snapshot(table, snapshot):
     if snapshot is not None:
         return snapshot
@@ -232,7 +335,17 @@ def _core_options(table):
     return options
 
 
-def _create_readers(file_io, index_path, index_type_metas, field, executor=None, options=None):
+def _exclude_ranges(base_ranges, excluded_ranges):
+    excluded_ranges = Range.sort_and_merge_overlap(excluded_ranges, True)
+    result = []
+    for base_range in Range.sort_and_merge_overlap(base_ranges, True):
+        result.extend(base_range.exclude(excluded_ranges))
+    return Range.sort_and_merge_overlap(result, True)
+
+
+def _create_readers(
+        file_io, index_path, index_type_metas, field, executor=None,
+        options=None, pad_ranges=None):
     """Create readers for a specific field, dispatched by index_type.
 
     Unknown indexTypes raise — a silent skip would make
@@ -260,7 +373,11 @@ def _create_readers(file_io, index_path, index_type_metas, field, executor=None,
                     OffsetGlobalIndexReader(
                         inner, range_key.from_, range_key.to))
         if offset_readers:
-            readers.append(UnionGlobalIndexReader(offset_readers))
+            reader = UnionGlobalIndexReader(offset_readers)
+            if pad_ranges:
+                padding = GlobalIndexResult.from_ranges(pad_ranges)
+                reader = _PaddingGlobalIndexReader(reader, padding)
+            readers.append(reader)
     return readers
 
 

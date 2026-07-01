@@ -33,7 +33,9 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -45,6 +47,8 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.SpecialFields;
@@ -71,7 +75,13 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
@@ -101,6 +111,61 @@ public class KeyValueFileReadWriteTest {
                                         newFile("non_avro_file.avro", 0, 0, 1, 0)))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
+    }
+
+    @Test
+    public void testConcurrentCreateRecordReaderBuildsFormatMappingOnce() throws Exception {
+        AtomicInteger readerFactoryCreations = new AtomicInteger();
+        CountDownLatch firstCreationStarted = new CountDownLatch(1);
+        CountDownLatch releaseCreation = new CountDownLatch(1);
+        FileFormat blockingFormat =
+                new FlushingFileFormat("avro") {
+                    @Override
+                    public FormatReaderFactory createReaderFactory(
+                            RowType dataSchemaRowType,
+                            RowType projectedRowType,
+                            List<Predicate> filters) {
+                        readerFactoryCreations.incrementAndGet();
+                        firstCreationStarted.countDown();
+                        try {
+                            releaseCreation.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(e);
+                        }
+                        return super.createReaderFactory(
+                                dataSchemaRowType, projectedRowType, filters);
+                    }
+                };
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), ignored -> blockingFormat, null, null);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<RecordReader<KeyValue>> first =
+                    executor.submit(
+                            () ->
+                                    readerFactory.createRecordReader(
+                                            newFile("concurrent-1.avro", 0, 0, 1, 0)));
+            assertThat(firstCreationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<RecordReader<KeyValue>> second =
+                    executor.submit(
+                            () ->
+                                    readerFactory.createRecordReader(
+                                            newFile("concurrent-2.avro", 0, 0, 1, 0)));
+
+            Thread.sleep(500);
+            assertThat(readerFactoryCreations.get()).isEqualTo(1);
+
+            releaseCreation.countDown();
+            assertThatThrownBy(() -> first.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+            assertThatThrownBy(() -> second.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+        } finally {
+            releaseCreation.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @RepeatedTest(10)
@@ -355,6 +420,15 @@ public class KeyValueFileReadWriteTest {
 
     private KeyValueFileReaderFactory createReaderFactory(
             String pathStr, String format, RowType readKeyType, RowType readValueType) {
+        return createReaderFactory(
+                pathStr, ignore -> new FlushingFileFormat(format), readKeyType, readValueType);
+    }
+
+    private KeyValueFileReaderFactory createReaderFactory(
+            String pathStr,
+            FileFormatDiscover formatDiscover,
+            RowType readKeyType,
+            RowType readValueType) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
         FileStorePathFactory pathFactory = createNonPartFactory(path);
@@ -365,7 +439,7 @@ public class KeyValueFileReadWriteTest {
                         createTestSchemaManager(path).schema(0),
                         KEY_TYPE,
                         DEFAULT_ROW_TYPE,
-                        ignore -> new FlushingFileFormat(format),
+                        formatDiscover,
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor(),
                         new CoreOptions(new HashMap<>()));

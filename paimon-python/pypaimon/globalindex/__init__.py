@@ -44,6 +44,14 @@ from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexRea
 from pypaimon.globalindex.sorted_file_global_index_reader import SortedFileGlobalIndexReader
 from pypaimon.globalindex.sorted_file_meta_selector import SortedFileMetaSelector
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
+from pypaimon.globalindex.create_global_index import (
+    GlobalIndexBuilder,
+    create_global_index,
+)
+from pypaimon.globalindex.drop_global_index import (
+    GlobalIndexDropper,
+    drop_global_index,
+)
 from pypaimon.utils.range import Range
 
 __all__ = [
@@ -74,5 +82,9 @@ __all__ = [
     'SortedFileGlobalIndexReader',
     'SortedFileMetaSelector',
     'SortedIndexFileMeta',
+    'GlobalIndexBuilder',
+    'create_global_index',
+    'GlobalIndexDropper',
+    'drop_global_index',
     'Range',
 ]

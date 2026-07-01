@@ -19,18 +19,20 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.shredding.ShreddingWritePlan;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.HadoopCompressionType;
+import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.format.parquet.writer.MetadataParquetBuilder;
 import org.apache.paimon.format.parquet.writer.ParquetBuilder;
 import org.apache.paimon.format.parquet.writer.ParquetBulkWriter;
 import org.apache.paimon.format.parquet.writer.ParquetMetadataBulkWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.format.parquet.writer.StreamOutputFile;
-import org.apache.paimon.format.variant.SupportsVariantInference;
+import org.apache.paimon.format.shredding.SupportsShreddingWritePlan;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
@@ -40,7 +42,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** A factory that creates a Parquet {@link FormatWriter}. */
-public class ParquetWriterFactory implements FormatWriterFactory, SupportsVariantInference {
+public class ParquetWriterFactory implements FormatWriterFactory, SupportsShreddingWritePlan {
 
     /** The builder to construct the ParquetWriter. */
     private final ParquetBuilder<InternalRow> writerBuilder;
@@ -71,8 +73,8 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
     }
 
     @Override
-    public FormatWriter createWithShreddingSchema(
-            PositionOutputStream stream, String compression, RowType inferredShreddingSchema)
+    public FormatWriter createWithShreddingWritePlan(
+            PositionOutputStream stream, String compression, ShreddingWritePlan writePlan)
             throws IOException {
         final OutputFile out = new StreamOutputFile(stream);
         if (HadoopCompressionType.NONE.value().equals(compression)) {
@@ -80,9 +82,26 @@ public class ParquetWriterFactory implements FormatWriterFactory, SupportsVarian
         }
 
         RowDataParquetBuilder newBuilder =
-                ((RowDataParquetBuilder) writerBuilder)
-                        .withShreddingSchemas(inferredShreddingSchema);
+                ((RowDataParquetBuilder) writerBuilder).withRowType(writePlan.physicalRowType());
         return createMetadataWriter(newBuilder, out, compression);
+    }
+
+    @Override
+    public void commitShreddingMetadata(
+            FormatWriter writer, ShreddingWritePlan writePlan, String compression) {
+        Map<String, Map<String, String>> fieldMetadata = writePlan.fieldMetadata(compression);
+        if (fieldMetadata.isEmpty()) {
+            return;
+        }
+
+        Map<String, byte[]> metadata = new HashMap<>();
+        metadata.put(
+                FormatMetadataUtils.ARROW_SCHEMA_METADATA_KEY,
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        writePlan.physicalRowType(),
+                        fieldMetadata,
+                        FormatMetadataUtils.PARQUET_FIELD_ID_KEY));
+        ((SupportsWriterMetadata) writer).addMetadata(metadata);
     }
 
     private FormatWriter createMetadataWriter(

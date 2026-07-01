@@ -519,6 +519,52 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon delete: data evolution table with deletion vectors") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("ALTER TABLE t ADD COLUMNS (d INT)")
+      sql(
+        "INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c, id + 100 AS d FROM range(10, 13)")
+
+      sql("DELETE FROM t WHERE id IN (1, 4, 6, 11)")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0, null, 0L),
+          Row(2, 2, 2, null, 2L),
+          Row(3, 3, 3, null, 3L),
+          Row(5, 5, 5, null, 5L),
+          Row(7, 7, 7, null, 7L),
+          Row(8, 8, 8, null, 8L),
+          Row(9, 9, 9, null, 9L),
+          Row(10, 10, 10, 110, 10L),
+          Row(12, 12, 12, 112, 12L)
+        )
+      )
+
+      sql("DELETE FROM t WHERE id IN (2, 8)")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(0, 0, 0, null, 0L),
+          Row(3, 3, 3, null, 3L),
+          Row(5, 5, 5, null, 5L),
+          Row(7, 7, 7, null, 7L),
+          Row(9, 9, 9, null, 9L),
+          Row(10, 10, 10, 110, 10L),
+          Row(12, 12, 12, 112, 12L))
+      )
+    }
+  }
+
   test("Paimon delete: delete with range condition") {
     withTable("t") {
       sql(s"CREATE TABLE t (id INT, v INT)")

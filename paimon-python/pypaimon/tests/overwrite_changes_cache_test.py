@@ -21,8 +21,8 @@ On every OVERWRITE retry, pypaimon re-scanned the full target partitions to
 recompute the files to delete. Under concurrent writers this made each retry as
 expensive as the first attempt. OverwriteChangesProvider caches the existing
 files of the target partitions and, on retry, reuses them when the snapshots in
-between are all APPEND and have not touched the target partitions (verified by a
-cheap DELTA probe), instead of a full re-scan.
+between can be applied from target-partition DELTA manifests, instead of a full
+re-scan.
 
 The test deterministically forces ``K`` conflicts, each advancing the latest
 snapshot with an append to an unrelated partition, and asserts the full scan
@@ -87,7 +87,7 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         # --- count provider full scans and delta probes (class-level spies) ---
         counts = {'full_scan': 0, 'probe': 0}
         orig_full = OverwriteChangesProvider._full_scan
-        orig_probe = OverwriteChangesProvider._delta_touches_target
+        orig_probe = OverwriteChangesProvider._read_delta_entries
 
         def spy_full(self, *a, **k):
             counts['full_scan'] += 1
@@ -112,13 +112,13 @@ class OverwriteChangesCacheTest(unittest.TestCase):
 
         fsc.snapshot_commit.commit = patched_cas
         OverwriteChangesProvider._full_scan = spy_full
-        OverwriteChangesProvider._delta_touches_target = spy_probe
+        OverwriteChangesProvider._read_delta_entries = spy_probe
         try:
             c.commit(messages)
             c.close()
         finally:
             OverwriteChangesProvider._full_scan = orig_full
-            OverwriteChangesProvider._delta_touches_target = orig_probe
+            OverwriteChangesProvider._read_delta_entries = orig_probe
 
         # Harness sanity: we really did force K conflicts and then converged.
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
@@ -146,8 +146,9 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
         self.assertEqual(len(actual[actual['f0'] == 99]), K)
 
-    def test_cache_rebuilt_when_concurrent_append_hits_target_partition(self):
-        # Concurrent appends hit the overwrite target; probe sees it touched -> rebuild.
+    def test_cache_applies_delta_when_concurrent_append_hits_target_partition(self):
+        # Concurrent appends hit the overwrite target; retry advances cached
+        # target-partition state from APPEND deltas instead of rebuilding.
         K = 3
 
         wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
@@ -160,7 +161,7 @@ class OverwriteChangesCacheTest(unittest.TestCase):
 
         counts = {'full_scan': 0, 'probe': 0}
         orig_full = OverwriteChangesProvider._full_scan
-        orig_probe = OverwriteChangesProvider._delta_touches_target
+        orig_probe = OverwriteChangesProvider._read_delta_entries
 
         def spy_full(self, *a, **k):
             counts['full_scan'] += 1
@@ -182,20 +183,20 @@ class OverwriteChangesCacheTest(unittest.TestCase):
 
         fsc.snapshot_commit.commit = patched_cas
         OverwriteChangesProvider._full_scan = spy_full
-        OverwriteChangesProvider._delta_touches_target = spy_probe
+        OverwriteChangesProvider._read_delta_entries = spy_probe
         try:
             c.commit(messages)
             c.close()
         finally:
             OverwriteChangesProvider._full_scan = orig_full
-            OverwriteChangesProvider._delta_touches_target = orig_probe
+            OverwriteChangesProvider._read_delta_entries = orig_probe
 
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
 
-        # Target touched each retry => cache rebuilds; full scan runs every attempt.
-        self.assertEqual(counts['full_scan'], K + 1,
-                         f"full scan ran {counts['full_scan']}x; cache must rebuild "
-                         f"when the target partition is touched")
+        # Target APPEND deltas can be applied to cached state; no full rebuild.
+        self.assertEqual(counts['full_scan'], 1,
+                         f"full scan ran {counts['full_scan']}x; APPEND deltas "
+                         f"should advance cached target state")
         self.assertEqual(counts['probe'], K,
                          f"delta probe ran {counts['probe']}x; once per retry (= K)")
 
@@ -248,9 +249,9 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
         return captured['provider']
 
-    def test_cache_rebuilt_on_non_append_snapshot(self):
-        # A non-APPEND (OVERWRITE) snapshot between retries forces a rebuild even
-        # though it only touches an unrelated partition.
+    def test_cache_applies_delta_when_concurrent_overwrite_hits_target_partition(self):
+        # Concurrent overwrites produce DELETE+ADD deltas. They can be applied
+        # to the cached target state just like APPEND deltas.
         K = 2
         wb = self.table.new_batch_write_builder().overwrite({'f0': 1})
         w = wb.new_write()
@@ -258,13 +259,21 @@ class OverwriteChangesCacheTest(unittest.TestCase):
         w.write_pandas(pd.DataFrame({'f0': [1], 'f1': ['new']}))
         provider = self._run_with_conflicts(
             c, w.prepare_commit(), K,
-            lambda i: self._overwrite_partition(99, f'z{i}'))
+            lambda i: self._overwrite_partition(1, f'z{i}'))
 
-        self.assertEqual(provider.full_scan_count, K + 1)   # rebuilt every retry
-        self.assertEqual(provider.delta_probe_count, K)     # probed, bailed at kind check
+        self.assertEqual(provider.full_scan_count, 1)
+        self.assertEqual(provider.delta_probe_count, K)
+        self.assertEqual(provider.delta_apply_count, K)
 
-    def test_whole_table_overwrite_always_full_scans(self):
-        # Whole-table overwrite (no partition filter) can never reuse the cache.
+        read_builder = self.table.new_read_builder()
+        actual = read_builder.new_read().to_pandas(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
+        self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
+
+    def test_whole_table_overwrite_advances_by_append_delta(self):
+        # Whole-table overwrite (no partition filter) can still advance through
+        # APPEND deltas because every appended file belongs to the target state.
         K = 2
         wb = self.table.new_batch_write_builder().overwrite()
         w = wb.new_write()
@@ -274,8 +283,9 @@ class OverwriteChangesCacheTest(unittest.TestCase):
             c, w.prepare_commit(), K,
             lambda i: self._append(pd.DataFrame({'f0': [99], 'f1': [f'x{i}']})))
 
-        self.assertEqual(provider.full_scan_count, K + 1)   # null filter -> always full scan
-        self.assertEqual(provider.delta_probe_count, 0)     # never enters the probe loop
+        self.assertEqual(provider.full_scan_count, 1)
+        self.assertEqual(provider.delta_probe_count, K)
+        self.assertEqual(provider.delta_apply_count, K)
 
         read_builder = self.table.new_read_builder()
         actual = read_builder.new_read().to_pandas(

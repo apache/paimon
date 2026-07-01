@@ -419,7 +419,7 @@ class TestFileStoreCommit(unittest.TestCase):
         snapshot_commit.commit.return_value = True
         file_store_commit.snapshot_commit = snapshot_commit
 
-        file_store_commit._write_manifest_file = Mock(return_value=Mock())
+        file_store_commit._write_manifest_files = Mock(return_value=[Mock()])
         file_store_commit._generate_partition_statistics = Mock(return_value=[])
         file_store_commit.manifest_list_manager.read_all.return_value = []
 
@@ -492,7 +492,7 @@ class TestFileStoreCommit(unittest.TestCase):
                           file=make_file("f2.parquet")),
         ]
 
-        result = file_store_commit._write_manifest_file(entries, "manifest-test")
+        result = file_store_commit._write_manifest_files(entries, "manifest-test")
         self.assertIsNotNone(result)
 
     @staticmethod

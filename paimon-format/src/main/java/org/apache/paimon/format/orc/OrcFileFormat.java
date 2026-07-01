@@ -154,7 +154,12 @@ public class OrcFileFormat extends FileFormat {
                         typeDescription, refinedType.getFields(), legacyTimestampLtzType);
 
         return new OrcWriterFactory(
-                vectorizer, orcProperties, writerConf, writeBatchSize, writeBatchMemory);
+                vectorizer,
+                orcProperties,
+                writerConf,
+                writeBatchSize,
+                writeBatchMemory,
+                legacyTimestampLtzType);
     }
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {

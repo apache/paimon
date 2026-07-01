@@ -535,8 +535,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            checkArgument(split instanceof ChainSplit);
-            return fallbackRead.createReader(split);
+            if (split instanceof ChainSplit || split instanceof DataSplit) {
+                return fallbackRead.createReader(split);
+            }
+            throw new IllegalArgumentException(
+                    "Unsupported split type for chain table read: " + split.getClass().getName());
         }
     }
 }

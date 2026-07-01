@@ -493,38 +493,6 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Blob: merge-into updates descriptor blob column with external storage end-to-end") {
-    withTable("s", "t") {
-      val externalStoragePath = tempDBDir.getCanonicalPath + "/external-storage-blob-merge-path"
-      sql(
-        s"CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
-          s"('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
-          s"'blob-field'='picture', 'blob-descriptor-field'='picture', " +
-          s"'blob-external-storage-field'='picture', " +
-          s"'blob-external-storage-path'='$externalStoragePath')")
-
-      // Insert initial row (writes raw data to external storage and stores descriptor bytes)
-      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
-      sql("INSERT INTO t VALUES (2, 'name2', X'5945')")
-
-      sql("CREATE TABLE s (id INT, name STRING)")
-      sql("INSERT INTO s VALUES (1, 'updated_name1')")
-
-      // Update the 'name' column via MERGE INTO
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED THEN UPDATE SET t.name = s.name
-            |""".stripMargin)
-
-      checkAnswer(
-        sql("SELECT id, name FROM t ORDER BY id"),
-        Seq(Row(1, "updated_name1"), Row(2, "name2"))
-      )
-    }
-  }
-
   private val HEX_ARRAY = "0123456789ABCDEF".toCharArray
 
   def bytesToHex(bytes: Array[Byte]): String = {

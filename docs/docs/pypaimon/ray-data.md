@@ -375,9 +375,11 @@ merge_into(
 
 Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
 column prefixes. `WhenNotMatched` conditions may only reference source
-columns (`s.*`). Requires the `datafusion` package: `pip install pypaimon[sql]`.
+columns (`s.*`). Condition evaluation uses DataFusion through the PyPaimon SQL
+extra. Install the extra before using conditions: `pip install pypaimon[sql]`.
 
-- `update` / `insert`: `"*"` updates/inserts all non-blob columns from source.
+- `update` / `insert`: `"*"` updates/inserts all columns from source,
+  including blob columns.
   A mapping selects specific columns:
   ```python
   from pypaimon.ray import source_col, target_col, lit
@@ -420,6 +422,6 @@ For an end-to-end feature update workflow on Blob tables, see
   table is partitioned, `merge_into` raises an error when `when_matched` is
   specified, because cross-partition row movement is not implemented.
   Not-matched inserts into partitioned tables work normally.
-- Blob columns are not written by `merge_into`: update leaves the existing
-  `.blob` files untouched, and insert fills blob columns with `NULL`. The
-  source data does not need to (and should not) carry blob columns.
+- Blob columns can be updated and inserted by `merge_into`. With `update="*"`
+  or `insert="*"`, the source must include the corresponding blob columns.
+  If an insert mapping omits a blob column, that column is written as `NULL`.
