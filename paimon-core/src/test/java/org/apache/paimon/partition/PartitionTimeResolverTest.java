@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.partition;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.RecordComparator;
@@ -24,9 +24,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ChainPartitionProjector;
+import org.apache.paimon.utils.ChainTableUtils;
 
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
@@ -96,7 +97,9 @@ public class PartitionTimeResolverTest {
                 .isEqualTo(Duration.ofSeconds(1));
         assertThat(extractMinStep("$a", "yyyyMMddHHmmss", "a")).isEqualTo(Duration.ofSeconds(1));
 
-        assertThat(extractMinStep("$a$aaT$aaa$a4Z", "yyMMdd'T'HHmmss'Z'", "a", "aa", "aaa", "a4"))
+        assertThat(
+                        extractMinStep(
+                                "$a $aaT$aaa $a4Z", "yyMM dd'T'HHmm ss'Z'", "a", "aa", "aaa", "a4"))
                 .isEqualTo(Duration.ofSeconds(1));
         assertThat(extractMinStep("$a12$aaT$aaa00Z", "yyyyMMdd'T'HHmmss'Z'", "a", "aa", "aaa"))
                 .isEqualTo(Duration.ofMinutes(1));
@@ -106,11 +109,13 @@ public class PartitionTimeResolverTest {
                 .isEqualTo(Duration.ofMinutes(1));
         assertThat(extractMinStep("$a", "yyyyMMdd'T'HHmmss", "a")).isEqualTo(Duration.ofSeconds(1));
 
-        assertThat(extractMinStep("$ab$c $d:$e:$f", "yyyyMMdd HH:mm:ss", "ab", "c", "d", "e", "f"))
+        assertThat(
+                        extractMinStep(
+                                "$ab $c $d:$e:$f", "yyyyMM dd HH:mm:ss", "ab", "c", "d", "e", "f"))
                 .isEqualTo(Duration.ofSeconds(1));
         assertThat(extractMinStep("$day $a:$b", "yyyyMMdd HH:mm", "day", "a", "b"))
                 .isEqualTo(Duration.ofMinutes(1));
-        assertThat(extractMinStep("$aa$a", "yyyy/MM/ddHH", "aa", "a"))
+        assertThat(extractMinStep("$aa $a", "yyyy/MM/dd HH", "aa", "a"))
                 .isEqualTo(Duration.ofHours(1));
 
         assertThat(extractMinStep("$a $b", "HH:mm:ss yyyyMMdd", "a", "b"))
@@ -139,7 +144,7 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$a", "yyyyMMddhh", "a")).isEqualTo(Duration.ofHours(1));
         assertThat(extractMinStep("$date $time", "yyyyMMdd hh", "date", "time"))
                 .isEqualTo(Duration.ofHours(1));
-        assertThat(extractMinStep("$a$b", "yyyyMMddhh", "a", "b")).isEqualTo(Duration.ofHours(1));
+        assertThat(extractMinStep("$a $b", "yyyyMMdd hh", "a", "b")).isEqualTo(Duration.ofHours(1));
     }
 
     @Test
@@ -152,7 +157,7 @@ public class PartitionTimeResolverTest {
 
         assertThat(extractMinStep("$a", "yyyyMMdd", "a")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("$a01", "yyyyMMdd", "a")).isEqualTo(Period.ofMonths(1));
-        assertThat(extractMinStep("$a$aa", "yyyyMMdd", "a", "aa")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$a $aa", "yyyyMM dd", "a", "aa")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("202601$a", "yyyyMMdd", "a")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("2026$a01", "yyyyMMdd", "a")).isEqualTo(Period.ofMonths(1));
         assertThat(extractMinStep("$a1201", "yyyyMMdd", "a")).isEqualTo(Period.ofYears(1));
@@ -161,7 +166,7 @@ public class PartitionTimeResolverTest {
 
         assertThat(extractMinStep("$a01", "yyMMdd", "a")).isEqualTo(Period.ofMonths(1));
         assertThat(extractMinStep("$a1201", "yyMMdd", "a")).isEqualTo(Period.ofYears(1));
-        assertThat(extractMinStep("$a$aa", "yyMMdd", "a", "aa")).isEqualTo(Duration.ofDays(1));
+        assertThat(extractMinStep("$a $aa", "yyMM dd", "a", "aa")).isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("$a'", "yyMMdd''", "a")).isEqualTo(Duration.ofDays(1));
     }
 
@@ -176,6 +181,18 @@ public class PartitionTimeResolverTest {
                     {
                         put("dt", "20230101");
                         put("hour", "12");
+                    }
+                },
+                partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "hr"), "$dt $hr", "yyyyMMdd HH")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 1, 2, 3, 0, 0));
+        assertEquals(
+                new LinkedHashMap<String, String>() {
+                    {
+                        put("dt", "20230102");
+                        put("hr", "03");
                     }
                 },
                 partitionValues);
@@ -212,6 +229,10 @@ public class PartitionTimeResolverTest {
                 new PartitionTimeResolver(Arrays.asList("aa", "a", "aaa"), "$aa$a$aaa", "yyyyMMdd");
         assertThat(resolver.parsePartitionValues(Arrays.asList("2023", "01", "01")))
                 .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("dt", "hr"), "$dt $hr", "yyyyMMdd HH");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("20230102", "03")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T03:00:00"));
     }
 
     @Test

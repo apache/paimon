@@ -20,6 +20,7 @@ package org.apache.paimon.partition;
 
 import org.apache.paimon.utils.Pair;
 
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -206,8 +207,7 @@ public class PartitionTimeResolver {
                     tokens.add(new LiteralToken(str.replace("''", "'"), start, pos + 1));
                 }
             } else {
-                String text = String.valueOf(c);
-                tokens.add(new LiteralToken(text, pos, pos + 1));
+                tokens.add(new LiteralToken(String.valueOf(c), pos, pos + 1));
             }
         }
         checkArgument(!tokens.isEmpty(), "No time unit found in formatter: %s", formatter);
@@ -270,23 +270,33 @@ public class PartitionTimeResolver {
         // pattern token
         int maxLen = formatTokens.size() - formatIdx - (patternTokens.size() - patternIdx - 1);
 
+        int matchedEndIdx = -1;
         for (int len = 1; len <= maxLen; len++) {
-            int endSpanIdx = formatIdx + len;
+            int formatEndIdx = formatIdx + len;
             if (patternToken.isVariable) {
-                if (matchRecursive(patternIdx + 1, endSpanIdx)) {
-                    patternFormatMappings.put(
-                            patternToken, formatTokens.subList(formatIdx, endSpanIdx));
-                    return true;
+                if (matchRecursive(patternIdx + 1, formatEndIdx)) {
+                    checkArgument(
+                            matchedEndIdx == -1,
+                            "Ambiguous mapping for pattern variable '%s' in pattern '%s' with formatter '%s'. "
+                                    + "Please separate adjacent variables with literals.",
+                            patternToken.token,
+                            pattern,
+                            formatter);
+                    matchedEndIdx = formatEndIdx;
                 }
             } else {
                 // Literal pattern tokens match 1...len consecutive format tokens, split by token
                 // length
-                if (matchLiteral(patternToken.token, formatTokens, formatIdx, endSpanIdx)) {
-                    if (matchRecursive(patternIdx + 1, endSpanIdx)) {
+                if (matchLiteral(patternToken.token, formatIdx, formatEndIdx)) {
+                    if (matchRecursive(patternIdx + 1, formatEndIdx)) {
                         return true;
                     }
                 }
             }
+        }
+        if (matchedEndIdx != -1) {
+            patternFormatMappings.put(patternToken, formatTokens.subList(formatIdx, matchedEndIdx));
+            return true;
         }
         return false;
     }
@@ -295,8 +305,7 @@ public class PartitionTimeResolver {
      * Checks if a literal pattern token matches a sequence of format tokens. Verifies total length
      * and literal content match.
      */
-    private static boolean matchLiteral(
-            String patternToken, List<FormatToken> formatTokens, int startIdx, int endIdx) {
+    private boolean matchLiteral(String patternToken, int startIdx, int endIdx) {
         int formatTokenTotalLen = 0;
         for (int i = startIdx; i < endIdx; i++) {
             formatTokenTotalLen += formatTokens.get(i).getLength();
@@ -307,17 +316,23 @@ public class PartitionTimeResolver {
 
         int pos = 0;
         for (int i = startIdx; i < endIdx; i++) {
-            FormatToken span = formatTokens.get(i);
-            int spanLen = span.getLength();
-            String sub = patternToken.substring(pos, pos + spanLen);
+            FormatToken token = formatTokens.get(i);
+            int tokenLen = token.getLength();
+            String sub = patternToken.substring(pos, pos + tokenLen);
 
-            if (span instanceof LiteralToken) {
-                if (!((LiteralToken) span).token.equals(sub)) {
+            if (token instanceof LiteralToken) {
+                if (!((LiteralToken) token).token.equals(sub)) {
+                    return false;
+                }
+            } else {
+                ChronoField field = ((TimeFieldToken) token).field;
+                try {
+                    field.checkValidIntValue(Long.parseLong(sub));
+                } catch (NumberFormatException | DateTimeException e) {
                     return false;
                 }
             }
-            // TimeFieldToken: length already verified, content is unrestricted
-            pos += spanLen;
+            pos += tokenLen;
         }
         return true;
     }
@@ -371,7 +386,7 @@ public class PartitionTimeResolver {
 
         @Override
         public String toString() {
-            return String.format("LiteralToken(token=%s, start=%d, end=%d)", token, start, end);
+            return String.format("LiteralToken{token=%s, start=%d, end=%d}", token, start, end);
         }
     }
 
@@ -385,7 +400,7 @@ public class PartitionTimeResolver {
 
         @Override
         public String toString() {
-            return String.format("TimeFieldToken(field=%s, start=%d, end=%d)", field, start, end);
+            return String.format("TimeFieldToken{field=%s, start=%d, end=%d}", field, start, end);
         }
     }
 
@@ -400,7 +415,7 @@ public class PartitionTimeResolver {
 
         @Override
         public String toString() {
-            return String.format("PatternToken(token='%s', isVariable=%s)", token, isVariable);
+            return String.format("PatternToken{token='%s', isVariable=%s}", token, isVariable);
         }
     }
 }
