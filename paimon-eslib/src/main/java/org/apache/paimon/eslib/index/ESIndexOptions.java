@@ -37,26 +37,32 @@ import java.util.Map;
 /**
  * Parses Paimon Options into ESLib FieldIndexConfig for each field.
  *
- * <p>Keys are read from the (unscoped) table options. A field-level key {@code
- * fields.<field>.<key>} takes precedence over the index-type-level key {@code es-index.<key>}
- * (mirrors the native vector parser).
+ * <p>Keys are read from the table options using the persisted {@code global-index.es-index.*}
+ * convention (same keys the table schema stores and the ES mount reads). A field-level key {@code
+ * global-index.es-index.fields.<field>.<key>} takes precedence over the index-type-level key {@code
+ * global-index.es-index.<key>}.
  *
  * <pre>
- *   es-index.metric = cosine                       # index-type-level default for all vector fields
- *   fields.vector_field.algorithm = diskbbq        # field-level override
- *   fields.vector_field.dimension = 128
- *   fields.text_field.analyzer = standard
- *   fields.id_field.type = keyword
+ *   global-index.es-index.metric = cosine                       # index-type-level default
+ *   global-index.es-index.fields.vector_field.algorithm = diskbbq   # field-level override
+ *   global-index.es-index.fields.vector_field.dimension = 128
+ *   global-index.es-index.fields.text_field.analyzer = standard
+ *   global-index.es-index.fields.id_field.type = keyword
  * </pre>
  */
 public class ESIndexOptions {
 
-    private static final String FIELDS_PREFIX = "fields.";
-
     /**
-     * Index-type-level key prefix (e.g. {@code es-index.metric}); overridden by field-level keys.
+     * Index-type-level key prefix (e.g. {@code global-index.es-index.metric}); overridden by
+     * field-level keys. Aligned with the persisted table-property / ES-mount convention
+     * ({@code global-index.<indexType>.*}) so build, read and mount all read the same keys. The
+     * {@code es-index} part still comes from {@link ESIndexGlobalIndexerFactory#IDENTIFIER}.
      */
-    private static final String INDEX_TYPE_PREFIX = ESIndexGlobalIndexerFactory.IDENTIFIER + ".";
+    private static final String INDEX_TYPE_PREFIX =
+            "global-index." + ESIndexGlobalIndexerFactory.IDENTIFIER + ".";
+
+    /** Field-level key prefix, e.g. {@code global-index.es-index.fields.<field>.algorithm}. */
+    private static final String FIELDS_PREFIX = INDEX_TYPE_PREFIX + "fields.";
 
     /**
      * Suffix of the keyword multi-field sub-field of a FULLTEXT column (mirrors ES text.keyword).

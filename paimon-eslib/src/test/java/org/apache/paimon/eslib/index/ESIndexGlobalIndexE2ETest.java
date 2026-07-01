@@ -112,10 +112,10 @@ class ESIndexGlobalIndexE2ETest {
                         new DataField(3, "price", DataTypes.INT()));
 
         Map<String, String> opt = new HashMap<>();
-        opt.put("fields.embedding.algorithm", "hnsw");
-        opt.put("fields.embedding.dimension", "4");
-        opt.put("fields.embedding.metric", "l2");
-        opt.put("fields.title.analyzer", "standard");
+        opt.put("global-index.es-index.fields.embedding.algorithm", "hnsw");
+        opt.put("global-index.es-index.fields.embedding.dimension", "4");
+        opt.put("global-index.es-index.fields.embedding.metric", "l2");
+        opt.put("global-index.es-index.fields.title.analyzer", "standard");
         ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
         java.nio.file.Path archiveDir = tmp.resolve("archive");
@@ -319,9 +319,9 @@ class ESIndexGlobalIndexE2ETest {
 
         for (boolean keywordSub : new boolean[] {true, false}) {
             Map<String, String> opt = new HashMap<>();
-            opt.put("fields.t.analyzer", "standard");
+            opt.put("global-index.es-index.fields.t.analyzer", "standard");
             if (!keywordSub) {
-                opt.put("fields.t.keyword_subfield", "false");
+                opt.put("global-index.es-index.fields.t.keyword_subfield", "false");
             }
             ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
@@ -610,12 +610,12 @@ class ESIndexGlobalIndexE2ETest {
                         new DataField(2, "price", DataTypes.INT()));
 
         Map<String, String> opt = new HashMap<>();
-        opt.put("fields.embedding.algorithm", "diskbbq");
-        opt.put("fields.embedding.dimension", "32");
-        opt.put("fields.embedding.metric", "l2");
+        opt.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        opt.put("global-index.es-index.fields.embedding.dimension", "32");
+        opt.put("global-index.es-index.fields.embedding.metric", "l2");
         // 64 is the MIN_VECTORS_PER_CLUSTER allowed by ES920DiskBBQVectorsFormat — picking the
         // minimum lets a small fixture still produce multiple IVF clusters.
-        opt.put("fields.embedding.vectors_per_cluster", "64");
+        opt.put("global-index.es-index.fields.embedding.vectors_per_cluster", "64");
         ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
         java.nio.file.Path archiveDir = tmp.resolve("archive-diskbbq");

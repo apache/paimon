@@ -44,9 +44,9 @@ class ESIndexOptionsTest {
     @Test
     void fieldLevelKeysAreRead() {
         Map<String, String> m = new HashMap<>();
-        m.put("fields.embedding.algorithm", "diskbbq");
-        m.put("fields.embedding.dimension", "128");
-        m.put("fields.title.analyzer", "standard");
+        m.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        m.put("global-index.es-index.fields.embedding.dimension", "128");
+        m.put("global-index.es-index.fields.title.analyzer", "standard");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
 
         FieldIndexConfig emb = options.getConfig("embedding");
@@ -61,11 +61,11 @@ class ESIndexOptionsTest {
     void indexTypeLevelKeyIsDefaultAndFieldLevelOverrides() {
         Map<String, String> m = new HashMap<>();
         // index-type-level default for all vector fields ...
-        m.put("es-index.metric", "l2");
-        m.put("fields.embedding.algorithm", "diskbbq");
-        m.put("fields.embedding.dimension", "8");
+        m.put("global-index.es-index.metric", "l2");
+        m.put("global-index.es-index.fields.embedding.algorithm", "diskbbq");
+        m.put("global-index.es-index.fields.embedding.dimension", "8");
         // ... overridden per-field
-        m.put("fields.embedding.metric", "cosine");
+        m.put("global-index.es-index.fields.embedding.metric", "cosine");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
 
         FieldIndexConfig emb = options.getConfig("embedding");
@@ -73,25 +73,26 @@ class ESIndexOptionsTest {
     }
 
     @Test
-    void longFormGlobalIndexKeysAreNotMistakenlyRead() {
-        // Keys written with the full global-index.es-index. prefix are NOT what the parser reads;
-        // the field stays at its default (STRING with no analyzer -> KEYWORD).
+    void globalIndexPrefixedKeysAreRead() {
+        // Keys use the full global-index.es-index. prefix (the persisted table-property / ES-mount
+        // convention). The parser reads them, so an explicit analyzer makes the field FULLTEXT
+        // instead of the default KEYWORD.
         Map<String, String> m = new HashMap<>();
         m.put("global-index.es-index.fields.title.analyzer", "standard");
         ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
         assertThat(options.getConfig("title").indexType())
-                .isEqualTo(FieldIndexConfig.IndexType.KEYWORD);
+                .isEqualTo(FieldIndexConfig.IndexType.FULLTEXT);
     }
 
     @Test
     void fulltextGetsKeywordSubFieldByDefaultAndCanBeDisabled() {
         Map<String, String> on = new HashMap<>();
-        on.put("fields.title.analyzer", "standard");
+        on.put("global-index.es-index.fields.title.analyzer", "standard");
         ESIndexOptions enabled = new ESIndexOptions(FIELDS, Options.fromMap(on));
         assertThat(enabled.keywordSubField("title")).isEqualTo("title.keyword");
 
         Map<String, String> off = new HashMap<>(on);
-        off.put("fields.title.keyword_subfield", "false");
+        off.put("global-index.es-index.fields.title.keyword_subfield", "false");
         ESIndexOptions disabled = new ESIndexOptions(FIELDS, Options.fromMap(off));
         assertThat(disabled.keywordSubField("title")).isNull();
     }
