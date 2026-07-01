@@ -56,19 +56,25 @@ class _OneBatchReader(RecordBatchReader):
 
 
 class _BlobFallbackBatchReaderForTest(BlobFallbackBatchReader):
-    def __init__(self, files, values_by_file_name, deletion_vector=None):
+    def __init__(
+        self, files, values_by_file_name, row_ranges=None, deletion_vector=None
+    ):
         super().__init__(
             [(file, lambda: None) for file in files],
             "blob_col",
             pa.binary(),
-            row_ranges=None,
+            row_ranges=row_ranges,
             blob_as_descriptor=False,
             deletion_vector=deletion_vector,
         )
         self._values_by_file_name = values_by_file_name
 
     def _read_blob_values(self, file, supplier):
-        return self._values_by_file_name[file.file_name]
+        values = self._values_by_file_name[file.file_name]
+        return [
+            values[row_id - file.first_row_id]
+            for row_id in self._selected_row_ids(file)
+        ]
 
 
 def _file(name, first_row_id, row_count, max_sequence_number):
@@ -205,6 +211,58 @@ class DataEvolutionDeletionVectorTest(unittest.TestCase):
             [b"old-0", b"new-2", b"old-3"],
             batch.column(0).to_pylist(),
         )
+        self.assertIsNone(reader.read_arrow_batch())
+
+    def test_data_evolution_merge_reader_aligns_blob_with_row_ranges_and_dv(self):
+        row_ranges = [Range(1, 4)]
+        deletion_vector = BitmapDeletionVector()
+        deletion_vector.delete(2)
+        deletion_vector.delete(4)
+
+        normal_reader = ApplyDeletionVectorReader(
+            _OneBatchReader([1, 2, 3, 4]),
+            PositionMappedDeletionVector(
+                deletion_vector,
+                file_offset=0,
+                row_positions=[1, 2, 3, 4],
+            ),
+        )
+        blob_reader = _BlobFallbackBatchReaderForTest(
+            [
+                _file("blob-old.blob", 0, 6, 1),
+                _file("blob-new.blob", 0, 6, 2),
+            ],
+            {
+                "blob-old.blob": [
+                    BlobData(b"old-0"),
+                    BlobData(b"old-1"),
+                    BlobData(b"old-2"),
+                    BlobData(b"old-3"),
+                    BlobData(b"old-4"),
+                    BlobData(b"old-5"),
+                ],
+                "blob-new.blob": [
+                    Blob.PLACE_HOLDER,
+                    Blob.PLACE_HOLDER,
+                    BlobData(b"new-2"),
+                    BlobData(b"new-3"),
+                    BlobData(b"new-4"),
+                    Blob.PLACE_HOLDER,
+                ],
+            },
+            row_ranges=row_ranges,
+            deletion_vector=(Range(0, 5), deletion_vector),
+        )
+        reader = DataEvolutionMergeReader(
+            row_offsets=[0, 1],
+            field_offsets=[0, 0],
+            readers=[normal_reader, blob_reader],
+            schema=pa.schema([pa.field("id", pa.int64()), pa.field("blob_col", pa.binary())]),
+        )
+
+        batch = reader.read_arrow_batch()
+        self.assertEqual([1, 3], batch.column(0).to_pylist())
+        self.assertEqual([b"old-1", b"new-3"], batch.column(1).to_pylist())
         self.assertIsNone(reader.read_arrow_batch())
 
 
