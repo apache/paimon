@@ -65,6 +65,7 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
@@ -466,6 +467,7 @@ public class HiveCatalog extends AbstractCatalog {
         TableSchema schema = this.loadTableSchema(identifier);
         CoreOptions options = CoreOptions.fromMap(schema.options());
         boolean tagToPart = options.tagToPartitionField() != null;
+        boolean ignorePartitionNonexistent = options.metastoreDropPartitionIgnoreNonexistent();
         if (metastorePartitioned(schema)) {
             List<Map<String, String>> metaPartitions =
                     tagToPart
@@ -484,6 +486,20 @@ public class HiveCatalog extends AbstractCatalog {
                                                     false));
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
+                } catch (MetaException e) {
+                    if (ignorePartitionNonexistent
+                            && !partitionExistsInHms(identifier, partitionValues)) {
+                        LOG.warn(
+                                "Drop partition {} of table {} returned MetaException, but "
+                                        + "the partition is confirmed not to exist in HMS. "
+                                        + "Ignoring the error and continuing with Paimon-side drop. "
+                                        + "Original exception: {}",
+                                part,
+                                identifier,
+                                e.getMessage());
+                    } else {
+                        throw new RuntimeException(e);
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -491,6 +507,31 @@ public class HiveCatalog extends AbstractCatalog {
         }
         if (!tagToPart) {
             super.dropPartitions(identifier, partitions);
+        }
+    }
+
+    private boolean partitionExistsInHms(Identifier identifier, List<String> partitionValues) {
+        try {
+            clients.run(
+                    client ->
+                            client.getPartition(
+                                    identifier.getDatabaseName(),
+                                    identifier.getTableName(),
+                                    partitionValues));
+            return true;
+        } catch (NoSuchObjectException e) {
+            return false;
+        } catch (Exception e) {
+            // In case of HMS connection or other unknown errors, conservatively assume the
+            // partition may exist and redirect the original exception upwards to avoid accidental
+            // deletion.
+            LOG.warn(
+                    "Failed to verify partition existence in HMS for table {}, "
+                            + "partition values {}: {}",
+                    identifier,
+                    partitionValues,
+                    e.getMessage());
+            return true;
         }
     }
 
