@@ -34,12 +34,9 @@ from pypaimon.globalindex.bitmap.bitmap_index_writer import (
     BitmapIndexWriter,
 )
 from pypaimon.globalindex.build_plan import (
-    calc_row_range as _calc_row_range,
     filter_non_indexable_splits as _filter_non_indexable_splits,
-    indexed_split_for_row_range as _indexed_split_for_row_range,
     split_by_contiguous_unindexed_row_range as _split_by_contiguous_unindexed_row_range,
     split_by_global_index_shard as _split_by_global_index_shard,
-    split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
     unindexed_row_ranges as _unindexed_row_ranges,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta

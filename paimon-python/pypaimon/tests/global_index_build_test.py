@@ -25,10 +25,10 @@ import types
 
 import pyarrow as pa
 
-from pypaimon.globalindex.create_global_index import (
-    _filter_non_indexable_splits,
-    _split_by_global_index_shard,
-    _split_one_by_contiguous_row_range,
+from pypaimon.globalindex.build_plan import (
+    filter_non_indexable_splits as _filter_non_indexable_splits,
+    split_by_global_index_shard as _split_by_global_index_shard,
+    split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
