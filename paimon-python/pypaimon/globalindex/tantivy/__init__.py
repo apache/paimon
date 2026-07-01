@@ -17,10 +17,16 @@
 
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
     TantivyFullTextGlobalIndexReader,
+    TantivyFullTextIndexOptions,
     TANTIVY_FULLTEXT_IDENTIFIER,
+)
+from pypaimon.globalindex.tantivy.tantivy_full_text_index_writer import (
+    TantivyFullTextIndexWriter,
 )
 
 __all__ = [
     'TantivyFullTextGlobalIndexReader',
+    'TantivyFullTextIndexOptions',
+    'TantivyFullTextIndexWriter',
     'TANTIVY_FULLTEXT_IDENTIFIER',
 ]

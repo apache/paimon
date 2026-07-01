@@ -345,6 +345,24 @@ class _FakeQuery:
         return ("empty",)
 
     @staticmethod
+    def boost_query(query, boost):
+        return ("boost", query, boost)
+
+    @staticmethod
+    def fuzzy_term_query(
+            schema, field_name, text, distance=1,
+            transposition_cost_one=True, prefix=False):
+        return (
+            "fuzzy",
+            schema,
+            field_name,
+            text,
+            distance,
+            transposition_cost_one,
+            prefix,
+        )
+
+    @staticmethod
     def term_query(schema, field_name, field_value, index_option="position"):
         return ("term", schema, field_name, field_value, index_option)
 
@@ -360,19 +378,39 @@ class _FakeOccur:
 
 
 class _FakeSearchResults:
-    hits = [(2.0, "addr")]
+    def __init__(self, hits=None):
+        self.hits = hits if hits is not None else [(2.0, "addr")]
 
 
 class _FakeSearcher:
     def __init__(self):
         self.query = None
+        self.queries = []
 
     def search(self, query, limit):
         self.query = query
+        self.queries.append(query)
+        query_text = _fake_query_text(query)
+        if query_text == "positive":
+            return _FakeSearchResults([(10.0, ("addr", 1)), (5.0, ("addr", 2))])
+        if query_text == "negative":
+            return _FakeSearchResults([(7.0, ("addr", 2))])
         return _FakeSearchResults()
 
     def fast_field_values(self, name, addresses):
-        return [7]
+        return [
+            address[1] if isinstance(address, tuple) else 7
+            for address in addresses
+        ]
+
+
+def _fake_query_text(query):
+    if isinstance(query, tuple) and query:
+        if query[0] == "boost":
+            return _fake_query_text(query[1])
+        if isinstance(query[0], str):
+            return query[0]
+    return None
 
 
 class _FakeIndex:
@@ -667,7 +705,7 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
                          tantivy.last_schema.fields)
         self.assertEqual(
             (TANTIVY_NGRAM_TOKENIZER,
-             ("ngram", 2, 3, True, ("lowercase",))),
+             ("ngram", 2, 3, True, (("remove_long", 40), "lowercase"))),
             tantivy.last_index.registered_tokenizer)
         self.assertEqual([7], sorted(list(result.results())))
 
@@ -773,6 +811,170 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
               (("remove_long", 16), "lowercase", "ascii_fold", ("stemmer", "english"),
                ("stopword", "english"), ("custom_stopword", ("paimon", "lake"))))),
             tantivy.last_index.registered_tokenizer)
+
+    def test_match_reader_aligns_java_boost_and_fuzziness(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                reader.visit_full_text_search(
+                    FullTextSearch(
+                        MatchQuery(
+                            "paimon",
+                            "content",
+                            boost=2.0,
+                            fuzziness=1,
+                            operator="and",
+                        ),
+                        10,
+                    )
+                ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual(
+            ("boost",
+             ("paimon",
+              ("text",),
+              {"conjunction_by_default": True,
+               "fuzzy_fields": {"text": (False, 1, True)}}),
+             2.0),
+            tantivy.last_index.searcher_instance.query,
+        )
+
+    def test_boost_reader_demotes_negative_matches_like_java(self):
+        from pypaimon.globalindex.full_text_query import BoostQuery
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                result = reader.visit_full_text_search(
+                    FullTextSearch(
+                        BoostQuery(
+                            MatchQuery("positive", "content"),
+                            MatchQuery("negative", "content"),
+                            negative_boost=0.2,
+                        ),
+                        10,
+                    )
+                ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual([1, 2], sorted(list(result.results())))
+        score_getter = result.score_getter()
+        self.assertEqual(10.0, score_getter(1))
+        self.assertEqual(1.0, score_getter(2))
+        self.assertEqual(
+            ["positive", "negative"],
+            [_fake_query_text(q) for q in tantivy.last_index.searcher_instance.queries],
+        )
+
+    def test_reader_rejects_java_unsupported_match_options(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                with self.assertRaisesRegex(ValueError, "max_expansions"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MatchQuery(
+                                "paimon",
+                                "content",
+                                max_expansions=10,
+                            ),
+                            10,
+                        )
+                    ).result()
+                with self.assertRaisesRegex(ValueError, "prefix_length"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MatchQuery(
+                                "paimon",
+                                "content",
+                                prefix_length=1,
+                            ),
+                            10,
+                        )
+                    ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+    def test_reader_rejects_single_column_multi_match_like_java(self):
+        from pypaimon.globalindex.full_text_query import MultiMatchQuery
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                with self.assertRaisesRegex(ValueError, "multi_match"):
+                    reader.visit_full_text_search(
+                        FullTextSearch(
+                            MultiMatchQuery("paimon", ["title", "content"]),
+                            10,
+                        )
+                    ).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
 
     def test_ngram_reader_requires_custom_tokenizer_api(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch

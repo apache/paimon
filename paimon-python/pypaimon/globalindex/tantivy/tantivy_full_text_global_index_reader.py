@@ -27,7 +27,7 @@ import os
 import struct
 import threading
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Mapping
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef, _completed_future
 from pypaimon.globalindex.vector_search_result import (
@@ -61,6 +61,21 @@ _SUPPORTED_LANGUAGES = {
     "tamil",
     "turkish",
 }
+_TANTIVY_OPTION_PREFIX = "tantivy."
+_TANTIVY_OPTION_KEYS = {
+    "tokenizer",
+    "ngram.min-gram",
+    "ngram.max-gram",
+    "ngram.prefix-only",
+    "lower-case",
+    "max-token-length",
+    "ascii-folding",
+    "stem",
+    "language",
+    "remove-stop-words",
+    "stop-words",
+    "with-position",
+}
 
 
 @dataclass(frozen=True)
@@ -87,26 +102,80 @@ class TantivyFullTextIndexOptions:
         return TantivyFullTextIndexOptions._deserialize_json(data)
 
     @staticmethod
+    def from_options(options: Mapping[str, object]):
+        """Create options from table/global-index build options.
+
+        Java's Tantivy factory strips the ``tantivy.`` prefix before creating
+        TantivyFullTextIndexOptions, while users configure PyPaimon with the
+        public prefixed keys. Accept both forms to keep metadata compatible.
+        """
+
+        config = {}
+        for key, value in options.items():
+            key = str(key)
+            if key.startswith(_TANTIVY_OPTION_PREFIX):
+                key = key[len(_TANTIVY_OPTION_PREFIX):]
+            if key in _TANTIVY_OPTION_KEYS:
+                config[key] = value
+        return TantivyFullTextIndexOptions._from_config(config)
+
+    @staticmethod
     def _deserialize_json(data):
         config = json.loads(data.decode("utf-8"))
+        return TantivyFullTextIndexOptions._from_config(config)
+
+    @staticmethod
+    def _from_config(config):
         stop_words = config.get("stop-words", [])
         if isinstance(stop_words, list):
             stop_words = ";".join(
-                word for word in stop_words if word is not None)
+                str(word) for word in stop_words if word is not None)
 
         return TantivyFullTextIndexOptions(
-            tokenizer=config.get("tokenizer", "default"),
-            ngram_min_gram=config.get("ngram.min-gram", 2),
-            ngram_max_gram=config.get("ngram.max-gram", 2),
-            ngram_prefix_only=config.get("ngram.prefix-only", False),
-            lower_case=config.get("lower-case", True),
-            max_token_length=config.get("max-token-length", 40),
-            ascii_folding=config.get("ascii-folding", False),
-            stem=config.get("stem", False),
-            language=config.get("language", "english"),
-            remove_stop_words=config.get("remove-stop-words", False),
+            tokenizer=_get_string(config, "tokenizer", "default"),
+            ngram_min_gram=_get_int(config, "ngram.min-gram", 2),
+            ngram_max_gram=_get_int(config, "ngram.max-gram", 2),
+            ngram_prefix_only=_get_bool(config, "ngram.prefix-only", False),
+            lower_case=_get_bool(config, "lower-case", True),
+            max_token_length=_get_int(config, "max-token-length", 40),
+            ascii_folding=_get_bool(config, "ascii-folding", False),
+            stem=_get_bool(config, "stem", False),
+            language=_get_string(config, "language", "english"),
+            remove_stop_words=_get_bool(config, "remove-stop-words", False),
             stop_words=stop_words,
-            with_position=config.get("with-position", True))
+            with_position=_get_bool(config, "with-position", True))
+
+    def serialize(self) -> bytes:
+        return self.to_native_config_json().encode("utf-8")
+
+    def to_native_config_json(self) -> str:
+        config = {}
+        if self.tokenizer != "default":
+            config["tokenizer"] = self.tokenizer
+        if self.ngram_min_gram != 2:
+            config["ngram.min-gram"] = self.ngram_min_gram
+        if self.ngram_max_gram != 2:
+            config["ngram.max-gram"] = self.ngram_max_gram
+        if self.ngram_prefix_only:
+            config["ngram.prefix-only"] = self.ngram_prefix_only
+        if not self.lower_case:
+            config["lower-case"] = self.lower_case
+        if self.max_token_length != 40:
+            config["max-token-length"] = self.max_token_length
+        if self.ascii_folding:
+            config["ascii-folding"] = self.ascii_folding
+        if self.stem:
+            config["stem"] = self.stem
+        if self.language != "english":
+            config["language"] = self.language
+        if self.remove_stop_words:
+            config["remove-stop-words"] = self.remove_stop_words
+        stop_words = self.stop_word_list()
+        if stop_words:
+            config["stop-words"] = stop_words
+        if not self.with_position:
+            config["with-position"] = self.with_position
+        return json.dumps(config, separators=(",", ":"))
 
     def __post_init__(self):
         tokenizer = "" if self.tokenizer is None else self.tokenizer.strip().lower()
@@ -275,24 +344,88 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         limit = full_text_search.limit
 
-        searcher = self._searcher
         import tantivy
 
-        query = self._parse_query(tantivy, full_text_search)
+        id_to_scores = self._search_full_text_query(
+            tantivy, full_text_search.query, limit)
+        return _completed_future(
+            DictBasedScoredIndexResult(id_to_scores).top_k(limit))
 
-        results = searcher.search(query, limit)
+    def _search_full_text_query(self, tantivy, query, limit):
+        from pypaimon.globalindex.full_text_query import (
+            BooleanQuery,
+            BoostQuery,
+            MultiMatchQuery,
+        )
+
+        if isinstance(query, BoostQuery):
+            child_limit = self._child_query_limit(limit)
+            positive = self._search_full_text_query(
+                tantivy, query.positive, child_limit)
+            negative = self._search_full_text_query(
+                tantivy, query.negative, child_limit)
+            return _demote_scores(positive, negative, query.negative_boost)
+        if isinstance(query, BooleanQuery) and _contains_boost_query(query):
+            return self._search_boolean_query(
+                tantivy, query, self._child_query_limit(limit))
+        if isinstance(query, MultiMatchQuery):
+            raise ValueError(
+                "multi_match is not supported by single-column Tantivy full-text indexes"
+            )
+
+        return self._search_tantivy_query(
+            self._parse_structured_query(tantivy, query), limit)
+
+    def _child_query_limit(self, limit):
+        num_docs = getattr(self._searcher, "num_docs", None)
+        if num_docs is None:
+            return limit
+        return max(limit, int(num_docs))
+
+    def _search_boolean_query(self, tantivy, query, limit):
+        from pypaimon.globalindex.full_text_query import Occur
+
+        result = None
+        should_results = []
+        must_not_results = []
+        for occur, child in query.queries:
+            child_scores = self._search_full_text_query(tantivy, child, limit)
+            if occur == Occur.MUST:
+                result = (
+                    child_scores if result is None
+                    else _intersect_scores(result, child_scores)
+                )
+            elif occur == Occur.SHOULD:
+                should_results.append(child_scores)
+            else:
+                must_not_results.append(child_scores)
+
+        if should_results:
+            should_result = _union_scores(should_results)
+            result = (
+                should_result if result is None
+                else _and_with_bonus_scores(result, should_result)
+            )
+        if result is None:
+            return {}
+        for must_not in must_not_results:
+            result = _remove_scores(result, must_not)
+        return result
+
+    def _search_tantivy_query(self, query, limit):
+        results = self._searcher.search(query, limit)
+
         if not results.hits:
-            return _completed_future(DictBasedScoredIndexResult({}))
+            return {}
 
         doc_addresses = [addr for score, addr in results.hits]
         scores = [score for score, addr in results.hits]
-        row_ids = searcher.fast_field_values("row_id", doc_addresses)
+        row_ids = self._searcher.fast_field_values("row_id", doc_addresses)
 
         id_to_scores: Dict[int, float] = {}
         for row_id, score in zip(row_ids, scores):
             id_to_scores[row_id] = score
-
-        return _completed_future(DictBasedScoredIndexResult(id_to_scores))
+        return id_to_scores
 
     def _ensure_loaded(self):
         if self._searcher is not None:
@@ -380,9 +513,8 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             return
 
         analyzer_builder = tantivy.TextAnalyzerBuilder(tokenizer)
-        if self._index_options.max_token_length != 40:
-            analyzer_builder = analyzer_builder.filter(
-                tantivy.Filter.remove_long(self._index_options.max_token_length))
+        analyzer_builder = analyzer_builder.filter(
+            tantivy.Filter.remove_long(self._index_options.max_token_length))
         if self._index_options.lower_case:
             analyzer_builder = analyzer_builder.filter(tantivy.Filter.lowercase())
         if self._index_options.ascii_folding:
@@ -444,7 +576,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             return tantivy.Query.boolean_query(subqueries)
         if isinstance(query, BoostQuery):
             raise ValueError(
-                "boost query is not supported by PyPaimon Tantivy full-text reader"
+                "boost query must be evaluated through search, not parsed as a Tantivy query"
             )
         if isinstance(query, MultiMatchQuery):
             raise ValueError(
@@ -453,44 +585,86 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
         raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
 
     def _parse_match_query(self, tantivy, query):
-        if query.boost != 1.0:
-            raise ValueError(
-                "match query boost is not supported by PyPaimon Tantivy full-text reader"
-            )
-        if query.fuzziness not in (None, 0):
-            raise ValueError(
-                "match query fuzziness is not supported by PyPaimon Tantivy full-text reader"
-            )
         if query.max_expansions != 50:
             raise ValueError(
-                "match query max_expansions is not supported by PyPaimon Tantivy full-text reader"
+                "match query max_expansions is not supported by Tantivy 0.22"
             )
         if query.prefix_length != 0:
             raise ValueError(
-                "match query prefix_length is not supported by PyPaimon Tantivy full-text reader"
+                "match query prefix_length is not supported by Tantivy 0.22"
             )
         conjunction_by_default = query.operator.value == "AND"
         if self._index_options.tokenizer != "jieba":
+            parse_kwargs = {}
             if conjunction_by_default:
-                return self._index.parse_query(
-                    query.query, ["text"], conjunction_by_default=True)
-            return self._index.parse_query(query.query, ["text"])
+                parse_kwargs["conjunction_by_default"] = True
+            if query.fuzziness not in (None, 0):
+                parse_kwargs["fuzzy_fields"] = {
+                    "text": (False, int(query.fuzziness), True)
+                }
+            parsed = self._parse_index_query(
+                tantivy, query.query, parse_kwargs)
+            return self._boost_query(tantivy, parsed, query.boost)
 
         tokens = self._jieba_query_tokens(query.query)
         if not tokens:
             return tantivy.Query.empty_query()
 
-        term_queries = [
-            tantivy.Query.term_query(self._schema, "text", token)
-            for token in tokens
-        ]
+        term_queries = []
+        for token in tokens:
+            if query.fuzziness not in (None, 0):
+                fuzzy_query = getattr(tantivy.Query, "fuzzy_term_query", None)
+                if fuzzy_query is None:
+                    raise RuntimeError(
+                        "PyPaimon Tantivy full-text search requires a tantivy-py "
+                        "version with Query.fuzzy_term_query support for "
+                        "match query fuzziness."
+                    )
+                term_queries.append(
+                    fuzzy_query(
+                        self._schema,
+                        "text",
+                        token,
+                        distance=int(query.fuzziness),
+                        transposition_cost_one=True,
+                        prefix=False,
+                    )
+                )
+            else:
+                term_queries.append(
+                    tantivy.Query.term_query(self._schema, "text", token))
         if len(term_queries) == 1:
-            return term_queries[0]
+            return self._boost_query(tantivy, term_queries[0], query.boost)
         occur = tantivy.Occur.Must if conjunction_by_default else tantivy.Occur.Should
-        return tantivy.Query.boolean_query([
+        parsed = tantivy.Query.boolean_query([
             (occur, query)
             for query in term_queries
         ])
+        return self._boost_query(tantivy, parsed, query.boost)
+
+    def _parse_index_query(self, tantivy, query_text, parse_kwargs):
+        try:
+            return self._index.parse_query(query_text, ["text"], **parse_kwargs)
+        except TypeError as e:
+            if "fuzzy_fields" in parse_kwargs:
+                raise RuntimeError(
+                    "PyPaimon Tantivy full-text search requires a tantivy-py "
+                    "version with Index.parse_query fuzzy_fields support for "
+                    "match query fuzziness."
+                ) from e
+            raise
+
+    @staticmethod
+    def _boost_query(tantivy, parsed_query, boost):
+        if boost == 1.0:
+            return parsed_query
+        boost_query = getattr(tantivy.Query, "boost_query", None)
+        if boost_query is None:
+            raise RuntimeError(
+                "PyPaimon Tantivy full-text search requires a tantivy-py "
+                "version with Query.boost_query support for match query boost."
+            )
+        return boost_query(parsed_query, float(boost))
 
     def _jieba_query_tokens(self, query_text):
         try:
@@ -519,14 +693,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         missing = []
         if self._index_options.tokenizer != "jieba":
-            required_classes = ["TextAnalyzerBuilder", "Tokenizer"]
-            if (self._index_options.lower_case
-                    or self._index_options.max_token_length != 40
-                    or self._index_options.ascii_folding
-                    or self._index_options.stem
-                    or self._index_options.remove_stop_words
-                    or self._index_options.stop_word_list()):
-                required_classes.append("Filter")
+            required_classes = ["TextAnalyzerBuilder", "Tokenizer", "Filter"]
         else:
             required_classes = ["Query", "Occur"]
         for name in required_classes:
@@ -549,9 +716,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
                 and not hasattr(tokenizer, tokenizer_api)):
             missing.append("Tokenizer.%s" % tokenizer_api)
         if self._index_options.tokenizer != "jieba" and filter_ is not None:
-            filter_checks = []
-            if self._index_options.max_token_length != 40:
-                filter_checks.append(("remove_long", "Filter.remove_long"))
+            filter_checks = [("remove_long", "Filter.remove_long")]
             if self._index_options.lower_case:
                 filter_checks.append(("lowercase", "Filter.lowercase"))
             if self._index_options.ascii_folding:
@@ -685,17 +850,85 @@ def _read_fully(stream, length: int) -> bytes:
     return bytes(buf)
 
 
+def _get_string(config, key, default):
+    value = config.get(key)
+    return default if value is None else str(value)
+
+
+def _get_int(config, key, default):
+    value = config.get(key)
+    if value is None:
+        return default
+    return int(value)
+
+
+def _get_bool(config, key, default):
+    value = config.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() == "true"
+
+
 def _normalize_stop_words(stop_words):
     if stop_words is None:
         return ""
     if isinstance(stop_words, list):
         return ";".join(
-            word.strip()
+            str(word).strip()
             for word in stop_words
-            if word is not None and word.strip()
+            if word is not None and str(word).strip()
         )
     return ";".join(
         word.strip()
         for word in stop_words.split(";")
         if word.strip()
     )
+
+
+def _contains_boost_query(query):
+    from pypaimon.globalindex.full_text_query import BooleanQuery, BoostQuery
+
+    if isinstance(query, BoostQuery):
+        return True
+    if isinstance(query, BooleanQuery):
+        return any(_contains_boost_query(child) for _, child in query.queries)
+    return False
+
+
+def _demote_scores(positive, negative, negative_boost):
+    return {
+        row_id: score * (negative_boost if row_id in negative else 1.0)
+        for row_id, score in positive.items()
+    }
+
+
+def _intersect_scores(left, right):
+    return {
+        row_id: left[row_id] + right[row_id]
+        for row_id in left.keys() & right.keys()
+    }
+
+
+def _and_with_bonus_scores(base, bonus):
+    return {
+        row_id: score + bonus.get(row_id, 0.0)
+        for row_id, score in base.items()
+    }
+
+
+def _union_scores(results):
+    merged = {}
+    for result in results:
+        for row_id, score in result.items():
+            merged[row_id] = merged.get(row_id, 0.0) + score
+    return merged
+
+
+def _remove_scores(left, right):
+    return {
+        row_id: score
+        for row_id, score in left.items()
+        if row_id not in right
+    }

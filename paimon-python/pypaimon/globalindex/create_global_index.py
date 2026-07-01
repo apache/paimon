@@ -35,6 +35,12 @@ from pypaimon.globalindex.bitmap.bitmap_index_writer import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+    TANTIVY_FULLTEXT_IDENTIFIER,
+)
+from pypaimon.globalindex.tantivy.tantivy_full_text_index_writer import (
+    TantivyFullTextIndexWriter,
+)
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     VINDEX_IDENTIFIERS,
 )
@@ -86,6 +92,9 @@ def create_global_index(
 
 
 _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
+_GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (
+    TANTIVY_FULLTEXT_IDENTIFIER,
+)
 _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
 
 
@@ -111,11 +120,15 @@ class GlobalIndexBuilder:
 
         if (
             self._index_type not in _SORTED_INDEX_IDENTIFIERS
-            and self._index_type not in VINDEX_IDENTIFIERS
+            and self._index_type not in _GENERIC_INDEX_IDENTIFIERS
         ):
             raise ValueError(
                 "Python global index build currently supports %s and %s, got '%s'."
-                % (_SORTED_INDEX_IDENTIFIERS, VINDEX_IDENTIFIERS, index_type)
+                % (
+                    _SORTED_INDEX_IDENTIFIERS,
+                    _GENERIC_INDEX_IDENTIFIERS,
+                    index_type,
+                )
             )
         if len(self._index_columns) != 1:
             raise ValueError(
@@ -133,8 +146,8 @@ class GlobalIndexBuilder:
                     "Column '%s' does not exist in table '%s'."
                     % (column, self._table.identifier)
                 )
-        if self._index_type in VINDEX_IDENTIFIERS:
-            self._validate_vindex_table()
+        if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
+            self._validate_generic_index_table()
 
     def build(self) -> List[CommitMessage]:
         read_builder = self._table.new_read_builder()
@@ -148,7 +161,7 @@ class GlobalIndexBuilder:
             return []
 
         index_field = self._table.field_dict[self._index_columns[0]]
-        if self._index_type in VINDEX_IDENTIFIERS:
+        if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             splits = _filter_non_indexable_splits(
                 self._table, splits, self._index_columns)
             if not splits:
@@ -168,7 +181,8 @@ class GlobalIndexBuilder:
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
                 splits, index_field, table_read, index_path)
-        return self._build_vindex(splits, index_field, table_read, index_path)
+        return self._build_generic_index(
+            splits, index_field, table_read, index_path)
 
     def _build_sorted_index(
         self, splits, index_field, table_read, index_path: str
@@ -244,7 +258,7 @@ class GlobalIndexBuilder:
             )
         raise ValueError("Unsupported sorted global index type: %s" % self._index_type)
 
-    def _build_vindex(
+    def _build_generic_index(
         self, splits, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
@@ -261,22 +275,15 @@ class GlobalIndexBuilder:
             if table is None or table.num_rows == 0:
                 continue
 
-            writer = VindexVectorIndexWriter(
-                self._table.file_io,
-                index_path,
-                index_field.type,
-                self._index_type,
-                self._options.to_map(),
-                index_field.name,
-            )
+            writer = self._create_generic_index_writer(index_path, index_field)
             try:
-                for vector, row_id in _extract_vector_rows(
+                for value, row_id in _extract_index_rows(
                     table,
                     self._index_columns[0],
                     SpecialFields.ROW_ID.name,
                     row_range,
                 ):
-                    writer.write(vector, row_id - row_range.from_)
+                    writer.write(value, row_id - row_range.from_)
 
                 index_adds = _to_index_manifest_entries(
                     self._table,
@@ -299,7 +306,26 @@ class GlobalIndexBuilder:
                 )
         return messages
 
-    def _validate_vindex_table(self) -> None:
+    def _create_generic_index_writer(self, index_path: str, index_field):
+        if self._index_type in VINDEX_IDENTIFIERS:
+            return VindexVectorIndexWriter(
+                self._table.file_io,
+                index_path,
+                index_field.type,
+                self._index_type,
+                self._options.to_map(),
+                index_field.name,
+            )
+        if self._index_type == TANTIVY_FULLTEXT_IDENTIFIER:
+            return TantivyFullTextIndexWriter(
+                self._table.file_io,
+                index_path,
+                index_field.type,
+                self._options.to_map(),
+            )
+        raise ValueError("Unsupported generic global index type: %s" % self._index_type)
+
+    def _validate_generic_index_table(self) -> None:
         bucket = self._core_options.bucket()
         if bucket != -1:
             raise ValueError(
@@ -607,22 +633,22 @@ def _extract_sorted_rows(
     return sorted(rows, key=cmp_to_key(compare))
 
 
-def _extract_vector_rows(
+def _extract_index_rows(
     table: pa.Table,
     index_column: str,
     row_id_column: str,
     row_range: Optional[Range] = None,
 ):
-    vectors = table.column(index_column).to_pylist()
+    values = table.column(index_column).to_pylist()
     row_ids = table.column(row_id_column).to_pylist()
     rows = []
-    for vector, row_id in zip(vectors, row_ids):
+    for value, row_id in zip(values, row_ids):
         if row_id is None:
             raise ValueError("Cannot build global index because _ROW_ID is null.")
         row_id = int(row_id)
         if row_range is not None and not row_range.contains(row_id):
             continue
-        rows.append((vector, row_id))
+        rows.append((value, row_id))
     return rows
 
 
