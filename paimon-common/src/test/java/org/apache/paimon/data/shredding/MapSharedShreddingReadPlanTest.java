@@ -20,7 +20,9 @@ package org.apache.paimon.data.shredding;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
@@ -86,7 +88,38 @@ class MapSharedShreddingReadPlanTest {
         assertThat(restored.valueArray().getLong(0)).isEqualTo(30L);
     }
 
+    @Test
+    void testAssembledMapVectorExposesKeyValueChildren() {
+        MapSharedShreddingFieldMeta fieldMeta =
+                new MapSharedShreddingFieldMeta(
+                        nameToId("a", 0, "b", 1),
+                        Collections.emptyMap(),
+                        new TreeSet<Integer>(),
+                        3,
+                        2);
+        HeapRowVector physicalMap =
+                rowVector(
+                        fieldMapping(0, 1, -1), longVector(10L), longVector(null), longVector(20L));
+
+        MapColumnVector mapVector = assembleMapVector(fieldMeta, physicalMap);
+        ColumnVector[] children = mapVector.getChildren();
+
+        assertThat(children).hasSize(2);
+        assertThat(BinaryString.fromBytes(((BytesColumnVector) children[0]).getBytes(0).getBytes()))
+                .isEqualTo(BinaryString.fromString("a"));
+        assertThat(BinaryString.fromBytes(((BytesColumnVector) children[0]).getBytes(1).getBytes()))
+                .isEqualTo(BinaryString.fromString("b"));
+        assertThat(((LongColumnVector) children[1]).getLong(0)).isEqualTo(10L);
+        assertThat(children[1].isNullAt(1)).isTrue();
+        assertThat(mapVector.getMap(0).size()).isEqualTo(2);
+    }
+
     private static InternalMap readMap(
+            MapSharedShreddingFieldMeta fieldMeta, HeapRowVector physicalMap) {
+        return assembleMapVector(fieldMeta, physicalMap).getMap(0);
+    }
+
+    private static MapColumnVector assembleMapVector(
             MapSharedShreddingFieldMeta fieldMeta, HeapRowVector physicalMap) {
         Map<String, MapSharedShreddingFieldMeta> fieldMetas = new LinkedHashMap<>();
         fieldMetas.put("metrics", fieldMeta);
@@ -96,7 +129,7 @@ class MapSharedShreddingReadPlanTest {
                 new VectorizedColumnBatch(new ColumnVector[] {physicalMap});
         physicalBatch.setNumRows(1);
         VectorizedColumnBatch logicalBatch = readPlan.batchAssembler().assemble(physicalBatch);
-        return ((MapColumnVector) logicalBatch.columns[0]).getMap(0);
+        return (MapColumnVector) logicalBatch.columns[0];
     }
 
     private static RowType logicalType() {

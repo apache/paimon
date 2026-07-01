@@ -68,11 +68,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
-import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWritableColumnVector;
 
 /**
  * Parquet {@link FormatReaderFactory} that reads data from the file to {@link
@@ -340,7 +340,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private WritableColumnVector[] createWritableVectors(int batchSize, DataField[] readFields) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
-            columns[i] = createWritableColumnVector(batchSize, readFields[i].type());
+            columns[i] = createParquetWritableColumnVector(batchSize, readFields[i].type());
         }
         return columns;
     }

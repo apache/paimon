@@ -21,12 +21,14 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
 import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.format.FileFormat;
@@ -51,6 +53,7 @@ import org.apache.paimon.utils.Range;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -181,6 +184,90 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                                         null,
                                         Collections.singletonList("overflow-tag"),
                                         javaMapOf("k1", 201L, "k2", 202L))));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testAppendOnlyTableReadWriteWithAllSupportedComplexValueTypes(String format)
+            throws Exception {
+        Table table = createAllSupportedValueTypesTable(format);
+
+        WideValue fixedValue =
+                new WideValue(
+                        true,
+                        (byte) 1,
+                        (short) 2,
+                        3,
+                        4L,
+                        5.5f,
+                        6.25d,
+                        "str",
+                        new byte[] {1, 2, 3},
+                        Decimal.fromBigDecimal(new BigDecimal("12345678.90"), 10, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("123456789012345678.12345"), 23, 5),
+                        19500,
+                        12_345,
+                        Timestamp.fromEpochMillis(1_700_000_000_123L),
+                        Timestamp.fromEpochMillis(1_700_000_000_123L, 456_000),
+                        Arrays.asList(7, null, 8),
+                        javaMapOf("m1", 10L, "m2", null),
+                        new NestedValue("nested", 99));
+        WideValue sparseValue =
+                new WideValue(
+                        null, null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null);
+        WideValue overflowValue =
+                new WideValue(
+                        false,
+                        (byte) 9,
+                        (short) 10,
+                        11,
+                        12L,
+                        13.5f,
+                        14.25d,
+                        "overflow",
+                        new byte[] {9, 8, 7},
+                        Decimal.fromBigDecimal(new BigDecimal("-1.23"), 10, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("-123456789012345678.12345"), 23, 5),
+                        19600,
+                        54_321,
+                        Timestamp.fromEpochMillis(1_800_000_000_321L),
+                        Timestamp.fromEpochMillis(1_800_000_000_321L, 987_000),
+                        Collections.singletonList(42),
+                        javaMapOf("om", 100L),
+                        new NestedValue("overflow-nested", -7));
+
+        write(
+                table,
+                GenericRow.of(
+                        1,
+                        wideMapOf(
+                                "fixed-a",
+                                toWideRow(fixedValue),
+                                "fixed-b",
+                                toWideRow(sparseValue),
+                                "overflow",
+                                toWideRow(overflowValue))),
+                GenericRow.of(2, null),
+                GenericRow.of(3, wideMapOf()));
+
+        Map<Integer, Map<String, WideValue>> actual = new LinkedHashMap<>();
+        for (InternalRow row : read(table)) {
+            actual.put(row.getInt(0), row.isNullAt(1) ? null : toJavaWideMap(row.getMap(1)));
+        }
+
+        assertThat(actual)
+                .containsEntry(
+                        1,
+                        javaWideMapOf(
+                                "fixed-a",
+                                fixedValue,
+                                "fixed-b",
+                                sparseValue,
+                                "overflow",
+                                overflowValue))
+                .containsEntry(2, null)
+                .containsEntry(3, Collections.emptyMap());
     }
 
     @ParameterizedTest
@@ -445,6 +532,73 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return catalog.getTable(identifier(format));
     }
 
+    private Table createAllSupportedValueTypesTable(String format) throws Exception {
+        catalog.createTable(
+                identifier(format),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(
+                                        DataTypes.STRING(),
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(0, "bool", DataTypes.BOOLEAN()),
+                                                DataTypes.FIELD(1, "tiny", DataTypes.TINYINT()),
+                                                DataTypes.FIELD(2, "small", DataTypes.SMALLINT()),
+                                                DataTypes.FIELD(3, "i", DataTypes.INT()),
+                                                DataTypes.FIELD(4, "big", DataTypes.BIGINT()),
+                                                DataTypes.FIELD(5, "f", DataTypes.FLOAT()),
+                                                DataTypes.FIELD(6, "d", DataTypes.DOUBLE()),
+                                                DataTypes.FIELD(7, "s", DataTypes.STRING()),
+                                                DataTypes.FIELD(8, "bin", DataTypes.BINARY(3)),
+                                                DataTypes.FIELD(
+                                                        9,
+                                                        "compact_decimal",
+                                                        DataTypes.DECIMAL(10, 2)),
+                                                DataTypes.FIELD(
+                                                        10,
+                                                        "large_decimal",
+                                                        DataTypes.DECIMAL(23, 5)),
+                                                DataTypes.FIELD(11, "date", DataTypes.DATE()),
+                                                DataTypes.FIELD(12, "time", DataTypes.TIME()),
+                                                DataTypes.FIELD(13, "ts3", DataTypes.TIMESTAMP(3)),
+                                                DataTypes.FIELD(
+                                                        14,
+                                                        "ts_ltz6",
+                                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(
+                                                                6)),
+                                                DataTypes.FIELD(
+                                                        15,
+                                                        "ints",
+                                                        DataTypes.ARRAY(DataTypes.INT())),
+                                                DataTypes.FIELD(
+                                                        16,
+                                                        "attrs",
+                                                        DataTypes.MAP(
+                                                                DataTypes.STRING(),
+                                                                DataTypes.BIGINT())),
+                                                DataTypes.FIELD(
+                                                        17,
+                                                        "nested",
+                                                        DataTypes.ROW(
+                                                                DataTypes.FIELD(
+                                                                        0,
+                                                                        "name",
+                                                                        DataTypes.STRING()),
+                                                                DataTypes.FIELD(
+                                                                        1,
+                                                                        "score",
+                                                                        DataTypes.INT()))))))
+                        .option("bucket", "-1")
+                        .option("file.format", format)
+                        .option(CoreOptions.WRITE_ONLY.key(), "true")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build(),
+                true);
+        return catalog.getTable(identifier(format));
+    }
+
     private void writeWithWriteType(Table table, RowType writeType, InternalRow... rows)
             throws Exception {
         writeWithWriteType(table, writeType, null, rows);
@@ -567,8 +721,41 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return new GenericMap(map);
     }
 
+    private GenericMap wideMapOf(Object... entries) {
+        Map<BinaryString, GenericRow> map = new LinkedHashMap<>();
+        for (int i = 0; i < entries.length; i += 2) {
+            map.put(BinaryString.fromString((String) entries[i]), (GenericRow) entries[i + 1]);
+        }
+        return new GenericMap(map);
+    }
+
     private GenericRow complexValue(Long count, GenericArray tags, GenericMap attrs) {
         return GenericRow.of(count, tags, attrs);
+    }
+
+    private GenericRow toWideRow(WideValue value) {
+        return GenericRow.of(
+                value.bool,
+                value.tiny,
+                value.small,
+                value.i,
+                value.big,
+                value.f,
+                value.d,
+                value.s == null ? null : BinaryString.fromString(value.s),
+                value.bin,
+                value.compactDecimal,
+                value.largeDecimal,
+                value.date,
+                value.time,
+                value.ts3,
+                value.tsLtz6,
+                value.ints == null ? null : new GenericArray(value.ints.toArray(new Integer[0])),
+                value.attrs == null ? null : longMapFromJava(value.attrs),
+                value.nested == null
+                        ? null
+                        : GenericRow.of(
+                                BinaryString.fromString(value.nested.name), value.nested.score));
     }
 
     private GenericArray stringArray(String... values) {
@@ -583,6 +770,14 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         Map<BinaryString, Long> map = new LinkedHashMap<>();
         for (int i = 0; i < entries.length; i += 2) {
             map.put(BinaryString.fromString((String) entries[i]), (Long) entries[i + 1]);
+        }
+        return new GenericMap(map);
+    }
+
+    private GenericMap longMapFromJava(Map<String, Long> values) {
+        Map<BinaryString, Long> map = new LinkedHashMap<>();
+        for (Map.Entry<String, Long> entry : values.entrySet()) {
+            map.put(BinaryString.fromString(entry.getKey()), entry.getValue());
         }
         return new GenericMap(map);
     }
@@ -650,6 +845,62 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         return map;
     }
 
+    private Map<String, WideValue> toJavaWideMap(InternalMap map) {
+        Map<String, WideValue> result = new LinkedHashMap<>();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(
+                    keys.getString(i).toString(),
+                    values.isNullAt(i) ? null : toJavaWideValue(values.getRow(i, 18)));
+        }
+        return result;
+    }
+
+    private WideValue toJavaWideValue(InternalRow row) {
+        return new WideValue(
+                row.isNullAt(0) ? null : row.getBoolean(0),
+                row.isNullAt(1) ? null : row.getByte(1),
+                row.isNullAt(2) ? null : row.getShort(2),
+                row.isNullAt(3) ? null : row.getInt(3),
+                row.isNullAt(4) ? null : row.getLong(4),
+                row.isNullAt(5) ? null : row.getFloat(5),
+                row.isNullAt(6) ? null : row.getDouble(6),
+                row.isNullAt(7) ? null : row.getString(7).toString(),
+                row.isNullAt(8) ? null : row.getBinary(8),
+                row.isNullAt(9) ? null : row.getDecimal(9, 10, 2),
+                row.isNullAt(10) ? null : row.getDecimal(10, 23, 5),
+                row.isNullAt(11) ? null : row.getInt(11),
+                row.isNullAt(12) ? null : row.getInt(12),
+                row.isNullAt(13) ? null : row.getTimestamp(13, 3),
+                row.isNullAt(14) ? null : row.getTimestamp(14, 6),
+                row.isNullAt(15) ? null : toJavaIntList(row.getArray(15)),
+                row.isNullAt(16) ? null : toJavaLongMap(row.getMap(16)),
+                row.isNullAt(17) ? null : toJavaNestedValue(row.getRow(17, 2)));
+    }
+
+    private List<Integer> toJavaIntList(InternalArray array) {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < array.size(); i++) {
+            result.add(array.isNullAt(i) ? null : array.getInt(i));
+        }
+        return result;
+    }
+
+    private NestedValue toJavaNestedValue(InternalRow row) {
+        return new NestedValue(
+                row.isNullAt(0) ? null : row.getString(0).toString(),
+                row.isNullAt(1) ? null : row.getInt(1));
+    }
+
+    private Map<String, WideValue> javaWideMapOf(Object... entries) {
+        Map<String, WideValue> map = new LinkedHashMap<>();
+        for (int i = 0; i < entries.length; i += 2) {
+            map.put((String) entries[i], (WideValue) entries[i + 1]);
+        }
+        return map;
+    }
+
     @Override
     protected Schema schemaDefault() {
         return schema("parquet", "metrics");
@@ -702,6 +953,198 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         @Override
         public String toString() {
             return "ComplexValue{" + "count=" + count + ", tags=" + tags + ", attrs=" + attrs + '}';
+        }
+    }
+
+    private static class NestedValue {
+
+        private final String name;
+        private final Integer score;
+
+        private NestedValue(String name, Integer score) {
+            this.name = name;
+            this.score = score;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof NestedValue)) {
+                return false;
+            }
+            NestedValue that = (NestedValue) o;
+            return java.util.Objects.equals(name, that.name)
+                    && java.util.Objects.equals(score, that.score);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(name, score);
+        }
+
+        @Override
+        public String toString() {
+            return "NestedValue{" + "name='" + name + '\'' + ", score=" + score + '}';
+        }
+    }
+
+    private static class WideValue {
+
+        private final Boolean bool;
+        private final Byte tiny;
+        private final Short small;
+        private final Integer i;
+        private final Long big;
+        private final Float f;
+        private final Double d;
+        private final String s;
+        private final byte[] bin;
+        private final Decimal compactDecimal;
+        private final Decimal largeDecimal;
+        private final Integer date;
+        private final Integer time;
+        private final Timestamp ts3;
+        private final Timestamp tsLtz6;
+        private final List<Integer> ints;
+        private final Map<String, Long> attrs;
+        private final NestedValue nested;
+
+        private WideValue(
+                Boolean bool,
+                Byte tiny,
+                Short small,
+                Integer i,
+                Long big,
+                Float f,
+                Double d,
+                String s,
+                byte[] bin,
+                Decimal compactDecimal,
+                Decimal largeDecimal,
+                Integer date,
+                Integer time,
+                Timestamp ts3,
+                Timestamp tsLtz6,
+                List<Integer> ints,
+                Map<String, Long> attrs,
+                NestedValue nested) {
+            this.bool = bool;
+            this.tiny = tiny;
+            this.small = small;
+            this.i = i;
+            this.big = big;
+            this.f = f;
+            this.d = d;
+            this.s = s;
+            this.bin = bin;
+            this.compactDecimal = compactDecimal;
+            this.largeDecimal = largeDecimal;
+            this.date = date;
+            this.time = time;
+            this.ts3 = ts3;
+            this.tsLtz6 = tsLtz6;
+            this.ints = ints;
+            this.attrs = attrs;
+            this.nested = nested;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof WideValue)) {
+                return false;
+            }
+            WideValue wideValue = (WideValue) o;
+            return java.util.Objects.equals(bool, wideValue.bool)
+                    && java.util.Objects.equals(tiny, wideValue.tiny)
+                    && java.util.Objects.equals(small, wideValue.small)
+                    && java.util.Objects.equals(i, wideValue.i)
+                    && java.util.Objects.equals(big, wideValue.big)
+                    && java.util.Objects.equals(f, wideValue.f)
+                    && java.util.Objects.equals(d, wideValue.d)
+                    && java.util.Objects.equals(s, wideValue.s)
+                    && Arrays.equals(bin, wideValue.bin)
+                    && java.util.Objects.equals(compactDecimal, wideValue.compactDecimal)
+                    && java.util.Objects.equals(largeDecimal, wideValue.largeDecimal)
+                    && java.util.Objects.equals(date, wideValue.date)
+                    && java.util.Objects.equals(time, wideValue.time)
+                    && java.util.Objects.equals(ts3, wideValue.ts3)
+                    && java.util.Objects.equals(tsLtz6, wideValue.tsLtz6)
+                    && java.util.Objects.equals(ints, wideValue.ints)
+                    && java.util.Objects.equals(attrs, wideValue.attrs)
+                    && java.util.Objects.equals(nested, wideValue.nested);
+        }
+
+        @Override
+        public int hashCode() {
+            int result =
+                    java.util.Objects.hash(
+                            bool,
+                            tiny,
+                            small,
+                            i,
+                            big,
+                            f,
+                            d,
+                            s,
+                            compactDecimal,
+                            largeDecimal,
+                            date,
+                            time,
+                            ts3,
+                            tsLtz6,
+                            ints,
+                            attrs,
+                            nested);
+            result = 31 * result + Arrays.hashCode(bin);
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return "WideValue{"
+                    + "bool="
+                    + bool
+                    + ", tiny="
+                    + tiny
+                    + ", small="
+                    + small
+                    + ", i="
+                    + i
+                    + ", big="
+                    + big
+                    + ", f="
+                    + f
+                    + ", d="
+                    + d
+                    + ", s='"
+                    + s
+                    + '\''
+                    + ", bin="
+                    + Arrays.toString(bin)
+                    + ", compactDecimal="
+                    + compactDecimal
+                    + ", largeDecimal="
+                    + largeDecimal
+                    + ", date="
+                    + date
+                    + ", time="
+                    + time
+                    + ", ts3="
+                    + ts3
+                    + ", tsLtz6="
+                    + tsLtz6
+                    + ", ints="
+                    + ints
+                    + ", attrs="
+                    + attrs
+                    + ", nested="
+                    + nested
+                    + '}';
         }
     }
 }

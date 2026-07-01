@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnVectorUtils;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
@@ -33,7 +34,6 @@ import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.PaimonShreddingUtils.FieldToExtract;
 import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.data.variant.VariantPathSegment;
-import org.apache.paimon.format.parquet.reader.ParquetReaderUtil;
 import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -368,7 +368,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
                 "Variant physical vector should be a row vector.");
         CastedRowColumnVector input = (CastedRowColumnVector) physicalVector;
         WritableColumnVector output =
-                ParquetReaderUtil.createWritableColumnVector(
+                ColumnVectorUtils.createParquetWritableColumnVector(
                         input.getElementsAppended(), logicalType);
         org.apache.paimon.data.variant.VariantSchema variantSchema =
                 PaimonShreddingUtils.buildVariantSchema((RowType) physicalType);
@@ -380,7 +380,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
             PaimonShreddingUtils.assembleVariantStructBatch(
                     input, output, variantSchema, fieldsToExtract, logicalType);
         }
-        return ParquetReaderUtil.createReadableColumnVector(logicalType, output);
+        return ColumnVectorUtils.createReadableColumnVector(logicalType, output);
     }
 
     private static ColumnVector assembleRowVector(

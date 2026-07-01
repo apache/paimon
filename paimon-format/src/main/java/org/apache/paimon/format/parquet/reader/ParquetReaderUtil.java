@@ -18,33 +18,12 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.paimon.data.columnar.ColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
-import org.apache.paimon.data.columnar.heap.CastedVectorColumnVector;
-import org.apache.paimon.data.columnar.heap.HeapArrayVector;
-import org.apache.paimon.data.columnar.heap.HeapBooleanVector;
-import org.apache.paimon.data.columnar.heap.HeapByteVector;
-import org.apache.paimon.data.columnar.heap.HeapBytesVector;
-import org.apache.paimon.data.columnar.heap.HeapDoubleVector;
-import org.apache.paimon.data.columnar.heap.HeapFloatVector;
-import org.apache.paimon.data.columnar.heap.HeapIntVector;
-import org.apache.paimon.data.columnar.heap.HeapLongVector;
-import org.apache.paimon.data.columnar.heap.HeapMapVector;
-import org.apache.paimon.data.columnar.heap.HeapRowVector;
-import org.apache.paimon.data.columnar.heap.HeapShortVector;
-import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
-import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeChecks;
-import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -64,8 +43,6 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -76,166 +53,6 @@ import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
 /** Util for generating parquet readers. */
 public class ParquetReaderUtil {
-
-    /** Create writable vectors. */
-    public static WritableColumnVector createWritableColumnVector(
-            int batchSize, DataType fieldType) {
-        switch (fieldType.getTypeRoot()) {
-            case BOOLEAN:
-                return new HeapBooleanVector(batchSize);
-            case TINYINT:
-                return new HeapByteVector(batchSize);
-            case DOUBLE:
-                return new HeapDoubleVector(batchSize);
-            case FLOAT:
-                return new HeapFloatVector(batchSize);
-            case INTEGER:
-            case DATE:
-            case TIME_WITHOUT_TIME_ZONE:
-                return new HeapIntVector(batchSize);
-            case BIGINT:
-                return new HeapLongVector(batchSize);
-            case SMALLINT:
-                return new HeapShortVector(batchSize);
-            case CHAR:
-            case VARCHAR:
-            case VARBINARY:
-            case BLOB:
-                return new HeapBytesVector(batchSize);
-            case BINARY:
-                return new HeapBytesVector(batchSize);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                int precision = DataTypeChecks.getPrecision(fieldType);
-                if (precision > 6) {
-                    return new HeapTimestampVector(batchSize);
-                } else {
-                    return new HeapLongVector(batchSize);
-                }
-            case DECIMAL:
-                DecimalType decimalType = (DecimalType) fieldType;
-                if (ParquetSchemaConverter.is32BitDecimal(decimalType.getPrecision())) {
-                    return new HeapIntVector(batchSize);
-                } else if (ParquetSchemaConverter.is64BitDecimal(decimalType.getPrecision())) {
-                    return new HeapLongVector(batchSize);
-                } else {
-                    return new HeapBytesVector(batchSize);
-                }
-            case ARRAY:
-                ArrayType arrayType = (ArrayType) fieldType;
-                return new HeapArrayVector(
-                        batchSize,
-                        createWritableColumnVector(batchSize, arrayType.getElementType()));
-            case VECTOR:
-                VectorType vectorType = (VectorType) fieldType;
-                return new HeapArrayVector(
-                        batchSize,
-                        createWritableColumnVector(batchSize, vectorType.getElementType()));
-            case MAP:
-                MapType mapType = (MapType) fieldType;
-                return new HeapMapVector(
-                        batchSize,
-                        createWritableColumnVector(batchSize, mapType.getKeyType()),
-                        createWritableColumnVector(batchSize, mapType.getValueType()));
-            case MULTISET:
-                MultisetType multisetType = (MultisetType) fieldType;
-                return new HeapMapVector(
-                        batchSize,
-                        createWritableColumnVector(batchSize, multisetType.getElementType()),
-                        createWritableColumnVector(batchSize, new IntType(false)));
-            case ROW:
-                RowType rowType = (RowType) fieldType;
-                WritableColumnVector[] columnVectors =
-                        new WritableColumnVector[rowType.getFieldCount()];
-                for (int i = 0; i < columnVectors.length; i++) {
-                    columnVectors[i] = createWritableColumnVector(batchSize, rowType.getTypeAt(i));
-                }
-                return new HeapRowVector(batchSize, columnVectors);
-            case VARIANT:
-                WritableColumnVector[] vectors = new WritableColumnVector[2];
-                vectors[0] = new HeapBytesVector(batchSize);
-                vectors[1] = new HeapBytesVector(batchSize);
-                return new HeapRowVector(batchSize, vectors);
-            default:
-                throw new UnsupportedOperationException(fieldType + " is not supported now.");
-        }
-    }
-
-    /**
-     * Create readable vectors from writable vectors. Especially for decimal, see {@code
-     * ParquetDecimalVector}.
-     */
-    public static ColumnVector[] createReadableColumnVectors(
-            List<DataType> types, WritableColumnVector[] writableVectors) {
-        ColumnVector[] vectors = new ColumnVector[writableVectors.length];
-        for (int i = 0; i < writableVectors.length; i++) {
-            vectors[i] = createReadableColumnVector(types.get(i), writableVectors[i]);
-        }
-        return vectors;
-    }
-
-    public static ColumnVector createReadableColumnVector(
-            DataType type, WritableColumnVector writableVector) {
-        switch (type.getTypeRoot()) {
-            case DECIMAL:
-                return new ParquetDecimalVector(writableVector);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return new ParquetTimestampVector(writableVector);
-            case BLOB:
-                // Physical representation is bytes; higher-level Row#getBlob() handles descriptor.
-                return writableVector;
-            case ARRAY:
-                return new CastedArrayColumnVector(
-                        (HeapArrayVector) writableVector,
-                        createReadableColumnVectors(
-                                Collections.singletonList(((ArrayType) type).getElementType()),
-                                Arrays.stream(writableVector.getChildren())
-                                        .map(WritableColumnVector.class::cast)
-                                        .toArray(WritableColumnVector[]::new)));
-            case VECTOR:
-                VectorType vectorType = (VectorType) type;
-                return new CastedVectorColumnVector(
-                        (HeapArrayVector) writableVector,
-                        createReadableColumnVectors(
-                                Collections.singletonList(vectorType.getElementType()),
-                                Arrays.stream(writableVector.getChildren())
-                                        .map(WritableColumnVector.class::cast)
-                                        .toArray(WritableColumnVector[]::new))[0],
-                        vectorType.getLength());
-            case MAP:
-                MapType mapType = (MapType) type;
-                return new CastedMapColumnVector(
-                        (HeapMapVector) writableVector,
-                        createReadableColumnVectors(
-                                Arrays.asList(mapType.getKeyType(), mapType.getValueType()),
-                                Arrays.stream(writableVector.getChildren())
-                                        .map(WritableColumnVector.class::cast)
-                                        .toArray(WritableColumnVector[]::new)));
-            case MULTISET:
-                MultisetType multisetType = (MultisetType) type;
-                return new CastedMapColumnVector(
-                        (HeapMapVector) writableVector,
-                        createReadableColumnVectors(
-                                Arrays.asList(
-                                        multisetType.getElementType(),
-                                        multisetType.getElementType()),
-                                Arrays.stream(writableVector.getChildren())
-                                        .map(WritableColumnVector.class::cast)
-                                        .toArray(WritableColumnVector[]::new)));
-            case ROW:
-                RowType rowType = (RowType) type;
-                return new CastedRowColumnVector(
-                        (HeapRowVector) writableVector,
-                        createReadableColumnVectors(
-                                rowType.getFieldTypes(),
-                                Arrays.stream(writableVector.getChildren())
-                                        .map(WritableColumnVector.class::cast)
-                                        .toArray(WritableColumnVector[]::new)));
-            default:
-                return writableVector;
-        }
-    }
 
     public static List<ParquetField> buildFieldsList(
             DataField[] readFields, MessageColumnIO columnIO, MessageType requestedFileSchema) {

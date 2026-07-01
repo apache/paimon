@@ -45,7 +45,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static java.lang.String.format;
-import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createReadableColumnVectors;
+import static org.apache.paimon.data.columnar.ColumnVectorUtils.createReadableColumnVectors;
 
 /** Record reader for parquet. */
 public class VectorizedParquetRecordReader implements FileRecordReader<InternalRow> {
