@@ -84,18 +84,22 @@ class ApplyDeletionVectorReader(RecordBatchReader):
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         self._reader: RecordBatchReader
-        arrow_batch = self._reader.read_arrow_batch()
-        if arrow_batch is None:
-            return None
+        # Skip physical batches that become empty after DV filtering. Some merge readers
+        # treat a zero-row batch as EOF and would otherwise stop before later live rows.
+        while True:
+            arrow_batch = self._reader.read_arrow_batch()
+            if arrow_batch is None:
+                return None
 
-        start = self._returned_position
-        end = start + arrow_batch.num_rows
-        self._returned_position = end
-        keep_indices = [
-            i for i, position in enumerate(range(start, end))
-            if not self._deletion_vector.is_deleted(position)
-        ]
-        return arrow_batch.take(pyarrow.array(keep_indices, type=pyarrow.int32()))
+            start = self._returned_position
+            end = start + arrow_batch.num_rows
+            self._returned_position = end
+            keep_indices = [
+                i for i, position in enumerate(range(start, end))
+                if not self._deletion_vector.is_deleted(position)
+            ]
+            if keep_indices:
+                return arrow_batch.take(pyarrow.array(keep_indices, type=pyarrow.int32()))
 
     def read_batch(self) -> Optional[RecordIterator]:
         """
