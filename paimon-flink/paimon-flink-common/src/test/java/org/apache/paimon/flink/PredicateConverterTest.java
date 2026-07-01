@@ -34,6 +34,7 @@ import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.BigIntType;
+import org.apache.flink.table.types.logical.BooleanType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -268,7 +269,13 @@ public class PredicateConverterTest {
                                 BuiltInFunctionDefinitions.IS_FALSE,
                                 Arrays.asList(boolRefExpr),
                                 DataTypes.BOOLEAN()),
-                        BUILDER.equal(3, false)));
+                        BUILDER.equal(3, false)),
+                Arguments.of(
+                        CallExpression.permanent(
+                                BuiltInFunctionDefinitions.IS_NOT_TRUE,
+                                Arrays.asList(boolRefExpr),
+                                DataTypes.BOOLEAN()),
+                        PredicateBuilder.or(BUILDER.isNull(3), BUILDER.equal(3, false))));
     }
 
     @MethodSource("provideLikeExpressions")
@@ -436,6 +443,19 @@ public class PredicateConverterTest {
                         rowCountList4,
                         statsList4,
                         expectedForStats4));
+    }
+
+    @Test
+    public void testIsNotTrueNullSemantics() {
+        // "x IS NOT TRUE" must be true for both FALSE and NULL, matching SQL's three-valued
+        // logic, unlike a plain NotEqual(x, TRUE) which returns false for NULL rows.
+        CallExpression expr =
+                call(BuiltInFunctionDefinitions.IS_NOT_TRUE, field(0, DataTypes.BOOLEAN()));
+        Predicate predicate = expr.accept(new PredicateConverter(RowType.of(new BooleanType())));
+
+        assertThat(predicate.test(GenericRow.of(true))).isFalse();
+        assertThat(predicate.test(GenericRow.of(false))).isTrue();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isTrue();
     }
 
     @Test
@@ -836,6 +856,12 @@ public class PredicateConverterTest {
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         assertThatThrownBy(() -> convertSimilarToLike("[a-z]", null))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        // '{m,n}' quantifiers are SIMILAR TO-only syntax (e.g. 'a{2}' means 'aa') and must not
+        // pass through as literal LIKE characters.
+        assertThatThrownBy(() -> convertSimilarToLike("a{2}", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+        assertThatThrownBy(() -> convertSimilarToLike("a{2,3}", null))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
 
         // --- Escape-character tests (using '=' as the escape char) ---
         // '=_' -> escaped underscore: output '\_' so Like treats '_' as literal
@@ -939,6 +965,21 @@ public class PredicateConverterTest {
     }
 
     @Test
+    public void testSimilarExpressionQuantifier() {
+        // 'a{2}' uses the SIMILAR TO-only {m,n} quantifier syntax (equivalent to 'aa') and must
+        // not be pushed down as a literal LIKE pattern matching 'a{2}'.
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        assertThatThrownBy(
+                        () ->
+                                call(
+                                                BuiltInFunctionDefinitions.SIMILAR,
+                                                field(0, STRING()),
+                                                literal("a{2}", STRING()))
+                                        .accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
     public void testSimilarExpressionEscapedWildcards() {
         // 'a=%b' SIMILAR TO with escape '=': literal 'a%b' (% is not a wildcard)
         // convertSimilarToLike converts this to 'a\%b', which Like then processes as 'a' + literal
@@ -966,9 +1007,7 @@ public class PredicateConverterTest {
                                                 BuiltInFunctionDefinitions.SIMILAR,
                                                 field(0, DataTypes.INT()),
                                                 literal(5))
-                                        .accept(
-                                                new PredicateConverter(
-                                                        RowType.of(new IntType()))))
+                                        .accept(new PredicateConverter(RowType.of(new IntType()))))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 

@@ -201,11 +201,18 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_TRUE) {
             FieldReferenceExpression fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.notEqual(builder.indexOf(fieldRefExpr.getName()), Boolean.TRUE);
+            int fieldIndex = builder.indexOf(fieldRefExpr.getName());
+            // "x IS NOT TRUE" is true for both FALSE and NULL, unlike NotEqual which returns
+            // false when the field value is null.
+            return PredicateBuilder.or(
+                    builder.isNull(fieldIndex), builder.equal(fieldIndex, Boolean.FALSE));
         } else if (func == BuiltInFunctionDefinitions.NOT_BETWEEN) {
             FieldReferenceExpression fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.between(builder.indexOf(fieldRefExpr.getName()), children.get(1), children.get(2))
+            return builder.between(
+                            builder.indexOf(fieldRefExpr.getName()),
+                            children.get(1),
+                            children.get(2))
                     .negate()
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.SIMILAR) {
@@ -217,7 +224,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .getTypeRoot()
                     .getFamilies()
                     .contains(LogicalTypeFamily.CHARACTER_STRING)) {
-                String sqlPattern = 
+                String sqlPattern =
                         Objects.requireNonNull(
                                         extractLiteral(
                                                 fieldRefExpr.getOutputDataType(), children.get(1)))
@@ -236,7 +243,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                         BinaryString.fromString(likePattern));
             }
         }
-        
+
         throw new UnsupportedExpression();
     }
 
@@ -336,18 +343,19 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
      *
      * <p>The conversion handles only the subset of SIMILAR TO syntax that maps directly to SQL
      * LIKE:
+     *
      * <ul>
-     *   <li>{@code %} (any-string wildcard) is preserved as-is.</li>
-     *   <li>{@code _} (single-character wildcard) is preserved as-is.</li>
+     *   <li>{@code %} (any-string wildcard) is preserved as-is.
+     *   <li>{@code _} (single-character wildcard) is preserved as-is.
      *   <li>Escape sequences: {@code escape + '_'} and {@code escape + '%'} become their literal
-     *       equivalents, emitted as {@code \ + char} so that the downstream
-     *       {@link Like} function (which uses {@code \} as its default escape) treats them as
-     *       literals. {@code escape + escape} becomes a literal escape character.</li>
+     *       equivalents, emitted as {@code \ + char} so that the downstream {@link Like} function
+     *       (which uses {@code \} as its default escape) treats them as literals. {@code escape +
+     *       escape} becomes a literal escape character.
      * </ul>
      *
      * <p>SIMILAR TO-only features (character classes {@code [...]}, alternation {@code |},
-     * quantifiers {@code *}, {@code +}, {@code ?}, and grouping {@code ()}) are not supported and
-     * will cause an {@link UnsupportedExpression} to be thrown.
+     * quantifiers {@code *}, {@code +}, {@code ?}, {@code {m,n}}, and grouping {@code ()}) are not
+     * supported and will cause an {@link UnsupportedExpression} to be thrown.
      *
      * @param sqlPattern the SIMILAR TO pattern string
      * @param escape the escape character string (single char), or {@code null} for no escaping
@@ -393,9 +401,10 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             } else if (c == '%' || c == '_') {
                 // SIMILAR TO wildcards are the same as SQL LIKE wildcards
                 like.append(c);
-            } else if (c == '[' || c == '|' || c == '(' || c == ')'
-                    || c == '*' || c == '+' || c == '?') {
-                // SIMILAR TO-only features: not representable in SQL LIKE
+            } else if (c == '[' || c == '|' || c == '(' || c == ')' || c == '*' || c == '+'
+                    || c == '?' || c == '{' || c == '}') {
+                // SIMILAR TO-only features (including {m,n} quantifiers): not representable in
+                // SQL LIKE
                 throw new UnsupportedExpression();
             } else if (c == outputEscape) {
                 // A literal backslash in the pattern needs to be escaped in the output,
