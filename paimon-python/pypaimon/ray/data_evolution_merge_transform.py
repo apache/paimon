@@ -114,6 +114,10 @@ def vectorized_insert_transform(
     return pa.Table.from_arrays(arrays, schema=target_pa_schema)
 
 
+def cast_to_schema(batch: pa.Table, schema: pa.Schema) -> pa.Table:
+    return batch if batch.schema == schema else batch.cast(schema)
+
+
 def build_update_schema(
     target_pa_schema: pa.Schema,
     update_cols: Sequence[str],
