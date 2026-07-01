@@ -239,6 +239,8 @@ public class SparkFilterConverter {
         }
 
         DataType fieldType;
+        int[] nestedIndexes = null;
+        int[] nestedArities = null;
         if (parts.length == 1) {
             fieldType = rowType.getTypeAt(topLevelIndex);
         } else {
@@ -247,9 +249,23 @@ public class SparkFilterConverter {
                 throw new UnsupportedOperationException(
                         String.format("Nested field '%s' is unsupported.", field));
             }
+            nestedIndexes = new int[parts.length - 1];
+            nestedArities = new int[parts.length - 1];
+            DataType currentType = rowType.getTypeAt(topLevelIndex);
+            for (int i = 0; i < parts.length - 1; i++) {
+                RowType currentSelection = (RowType) currentType;
+                nestedArities[i] = currentSelection.getFieldCount();
+                String nextPart = parts[i + 1];
+                int nextIndex = currentSelection.getFieldIndex(nextPart);
+                nestedIndexes[i] = nextIndex;
+                currentType = currentSelection.getTypeAt(nextIndex);
+            }
         }
 
-        Transform transform = new FieldTransform(new FieldRef(topLevelIndex, field, fieldType));
+        Transform transform =
+                new FieldTransform(
+                        new FieldRef(
+                                topLevelIndex, field, fieldType, nestedIndexes, nestedArities));
         return new FieldInfo(transform, fieldType);
     }
 
