@@ -86,6 +86,7 @@ def create_global_index(
 
 
 _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
+_SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
 
 
 class GlobalIndexBuilder:
@@ -173,9 +174,14 @@ class GlobalIndexBuilder:
         self, splits, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
         key_serializer = create_serializer(index_field.type)
-        records_per_range = self._core_options.sorted_index_records_per_range()
-        if records_per_range <= 0:
+        configured_records_per_range = (
+            self._core_options.sorted_index_records_per_range())
+        if configured_records_per_range <= 0:
             raise ValueError("sorted-index.records-per-range must be positive.")
+        records_per_range = int(
+            configured_records_per_range
+            * _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING
+        )
 
         messages = []
         for split in _split_by_contiguous_row_range(splits):

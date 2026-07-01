@@ -294,6 +294,26 @@ class GlobalIndexBuildTest(
                 options={'bitmap-index.compression': 'lz4'},
             )
 
+    def test_sorted_index_records_per_range_matches_java_floating_factor(self):
+        table = self._create_table()
+        rows = list(range(12))
+        self._write_arrow(table, pa.table(
+            {
+                'id': rows,
+                'name': ['n%s' % i for i in rows],
+                'age': rows,
+                'city': ['c%s' % i for i in rows],
+            },
+            schema=self.pa_schema,
+        ))
+
+        added = table.create_global_index(
+            'id',
+            options={'sorted-index.records-per-range': '10'},
+        )
+
+        self.assertEqual(1, added)
+
     def test_create_global_index_uses_external_path(self):
         external_root = 'file://%s' % os.path.join(
             self.tempdir, 'global-index-external')

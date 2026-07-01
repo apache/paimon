@@ -19,10 +19,18 @@
 
 from dataclasses import dataclass
 import struct
-import uuid
 from typing import Dict, List
 
-from pypaimon.globalindex.block_compression import COMPRESSION_NONE, crc32c
+from pypaimon.globalindex.index_file_utils import (
+    BlockInfo,
+    PositionOutput,
+    new_global_index_file_name,
+    var_len_int_size,
+    var_len_long_size,
+    write_uncompressed_block,
+    write_var_len_int,
+    write_var_len_long,
+)
 from pypaimon.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -36,45 +44,22 @@ _DEFAULT_DICTIONARY_BLOCK_SIZE = 16 * 1024
 
 
 @dataclass(frozen=True)
-class _BlockInfo:
-    offset: int
-    length: int
-
-
-@dataclass(frozen=True)
-class _DictionaryBlockMeta(_BlockInfo):
+class _DictionaryBlockMeta(BlockInfo):
     first_key: bytes
 
 
 @dataclass(frozen=True)
 class _DictionaryEntry:
     key: bytes
-    bitmap_block: _BlockInfo
+    bitmap_block: BlockInfo
 
     def estimated_size(self) -> int:
         return (
-            _var_len_int_size(len(self.key))
+            var_len_int_size(len(self.key))
             + len(self.key)
-            + _var_len_long_size(self.bitmap_block.offset)
-            + _var_len_int_size(self.bitmap_block.length)
+            + var_len_long_size(self.bitmap_block.offset)
+            + var_len_int_size(self.bitmap_block.length)
         )
-
-
-class _PositionOutput:
-    def __init__(self, output_stream):
-        self._output_stream = output_stream
-        self._pos = 0
-
-    @property
-    def pos(self) -> int:
-        return self._pos
-
-    def write(self, data: bytes) -> None:
-        self._output_stream.write(data)
-        self._pos += len(data)
-
-    def close(self) -> None:
-        self._output_stream.close()
 
 
 class _DictionaryBlockBuilder:
@@ -86,11 +71,11 @@ class _DictionaryBlockBuilder:
         return len(self.entries) > 0
 
     def estimated_size(self) -> int:
-        return _var_len_int_size(len(self.entries)) + self._entries_size
+        return var_len_int_size(len(self.entries)) + self._entries_size
 
     def estimated_size_after(self, entry: _DictionaryEntry) -> int:
         return (
-            _var_len_int_size(len(self.entries) + 1)
+            var_len_int_size(len(self.entries) + 1)
             + self._entries_size
             + entry.estimated_size()
         )
@@ -129,8 +114,7 @@ class BitmapIndexWriter:
                 "bitmap-index.compression=none, got '%s'." % compression
             )
 
-        self.file_name = (
-            "%s-global-index-%s.index" % (BITMAP_IDENTIFIER, uuid.uuid4()))
+        self.file_name = new_global_index_file_name(BITMAP_IDENTIFIER)
         self._file_io = file_io
         self._index_path = index_path.rstrip("/")
         self._key_serializer = key_serializer
@@ -167,7 +151,7 @@ class BitmapIndexWriter:
             return []
 
         self._file_io.check_or_mkdirs(self._index_path)
-        output = _PositionOutput(
+        output = PositionOutput(
             self._file_io.new_output_stream(self._file_path()))
         try:
             self._write(output)
@@ -185,7 +169,7 @@ class BitmapIndexWriter:
         ).serialize()
         return [ResultEntry(self.file_name, self._row_count, meta)]
 
-    def _write(self, output: _PositionOutput) -> None:
+    def _write(self, output: PositionOutput) -> None:
         null_rows_block = _write_bitmap_block(output, self._null_rows)
         non_null_rows_block = _write_bitmap_block(output, self._non_null_rows)
         dictionary_blocks, value_count = self._write_dictionary_and_bitmap_blocks(
@@ -200,7 +184,7 @@ class BitmapIndexWriter:
             )
         )
 
-    def _write_dictionary_and_bitmap_blocks(self, output: _PositionOutput):
+    def _write_dictionary_and_bitmap_blocks(self, output: PositionOutput):
         dictionary_blocks = []
         current = _DictionaryBlockBuilder()
         value_count = 0
@@ -232,16 +216,16 @@ class BitmapIndexWriter:
 
 
 def _write_dictionary_block(
-    output: _PositionOutput,
+    output: PositionOutput,
     block: _DictionaryBlockBuilder,
 ) -> _DictionaryBlockMeta:
     data = bytearray()
-    data.extend(_write_var_len_int(len(block.entries)))
+    data.extend(write_var_len_int(len(block.entries)))
     for entry in block.entries:
-        data.extend(_write_var_len_int(len(entry.key)))
+        data.extend(write_var_len_int(len(entry.key)))
         data.extend(entry.key)
-        data.extend(_write_var_len_long(entry.bitmap_block.offset))
-        data.extend(_write_var_len_int(entry.bitmap_block.length))
+        data.extend(write_var_len_long(entry.bitmap_block.offset))
+        data.extend(write_var_len_int(entry.bitmap_block.length))
     block_info = _write_compressible_block(output, bytes(data))
     return _DictionaryBlockMeta(
         block_info.offset,
@@ -251,42 +235,37 @@ def _write_dictionary_block(
 
 
 def _write_index_block(
-    output: _PositionOutput,
+    output: PositionOutput,
     blocks: List[_DictionaryBlockMeta],
-) -> _BlockInfo:
+) -> BlockInfo:
     data = bytearray()
-    data.extend(_write_var_len_int(len(blocks)))
+    data.extend(write_var_len_int(len(blocks)))
     for block in blocks:
-        data.extend(_write_var_len_int(len(block.first_key)))
+        data.extend(write_var_len_int(len(block.first_key)))
         data.extend(block.first_key)
-        data.extend(_write_var_len_long(block.offset))
-        data.extend(_write_var_len_int(block.length))
+        data.extend(write_var_len_long(block.offset))
+        data.extend(write_var_len_int(block.length))
     return _write_compressible_block(output, bytes(data))
 
 
 def _write_bitmap_block(
-    output: _PositionOutput,
+    output: PositionOutput,
     bitmap: RoaringBitmap64,
-) -> _BlockInfo:
+) -> BlockInfo:
     data = bitmap.serialize()
     offset = output.pos
     output.write(data)
-    return _BlockInfo(offset, len(data))
+    return BlockInfo(offset, len(data))
 
 
-def _write_compressible_block(output: _PositionOutput, data: bytes) -> _BlockInfo:
-    offset = output.pos
-    output.write(data)
-    output.write(
-        struct.pack("<B", COMPRESSION_NONE)
-        + struct.pack("<I", crc32c(data, COMPRESSION_NONE)))
-    return _BlockInfo(offset, len(data))
+def _write_compressible_block(output: PositionOutput, data: bytes) -> BlockInfo:
+    return write_uncompressed_block(output, data)
 
 
 def _write_footer(
-    null_rows_block: _BlockInfo,
-    non_null_rows_block: _BlockInfo,
-    index_block: _BlockInfo,
+    null_rows_block: BlockInfo,
+    non_null_rows_block: BlockInfo,
+    index_block: BlockInfo,
     value_count: int,
 ) -> bytes:
     result = struct.pack(
@@ -304,45 +283,3 @@ def _write_footer(
     if len(result) != _BITMAP_FOOTER_LENGTH:
         raise AssertionError("Unexpected bitmap footer length: %s" % len(result))
     return result
-
-
-def _write_var_len_int(value: int) -> bytes:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    result = bytearray()
-    while value & ~0x7F:
-        result.append((value & 0x7F) | 0x80)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
-def _write_var_len_long(value: int) -> bytes:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    result = bytearray()
-    while value & ~0x7F:
-        result.append((value & 0x7F) | 0x80)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
-def _var_len_int_size(value: int) -> int:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    size = 1
-    while value & ~0x7F:
-        value >>= 7
-        size += 1
-    return size
-
-
-def _var_len_long_size(value: int) -> int:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    size = 1
-    while value & ~0x7F:
-        value >>= 7
-        size += 1
-    return size
