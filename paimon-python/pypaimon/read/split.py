@@ -184,6 +184,10 @@ class DataSplit(Split):
         for file in self._files:
             if file.first_row_id is None:
                 return False
+        if self.data_deletion_files is not None:
+            for deletion_file in self.data_deletion_files:
+                if deletion_file is not None and deletion_file.cardinality is None:
+                    return False
         return True
 
     def _data_evolution_merged_row_count(self) -> int:
@@ -198,4 +202,11 @@ class DataSplit(Split):
             return 0
 
         ranges = Range.sort_and_merge_overlap(file_ranges, True, True)
-        return sum([r.count() for r in ranges])
+        row_count = sum([r.count() for r in ranges])
+        if self.data_deletion_files is not None:
+            row_count -= sum(
+                deletion_file.cardinality
+                for deletion_file in self.data_deletion_files
+                if deletion_file is not None
+            )
+        return row_count
