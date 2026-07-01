@@ -1130,7 +1130,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         intercept[RuntimeException] {
           sql("DELETE FROM t WHERE id = 2")
         }.getMessage
-          .contains("Delete operation is not supported when data evolution is enabled yet."))
+          .contains(
+            "Can only perform deletion operation on data evolution tables with DeletionVector enabled."))
     }
   }
 
