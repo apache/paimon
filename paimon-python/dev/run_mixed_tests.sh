@@ -681,6 +681,30 @@ run_data_evolution_test() {
     return 0
 }
 
+run_data_evolution_deletion_vector_test() {
+    echo -e "${YELLOW}=== Running Data Evolution Deletion Vector Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testDataEvolutionDeletionVectorWrite..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testDataEvolutionDeletionVectorWrite -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java data evolution deletion vector write completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java data evolution deletion vector write failed${NC}"
+        return 1
+    fi
+
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_data_evolution_deletion_vector_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_data_evolution_deletion_vector_table -v; then
+        echo -e "${GREEN}✓ Python data evolution deletion vector read completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python data evolution deletion vector read failed${NC}"
+        return 1
+    fi
+}
+
 run_data_evolution_py_write_test() {
     echo -e "${YELLOW}=== Running Data Evolution Test (Python Write, Java Read) ===${NC}"
 
@@ -859,6 +883,7 @@ main() {
     local blob_compact_conflict_result=0
     local blob_alter_compact_result=0
     local data_evolution_result=0
+    local data_evolution_deletion_vector_result=0
     local data_evolution_py_write_result=0
     local vector_dedicated_java_write_result=0
     local vector_dedicated_py_write_result=0
@@ -1067,6 +1092,13 @@ main() {
 
     echo ""
 
+    # Run data evolution deletion vector test (Java write, Python read)
+    if ! run_data_evolution_deletion_vector_test; then
+        data_evolution_deletion_vector_result=1
+    fi
+
+    echo ""
+
     # Run data evolution test (Python write, Java read)
     if ! run_data_evolution_py_write_test; then
         data_evolution_py_write_result=1
@@ -1246,6 +1278,12 @@ main() {
         echo -e "${RED}✗ Data Evolution Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $data_evolution_deletion_vector_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Data Evolution Deletion Vector Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Data Evolution Deletion Vector Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     if [[ $data_evolution_py_write_result -eq 0 ]]; then
         echo -e "${GREEN}✓ Data Evolution Test (Python Write, Java Read): PASSED${NC}"
     else
@@ -1275,7 +1313,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

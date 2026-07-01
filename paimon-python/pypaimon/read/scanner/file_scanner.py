@@ -565,6 +565,8 @@ class FileScanner:
         """
         if self.limit is None:
             return splits
+        if self.data_evolution and self.deletion_vectors_enabled:
+            return splits
         if self._has_non_partition_filter():
             return splits
 
