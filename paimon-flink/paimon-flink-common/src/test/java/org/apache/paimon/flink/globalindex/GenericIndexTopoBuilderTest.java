@@ -75,8 +75,7 @@ class GenericIndexTopoBuilderTest {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 100));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).rowRanges().get(0)).isEqualTo(new Range(0, 99));
@@ -89,8 +88,7 @@ class GenericIndexTopoBuilderTest {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 250));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).hasSize(3);
         // Shard 0: [0, 99], shard 1: [0, 199] clamped to [100, 199], shard 2: [0, 249] clamped
@@ -110,8 +108,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 50));
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 50L, 50));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).rowRanges().get(0)).isEqualTo(new Range(0, 99));
@@ -125,8 +122,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 30));
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 70L, 30));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         // Gap produces two separate tasks within the same shard
         assertThat(tasks).hasSize(2);
@@ -143,8 +139,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(BinaryRow.EMPTY_ROW, null, 100));
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 50));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         // Only the file with valid firstRowId should produce a task
         assertThat(tasks).hasSize(1);
@@ -161,8 +156,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(partA, 0L, 50));
         entries.add(createEntry(partB, 100L, 50));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).hasSize(2);
         // Each partition should have its own task
@@ -184,8 +178,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(BinaryRow.EMPTY_ROW, null, 100));
         entries.add(createEntry(BinaryRow.EMPTY_ROW, null, 200));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).isEmpty();
     }
@@ -197,8 +190,7 @@ class GenericIndexTopoBuilderTest {
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 0L, 80));
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 80L, 80));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         // Shard 0: both files (contiguous), range [0, 99]
         // Shard 1: only file2, range [100, 159]
@@ -215,8 +207,7 @@ class GenericIndexTopoBuilderTest {
         List<ManifestEntry> entries = new ArrayList<>();
         entries.add(createEntry(BinaryRow.EMPTY_ROW, 50L, 100));
 
-        List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
+        List<IndexedSplit> tasks = GenericIndexTopoBuilder.computeShardTasks(table, entries, 100);
 
         assertThat(tasks).hasSize(2);
         // Clamped: shard 0 starts at 50 (not 0), shard 1 ends at 149 (not 199)
@@ -265,8 +256,7 @@ class GenericIndexTopoBuilderTest {
         List<Range> unindexedRanges = Collections.singletonList(new Range(0, 99));
 
         List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(
-                        table, entries, 100, unindexedRanges);
+                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100, unindexedRanges);
 
         assertThat(tasks).hasSize(1);
         assertThat(tasks.get(0).rowRanges().get(0)).isEqualTo(new Range(0, 99));
@@ -279,8 +269,7 @@ class GenericIndexTopoBuilderTest {
         List<Range> unindexedRanges = Arrays.asList(new Range(0, 9), new Range(90, 99));
 
         List<IndexedSplit> tasks =
-                GenericIndexTopoBuilder.computeShardTasks(
-                        table, entries, 100, unindexedRanges);
+                GenericIndexTopoBuilder.computeShardTasks(table, entries, 100, unindexedRanges);
 
         assertThat(tasks).hasSize(2);
         assertThat(tasks.get(0).rowRanges().get(0)).isEqualTo(new Range(0, 9));

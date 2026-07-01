@@ -198,8 +198,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
             Map<BinaryRow, List<ManifestEntry>> entriesByPartition,
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, Path> pathFactory) {
-        return groupFilesIntoShardsByPartition(
-                entriesByPartition, rowsPerShard, pathFactory, null);
+        return groupFilesIntoShardsByPartition(entriesByPartition, rowsPerShard, pathFactory, null);
     }
 
     public static Map<BinaryRow, List<IndexedSplit>> groupFilesIntoShardsByPartition(
