@@ -184,7 +184,18 @@ case class PaimonSparkWriter(
 
   private def writePerPartition(ctx: WriteContext, dataFrame: DataFrame)(
       writeRow: (PaimonDataWrite, Row) => Unit): Dataset[InnerTableWriteTaskResult] = {
-    writePerPartitionWithFactory(ctx, dataFrame)(() => writeRow)
+    dataFrame.mapPartitions {
+      iter =>
+        {
+          val write = ctx.newWrite()
+          try {
+            iter.foreach(row => writeRow(write, row))
+            Iterator.single(write.commit)
+          } finally {
+            write.close()
+          }
+        }
+    }(Encoders.kryo[InnerTableWriteTaskResult])
   }
 
   private def writePerPartitionWithFactory(ctx: WriteContext, dataFrame: DataFrame)(
