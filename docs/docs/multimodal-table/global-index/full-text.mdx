@@ -34,6 +34,10 @@ the full-text index and can be consumed directly or combined with vector routes 
 
 ## Build Full-Text Index
 
+<Tabs groupId="fulltext-build">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 -- Create full-text index on 'content' column
 CALL sys.create_global_index(
@@ -77,6 +81,61 @@ CALL sys.create_global_index(
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create full-text index on 'content' column.
+added_files = table.create_global_index(
+    "content",
+    index_type="tantivy-fulltext",
+)
+print(added_files)
+```
+
+For other content where users often search by short character fragments, build
+the index with Tantivy's `ngram` tokenizer:
+
+```python
+added_files = table.create_global_index(
+    "content",
+    index_type="tantivy-fulltext",
+    options={
+        "tantivy.tokenizer": "ngram",
+        "tantivy.ngram.min-gram": "2",
+        "tantivy.ngram.max-gram": "2",
+    },
+)
+print(added_files)
+```
+
+To customize text analysis, choose a base tokenizer and compose token filters:
+
+```python
+added_files = table.create_global_index(
+    "content",
+    index_type="tantivy-fulltext",
+    options={
+        "tantivy.tokenizer": "simple",
+        "tantivy.stem": "true",
+        "tantivy.remove-stop-words": "true",
+    },
+)
+print(added_files)
+```
+
+PyPaimon does not build indexes with `tantivy.tokenizer=jieba` because
+tantivy-py does not expose the same `tantivy_jieba` tokenizer used by the Java
+implementation. Use SQL or Java to build `jieba` full-text indexes, then
+PyPaimon can query them when the Python `jieba` package is installed.
+
+</TabItem>
+
+</Tabs>
+
 Supported tokenizer options:
 
 | Option | Default | Description |
@@ -98,7 +157,9 @@ Tokenizer settings are persisted in global index metadata. Existing index files 
 tokenizer they were built with, even if later index builds use different options.
 Paimon does not load arbitrary Rust tokenizer plugins from configuration; custom analysis is
 provided by composing the supported tokenizer and filter options above. PyPaimon can query
-`jieba` indexes when the Python `jieba` package is installed.
+`jieba` indexes when the Python `jieba` package is installed. PyPaimon full-text index
+builds require the Python `tantivy` package. PyPaimon does not build
+`tantivy.tokenizer=jieba` indexes; use Java or SQL for that tokenizer.
 
 Choose tokenizer settings based on the query pattern:
 
@@ -106,10 +167,55 @@ Choose tokenizer settings based on the query pattern:
 |---|---|
 | Natural-language English text | Use the default tokenizer, or enable `tantivy.stem=true` and `tantivy.remove-stop-words=true`. |
 | Short fragments or substring-like lookup | Use `tantivy.tokenizer=ngram` and tune `tantivy.ngram.min-gram` / `tantivy.ngram.max-gram`. |
-| Chinese text | Use `tantivy.tokenizer=jieba`. |
+| Chinese text | Use SQL or Java with `tantivy.tokenizer=jieba`; PyPaimon can query these indexes but does not build them. |
 | Exact token matching | Use `tantivy.tokenizer=raw` or `tantivy.tokenizer=whitespace`, depending on how the field is written. |
 
 Set `tantivy.with-position=false` to reduce index size when phrase queries are not needed.
+
+## Drop Full-Text Index
+
+<Tabs groupId="fulltext-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index(
+    "content",
+    index_type="tantivy-fulltext",
+)
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "content",
+    index_type="tantivy-fulltext",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
 
 ## Full-Text Search
 
@@ -406,7 +512,9 @@ Supported `occur` values are `should`, `must`, and `must_not`.
 - `fuzziness` must be `0`, `1`, `2`, `null`, or `auto`.
 - `max_expansions` and `prefix_length` are part of the DSL for LanceDB compatibility. The current
   Tantivy backend accepts the default values only: `max_expansions=50` and `prefix_length=0`.
-- PyPaimon can parse the same DSL, but its local Tantivy reader does not support every advanced
-  scoring option yet. Unsupported options fail fast instead of changing query semantics silently.
+- PyPaimon parses the same DSL and fails fast for unsupported Tantivy options instead of
+  changing query semantics silently.
+- PyPaimon can query Java/SQL-built `jieba` indexes for `match` queries. `match_phrase`
+  on `jieba` indexes is not supported by the local Python reader.
 - Multi-column queries such as `multi_match` require full-text indexes for every referenced
   column.
