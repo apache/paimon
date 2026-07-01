@@ -55,7 +55,9 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -66,6 +68,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link CommittingWriteOperatorCoordinator}. */
 public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTestBase {
@@ -301,6 +304,41 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         assertThat(snapshot.commitIdentifier()).isEqualTo(lastCp);
         Collections.sort(expected);
         assertResults(table, expected.toArray(new String[0]));
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCheckpointFutureCompletedExceptionallyOnSnapshotFailure() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 1);
+        RuntimeException expected = new RuntimeException("snapshotState boom");
+        CommittingWriteOperatorCoordinator coordinator =
+                new CommittingWriteOperatorCoordinator(
+                        context,
+                        commitContext ->
+                                new FailingSnapshotCommitter(
+                                        new StoreCommitter(
+                                                table,
+                                                table.newStreamWriteBuilder()
+                                                        .withCommitUser(commitContext.commitUser())
+                                                        .newCommit(),
+                                                commitContext),
+                                        expected),
+                        true,
+                        commitUser,
+                        false);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+        coordinator.checkpointCoordinator(1L, checkpoint);
+        coordinator.waitProcessAllActions();
+
+        assertThat(checkpoint.isCompletedExceptionally()).isTrue();
+        assertThatThrownBy(checkpoint::get).hasCause(expected);
+        assertThat(failureCause).isSameAs(expected);
+        failureCause = null;
         coordinator.close();
     }
 
@@ -857,6 +895,73 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         @Override
         public CheckpointCoordinator getCheckpointCoordinator() {
             return null;
+        }
+    }
+
+    /** {@link Committer} decorator whose {@link #snapshotState()} always throws. */
+    private static class FailingSnapshotCommitter
+            implements Committer<Committable, ManifestCommittable> {
+
+        private final Committer<Committable, ManifestCommittable> delegate;
+        private final RuntimeException failure;
+
+        FailingSnapshotCommitter(
+                Committer<Committable, ManifestCommittable> delegate, RuntimeException failure) {
+            this.delegate = delegate;
+            this.failure = failure;
+        }
+
+        @Override
+        public void snapshotState() {
+            throw failure;
+        }
+
+        @Override
+        public boolean forceCreatingSnapshot() {
+            return delegate.forceCreatingSnapshot();
+        }
+
+        @Override
+        public ManifestCommittable combine(
+                long checkpointId, long watermark, List<Committable> committables)
+                throws IOException {
+            return delegate.combine(checkpointId, watermark, committables);
+        }
+
+        @Override
+        public ManifestCommittable combine(
+                long checkpointId,
+                long watermark,
+                ManifestCommittable t,
+                List<Committable> committables) {
+            return delegate.combine(checkpointId, watermark, t, committables);
+        }
+
+        @Override
+        public void commit(List<ManifestCommittable> globalCommittables)
+                throws IOException, InterruptedException {
+            delegate.commit(globalCommittables);
+        }
+
+        @Override
+        public int filterAndCommit(
+                List<ManifestCommittable> globalCommittables,
+                boolean checkAppendFiles,
+                boolean partitionMarkDoneRecoverFromState)
+                throws IOException {
+            return delegate.filterAndCommit(
+                    globalCommittables, checkAppendFiles, partitionMarkDoneRecoverFromState);
+        }
+
+        @Override
+        public Map<Long, List<Committable>> groupByCheckpoint(
+                Collection<Committable> committables) {
+            return delegate.groupByCheckpoint(committables);
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
         }
     }
 
