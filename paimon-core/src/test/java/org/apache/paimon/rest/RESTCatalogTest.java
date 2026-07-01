@@ -86,6 +86,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
@@ -638,6 +639,85 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Assertions.assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale", null));
+    }
+
+    @Test
+    public void testListSystemTablesPaged() throws Exception {
+        String[] systemTableNames =
+                SystemTableLoader.loadGlobalTableNames(options).stream()
+                        .sorted()
+                        .toArray(String[]::new);
+        List<String> allTablePrefixedNames =
+                Arrays.stream(systemTableNames)
+                        .filter(tableName -> tableName.startsWith("all_table"))
+                        .collect(Collectors.toList());
+
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, 1, pagedTables.getNextPageToken(), null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[1]);
+        assertEquals(systemTableNames[1], pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "all_table%", null);
+        assertThat(pagedTables.getElements()).containsExactlyElementsOf(allTablePrefixedNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "catalog_%", null);
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.TABLE.toString());
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        PagedList<Table> pagedTableDetails =
+                catalog.listTableDetailsPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertPagedTableDetails(pagedTableDetails, 1, systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, "all_table%", TableType.TABLE.toString());
+        assertPagedTableDetails(
+                pagedTableDetails,
+                allTablePrefixedNames.size(),
+                allTablePrefixedNames.toArray(new String[0]));
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTableDetails.getElements()).isEmpty();
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTablesPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTableDetailsPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
     }
 
     @Test
