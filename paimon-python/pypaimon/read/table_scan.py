@@ -42,10 +42,23 @@ class TableScan:
         self.predicate = predicate
         self.limit = limit
         self.partition_predicate = partition_predicate
+        self._read_type = None
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
-        return self.file_scanner.scan()
+        auth_result = self._auth_query()
+        plan = self.file_scanner.scan()
+        if auth_result is not None:
+            plan = auth_result.convert_plan(plan)
+        return plan
+
+    def _auth_query(self):
+        fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
+        if fn is None:
+            return None
+        select = [f.name for f in self._read_type] if self._read_type else None
+        return fn(select)
 
     def scan_with_stats(self) -> Tuple[Plan, ScanStats]:
         """Run :meth:`plan` while recording manifest / pruning counters.

@@ -31,6 +31,7 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       SplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.table.row.row_kind import RowKind
 
 ROW_KIND_COLUMN = "_row_kind"
 
@@ -119,14 +120,43 @@ class TableRead:
             for split in splits:
                 if limit is not None and count >= limit:
                     return
-                reader = self._create_split_read(split).create_reader()
+                reader = self._create_reader_for_split(split)
                 try:
-                    for batch in iter(reader.read_batch, None):
-                        for row in iter(batch.next, None):
-                            yield row
-                            count += 1
-                            if limit is not None and count >= limit:
-                                return
+                    if isinstance(reader, RecordBatchReader):
+                        blob_indices = getattr(reader, 'blob_field_indices', None)
+                        vector_indices = getattr(reader, 'vector_field_indices', None)
+                        file_io = self.table.file_io
+                        for arrow_batch in iter(reader.read_arrow_batch, None):
+                            has_rk = ROW_KIND_COLUMN in arrow_batch.schema.names
+                            if has_rk:
+                                rk_idx = arrow_batch.schema.get_field_index(ROW_KIND_COLUMN)
+                                data_cols = [j for j in range(arrow_batch.num_columns) if j != rk_idx]
+                            else:
+                                data_cols = list(range(arrow_batch.num_columns))
+                            for row_idx in range(arrow_batch.num_rows):
+                                row_tuple = tuple(
+                                    arrow_batch.column(j)[row_idx].as_py()
+                                    for j in data_cols
+                                )
+                                row = OffsetRow(
+                                    row_tuple, 0, len(data_cols),
+                                    file_io=file_io,
+                                    blob_field_indices=blob_indices,
+                                    vector_field_indices=vector_indices)
+                                if has_rk:
+                                    kind_str = arrow_batch.column(rk_idx)[row_idx].as_py()
+                                    row.set_row_kind_byte(RowKind.from_string(kind_str).value)
+                                yield row
+                                count += 1
+                                if limit is not None and count >= limit:
+                                    return
+                    else:
+                        for batch in iter(reader.read_batch, None):
+                            for row in iter(batch.next, None):
+                                yield row
+                                count += 1
+                                if limit is not None and count >= limit:
+                                    return
                 finally:
                     reader.close()
 
@@ -223,7 +253,7 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self._create_split_read(split, blob_parallelism).create_reader()
+            reader = self._create_reader_for_split(split, blob_parallelism)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -231,7 +261,8 @@ class TableRead:
                             batch = batch.slice(0, remaining)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
-                            batch = self._add_row_kind_column_to_batch(batch, "+I")
+                            if "_row_kind" not in batch.schema.names:
+                                batch = self._add_row_kind_column_to_batch(batch, "+I")
                         yield batch
                         if remaining is not None:
                             remaining -= batch.num_rows
@@ -387,10 +418,12 @@ class TableRead:
         """
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = self._create_split_read(split, blob_parallelism).create_reader()
+        reader = self._create_reader_for_split(split, blob_parallelism)
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
+                    if batch.num_rows == 0:
+                        continue
                     allowed = remaining_state.try_consume(batch.num_rows)
                     if allowed == 0:
                         break
@@ -398,7 +431,8 @@ class TableRead:
                         batch = batch.slice(0, allowed)
                     batch = self._project_batch_to_output(batch)
                     if self.include_row_kind:
-                        batch = self._add_row_kind_column_to_batch(batch, "+I")
+                        if "_row_kind" not in batch.schema.names:
+                            batch = self._add_row_kind_column_to_batch(batch, "+I")
                     out.append(batch)
                     if remaining_state.exhausted():
                         break
@@ -629,14 +663,16 @@ class TableRead:
             dataset = TorchDataset(self, splits)
             return dataset
 
-    def _create_split_read(self, split: Split, blob_parallelism: int = 1) -> SplitRead:
-        sr = self._build_split_read(split)
+    def _create_split_read(self, split: Split, read_type=None, blob_parallelism: int = 1) -> SplitRead:
+        sr = self._build_split_read(split, read_type)
         sr._blob_parallelism = blob_parallelism
         return sr
 
-    def _build_split_read(self, split: Split) -> SplitRead:
+    def _build_split_read(self, split: Split, read_type=None) -> SplitRead:
+        effective_read_type = read_type if read_type is not None else self.read_type
+        scan_read_type = read_type if read_type is not None else self._scan_read_type
         if self.table.is_primary_key_table and not split.raw_convertible:
-            inner_read_type = self._scan_read_type
+            inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
@@ -670,10 +706,8 @@ class TableRead:
                         # Drop the injected seq columns: project back to the
                         # user's requested (flat) columns in order.
                         outer_extract_name_paths = [
-                            [f.name] for f in self.read_type]
+                            [f.name] for f in effective_read_type]
             if outer_extract_name_paths is None and self._needs_output_projection():
-                # Split readers own the output projection for iterator reads;
-                # the TableRead Arrow projection below is a final guard.
                 outer_extract_name_paths = self._output_extract_name_paths()
             return MergeFileSplitRead(
                 table=self.table,
@@ -683,7 +717,7 @@ class TableRead:
                 row_tracking_enabled=False,
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self.read_type if outer_extract_name_paths else None),
+                    effective_read_type if outer_extract_name_paths else None),
                 limit=self.limit,
             )
         elif self.table.options.data_evolution_enabled():
@@ -699,7 +733,7 @@ class TableRead:
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                read_type=self._scan_read_type,
+                read_type=scan_read_type,
                 split=split,
                 row_tracking_enabled=True,
                 nested_name_paths=self.nested_name_paths,
@@ -709,7 +743,7 @@ class TableRead:
                 limit=self.limit,
             )
         else:
-            inner_read_type = self._scan_read_type
+            inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
@@ -733,7 +767,7 @@ class TableRead:
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self.read_type if outer_extract_name_paths else None),
+                    effective_read_type if outer_extract_name_paths else None),
                 limit=self.limit,
             )
 
@@ -793,6 +827,53 @@ class TableRead:
                     "table schema" % (top_name,))
             widened.append(field)
         return widened
+
+    def _create_reader_for_split(self, split, blob_parallelism=1):
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+
+        auth_result = None
+        if isinstance(split, QueryAuthSplit):
+            auth_result = split.auth_result
+            split = split.split
+
+        if auth_result is not None:
+            return self._authed_reader(split, auth_result, blob_parallelism)
+        else:
+            return self._create_split_read(split, blob_parallelism=blob_parallelism).create_reader()
+
+    def _authed_reader(self, split, auth_result, blob_parallelism=1):
+        from pypaimon.read.reader.auth_masking_reader import (
+            AuthFilterReader, AuthMaskingReader, ColumnProjectReader)
+
+        table_fields = self.table.fields
+        read_fields = self.read_type
+
+        extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
+        effective_read_type = read_fields
+        if extra_fields:
+            effective_read_type = read_fields + extra_fields
+
+        reader = self._create_split_read(
+            split, read_type=effective_read_type,
+            blob_parallelism=blob_parallelism).create_reader()
+
+        if not isinstance(reader, RecordBatchReader):
+            from pypaimon.read.reader.auth_masking_reader import RecordReaderToBatchAdapter
+            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+
+        filter_fn = auth_result.extract_row_filter()
+        if filter_fn:
+            reader = AuthFilterReader(reader, filter_fn)
+
+        if auth_result.column_masking:
+            reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
+
+        if extra_fields:
+            original_columns = [f.name for f in read_fields]
+            reader = ColumnProjectReader(reader, original_columns)
+
+        return reader
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:

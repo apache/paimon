@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Generic, List, Optional
 
+from pypaimon.api.api_request import RESTRequest
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import T, json_field
 from pypaimon.common.options import Options
@@ -600,3 +601,14 @@ class ListFunctionsGloballyResponse(PagedResponse[Identifier]):
             result["functions"] = None
         result["nextPageToken"] = self.next_page_token
         return result
+
+
+@dataclass
+class AuthTableQueryRequest(RESTRequest):
+    select: Optional[List[str]] = json_field("select", default=None)
+
+
+@dataclass
+class AuthTableQueryResponse(RESTResponse):
+    filter: Optional[List[str]] = json_field("filter", default=None)
+    column_masking: Optional[Dict[str, str]] = json_field("columnMasking", default=None)
