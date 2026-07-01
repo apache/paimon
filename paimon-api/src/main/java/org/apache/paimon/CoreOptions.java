@@ -2527,8 +2527,9 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to write NULL for a descriptor BLOB value when the "
-                                    + "referenced file does not exist during Flink writes. When "
-                                    + "false, the write fails when the descriptor is read.");
+                                    + "referenced file or HTTP resource does not exist during Flink "
+                                    + "writes. When false, the write fails when the descriptor is "
+                                    + "read.");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
