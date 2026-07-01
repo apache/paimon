@@ -79,12 +79,14 @@ class ReadBuilder:
         return self
 
     def new_scan(self) -> TableScan:
-        return TableScan(
+        scan = TableScan(
             table=self.table,
             predicate=self._predicate,
             limit=self._limit,
             partition_predicate=self._partition_filter,
         )
+        scan._read_type = self.read_type()
+        return scan
 
     def new_read(self) -> TableRead:
         return TableRead(

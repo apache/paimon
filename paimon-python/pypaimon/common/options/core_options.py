@@ -784,6 +784,13 @@ class CoreOptions:
         )
     )
 
+    QUERY_AUTH_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("query-auth.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable query auth.")
+    )
+
     PARTITION_DEFAULT_NAME: ConfigOption[str] = (
         ConfigOptions.key("partition.default-name")
         .string_type()
@@ -1188,3 +1195,7 @@ class CoreOptions:
 
     def dynamic_partition_overwrite(self) -> bool:
         return self.options.get(CoreOptions.DYNAMIC_PARTITION_OVERWRITE)
+
+    @property
+    def query_auth_enabled(self) -> bool:
+        return self.options.get(CoreOptions.QUERY_AUTH_ENABLED)
