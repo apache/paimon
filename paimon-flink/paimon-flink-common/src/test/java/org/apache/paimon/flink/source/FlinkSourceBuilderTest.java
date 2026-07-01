@@ -22,16 +22,25 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 
+import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -113,5 +122,64 @@ public class FlinkSourceBuilderTest {
         table = createTable("t6", false, 2, false);
         builder = new FlinkSourceBuilder(table);
         assertTrue(builder.isUnordered());
+    }
+
+    @Test
+    public void testBuildWrapsStaticSourceWithPaimonDataStreamSource() throws Exception {
+        Table table = createTable("static_source", false, -1, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                new FlinkSourceBuilder(table).env(env).sourceBounded(true).build();
+
+        assertThat(dataStream.getTransformation()).isInstanceOf(SourceTransformation.class);
+        SourceTransformation<?, ?, ?> transformation =
+                (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
+        assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testBuildWrapsContinuousSourceWithPaimonDataStreamSource() throws Exception {
+        Table table = createTable("continuous_source", false, -1, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                new FlinkSourceBuilder(table).env(env).sourceBounded(false).build();
+
+        assertThat(dataStream.getTransformation()).isInstanceOf(SourceTransformation.class);
+        SourceTransformation<?, ?, ?> transformation =
+                (SourceTransformation<?, ?, ?>) dataStream.getTransformation();
+        assertThat(transformation.getSource()).isInstanceOf(PaimonDataStreamSource.class);
+    }
+
+    @Test
+    public void testMonitorSourceBuildSourceWrapsWithPaimonDataStreamSource() throws Exception {
+        Table table = createTable("monitor_source", false, -1, true);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStream<RowData> dataStream =
+                MonitorSource.buildSource(
+                        env,
+                        "source",
+                        InternalTypeInfo.of(toLogicalType(table.rowType())),
+                        table.newReadBuilder(),
+                        10,
+                        false,
+                        false,
+                        false,
+                        null,
+                        true,
+                        null,
+                        table);
+
+        assertThat(dataStream.getTransformation().getTransitivePredecessors())
+                .filteredOn(Transformation.class::isInstance)
+                .filteredOn(transformation -> transformation instanceof SourceTransformation)
+                .anySatisfy(
+                        transformation ->
+                                assertThat(
+                                                ((SourceTransformation<?, ?, ?>) transformation)
+                                                        .getSource())
+                                        .isInstanceOf(PaimonDataStreamSource.class));
     }
 }

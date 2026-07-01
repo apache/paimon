@@ -19,12 +19,19 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.jdbc.JdbcCatalogFactory;
+import org.apache.paimon.jdbc.JdbcCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
@@ -37,9 +44,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Lineage utilities for building {@link SourceLineageVertex} and {@link LineageVertex} from a
@@ -57,8 +66,13 @@ public class LineageUtils {
             new HashSet<>(
                     Arrays.asList(CatalogOptions.WAREHOUSE.key(), CatalogOptions.METASTORE.key()));
 
+    private static final String DEFAULT_CATALOG_IDENTIFIER = FlinkCatalogFactory.IDENTIFIER;
+
     private static final Set<String> PAIMON_OPTION_KEYS =
-            CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
+            Stream.of(CoreOptions.getOptions(), IcebergOptions.getOptions())
+                    .flatMap(List::stream)
+                    .map(opt -> opt.key())
+                    .collect(Collectors.toSet());
 
     /** Extracts the {@link CatalogContext} from a table, or null if not available. */
     @Nullable
@@ -73,9 +87,9 @@ public class LineageUtils {
     }
 
     /**
-     * Builds the config map for a dataset facet. Includes filtered Paimon {@link CoreOptions},
-     * partition keys, primary keys, and a safe subset of catalog-level options (warehouse,
-     * metastore) prefixed with {@code "catalog."}.
+     * Builds the config map for a dataset facet from a {@link Table}. Includes {@link CoreOptions}
+     * and {@link IcebergOptions}, partition keys, primary keys, and a safe subset of catalog-level
+     * options prefixed with {@code "catalog."}.
      */
     private static Map<String, String> buildConfigMap(
             Table table, @Nullable CatalogContext catalogContext) {
@@ -122,6 +136,27 @@ public class LineageUtils {
         return DEFAULT_NAMESPACE;
     }
 
+    @VisibleForTesting
+    static String resolveNameByMetastore(Table table, @Nullable String defaultName) {
+        if (defaultName != null) {
+            return defaultName;
+        }
+
+        CatalogContext ctx = catalogContext(table);
+        if (ctx != null) {
+            Options catalogOptions = ctx.options();
+            // If jdbc metastore is used, use catalog-key as the catalog identifier.
+            if (JdbcCatalogFactory.IDENTIFIER.equals(
+                    catalogOptions.get(CatalogOptions.METASTORE))) {
+                String catalogKeyValue = catalogOptions.get(JdbcCatalogOptions.CATALOG_KEY);
+                if (!StringUtils.isNullOrWhitespaceOnly(catalogKeyValue)) {
+                    return catalogKeyValue + "." + table.fullName();
+                }
+            }
+        }
+        return DEFAULT_CATALOG_IDENTIFIER + "." + table.fullName();
+    }
+
     /**
      * Creates a {@link SourceLineageVertex} for a Paimon source table.
      *
@@ -134,10 +169,24 @@ public class LineageUtils {
         CatalogContext ctx = catalogContext(table);
         LineageDataset dataset =
                 new PaimonLineageDataset(
-                        name, getNamespace(table, ctx), buildConfigMap(table, ctx));
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table, ctx),
+                        buildConfigMap(table, ctx),
+                        table.rowType());
         Boundedness boundedness =
                 isBounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
         return new PaimonSourceLineageVertex(boundedness, Collections.singletonList(dataset));
+    }
+
+    /**
+     * Creates a {@link SourceLineageVertex} for a Paimon DataStream source table. The table name is
+     * derived from the table's full name, prefixed with the {@code catalog-key} if available.
+     *
+     * @param isBounded whether the source is bounded (batch) or unbounded (streaming)
+     * @param table the Paimon table
+     */
+    public static SourceLineageVertex sourceLineageVertex(boolean isBounded, Table table) {
+        return sourceLineageVertex(null, isBounded, table);
     }
 
     /**
@@ -150,7 +199,20 @@ public class LineageUtils {
         CatalogContext ctx = catalogContext(table);
         LineageDataset dataset =
                 new PaimonLineageDataset(
-                        name, getNamespace(table, ctx), buildConfigMap(table, ctx));
+                        resolveNameByMetastore(table, name),
+                        getNamespace(table, ctx),
+                        buildConfigMap(table, ctx),
+                        table.rowType());
         return new PaimonSinkLineageVertex(Collections.singletonList(dataset));
+    }
+
+    /**
+     * Creates a {@link LineageVertex} for a Paimon DataStream sink table. The table name is derived
+     * from the table's full name, prefixed with the {@code catalog-key} if available.
+     *
+     * @param table the Paimon table
+     */
+    public static LineageVertex sinkLineageVertex(Table table) {
+        return sinkLineageVertex(null, table);
     }
 }
