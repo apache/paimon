@@ -16,7 +16,7 @@
 # under the License.
 
 from collections import defaultdict
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
 import pyarrow as pa
@@ -185,6 +185,26 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier
         ).upsert(table, upsert_keys, self.update_cols)
 
+    def _merge_into(
+            self,
+            source: Any,
+            on,
+            when_matched: Sequence,
+            when_not_matched: Sequence,
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        from pypaimon.table.data_evolution_merge_into import merge_into
+
+        return merge_into(
+            self.table,
+            source,
+            on=on,
+            when_matched=when_matched,
+            when_not_matched=when_not_matched,
+            commit_user=self.commit_user,
+            commit_identifier=commit_identifier,
+        )
+
     def _update_by_predicate(
             self,
             predicate: Optional[Predicate],
@@ -342,6 +362,23 @@ class BatchTableUpdate(TableUpdate):
             predicate, assignments, BATCH_COMMIT_IDENTIFIER
         )
 
+    def merge_into(
+            self,
+            source: Any,
+            *,
+            on,
+            when_matched: Sequence = (),
+            when_not_matched: Sequence = (),
+    ) -> List[CommitMessage]:
+        """Prepare batch MERGE INTO commit messages."""
+        return self._merge_into(
+            source,
+            on,
+            when_matched,
+            when_not_matched,
+            BATCH_COMMIT_IDENTIFIER,
+        )
+
 
 class StreamTableUpdate(TableUpdate):
     """Stream-mode table update; the same instance may drive many rounds,
@@ -376,6 +413,24 @@ class StreamTableUpdate(TableUpdate):
         tagging the produced commit messages with ``commit_identifier``."""
         return self._update_by_predicate(
             predicate, assignments, commit_identifier
+        )
+
+    def merge_into(
+            self,
+            source: Any,
+            *,
+            on,
+            when_matched: Sequence = (),
+            when_not_matched: Sequence = (),
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Prepare stream MERGE INTO commit messages."""
+        return self._merge_into(
+            source,
+            on,
+            when_matched,
+            when_not_matched,
+            commit_identifier,
         )
 
 
