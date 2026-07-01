@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.apache.flink.metrics.groups.OperatorCoordinatorMetricGroup;
@@ -816,6 +817,10 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         @Override
         public OperatorID getOperatorId() {
             return operatorID;
+        }
+
+        public JobID getJobID() {
+            return new JobID();
         }
 
         @Override

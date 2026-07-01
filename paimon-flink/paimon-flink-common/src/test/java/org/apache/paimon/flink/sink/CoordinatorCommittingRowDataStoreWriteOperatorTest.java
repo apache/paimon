@@ -29,6 +29,7 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
@@ -322,6 +323,10 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         @Override
         public OperatorID getOperatorId() {
             return new OperatorID();
+        }
+
+        public JobID getJobID() {
+            return new JobID();
         }
 
         @Override
