@@ -33,7 +33,6 @@ from pypaimon.globalindex.create_global_index import (
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
     TANTIVY_FULLTEXT_IDENTIFIER,
-    TANTIVY_JIEBA_TOKENIZER,
     TANTIVY_NGRAM_TOKENIZER,
     TantivyFullTextIndexOptions,
 )
