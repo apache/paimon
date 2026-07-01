@@ -118,7 +118,7 @@ commit.close()
 ## Partial Updates
 
 You can update selected columns with Spark `MERGE INTO`, the Flink
-`data_evolution_merge_into` procedure, or the PyPaimon Ray `update` API. Only
+`data_evolution_merge_into` procedure, or the PyPaimon table update API. Only
 the updated column files are written; untouched columns remain in their original
 files.
 
@@ -208,25 +208,21 @@ Notes:
   `WHEN NOT MATCHED BY SOURCE` clause.
 - The Flink `data_evolution_merge_into` procedure currently supports updating
   or inserting columns, but not inserting new rows.
-- PyPaimon Ray APIs require `ray >= 2.50`; conditional expressions also require
-  the `datafusion` package.
 
 ## Self Updates
 
 Self updates transform existing column values in place. In Flink SQL, create a
 temporary source view from the `$row_tracking` system table and join by
-`_ROW_ID`. In PyPaimon, omit `source` and `on`; the `update` API uses `_ROW_ID`
-automatically.
+`_ROW_ID`. In PyPaimon, use the shard scan + rewrite workflow to read existing
+values and write the derived columns back.
 
 <Tabs groupId="data-evolution-self-update">
 
 <TabItem value="flink-sql" label="Flink SQL">
 
 ```sql
-CREATE TEMPORARY FUNCTION concat_string AS 'com.example.StringConcatUdf';
-
 CREATE TEMPORARY VIEW source_view AS
-SELECT _ROW_ID, concat_string(name) AS name
+SELECT _ROW_ID, b + c AS b
 FROM default.target_table$row_tracking;
 
 CALL sys.data_evolution_merge_into(
@@ -235,7 +231,7 @@ CALL sys.data_evolution_merge_into(
     '',
     'source_view',
     'TempT._ROW_ID=source_view._ROW_ID',
-    'name=source_view.name',
+    'b=source_view.b',
     2
 );
 ```
@@ -245,14 +241,26 @@ CALL sys.data_evolution_merge_into(
 <TabItem value="python-api" label="Python API">
 
 ```python
+import pyarrow as pa
+
 table = catalog.get_table("default.target_table")
 
 builder = table.new_batch_write_builder()
 table_update = builder.new_update()
-predicate = table_update.new_predicate_builder().equal("id", 1)
+table_update.with_read_projection(["b", "c"])
+table_update.with_update_type(["b"])
 
-messages = table_update.update_by_predicate(predicate, {"b": 100})
+updater = table_update.new_shard_updator(0, 1)
+reader = updater.arrow_reader()
+for batch in iter(reader.read_next_batch, None):
+    b = batch.column("b").to_pylist()
+    c = batch.column("c").to_pylist()
+    updater.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+        {"b": [bi + ci for bi, ci in zip(b, c)]},
+        schema=pa.schema([("b", pa.int32())]),
+    ))
 
+messages = updater.prepare_commit()
 commit = builder.new_commit()
 commit.commit(messages)
 commit.close()

@@ -83,6 +83,36 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
         return table
 
+    def _create_global_indexed_table_for_predicate_update(self):
+        options = dict(self.table_options)
+        options.update({
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+            'file.format': 'parquet',
+        })
+        table = self._create_table(options=options)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['old', 'indexed'],
+            'age': [10, 15],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+
+        self.assertEqual(
+            1,
+            table.create_global_index(
+                'name',
+                options={'sorted-index.records-per-range': '1000'},
+            ),
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['new', 'other'],
+            'age': [20, 30],
+            'city': ['LA', 'SF'],
+        }, schema=self.pa_schema))
+        return table
+
     def _do_update(self, table, data, columns):
         """End-to-end ``update_by_arrow_with_row_id`` + commit. Returns the
         commit messages so callers can inspect produced files."""
@@ -243,34 +273,23 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['age'].to_pylist(),
         )
 
-    def test_update_by_predicate_with_global_index_updates_unindexed_rows(self):
-        options = dict(self.table_options)
-        options.update({
-            'global-index.enabled': 'true',
-            'bucket': '-1',
-            'file.format': 'parquet',
-        })
-        table = self._create_table(options=options)
-        self._write_arrow(table, pa.Table.from_pydict({
-            'id': [1],
-            'name': ['old'],
-            'age': [10],
-            'city': ['NYC'],
-        }, schema=self.pa_schema))
+    def test_update_by_predicate_rejects_uncastable_assignment(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaises((pa.ArrowInvalid, pa.ArrowTypeError, ValueError)):
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'age': 'not-an-int'},
+            )
 
         self.assertEqual(
-            1,
-            table.create_global_index(
-                'name',
-                options={'sorted-index.records-per-range': '1000'},
-            ),
+            [25, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
         )
-        self._write_arrow(table, pa.Table.from_pydict({
-            'id': [2],
-            'name': ['new'],
-            'age': [20],
-            'city': ['LA'],
-        }, schema=self.pa_schema))
+
+    def test_update_by_predicate_with_global_index_updates_unindexed_rows(self):
+        table = self._create_global_indexed_table_for_predicate_update()
 
         pb = table.new_read_builder().new_predicate_builder()
         self._do_update_by_predicate(
@@ -284,7 +303,41 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             result['id'].to_pylist(),
             result['age'].to_pylist(),
         ))
-        self.assertEqual({1: 10, 2: 21}, ages_by_id)
+        self.assertEqual({1: 10, 2: 15, 3: 21, 4: 30}, ages_by_id)
+
+    def test_update_by_predicate_with_global_index_falls_back_to_full_scan(self):
+        table = self._create_global_indexed_table_for_predicate_update()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_update_by_predicate(
+            table,
+            pb.equal('city', 'LA'),
+            {'age': 88},
+        )
+
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 88, 3: 88, 4: 30}, ages_by_id)
+
+    def test_update_by_predicate_with_global_index_handles_compound_predicate(self):
+        table = self._create_global_indexed_table_for_predicate_update()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        predicate = pb.or_predicates([
+            pb.equal('name', 'old'),
+            pb.equal('city', 'SF'),
+        ])
+        self._do_update_by_predicate(table, predicate, {'age': 77})
+
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 77, 2: 15, 3: 20, 4: 77}, ages_by_id)
 
     def test_update_by_predicate_resolves_time_travel_scan_snapshot(self):
         table = self._create_table()
@@ -303,6 +356,38 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         }, schema=self.pa_schema))
 
         travel_table = table.copy({'scan.tag-name': 'before_new'})
+        pb = travel_table.new_read_builder().new_predicate_builder()
+        msgs = self._do_update_by_predicate(
+            travel_table,
+            pb.equal('name', 'new'),
+            {'age': 21},
+        )
+
+        self.assertEqual([], msgs)
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 20}, ages_by_id)
+
+    def test_update_by_predicate_resolves_scan_snapshot_id(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['old'],
+            'age': [10],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [2],
+            'name': ['new'],
+            'age': [20],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        travel_table = table.copy({'scan.snapshot-id': str(snapshot.id)})
         pb = travel_table.new_read_builder().new_predicate_builder()
         msgs = self._do_update_by_predicate(
             travel_table,
