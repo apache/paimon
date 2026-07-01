@@ -18,13 +18,15 @@
 """BTree global index writer compatible with Java's SST-backed format."""
 
 import struct
-import uuid
 import zlib
 from typing import List, Optional
 
-from pypaimon.globalindex.block_compression import (
-    COMPRESSION_NONE,
-    crc32c,
+from pypaimon.globalindex.index_file_utils import (
+    PositionOutput,
+    new_global_index_file_name,
+    write_uncompressed_block,
+    write_var_len_int,
+    write_var_len_long,
 )
 from pypaimon.globalindex.result_entry import ResultEntry
 from pypaimon.globalindex.sorted_index_file_meta import SortedIndexFileMeta
@@ -39,47 +41,8 @@ _BLOCK_ALIGNED = 0
 _BLOCK_UNALIGNED = 1
 
 
-def _write_var_len_int(value: int) -> bytes:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    result = bytearray()
-    while value & ~0x7F:
-        result.append((value & 0x7F) | 0x80)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
-def _write_var_len_long(value: int) -> bytes:
-    if value < 0:
-        raise ValueError("negative value: v=%s" % value)
-    result = bytearray()
-    while value & ~0x7F:
-        result.append((value & 0x7F) | 0x80)
-        value >>= 7
-    result.append(value)
-    return bytes(result)
-
-
 def _write_block_handle(offset: int, size: int) -> bytes:
-    return _write_var_len_long(offset) + _write_var_len_int(size)
-
-
-class _PositionOutput:
-    def __init__(self, output_stream):
-        self._output_stream = output_stream
-        self._pos = 0
-
-    @property
-    def pos(self) -> int:
-        return self._pos
-
-    def write(self, data: bytes) -> None:
-        self._output_stream.write(data)
-        self._pos += len(data)
-
-    def close(self) -> None:
-        self._output_stream.close()
+    return write_var_len_long(offset) + write_var_len_int(size)
 
 
 class _BlockWriter:
@@ -97,9 +60,9 @@ class _BlockWriter:
 
     def add(self, key: bytes, value: bytes) -> None:
         start_position = len(self._block)
-        self._block.extend(_write_var_len_int(len(key)))
+        self._block.extend(write_var_len_int(len(key)))
         self._block.extend(key)
-        self._block.extend(_write_var_len_int(len(value)))
+        self._block.extend(write_var_len_int(len(value)))
         self._block.extend(value)
         end_position = len(self._block)
 
@@ -137,7 +100,7 @@ class _BlockWriter:
 
 
 class _SstFileWriter:
-    def __init__(self, out: _PositionOutput, block_size: int):
+    def __init__(self, out: PositionOutput, block_size: int):
         self._out = out
         self._block_size = block_size
         self._data_block_writer = _BlockWriter()
@@ -169,13 +132,9 @@ class _SstFileWriter:
 
     def _write_block(self, block_writer: _BlockWriter):
         block = block_writer.finish()
-        block_offset = self._out.pos
-        self._out.write(block)
-        self._out.write(
-            struct.pack('<B', COMPRESSION_NONE)
-            + struct.pack('<I', crc32c(block, COMPRESSION_NONE)))
+        block_info = write_uncompressed_block(self._out, block)
         block_writer.reset()
-        return block_offset, len(block)
+        return block_info.offset, block_info.length
 
 
 class BTreeIndexWriter:
@@ -192,8 +151,7 @@ class BTreeIndexWriter:
         key_serializer,
         block_size: int = 64 * 1024,
     ):
-        self.file_name = (
-            "%s-global-index-%s.index" % (BTREE_IDENTIFIER, uuid.uuid4()))
+        self.file_name = new_global_index_file_name(BTREE_IDENTIFIER)
         self._file_io = file_io
         self._index_path = index_path.rstrip('/')
         self._key_serializer = key_serializer
@@ -206,7 +164,7 @@ class BTreeIndexWriter:
         self._closed = False
 
         self._file_io.check_or_mkdirs(self._index_path)
-        self._output = _PositionOutput(
+        self._output = PositionOutput(
             self._file_io.new_output_stream(self._file_path()))
         self._sst = _SstFileWriter(self._output, block_size)
 
@@ -262,9 +220,9 @@ class BTreeIndexWriter:
             return
 
         value = bytearray()
-        value.extend(_write_var_len_int(len(self._current_row_ids)))
+        value.extend(write_var_len_int(len(self._current_row_ids)))
         for row_id in self._current_row_ids:
-            value.extend(_write_var_len_long(row_id))
+            value.extend(write_var_len_long(row_id))
         self._current_row_ids = []
         self._sst.put(self._key_serializer.serialize(self._last_key), bytes(value))
 
