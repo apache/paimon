@@ -350,7 +350,7 @@ case class PaimonSparkWriter(
     ) {
       val strategy = coreOptions.clusteringStrategy(clusteringColumns.size())
       val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
-      input = sorter.sort(ctx.data)
+      input = sorter.sort(input)
     }
     writeWithoutBucket(ctx, input)
   }
