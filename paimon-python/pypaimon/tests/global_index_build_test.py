@@ -25,10 +25,10 @@ import types
 
 import pyarrow as pa
 
-from pypaimon.globalindex.create_global_index import (
-    _filter_non_indexable_splits,
-    _split_by_global_index_shard,
-    _split_one_by_contiguous_row_range,
+from pypaimon.globalindex.build_plan import (
+    filter_non_indexable_splits as _filter_non_indexable_splits,
+    split_by_global_index_shard as _split_by_global_index_shard,
+    split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
@@ -536,7 +536,7 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
-    def test_create_global_index_rejects_overlapping_existing_range(self):
+    def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
             {
@@ -553,11 +553,46 @@ class GlobalIndexBuildTest(
         snapshot = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(2, len(IndexFileHandler(table).scan(snapshot)))
 
-        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
-            table.create_global_index('id', options=options)
+        self.assertEqual(0, table.create_global_index('id', options=options))
 
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(2, len(IndexFileHandler(table).scan(latest_snapshot)))
+
+        self._write_arrow(table, pa.table(
+            {
+                'id': [5, 4],
+                'name': ['e', 'd'],
+                'age': [50, 40],
+                'city': ['v', 'u'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        self.assertEqual(1, table.create_global_index('id', options=options))
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = sorted(
+            IndexFileHandler(table).scan(latest_snapshot),
+            key=lambda entry: (
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.file_name,
+            ),
+        )
+        self.assertEqual(
+            [(0, 3), (0, 3), (4, 5)],
+            [
+                (
+                    entry.index_file.global_index_meta.row_range_start,
+                    entry.index_file.global_index_meta.row_range_end,
+                )
+                for entry in entries
+            ],
+        )
+        self.assertEqual(0, table.create_global_index('id', options=options))
+        self.assertEqual(
+            3,
+            len(IndexFileHandler(table).scan(
+                table.snapshot_manager().get_latest_snapshot())),
+        )
 
     def test_create_btree_global_index_for_java_scalar_types(self):
         schema = pa.schema([
@@ -702,6 +737,98 @@ class GlobalIndexBuildTest(
                     entry.index_file.global_index_meta.row_range_start,
                     entry.index_file.global_index_meta.row_range_end,
                     entry.index_file.row_count,
+                )
+                for entry in entries
+            ],
+        )
+
+    def test_create_vindex_global_index_skips_existing_ranges(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('embedding', pa.list_(pa.float32())),
+        ])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3],
+                'embedding': pa.array(
+                    [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
+                    type=pa.list_(pa.float32()),
+                ),
+            },
+            schema=schema,
+        ))
+
+        old_module = sys.modules.get("paimon_vindex")
+        sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            VectorIndexWriter=_FakeVectorIndexWriter)
+        _FakeVectorIndexWriter.instances = []
+        options = {
+            'global-index.row-count-per-shard': '2',
+            'ivf-flat.dimension': '2',
+        }
+        try:
+            self.assertEqual(
+                2,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+            self.assertEqual(
+                0,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+
+            self._write_arrow(table, pa.table(
+                {
+                    'id': [4, 5],
+                    'embedding': pa.array(
+                        [[0.2, 0.8], [0.9, 0.1]],
+                        type=pa.list_(pa.float32()),
+                    ),
+                },
+                schema=schema,
+            ))
+
+            self.assertEqual(
+                2,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+            self.assertEqual(
+                0,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+        finally:
+            if old_module is None:
+                sys.modules.pop("paimon_vindex", None)
+            else:
+                sys.modules["paimon_vindex"] = old_module
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = sorted(
+            IndexFileHandler(table).scan(snapshot),
+            key=lambda entry: entry.index_file.global_index_meta.row_range_start,
+        )
+        self.assertEqual(
+            [(0, 1), (2, 2), (3, 3), (4, 4)],
+            [
+                (
+                    entry.index_file.global_index_meta.row_range_start,
+                    entry.index_file.global_index_meta.row_range_end,
                 )
                 for entry in entries
             ],
@@ -966,6 +1093,25 @@ class GlobalIndexBuildTest(
                 (['b'], 4, 4),
                 (['c'], 6, 7),
                 (['c'], 8, 8),
+            ],
+            [
+                ([file.file_name for file in shard.files], row_range.from_, row_range.to)
+                for shard, row_range in shards
+            ],
+        )
+
+    def test_split_by_global_index_shard_uses_unindexed_ranges(self):
+        split = _FakeSplit([
+            _FakeFile('a', 0, 100),
+        ])
+
+        shards = _split_by_global_index_shard(
+            [split], 100, [Range(0, 9), Range(90, 99)])
+
+        self.assertEqual(
+            [
+                (['a'], 0, 9),
+                (['a'], 90, 99),
             ],
             [
                 ([file.file_name for file in shard.files], row_range.from_, row_range.to)

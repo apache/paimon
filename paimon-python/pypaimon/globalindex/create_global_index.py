@@ -33,6 +33,12 @@ from pypaimon.globalindex.bitmap.bitmap_index_writer import (
     BITMAP_IDENTIFIER,
     BitmapIndexWriter,
 )
+from pypaimon.globalindex.build_plan import (
+    filter_non_indexable_splits as _filter_non_indexable_splits,
+    split_by_contiguous_unindexed_row_range as _split_by_contiguous_unindexed_row_range,
+    split_by_global_index_shard as _split_by_global_index_shard,
+    unindexed_row_ranges as _unindexed_row_ranges,
+)
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
@@ -49,11 +55,9 @@ from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
 )
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
-from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
-from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.write.commit_message import CommitMessage
 
 
@@ -156,11 +160,23 @@ class GlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        splits = scan.plan().splits()
+        plan = scan.plan()
+        splits = plan.splits()
         if not splits:
             return []
 
         index_field = self._table.field_dict[self._index_columns[0]]
+        snapshot = self._snapshot_for_plan(plan)
+        unindexed_ranges = _unindexed_row_ranges(
+            self._table,
+            snapshot,
+            partition_filter,
+            index_field.id,
+            self._index_type,
+        )
+        if not unindexed_ranges:
+            return []
+
         if self._index_type in _GENERIC_INDEX_IDENTIFIERS:
             splits = _filter_non_indexable_splits(
                 self._table, splits, self._index_columns)
@@ -180,12 +196,19 @@ class GlobalIndexBuilder:
 
         if self._index_type in _SORTED_INDEX_IDENTIFIERS:
             return self._build_sorted_index(
-                splits, index_field, table_read, index_path)
+                splits, unindexed_ranges, index_field, table_read, index_path)
         return self._build_generic_index(
-            splits, index_field, table_read, index_path)
+            splits, unindexed_ranges, index_field, table_read, index_path)
+
+    def _snapshot_for_plan(self, plan):
+        snapshot_id = getattr(plan, "snapshot_id", None)
+        snapshot_manager = self._table.snapshot_manager()
+        if snapshot_id is not None:
+            return snapshot_manager.get_snapshot_by_id(snapshot_id)
+        return snapshot_manager.get_latest_snapshot()
 
     def _build_sorted_index(
-        self, splits, index_field, table_read, index_path: str
+        self, splits, unindexed_ranges, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
         key_serializer = create_serializer(index_field.type)
         configured_records_per_range = (
@@ -198,8 +221,9 @@ class GlobalIndexBuilder:
         )
 
         messages = []
-        for split in _split_by_contiguous_row_range(splits):
-            row_range = _calc_row_range(split)
+        for split, row_range in _split_by_contiguous_unindexed_row_range(
+            splits, unindexed_ranges
+        ):
             table = table_read.to_arrow([split])
             if table is None or table.num_rows == 0:
                 continue
@@ -208,6 +232,7 @@ class GlobalIndexBuilder:
                 self._index_columns[0],
                 SpecialFields.ROW_ID.name,
                 key_serializer,
+                row_range,
             )
             if not rows:
                 continue
@@ -259,7 +284,7 @@ class GlobalIndexBuilder:
         raise ValueError("Unsupported sorted global index type: %s" % self._index_type)
 
     def _build_generic_index(
-        self, splits, index_field, table_read, index_path: str
+        self, splits, unindexed_ranges, index_field, table_read, index_path: str
     ) -> List[CommitMessage]:
         rows_per_shard = self._core_options.global_index_row_count_per_shard()
         if rows_per_shard <= 0:
@@ -268,10 +293,10 @@ class GlobalIndexBuilder:
             )
 
         messages = []
-        for split, row_range in _split_by_global_index_shard(
-            splits, rows_per_shard
+        for index_split, index_range in _split_by_global_index_shard(
+            splits, rows_per_shard, unindexed_ranges
         ):
-            table = table_read.to_arrow([split])
+            table = table_read.to_arrow([index_split])
             if table is None or table.num_rows == 0:
                 continue
 
@@ -281,14 +306,14 @@ class GlobalIndexBuilder:
                     table,
                     self._index_columns[0],
                     SpecialFields.ROW_ID.name,
-                    row_range,
+                    index_range,
                 ):
-                    writer.write(value, row_id - row_range.from_)
+                    writer.write(value, row_id - index_range.from_)
 
                 index_adds = _to_index_manifest_entries(
                     self._table,
-                    split.partition,
-                    row_range,
+                    index_split.partition,
+                    index_range,
                     index_field.id,
                     self._index_type,
                     writer.finish(),
@@ -298,7 +323,7 @@ class GlobalIndexBuilder:
             if index_adds:
                 messages.append(
                     CommitMessage(
-                        partition=tuple(split.partition.values),
+                        partition=tuple(index_split.partition.values),
                         bucket=0,
                         new_files=[],
                         index_adds=index_adds,
@@ -385,229 +410,12 @@ def _merged_options(table, options: Optional[Dict[str, object]]) -> Options:
     return Options(merged)
 
 
-def _calc_row_range(split) -> Range:
-    ranges = []
-    for file in split.files:
-        row_range = file.row_id_range()
-        if row_range is None:
-            raise ValueError(
-                "Cannot build global index because file '%s' has no row id range."
-                % file.file_name
-            )
-        ranges.append(row_range)
-    if not ranges:
-        raise ValueError("Cannot build global index for an empty split.")
-    merged = Range.sort_and_merge_overlap(ranges, True, True)
-    return Range(merged[0].from_, merged[-1].to)
-
-
-def _split_by_contiguous_row_range(splits):
-    result = []
-    for split in splits:
-        result.extend(_split_one_by_contiguous_row_range(split))
-    return result
-
-
-def _filter_non_indexable_splits(table, splits, index_columns):
-    boundary = _find_min_non_indexable_row_id(
-        table.schema_manager,
-        [file for split in splits for file in split.files],
-        index_columns,
-    )
-    if boundary is None:
-        return splits
-
-    result = []
-    for split in splits:
-        files = [
-            file for file in split.files
-            if file.row_id_range() is not None
-            and file.row_id_range().from_ < boundary
-        ]
-        if files:
-            result.append(_copy_split_with_files(split, files))
-    return result
-
-
-def _find_min_non_indexable_row_id(schema_manager, files, index_columns):
-    schema_contains_columns = {}
-    index_column_set = set(index_columns)
-    boundary = None
-    for file in files:
-        row_range = file.row_id_range()
-        if row_range is None:
-            continue
-
-        schema_id = file.schema_id
-        if schema_id not in schema_contains_columns:
-            schema = schema_manager.get_schema(schema_id)
-            schema_field_names = {field.name for field in schema.fields}
-            schema_contains_columns[schema_id] = (
-                index_column_set.issubset(schema_field_names)
-            )
-        if not schema_contains_columns[schema_id]:
-            if boundary is None or row_range.from_ < boundary:
-                boundary = row_range.from_
-    return boundary
-
-
-def _split_by_global_index_shard(splits, rows_per_shard):
-    if rows_per_shard <= 0:
-        raise ValueError(
-            "Option 'global-index.row-count-per-shard' must be greater than 0."
-        )
-
-    groups = {}
-    for split in splits:
-        key = (_partition_key(split.partition), split.bucket)
-        if key not in groups:
-            groups[key] = {
-                "partition": split.partition,
-                "bucket": split.bucket,
-                "files": [],
-            }
-        for file in split.files:
-            if file.row_id_range() is None:
-                continue
-            groups[key]["files"].append(file)
-
-    result = []
-    for group in groups.values():
-        files_by_shard = {}
-        for file in group["files"]:
-            file_range = file.row_id_range()
-            start_shard = file_range.from_ // rows_per_shard
-            end_shard = file_range.to // rows_per_shard
-            for shard_id in range(start_shard, end_shard + 1):
-                shard_start = shard_id * rows_per_shard
-                files_by_shard.setdefault(shard_start, []).append(file)
-
-        for shard_start in sorted(files_by_shard):
-            shard_end = shard_start + rows_per_shard - 1
-            shard_files = sorted(
-                files_by_shard[shard_start],
-                key=lambda file: file.row_id_range().from_,
-            )
-            current_group = []
-            current_group_end = None
-            for file in shard_files:
-                file_range = file.row_id_range()
-                if not current_group:
-                    current_group.append(file)
-                    current_group_end = file_range.to
-                elif file_range.from_ <= current_group_end + 1:
-                    current_group.append(file)
-                    current_group_end = max(current_group_end, file_range.to)
-                else:
-                    _append_shard_split(
-                        result,
-                        current_group,
-                        shard_start,
-                        shard_end,
-                        group["partition"],
-                        group["bucket"],
-                    )
-                    current_group = [file]
-                    current_group_end = file_range.to
-
-            if current_group:
-                _append_shard_split(
-                    result,
-                    current_group,
-                    shard_start,
-                    shard_end,
-                    group["partition"],
-                    group["bucket"],
-                )
-
-    return result
-
-
-def _partition_key(partition):
-    values = getattr(partition, "values", None)
-    return tuple(values) if values is not None else partition
-
-
-def _append_shard_split(
-    result,
-    files,
-    shard_start,
-    shard_end,
-    partition,
-    bucket,
-):
-    group_start = min(file.row_id_range().from_ for file in files)
-    group_end = max(file.row_id_range().to for file in files)
-    row_range = Range(max(group_start, shard_start), min(group_end, shard_end))
-    result.append((
-        DataSplit(
-            files=list(files),
-            partition=partition,
-            bucket=bucket,
-            raw_convertible=False,
-        ),
-        row_range,
-    ))
-
-
-def _split_one_by_contiguous_row_range(split):
-    for file in split.files:
-        if file.row_id_range() is None:
-            raise ValueError(
-                "Cannot build global index because file '%s' has no row id range."
-                % file.file_name
-            )
-
-    range_helper = RangeHelper(lambda file: file.row_id_range())
-    ranges = range_helper.merge_overlapping_ranges(split.files)
-    if not ranges:
-        return []
-
-    result = []
-    current_segment = []
-    current_max_row_id = None
-    for range_files in ranges:
-        min_row_id = min(file.row_id_range().from_ for file in range_files)
-        max_row_id = max(file.row_id_range().to for file in range_files)
-        if (
-            not current_segment
-            or current_max_row_id is None
-            or current_max_row_id >= min_row_id - 1
-        ):
-            current_segment.extend(range_files)
-            current_max_row_id = max_row_id
-        else:
-            result.append(_copy_split_with_files(split, current_segment))
-            current_segment = list(range_files)
-            current_max_row_id = max_row_id
-
-    if current_segment:
-        result.append(_copy_split_with_files(split, current_segment))
-    return result
-
-
-def _copy_split_with_files(split, files):
-    data_deletion_files = None
-    if getattr(split, "data_deletion_files", None) is not None:
-        index_by_file = {id(file): i for i, file in enumerate(split.files)}
-        data_deletion_files = [
-            split.data_deletion_files[index_by_file[id(file)]]
-            for file in files
-        ]
-    return DataSplit(
-        files=list(files),
-        partition=split.partition,
-        bucket=split.bucket,
-        raw_convertible=getattr(split, "raw_convertible", False),
-        data_deletion_files=data_deletion_files,
-    )
-
-
 def _extract_sorted_rows(
     table: pa.Table,
     index_column: str,
     row_id_column: str,
     key_serializer,
+    row_range: Optional[Range] = None,
 ):
     keys = table.column(index_column).to_pylist()
     row_ids = table.column(row_id_column).to_pylist()
@@ -615,7 +423,10 @@ def _extract_sorted_rows(
     for key, row_id in zip(keys, row_ids):
         if row_id is None:
             raise ValueError("Cannot build global index because _ROW_ID is null.")
-        rows.append((key, int(row_id)))
+        row_id = int(row_id)
+        if row_range is not None and not row_range.contains(row_id):
+            continue
+        rows.append((key, row_id))
 
     comparator = key_serializer.create_comparator()
 

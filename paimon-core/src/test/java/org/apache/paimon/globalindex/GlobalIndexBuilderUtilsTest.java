@@ -19,12 +19,17 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.io.PojoDataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
@@ -138,10 +143,69 @@ class GlobalIndexBuilderUtilsTest {
         assertThat(metas.get(0).globalIndexMeta().extraFieldIds()).isEqualTo(new int[] {2, 3});
     }
 
+    @Test
+    void testCreateShardIndexedSplitsUsesUnindexedRanges() {
+        List<ManifestEntry> entries = Arrays.asList(createEntry(0L, 100), createEntry(100L, 100));
+
+        List<IndexedSplit> splits =
+                GlobalIndexBuilderUtils.createShardIndexedSplits(
+                        entries,
+                        100,
+                        (partition, bucket) -> "/bucket-" + bucket,
+                        Collections.singletonList(new Range(0, 99)));
+
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).rowRanges()).containsExactly(new Range(0, 99));
+        assertThat(splits.get(0).dataSplit().dataFiles()).containsExactly(entries.get(0).file());
+    }
+
+    @Test
+    void testCreateShardIndexedSplitsCanSplitOneShardIntoMultipleRanges() {
+        List<ManifestEntry> entries = Collections.singletonList(createEntry(0L, 100));
+
+        List<IndexedSplit> splits =
+                GlobalIndexBuilderUtils.createShardIndexedSplits(
+                        entries,
+                        100,
+                        (partition, bucket) -> "/bucket-" + bucket,
+                        Arrays.asList(new Range(0, 9), new Range(90, 99)));
+
+        assertThat(splits).hasSize(2);
+        assertThat(splits.get(0).rowRanges()).containsExactly(new Range(0, 9));
+        assertThat(splits.get(1).rowRanges()).containsExactly(new Range(90, 99));
+        assertThat(splits.get(0).dataSplit()).isEqualTo(splits.get(1).dataSplit());
+    }
+
     private List<ResultEntry> createDummyResultEntries() throws IOException {
         String fileName = "test-index-" + UUID.randomUUID();
         Path filePath = indexPathFactory.toPath(fileName);
         fileIO.newOutputStream(filePath, false).close();
         return Collections.singletonList(new ResultEntry(fileName, 100, null));
+    }
+
+    private ManifestEntry createEntry(Long firstRowId, long rowCount) {
+        PojoDataFileMeta file =
+                new PojoDataFileMeta(
+                        "test-file-" + UUID.randomUUID(),
+                        1024L,
+                        rowCount,
+                        BinaryRow.EMPTY_ROW,
+                        BinaryRow.EMPTY_ROW,
+                        SimpleStats.EMPTY_STATS,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        0L,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        firstRowId,
+                        null);
+        return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
 }
