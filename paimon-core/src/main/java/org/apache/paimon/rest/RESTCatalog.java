@@ -82,6 +82,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
@@ -244,8 +245,7 @@ public class RESTCatalog implements Catalog {
             if (isSystemDatabase(databaseName)) {
                 CatalogUtils.validateNamePattern(this, tableNamePattern);
                 CatalogUtils.validateTableType(this, tableType);
-                return new PagedList<>(
-                        SystemTableLoader.loadGlobalTableNames(context.options()), null);
+                return listSystemTablesPaged(maxResults, pageToken, tableNamePattern, tableType);
             }
             return api.listTablesPaged(
                     databaseName, maxResults, pageToken, tableNamePattern, tableType);
@@ -266,8 +266,10 @@ public class RESTCatalog implements Catalog {
             if (isSystemDatabase(db)) {
                 CatalogUtils.validateNamePattern(this, tableNamePattern);
                 CatalogUtils.validateTableType(this, tableType);
+                PagedList<String> pagedSystemTableNames =
+                        listSystemTablesPaged(maxResults, pageToken, tableNamePattern, tableType);
                 List<Table> systemTables =
-                        SystemTableLoader.loadGlobalTableNames(context.options()).stream()
+                        pagedSystemTableNames.getElements().stream()
                                 .map(
                                         tableName -> {
                                             try {
@@ -278,7 +280,7 @@ public class RESTCatalog implements Catalog {
                                         })
                                 .filter(Objects::nonNull)
                                 .collect(Collectors.toList());
-                return new PagedList<>(systemTables, null);
+                return new PagedList<>(systemTables, pagedSystemTableNames.getNextPageToken());
             }
             PagedList<GetTableResponse> tables =
                     api.listTableDetailsPaged(
@@ -291,6 +293,75 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
         }
+    }
+
+    private PagedList<String> listSystemTablesPaged(
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType) {
+        if (StringUtils.isNotEmpty(tableNamePattern)) {
+            try {
+                RESTUtil.validatePrefixSqlPattern(tableNamePattern);
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException(e.getMessage());
+            }
+        }
+
+        List<String> tableNames =
+                SystemTableLoader.loadGlobalTableNames(context.options()).stream()
+                        .filter(tableName -> matchesNamePattern(tableName, tableNamePattern))
+                        .filter(tableName -> matchesTableType(tableType))
+                        .sorted()
+                        .collect(Collectors.toList());
+
+        Integer pageSize = maxResults != null && maxResults > 0 ? maxResults : null;
+        List<String> pagedTableNames = new ArrayList<>();
+        for (String tableName : tableNames) {
+            if (pageToken != null && tableName.compareTo(pageToken) <= 0) {
+                continue;
+            }
+            if (pageSize != null && pagedTableNames.size() >= pageSize) {
+                break;
+            }
+            pagedTableNames.add(tableName);
+        }
+
+        String nextPageToken =
+                pageSize != null && pagedTableNames.size() == pageSize
+                        ? pagedTableNames.get(pagedTableNames.size() - 1)
+                        : null;
+        return new PagedList<>(pagedTableNames, nextPageToken);
+    }
+
+    private boolean matchesNamePattern(String name, @Nullable String namePattern) {
+        if (StringUtils.isEmpty(namePattern)) {
+            return true;
+        }
+        return Pattern.compile(sqlPatternToRegex(namePattern)).matcher(name).matches();
+    }
+
+    private boolean matchesTableType(@Nullable String tableType) {
+        return StringUtils.isEmpty(tableType) || TableType.TABLE.toString().equals(tableType);
+    }
+
+    private String sqlPatternToRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        boolean escaped = false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (escaped) {
+                regex.append(c);
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '%') {
+                regex.append(".*");
+            } else {
+                regex.append(c);
+            }
+        }
+        return "^" + regex + "$";
     }
 
     @Override
