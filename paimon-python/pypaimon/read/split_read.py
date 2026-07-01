@@ -120,6 +120,7 @@ class SplitRead(ABC):
         self.value_arity = len(read_type)
         self.nested_name_paths = nested_name_paths
         self.limit = limit
+        self._blob_parallelism = 1
         # Snapshot the raw value-side schema before _create_key_value_fields
         # wraps it, so MergeFileSplitRead can hand per-value-field nullable
         # flags to merge functions that enforce NOT-NULL on every add().
@@ -280,10 +281,12 @@ class SplitRead(ABC):
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
             blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+            blob_parallelism = getattr(self, '_blob_parallelism', 1)
             format_reader = FormatBlobReader(self.table.file_io, file_path, read_file_fields,
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size,
-                                             row_indices=row_indices)
+                                             row_indices=row_indices,
+                                             blob_parallelism=blob_parallelism)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -999,9 +1002,11 @@ class DataEvolutionSplitRead(SplitRead):
                 self.table.options))
                 or (not CoreOptions.blob_as_descriptor(self.table.options)
                     and CoreOptions.blob_descriptor_fields(self.table.options))):
+            blob_parallelism = getattr(self, '_blob_parallelism', 1)
             reader = BlobInlineConvertReader(
                 reader, self.table,
-                prescan_reader_factory=lambda names: self._create_prescan_reader(names))
+                prescan_reader_factory=lambda names: self._create_prescan_reader(names),
+                blob_parallelism=blob_parallelism)
 
         return reader
 
@@ -1254,6 +1259,7 @@ class DataEvolutionSplitRead(SplitRead):
                 return None
 
         file_path = file.external_path if file.external_path else file.file_path
+        blob_parallelism = getattr(self, '_blob_parallelism', 1)
         return FormatBlobReader(
             self.table.file_io,
             file_path,
@@ -1263,6 +1269,7 @@ class DataEvolutionSplitRead(SplitRead):
             CoreOptions.blob_as_descriptor(self.table.options),
             batch_size=self.table.options.read_batch_size(),
             row_indices=row_indices,
+            blob_parallelism=blob_parallelism,
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

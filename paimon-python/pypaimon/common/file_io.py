@@ -48,6 +48,35 @@ def pread(stream, length: int, offset: int) -> bytes:
     return os.pread(stream.fileno(), length, offset)
 
 
+def read_file_range(file_io, path, offset, length):
+    """Read a byte range from a file. Thread-safe."""
+    stream = file_io.new_input_stream(path)
+    try:
+        if supports_pread(stream):
+            return pread(stream, length, offset)
+        stream.seek(offset)
+        return stream.read(length)
+    finally:
+        stream.close()
+
+
+def read_blobs_concurrent(file_io, blobs, parallelism):
+    """Read a list of Blobs concurrently via ThreadPool + pread."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _read_one(blob):
+        if blob is None:
+            return None
+        return blob.to_data()
+
+    non_null = [b for b in blobs if b is not None]
+    if not non_null:
+        return [None] * len(blobs)
+    workers = min(parallelism, len(non_null))
+    with ThreadPoolExecutor(workers) as pool:
+        return list(pool.map(_read_one, blobs))
+
+
 class FileIO(ABC):
     """
     File IO interface to read and write files.

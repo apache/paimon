@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
@@ -1487,6 +1487,61 @@ class BlobEndToEndTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
             reader.read_arrow_batch()
         reader.close()
+
+
+class BlobParallelismTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.catalog = CatalogFactory.create({'warehouse': os.path.join(self.temp_dir, 'wh')})
+        self.catalog.create_database('default', True)
+        pa_schema = pa.schema([('id', pa.int32()), ('img', pa.large_binary())])
+        self.catalog.create_table('default.bp_test', Schema.from_pyarrow_schema(
+            pa_schema, options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}), False)
+        self.payloads = [os.urandom(512) for _ in range(20)]
+        t = self.catalog.get_table('default.bp_test')
+        w = t.new_batch_write_builder().new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {'id': list(range(20)), 'img': self.payloads}, schema=pa_schema))
+        t.new_batch_write_builder().new_commit().commit(w.prepare_commit())
+        w.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_to_arrow_blob_parallelism(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        serial = rb.new_read().to_arrow(splits)
+        parallel = rb.new_read().to_arrow(splits, blob_parallelism=4)
+        self.assertEqual(serial.num_rows, parallel.num_rows)
+        for i in range(serial.num_rows):
+            self.assertEqual(serial['img'][i].as_py(), parallel['img'][i].as_py())
+
+    def test_to_arrow_batch_reader_blob_parallelism(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        serial = rb.new_read().to_arrow(splits)
+        batches = []
+        for batch in rb.new_read().to_arrow_batch_reader(splits, blob_parallelism=4):
+            batches.append(batch)
+        parallel = pa.Table.from_batches(batches)
+        self.assertEqual(serial.num_rows, parallel.num_rows)
+        for i in range(serial.num_rows):
+            self.assertEqual(serial['img'][i].as_py(), parallel['img'][i].as_py())
+
+    def test_blob_parallelism_with_projection(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        rb = rb.with_projection(['id', 'img'])
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits, blob_parallelism=4)
+        self.assertEqual(result.column_names, ['id', 'img'])
+        got = dict(zip(result['id'].to_pylist(), result['img'].to_pylist()))
+        for i in range(20):
+            self.assertEqual(got[i], self.payloads[i])
 
 
 class OffsetInputStreamTest(unittest.TestCase):

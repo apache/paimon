@@ -1,0 +1,90 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Blob I/O helpers for the Daft integration."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import BinaryIO, Dict
+
+
+@lru_cache(maxsize=16)
+def _get_file_io(catalog_key: tuple, table: str):
+    from pypaimon.catalog.catalog_factory import CatalogFactory
+    catalog_options = dict(catalog_key)
+    return CatalogFactory.create(catalog_options).get_table(table).file_io
+
+
+def _cache_key(catalog_options: Dict[str, str]) -> tuple:
+    return tuple(sorted(catalog_options.items()))
+
+
+def _file_range_fields():
+    from pypaimon.daft.daft_compat import file_range_position_field, file_range_size_field
+    return file_range_position_field(), file_range_size_field()
+
+
+def _resolve_file_range(file, pos_field=None, size_field=None):
+    if pos_field is None:
+        pos_field, size_field = _file_range_fields()
+    offset = getattr(file, pos_field)
+    offset = offset() if callable(offset) else offset
+    length = getattr(file, size_field)
+    length = length() if callable(length) else length
+    return file.path, offset, length
+
+
+def open_blob(file, catalog_options: Dict[str, str], table: str) -> BinaryIO:
+    """Open a Daft ``File`` as a seekable stream via pypaimon's FileIO."""
+    from pypaimon.table.row.blob import OffsetInputStream
+    path, offset, length = _resolve_file_range(file)
+    fio = _get_file_io(_cache_key(catalog_options), table)
+    stream = fio.new_input_stream(path)
+    try:
+        return OffsetInputStream(stream, offset, length)
+    except Exception:
+        stream.close()
+        raise
+
+
+def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concurrency: int = 64):
+    """Read a blob ``File`` column to ``binary`` bytes via concurrent ranged reads."""
+    import daft
+    from daft import DataType
+
+    @daft.func.batch(return_dtype=DataType.binary())
+    def _read_blobs(files):
+        from concurrent.futures import ThreadPoolExecutor
+        from pypaimon.common.file_io import read_file_range
+
+        objs = files.to_pylist()
+        fio = _get_file_io(_cache_key(catalog_options), table)
+        pos_field, size_field = _file_range_fields()
+
+        def _one(f):
+            if f is None:
+                return None
+            path, offset, length = _resolve_file_range(f, pos_field, size_field)
+            return read_file_range(fio, path, offset, length)
+
+        workers = max(1, min(max_concurrency, len(objs) or 1))
+        with ThreadPoolExecutor(workers) as ex:
+            return list(ex.map(_one, objs))
+
+    return _read_blobs(column)
