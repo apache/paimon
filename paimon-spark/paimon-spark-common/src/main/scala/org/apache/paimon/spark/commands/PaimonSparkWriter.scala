@@ -188,8 +188,7 @@ case class PaimonSparkWriter(
   }
 
   private def writePerPartitionWithFactory(ctx: WriteContext, dataFrame: DataFrame)(
-      writeRowFactory: () => (PaimonDataWrite, Row) => Unit)
-    : Dataset[InnerTableWriteTaskResult] = {
+      writeRowFactory: () => (PaimonDataWrite, Row) => Unit): Dataset[InnerTableWriteTaskResult] = {
     ctx.sparkSession.createDataset(dataFrame.rdd.mapPartitions {
       iter =>
         {
@@ -234,9 +233,10 @@ case class PaimonSparkWriter(
       ctx: WriteContext,
       dataFrame: DataFrame,
       funcFactory: () => Row => Int): Dataset[InnerTableWriteTaskResult] = {
-    writePerPartitionWithFactory(ctx, dataFrame) { () =>
-      val assigner = funcFactory.apply()
-      (write, row) => write.write(row, assigner.apply(row))
+    writePerPartitionWithFactory(ctx, dataFrame) {
+      () =>
+        val assigner = funcFactory.apply()
+        (write, row) => write.write(row, assigner.apply(row))
     }
   }
 
