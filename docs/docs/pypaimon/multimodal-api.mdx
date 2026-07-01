@@ -1,0 +1,428 @@
+---
+title: "Multimodal API"
+sidebar_position: 3
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Multimodal API
+
+`pypaimon.multimodal` provides a high-level API for local Python applications
+on top of Paimon data-evolution tables. It does not replace the lower-level
+`Catalog`, `Database`, or `Table` APIs. Instead, a multimodal connection wraps
+a Paimon catalog plus a default database, and exposes a compact table API for
+scalar, text, vector, and blob data.
+
+Creating a multimodal table enables `row-tracking.enabled`,
+`data-evolution.enabled`, and `deletion-vectors.enabled` by default. Global
+index scans use full fallback coverage through `global-index.search-mode` set
+to `FULL`. Data files use Vortex by default through `file.format = vortex`, and
+vector columns are stored in dedicated Vortex files through
+`vector.file.format` set to `vortex`. Install the Vortex extra when writing or
+reading default multimodal tables from Python:
+
+```shell
+pip install pypaimon[vortex]
+```
+
+## Connect
+
+`connect` creates a multimodal connection from Paimon catalog options. The
+`options` argument is forwarded to `CatalogFactory.create`.
+
+<Tabs groupId="pypaimon-multimodal-connect">
+
+<TabItem value="filesystem" label="Filesystem catalog" default>
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "warehouse": "file:///tmp/warehouse",
+    },
+)
+```
+
+</TabItem>
+
+<TabItem value="rest" label="REST catalog">
+
+```python
+import pypaimon.multimodal as pm
+
+conn = pm.connect(
+    database="default",
+    options={
+        "metastore": "rest",
+        "uri": "http://localhost:8080",
+        "warehouse": "catalog_name",
+        # Optional authentication and storage options go here.
+        # "token.provider": "...",
+    },
+)
+```
+
+REST catalog options use the same keys as the lower-level PyPaimon catalog API.
+See [REST](../concepts/rest/) for server-side catalog configuration.
+
+</TabItem>
+
+</Tabs>
+
+Table names without a database are resolved against the connection's default
+database. Fully-qualified names such as `"analytics.docs"` are also accepted.
+Use `get_table` to open an existing multimodal table. The table must be a
+data-evolution table without primary keys.
+
+```python
+docs = conn.get_table("docs")
+```
+
+## Create
+
+<Tabs groupId="pypaimon-multimodal-create-table">
+
+<TabItem value="schema" label="Create from schema" default>
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("image", pa.large_binary()),
+        pa.field("category", pa.string()),
+    ]),
+    ignore_if_exists=True,
+)
+```
+
+</TabItem>
+
+<TabItem value="data" label="Create from data">
+
+```python
+docs = conn.create_table(
+    "docs",
+    data=[
+        {
+            "id": 1,
+            "content": "Apache Paimon supports mutable lakehouse tables.",
+            "category": "lake",
+        }
+    ],
+)
+```
+
+</TabItem>
+
+<TabItem value="partitioned" label="Create partitioned table">
+
+```python
+import pyarrow as pa
+
+docs = conn.create_table(
+    "docs_by_day",
+    schema=pa.schema([
+        pa.field("id", pa.int64()),
+        pa.field("content", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32(), 3)),
+        pa.field("category", pa.string()),
+        pa.field("dt", pa.string()),
+    ]),
+    partitioned=["dt"],
+    options={
+        "snapshot.time-retained": "7 d",
+    },
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+Partition keys can be specified with `partitioned`, and table options can be
+specified with `options`. The multimodal API accepts `pyarrow.Schema` objects;
+it does not accept field dictionaries or `pypaimon.Schema`. Use Arrow fixed-size
+list types for vector columns, and Arrow binary or large-binary types for blob
+columns. When creating from data, pass an explicit schema if you need exact
+vector or blob types.
+
+## Add
+
+`add` accepts `pyarrow.Table`, `pyarrow.RecordBatch`, a list of dictionaries, a
+dictionary of arrays, or a pandas DataFrame. Input columns are aligned and cast
+to the Paimon table schema before writing.
+
+```python
+docs.add([
+    {
+        "id": 2,
+        "content": "Paimon stores mutable lakehouse tables.",
+        "embedding": [0.4, 0.5, 0.6],
+        "category": "lake",
+    }
+])
+```
+
+## Update
+
+`update` modifies rows matched by a SQL-like predicate.
+
+```python
+docs.update(
+    where="id = 2",
+    values={"category": "docs"},
+)
+```
+
+## Merge
+
+Use `merge` for idempotent ingestion. The builder delegates to Paimon's local
+`MERGE INTO` implementation.
+
+`execute` takes the source rows for the merge. It accepts the same input formats
+as `add`, including `pyarrow.Table`, `pyarrow.RecordBatch`, a list of
+dictionaries, a dictionary of arrays, or a pandas DataFrame. A list of
+dictionaries is convenient for small batches. `when_matched_update()` updates
+the columns present in the source data and leaves omitted target columns
+unchanged. `when_not_matched_insert()` inserts the columns present in the source
+data and fills omitted target columns with null.
+
+```python
+from pypaimon.multimodal import source_col
+
+docs.merge("id") \
+    .when_matched_update(
+        where="source.category != target.category",
+    ) \
+    .when_not_matched_insert() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+        }
+    ])
+```
+
+Clause predicates use `where`. Refer to source rows with `source.<column>` and
+target rows with `target.<column>`. Install `pypaimon[sql]` when using merge
+clause predicates.
+
+When source and target key names differ, pass a mapping from target column to
+source column:
+
+```python
+docs.merge({"id": "doc_id"}) \
+    .when_matched_update({"category": source_col("new_category")}) \
+    .when_not_matched_insert({
+        "id": source_col("doc_id"),
+        "content": source_col("content"),
+        "category": source_col("new_category"),
+    }) \
+    .execute([
+        {"doc_id": 3, "content": "New doc", "new_category": "search"},
+    ])
+```
+
+## Scan
+
+Use `scan()` for ordinary table reads. `where()` accepts SQL-like predicate
+strings; it does not accept lower-level `Predicate` objects.
+
+```python
+result = (
+    docs.scan()
+    .where("category = 'lake'")
+    .select(["id", "content"])
+    .limit(10)
+    .to_pandas()
+)
+```
+
+## Create Index
+
+Use `create_index` to create the global indexes used by search APIs. The
+`index_type` argument is required; the multimodal API does not choose a default
+index implementation. The `full-text` alias is normalized to
+`tantivy-fulltext`.
+
+```python
+docs.create_index("embedding", index_type="ivf-pq")
+docs.create_index("content", index_type="full-text")
+```
+
+## Search
+
+Use `search` for one vector query or one full-text query.
+
+If the table has exactly one vector column, `column` can be omitted for vector
+search. A string query is shorthand for a full-text match query when the table
+has exactly one text column. To target a specific text column, pass a
+`FullTextQuery` object.
+
+Use `pre_filter` to prune search candidates before ranking. Use `where()` to
+filter the rows read from the search result. Both `pre_filter` and `where()`
+accept SQL-like predicate strings. For full-text search, `pre_filter` must only
+reference partition columns.
+
+```python
+neighbors = (
+    docs.search(
+        [0.1, 0.2, 0.3],
+        column="embedding",
+        pre_filter="category = 'lake'",
+    )
+    .limit(10)
+    .to_arrow()
+)
+
+matches = (
+    docs.search("paimon vector")
+    .limit(10)
+    .to_pandas()
+)
+```
+
+```python
+from pypaimon.globalindex.full_text_query import FullTextQuery
+
+content_query = FullTextQuery.from_dict({
+    "match": {
+        "column": "content",
+        "terms": "paimon vector",
+        "operator": "And",
+    },
+})
+
+matches = docs.search(content_query).limit(10).to_list()
+```
+
+## Search Hybrid
+
+Use `search_hybrid` to combine vector and full-text routes, then rerank the
+merged candidates. Create the indexes required by the routes you use.
+
+Pass route specs to `search_hybrid`. Each route can set its own candidate
+`limit`, `weight`, and vector index `options`. String text routes infer the
+text column when the table has exactly one text column. To target a specific
+text column, pass a `FullTextQuery` object to `pm.text_route`.
+
+`pre_filter` is applied before ranking. It accepts a SQL-like predicate string.
+When a hybrid query has a full-text route, `pre_filter` must only reference
+partition columns.
+
+```python
+# This example assumes the table is partitioned by dt.
+hybrid = (
+    docs.search_hybrid(
+        [
+            pm.vector_route("embedding", query_vector, limit=50),
+            pm.text_route("paimon vector", weight=0.2),
+        ],
+        pre_filter="dt = '2026-07-01'",
+    )
+    .rerank("rrf")
+    .limit(10)
+    .to_list()
+)
+```
+
+For multiple vector fields, add multiple vector routes:
+
+```python
+hybrid = (
+    docs.search_hybrid(
+        [
+            pm.vector_route(
+                "image_embedding",
+                image_vector,
+                weight=0.7,
+                limit=50,
+                options={"nprobe": "8"},
+            ),
+            pm.vector_route(
+                "text_embedding",
+                text_vector,
+                weight=0.3,
+                limit=50,
+            ),
+            pm.text_route("paimon vector", weight=0.2),
+        ],
+        ranker="weighted_score",
+    )
+    .limit(10)
+    .to_list()
+)
+```
+
+Dictionary route specs are also accepted:
+
+```python
+hybrid = docs.search_hybrid(
+    [
+        {
+            "column": "image_embedding",
+            "vector": image_vector,
+            "weight": 0.7,
+            "limit": 50,
+            "options": {"nprobe": "8"},
+        },
+        {
+            "column": "text_embedding",
+            "vector": text_vector,
+            "weight": 0.3,
+            "limit": 50,
+        },
+    ],
+)
+```
+
+Dictionary vector routes also accept `anns_field`, `data`, and `param` aliases.
+
+## Search Vectors
+
+Use `search_vectors` for multiple query vectors against one vector column. It
+returns one result set for each input vector, preserving input order.
+
+```python
+batch_neighbors = (
+    docs.search_vectors(
+        [
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+        ],
+        column="embedding",
+        pre_filter="category = 'lake'",
+    )
+    .limit(10)
+    .to_list()
+)
+```
