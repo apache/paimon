@@ -42,6 +42,8 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String RESOURCES = "resources";
+    protected static final String RESOURCE_DETAILS = "resource-details";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -360,5 +362,27 @@ public class ResourcePaths {
                 encodeString(databaseName),
                 FUNCTIONS,
                 encodeString(functionName));
+    }
+
+    public String resources(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), RESOURCES);
+    }
+
+    public String resources() {
+        return SLASH.join(V1, prefix, RESOURCES);
+    }
+
+    public String resourceDetails(String databaseName) {
+        return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), RESOURCE_DETAILS);
+    }
+
+    public String resource(String databaseName, String resourceName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                RESOURCES,
+                encodeString(resourceName));
     }
 }

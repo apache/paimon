@@ -42,6 +42,9 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.resource.Resource;
+import org.apache.paimon.resource.ResourceChange;
+import org.apache.paimon.resource.ResourceType;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -52,6 +55,7 @@ import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetResourceResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
@@ -956,6 +960,143 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
+    }
+
+    @Override
+    public List<String> listResources(String databaseName) throws DatabaseNotExistException {
+        try {
+            return api.listResources(databaseName);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
+        }
+    }
+
+    @Override
+    public Resource getResource(Identifier identifier) throws ResourceNotExistException {
+        try {
+            GetResourceResponse response = api.getResource(identifier);
+            return toResource(identifier, response);
+        } catch (NoSuchResourceException e) {
+            throw new ResourceNotExistException(identifier, e);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void createResource(Identifier identifier, Resource resource, boolean ignoreIfExists)
+            throws ResourceAlreadyExistException, DatabaseNotExistException {
+        RESTFunctionValidator.checkFunctionName(identifier.getObjectName());
+        try {
+            api.createResource(
+                    identifier,
+                    resource.comment().orElse(null),
+                    resource.uri(),
+                    resource.resourceType());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName(), e);
+        } catch (AlreadyExistsException e) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new ResourceAlreadyExistException(identifier, e);
+        }
+    }
+
+    @Override
+    public void dropResource(Identifier identifier, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
+        RESTFunctionValidator.checkFunctionName(identifier.getObjectName());
+        try {
+            api.dropResource(identifier);
+        } catch (NoSuchResourceException e) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new ResourceNotExistException(identifier, e);
+        }
+    }
+
+    @Override
+    public void alterResource(
+            Identifier identifier, List<ResourceChange> changes, boolean ignoreIfNotExists)
+            throws ResourceNotExistException {
+        try {
+            api.alterResource(identifier, changes);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new ResourceNotExistException(identifier, e);
+            }
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public PagedList<String> listResourcesPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            return api.listResourcesPaged(databaseName, maxResults, pageToken, resourceNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
+        }
+    }
+
+    @Override
+    public PagedList<Resource> listResourceDetailsPaged(
+            String databaseName,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String resourceNamePattern)
+            throws DatabaseNotExistException {
+        try {
+            PagedList<GetResourceResponse> resources =
+                    api.listResourceDetailsPaged(
+                            databaseName, maxResults, pageToken, resourceNamePattern);
+            return new PagedList<>(
+                    resources.getElements().stream()
+                            .map(r -> toResource(Identifier.create(databaseName, r.name()), r))
+                            .collect(Collectors.toList()),
+                    resources.getNextPageToken());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
+        }
+    }
+
+    private Resource toResource(Identifier identifier, GetResourceResponse response) {
+        String uri = response.uri();
+        return Resource.toResource(
+                ResourceType.fromValue(response.resourceType()),
+                identifier,
+                response.comment(),
+                uri,
+                response.size(),
+                response.lastModifiedTime(),
+                fileIOForData(new Path(uri), identifier));
+    }
+
+    @Override
+    public PagedList<Identifier> listResourcesPagedGlobally(
+            @Nullable String databaseNamePattern,
+            @Nullable String resourceNamePattern,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken) {
+        PagedList<Identifier> resources =
+                api.listResourcesPagedGlobally(
+                        databaseNamePattern, resourceNamePattern, maxResults, pageToken);
+        return new PagedList<>(resources.getElements(), resources.getNextPageToken());
     }
 
     @Override

@@ -33,6 +33,7 @@ from pypaimon.catalog.catalog_exception import (
     DefinitionAlreadyExistException, DefinitionNotExistException,
     TagNotExistException, TagAlreadyExistException,
     BranchNotExistException, BranchAlreadyExistException,
+    ResourceNotExistException, ResourceAlreadyExistException,
 )
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
@@ -492,6 +493,133 @@ class RESTCatalog(Catalog):
             return PagedList(functions, result.next_page_token)
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
+
+    # Resource CRUD: mirrors Java RESTCatalog resource handlers.
+    def list_resources(self, database_name: str) -> List[str]:
+        try:
+            return self.rest_api.list_resources(database_name)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
+
+    def get_resource(self, identifier: Union[str, Identifier]) -> 'Resource':
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            response = self.rest_api.get_resource(identifier)
+            return self._to_resource(identifier, response)
+        except NoSuchResourceException as e:
+            raise ResourceNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def create_resource(self, identifier: Union[str, Identifier],
+                        resource: 'Resource', ignore_if_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        RESTApi.check_function_name(identifier.get_object_name())
+        try:
+            self.rest_api.create_resource(
+                identifier,
+                resource.comment(),
+                resource.uri(),
+                resource.resource_type(),
+            )
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(identifier.get_database_name()) from e
+        except AlreadyExistsException as e:
+            if ignore_if_exists:
+                return
+            raise ResourceAlreadyExistException(identifier) from e
+
+    def drop_resource(self, identifier: Union[str, Identifier],
+                      ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        RESTApi.check_function_name(identifier.get_object_name())
+        try:
+            self.rest_api.drop_resource(identifier)
+        except NoSuchResourceException as e:
+            if ignore_if_not_exists:
+                return
+            raise ResourceNotExistException(identifier) from e
+
+    def alter_resource(self, identifier: Union[str, Identifier],
+                       changes: List['ResourceChange'],
+                       ignore_if_not_exists: bool = False) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_resource(identifier, changes)
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists:
+                raise ResourceNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
+
+    def list_resources_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+    ) -> PagedList[str]:
+        try:
+            return self.rest_api.list_resources_paged(
+                database_name, max_results, page_token, resource_name_pattern)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
+
+    def list_resources_paged_globally(
+            self,
+            database_name_pattern: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+    ) -> PagedList[Identifier]:
+        result = self.rest_api.list_resources_paged_globally(
+            database_name_pattern, resource_name_pattern, max_results, page_token)
+        resources = result.elements if result.elements else []
+        return PagedList(resources, result.next_page_token)
+
+    def list_resource_details_paged(
+            self,
+            database_name: str,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            resource_name_pattern: Optional[str] = None,
+    ) -> PagedList['Resource']:
+        try:
+            result = self.rest_api.list_resource_details_paged(
+                database_name, max_results, page_token, resource_name_pattern)
+            resources = [
+                self._to_resource(Identifier.create(database_name, resp.name), resp)
+                for resp in result.elements
+            ]
+            return PagedList(resources, result.next_page_token)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
+
+    def _to_resource(self, identifier: Identifier, response) -> 'Resource':
+        from pypaimon.resource.resource import Resource
+        from pypaimon.resource.resource_type import ResourceType
+        uri = response.uri
+        return Resource.to_resource(
+            ResourceType.from_value(response.resource_type),
+            identifier,
+            response.comment,
+            uri,
+            response.size,
+            response.last_modified_time,
+            self.file_io_for_data(uri, identifier) if uri else None,
+        )
 
     # Tag CRUD: mirrors Java RESTCatalog tag handlers.
     def create_tag(self, identifier: Union[str, Identifier], tag_name: str,
