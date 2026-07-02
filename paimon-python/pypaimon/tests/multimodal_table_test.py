@@ -446,15 +446,17 @@ class MultimodalTableTest(unittest.TestCase):
 
         users.raw_table.new_batch_write_builder = lambda: FakeWriteBuilder()
 
-        users.merge("id") \
+        (
+            users.merge("id")
             .when_matched_update(
                 {"age": source_col("age")},
                 where="source.age > target.age and source.name != 'target.name'",
-            ) \
-            .when_not_matched_insert(where="source.age > 0") \
+            )
+            .when_not_matched_insert(where="source.age > 0")
             .execute([
                 {"id": 1, "name": "Alice", "age": 31},
             ])
+        )
 
         self.assertEqual({"id": "id"}, calls["on"])
         self.assertEqual(
