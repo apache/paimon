@@ -37,6 +37,7 @@ without full-table scans. Paimon supports multiple global index types:
 - **[Vector Index](./global-index/vector)**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
 - **[Full-Text Index](./global-index/full-text)**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
 - **[Hybrid Search](./global-index/hybrid-search)**: A multi-route search API that combines results from multiple vector routes, multiple full-text routes, or both before reading table rows.
+- **[ES Index (Multi-Column)](./global-index/es-index)**: A Lucene-backed multi-column index that indexes a vector column together with companion full-text, keyword, scalar, and date columns in a single index.
 
 | Index Type | Best For | Notes |
 |---|---|---|
@@ -45,6 +46,7 @@ without full-table scans. Paimon supports multiple global index types:
 | Vector | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
 | Full-Text | Keyword search over text columns | Uses Tantivy scoring and tokenizer configuration stored with each index file. |
 | Hybrid Search | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
+| ES Index | Indexing a vector column together with companion full-text, keyword, scalar, and date columns in one index | Lucene-backed multi-column index. Requires the `paimon-eslib` plugin on the classpath. |
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
 
