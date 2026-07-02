@@ -72,6 +72,11 @@ class _RemainingRows:
 class TableRead:
     """Implementation of TableRead for native Python reading."""
 
+    # Cap on peak concurrent blob reads across the whole parallel read: split
+    # workers (P) each spin up blob_parallelism (B) blob threads, so peak
+    # connections ~= P*B. Shrink per-split B to keep the product bounded.
+    _MAX_TOTAL_BLOB_WORKERS = 64
+
     def __init__(
         self,
         table,
@@ -172,7 +177,11 @@ class TableRead:
             blob_parallelism: number of threads for concurrent blob reads
                 within each batch. ``None`` or ``1`` (default) reads blobs
                 serially; ``>= 2`` uses a thread pool with ``pread`` for
-                concurrent ranged reads. GIL is released during I/O.
+                concurrent ranged reads. GIL is released during I/O. On the
+                parallel path, peak blob threads (``parallelism`` *
+                ``blob_parallelism``) are capped at
+                ``_MAX_TOTAL_BLOB_WORKERS``; per-split ``blob_parallelism`` is
+                shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
         # TODO: default read.parallelism to min(splits, cpu_count()) once stable
@@ -285,6 +294,13 @@ class TableRead:
             raise ValueError(f"blob_parallelism must be >= 1, got {runtime}")
         return runtime
 
+    @classmethod
+    def _cap_blob_parallelism(cls, workers: int, blob_parallelism: int) -> int:
+        """Shrink per-split blob_parallelism so workers*B <= cap (peak reads)."""
+        if blob_parallelism <= 1 or workers * blob_parallelism <= cls._MAX_TOTAL_BLOB_WORKERS:
+            return blob_parallelism
+        return max(1, cls._MAX_TOTAL_BLOB_WORKERS // workers)
+
     def _should_run_parallel(
         self,
         splits: List[Split],
@@ -316,6 +332,7 @@ class TableRead:
         remaining_state = _RemainingRows(self.limit)
         results: List[Optional[List[pyarrow.RecordBatch]]] = [None] * len(splits)
         workers = min(effective, len(splits))
+        blob_parallelism = self._cap_blob_parallelism(workers, blob_parallelism)
         with ThreadPoolExecutor(
             max_workers=workers,
             thread_name_prefix="pypaimon-read",

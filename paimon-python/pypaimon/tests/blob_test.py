@@ -1544,6 +1544,24 @@ class BlobParallelismTest(unittest.TestCase):
             self.assertEqual(got[i], self.payloads[i])
 
 
+class CapBlobParallelismTest(unittest.TestCase):
+    """Peak blob threads on the parallel path (workers * blob_parallelism)
+    must stay within TableRead._MAX_TOTAL_BLOB_WORKERS."""
+
+    def test_cap(self):
+        from pypaimon.read.table_read import TableRead
+        cap = TableRead._MAX_TOTAL_BLOB_WORKERS
+        f = TableRead._cap_blob_parallelism
+        self.assertEqual(f(1, 1), 1)             # serial blobs, untouched
+        self.assertEqual(f(16, 1), 1)            # B<=1 untouched
+        self.assertEqual(f(4, 8), 8)             # 32 <= cap, untouched
+        self.assertEqual(f(16, 16), cap // 16)   # 256 -> shrink to cap/workers
+        self.assertEqual(f(cap, 2), 1)           # workers==cap -> 1
+        self.assertEqual(f(cap + 100, 2), 1)     # workers>cap -> floor to 1
+        for w in (2, 4, 8, 16, 32, 64):
+            self.assertLessEqual(w * f(w, 999), cap)
+
+
 class ReadFileRangeTest(unittest.TestCase):
     """read_file_range must accept length == -1 (read to EOF) -- the valid
     unknown-length BlobDescriptor case -- not pass -1 into pread."""
