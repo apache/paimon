@@ -29,6 +29,7 @@ from pypaimon.table.row.blob import Blob, BlobDescriptor
 
 
 _RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
+_MAX_OVERWRITE_ATTEMPTS = 3
 
 
 class NoSuchKey(KeyError):
@@ -174,6 +175,11 @@ class BlobStore:
             prefix: Optional[str] = None,
             limit: Optional[int] = None,
             columns: Optional[Sequence[str]] = None) -> List[ObjectInfo]:
+        if limit is not None:
+            if limit < 0:
+                raise ValueError("limit must be greater than or equal to 0.")
+            if limit == 0:
+                return []
         rows = self._read_rows(
             include_blob=True,
             columns=columns,
@@ -206,8 +212,22 @@ class BlobStore:
             table_commit.close()
 
     def _overwrite_rows(self, rows: List[Mapping[str, object]]) -> Optional[int]:
-        arrow_table = self._rows_to_arrow(rows)
         keys = [row[self.key_column] for row in rows]
+        snapshot_id = None
+        for _ in range(_MAX_OVERWRITE_ATTEMPTS):
+            snapshot_id = self._commit_overwrite_once(rows, keys)
+            if self._has_unique_rows(keys):
+                return snapshot_id
+        raise ValueError(
+            "Concurrent blob put conflict left duplicate rows for keys: %s"
+            % list(keys)
+        )
+
+    def _commit_overwrite_once(
+            self,
+            rows: List[Mapping[str, object]],
+            keys: Sequence[object]) -> Optional[int]:
+        arrow_table = self._rows_to_arrow(rows)
         write_builder = self._raw_table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_update = write_builder.new_update()
@@ -223,6 +243,14 @@ class BlobStore:
             table_commit.close()
         latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
         return latest_snapshot.id if latest_snapshot is not None else None
+
+    def _has_unique_rows(self, keys: Sequence[object]) -> bool:
+        rows = self._read_rows(keys=keys, columns=[])
+        counts = {key: 0 for key in keys}
+        for row in rows:
+            key = row[self.key_column]
+            counts[key] = counts.get(key, 0) + 1
+        return all(counts.get(key, 0) == 1 for key in keys)
 
     def _put_result(self, key, snapshot_id: Optional[int]) -> PutObjectResult:
         info = self.head_object(key)

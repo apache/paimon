@@ -243,6 +243,9 @@ class MultimodalTableTest(unittest.TestCase):
             {"images/cat.jpg": {}, "images/dog.jpg": {}},
             {obj.key: obj.columns for obj in listed_without_columns},
         )
+        self.assertEqual([], store.list_objects(prefix="images/", limit=0))
+        with self.assertRaisesRegex(ValueError, "limit"):
+            store.list_objects(prefix="images/", limit=-1)
 
         store.put_object(
             "images/cat.jpg",
@@ -300,6 +303,52 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(len(data), result.size)
         self.assertNotEqual(external_path, result.descriptor.uri)
         self.assertEqual(data, store.get_object("payloads/1").read())
+
+    def test_blob_store_put_object_recovers_absent_key_race(self):
+        table = self.conn.create_table(
+            "raced_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        store = table.blobs(column="payload")
+
+        stale_rows = [{
+            "key": "payloads/1",
+            "payload": b"stale",
+        }]
+        write_builder = table.raw_table.new_batch_write_builder()
+        stale_write = write_builder.new_write()
+        stale_update = write_builder.new_update()
+        stale_commit = write_builder.new_commit()
+        stale_messages = stale_update.delete_by_predicate(
+            store._keys_predicate(["payloads/1"]))
+        stale_write.write_arrow(store._rows_to_arrow(stale_rows))
+        stale_messages.extend(stale_write.prepare_commit())
+
+        original_commit = store._commit_overwrite_once
+        injected = {"done": False}
+
+        def commit_with_race(rows, keys):
+            snapshot_id = original_commit(rows, keys)
+            if not injected["done"]:
+                injected["done"] = True
+                stale_commit.commit(stale_messages)
+            return snapshot_id
+
+        store._commit_overwrite_once = commit_with_race
+        try:
+            result = store.put_object("payloads/1", b"winner")
+        finally:
+            store._commit_overwrite_once = original_commit
+            stale_write.close()
+            stale_commit.close()
+
+        self.assertEqual(len(b"winner"), result.size)
+        self.assertEqual(b"winner", store.get_object("payloads/1").read())
+        self.assertEqual(1, table.scan().to_arrow().num_rows)
 
     def test_blob_store_put_object_reference_preserves_descriptor_uri(self):
         table = self.conn.create_table(
