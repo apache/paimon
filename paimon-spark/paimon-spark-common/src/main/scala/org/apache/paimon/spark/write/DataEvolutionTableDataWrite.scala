@@ -21,6 +21,7 @@ package org.apache.paimon.spark.write
 import org.apache.paimon.casting.FallbackMappingRow
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.data.{BinaryRow, BlobPlaceholder, GenericRow, InternalRow}
+import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.disk.IOManager
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
@@ -34,6 +35,7 @@ import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.Row
+import org.slf4j.LoggerFactory
 
 import java.util.Collections
 
@@ -58,7 +60,9 @@ case class DataEvolutionTableDataWrite(
   private val toPaimonRow = {
     SparkRowUtils.toPaimonRow(writeType, -1, catalogContext)
   }
+  private lazy val rowSerializer = InternalSerializers.create(writeType)
   private val rawBlobFallbackFields = rawBlobPlaceholderMarkerIndexes.toSeq.sortBy(_._1).toArray
+  private val rawBlobFallbackFieldIndexes = rawBlobFallbackFields.map(_._1)
   private val rawBlobFallbackMappings = {
     val mappings = Array.fill(writeType.getFieldCount)(-1)
     rawBlobFallbackFields.zipWithIndex.foreach {
@@ -148,23 +152,43 @@ case class DataEvolutionTableDataWrite(
       recordWriter: RecordWriter[InternalRow],
       numRecords: Long) {
 
-    private var numWritten = 0
+    private var numWritten = 0L
+    private var fillerRows = 0L
+    private var fillerRow: InternalRow = _
 
     def matchFirstRowId(firstRowId: Long): Boolean = {
       this.firstRowId == firstRowId
     }
 
     def write(row: InternalRow, rowId: Long): Unit = {
-      assert(rowId == firstRowId + numWritten, "Row ID does not match expected.")
+      assert(
+        rowId >= firstRowId + numWritten,
+        s"Row ID should be incremental. Expected at least ${firstRowId + numWritten}, but got $rowId.")
+      assert(
+        rowId < firstRowId + numRecords,
+        s"Row ID $rowId is out of range [$firstRowId, ${firstRowId + numRecords}).")
+
+      // For tables with existing deletion vectors, there may be some row id gaps.
+      // We can simply pad any valid values since these rows will never be exposed.
+      fillGapUntil(rowId, row)
+
       numWritten += 1
       recordWriter.write(row)
     }
 
     def finish(): Seq[CommitMessageImpl] = {
       try {
+        fillGapUntil(firstRowId + numRecords)
+
         assert(
           numRecords == numWritten,
           s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
+        if (fillerRows > 0) {
+          DataEvolutionTableDataWrite.LOG.warn(
+            s"Data evolution merge wrote $fillerRows filler rows out of $numRecords rows " +
+              s"for row-id range [$firstRowId, ${firstRowId + numRecords}) to preserve " +
+              "row-id continuity. Raw blob fields in filler rows are written as NULL.")
+        }
         val result = recordWriter.prepareCommit(false)
         val dataFiles = result.newFilesIncrement().newFiles()
         val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
@@ -181,6 +205,28 @@ case class DataEvolutionTableDataWrite(
           ))
       } finally {
         recordWriter.close()
+      }
+    }
+
+    private def fillGapUntil(rowId: Long, fillerSourceRow: InternalRow = null): Unit = {
+      if (fillerRow == null && fillerSourceRow != null) {
+        // Copy the first record this file writer met to minimize the influences on
+        // file stats, but keep raw blob fields as NULLs so filler rows do not trigger
+        // blob fallback.
+        val copied = rowSerializer
+          .copyRowData(fillerSourceRow, new GenericRow(writeType.getFieldCount))
+          .asInstanceOf[GenericRow]
+        rawBlobFallbackFieldIndexes.foreach(copied.setField(_, null))
+        fillerRow = copied
+      }
+
+      assert(
+        fillerRow != null || firstRowId + numWritten == rowId,
+        s"Cannot fill row ID gaps before any real row for first row ID $firstRowId.")
+      while (firstRowId + numWritten < rowId) {
+        recordWriter.write(fillerRow)
+        numWritten += 1
+        fillerRows += 1
       }
     }
 
@@ -222,4 +268,8 @@ case class DataEvolutionTableDataWrite(
       assigned.toSeq
     }
   }
+}
+
+object DataEvolutionTableDataWrite {
+  private val LOG = LoggerFactory.getLogger(classOf[DataEvolutionTableDataWrite])
 }
