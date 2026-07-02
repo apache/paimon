@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.ChainGroupReadTable;
@@ -31,16 +31,12 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /** Utils for chain table. */
 public class ChainTableUtils {
@@ -75,61 +71,33 @@ public class ChainTableUtils {
             List<String> partitionColumns,
             RowType partType,
             CoreOptions options,
-            RecordComparator partitionComparator,
             InternalRowPartitionComputer partitionComputer) {
         InternalRowSerializer serializer = new InternalRowSerializer(partType);
         List<BinaryRow> deltaPartitions = new ArrayList<>();
-        boolean isDailyPartition = partitionColumns.size() == 1;
         List<String> startPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(beginPartition).values());
         List<String> endPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(endPartition).values());
-        PartitionTimeExtractor timeExtractor =
-                new PartitionTimeExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
-        LocalDateTime stratPartitionTime =
-                timeExtractor.extract(partitionColumns, startPartitionValues);
-        LocalDateTime candidateTime = stratPartitionTime;
-        LocalDateTime endPartitionTime =
-                timeExtractor.extract(partitionColumns, endPartitionValues);
+        PartitionTimeResolver timeResolver =
+                new PartitionTimeResolver(
+                        partitionColumns,
+                        options.partitionTimestampPattern(),
+                        options.partitionTimestampFormatter());
+        LocalDateTime stratPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
+        LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
+        TemporalAmount step = timeResolver.extractMinStep();
+        LocalDateTime candidateTime = stratPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
-            if (isDailyPartition) {
-                if (candidateTime.isAfter(stratPartitionTime)) {
-                    deltaPartitions.add(
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy());
-                }
-            } else {
-                for (int hour = 0; hour <= 23; hour++) {
-                    candidateTime = candidateTime.toLocalDate().atStartOfDay().plusHours(hour);
-                    BinaryRow candidatePartition =
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy();
-                    if (partitionComparator.compare(candidatePartition, beginPartition) > 0
-                            && partitionComparator.compare(candidatePartition, endPartition) <= 0) {
-                        deltaPartitions.add(candidatePartition);
-                    }
-                }
-            }
-            candidateTime = candidateTime.toLocalDate().plusDays(1).atStartOfDay();
+            BinaryRow candidatePartition =
+                    serializer
+                            .toBinaryRow(
+                                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                                            timeResolver.resolvePartitionValues(candidateTime),
+                                            partType,
+                                            options.partitionDefaultName()))
+                            .copy();
+            deltaPartitions.add(candidatePartition);
+            candidateTime = candidateTime.plus(step);
         }
         return deltaPartitions;
     }
@@ -164,48 +132,6 @@ public class ChainTableUtils {
             fieldPredicates.add(func.apply(i, partitionObjects[i]));
         }
         return PredicateBuilder.and(fieldPredicates);
-    }
-
-    public static LinkedHashMap<String, String> calPartValues(
-            LocalDateTime dateTime,
-            List<String> partitionKeys,
-            String timestampPattern,
-            String timestampFormatter) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(timestampFormatter);
-        String formattedDateTime = dateTime.format(formatter);
-        Pattern keyPattern = Pattern.compile("\\$(\\w+)");
-        Matcher keyMatcher = keyPattern.matcher(timestampPattern);
-        List<String> keyOrder = new ArrayList<>();
-        StringBuilder regexBuilder = new StringBuilder();
-        int lastPosition = 0;
-        while (keyMatcher.find()) {
-            regexBuilder.append(
-                    Pattern.quote(timestampPattern.substring(lastPosition, keyMatcher.start())));
-            regexBuilder.append("(.+)");
-            keyOrder.add(keyMatcher.group(1));
-            lastPosition = keyMatcher.end();
-        }
-        regexBuilder.append(Pattern.quote(timestampPattern.substring(lastPosition)));
-
-        Matcher valueMatcher = Pattern.compile(regexBuilder.toString()).matcher(formattedDateTime);
-        if (!valueMatcher.matches() || valueMatcher.groupCount() != keyOrder.size()) {
-            throw new IllegalArgumentException(
-                    "Formatted datetime does not match timestamp pattern");
-        }
-
-        Map<String, String> keyValues = new HashMap<>();
-        for (int i = 0; i < keyOrder.size(); i++) {
-            keyValues.put(keyOrder.get(i), valueMatcher.group(i + 1));
-        }
-        List<String> values =
-                partitionKeys.stream()
-                        .map(key -> keyValues.getOrDefault(key, ""))
-                        .collect(Collectors.toList());
-        LinkedHashMap<String, String> res = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            res.put(partitionKeys.get(i), values.get(i));
-        }
-        return res;
     }
 
     public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
@@ -312,7 +238,6 @@ public class ChainTableUtils {
                         chainPartitionColumns,
                         chainPartType,
                         options,
-                        chainPartitionComparator,
                         chainPartitionComputer);
 
         // Combine each chain-only BinaryRow with the group part into a full partition

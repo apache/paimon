@@ -34,17 +34,14 @@ import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Test class for {@link org.apache.paimon.utils.ChainTableUtils}. */
 public class ChainTableUtilsTest {
@@ -175,38 +172,6 @@ public class ChainTableUtilsTest {
         predicates.add(builder.equal(1, partitionValue.getString(1)));
         Predicate expected = PredicateBuilder.and(predicates);
         Assertions.assertTrue(predicate.equals(expected));
-    }
-
-    @Test
-    public void testGeneratePartitionValues() {
-        LinkedHashMap<String, String> partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 12, 0, 0),
-                        Arrays.asList("dt", "hour"),
-                        "$dt $hour:00:00",
-                        "yyyyMMdd HH:mm:ss");
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                        put("hour", "12");
-                    }
-                },
-                partitionValues);
-
-        partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 0, 0, 0),
-                        Arrays.asList("dt"),
-                        "$dt",
-                        "yyyyMMdd");
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                    }
-                },
-                partitionValues);
     }
 
     // ========================== Tests for findFirstLatestPartitionsWithProjector
