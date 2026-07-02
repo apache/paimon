@@ -304,11 +304,13 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "columns must not include"):
             store.update_object_columns("images/cat.jpg", {"image": b"new"})
 
-        store.delete_object("images/dog.jpg")
+        store.delete_objects(["images/dog.jpg", "images/dog.jpg"])
         with self.assertRaises(pmm.NoSuchKey):
             store.head_object("images/dog.jpg")
         self.assertEqual(["images/cat.jpg"],
                          [obj.key for obj in store.list_objects(prefix="images/")])
+        store.delete_object("images/cat.jpg")
+        self.assertEqual([], store.list_objects(prefix="images/"))
 
     def test_blob_store_put_object_accepts_blob_without_materializing(self):
         from pypaimon.table.row.blob import Blob, BlobDescriptor

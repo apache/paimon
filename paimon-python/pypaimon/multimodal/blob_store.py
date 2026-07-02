@@ -220,7 +220,7 @@ class BlobStore:
     def delete_objects(self, keys: Sequence[object]) -> None:
         if not keys:
             return
-        self._validate_unique_keys(keys)
+        keys = self._deduplicate_keys(keys)
         write_builder = self._raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
         table_commit = write_builder.new_commit()
@@ -250,6 +250,16 @@ class BlobStore:
             rows[index]
             for index in sorted(key_to_last_index.values())
         ]
+
+    def _deduplicate_keys(self, keys: Sequence[object]) -> List[object]:
+        unique_keys = []
+        seen = set()
+        for key in keys:
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_keys.append(key)
+        return unique_keys
 
     def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> None:
         generic_rows = self._rows_to_generic_rows(rows)

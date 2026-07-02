@@ -544,7 +544,8 @@ object stream. `get_object`, `head_object`, and `list_objects` expose non-key,
 non-BLOB table columns through `columns`. These columns are all returned by
 default. Pass `columns` to return only selected columns, or `[]` to skip them.
 `list_objects` requires a non-negative `limit`; `limit=0` returns an empty
-list.
+list. `delete_object` deletes one key; `delete_objects` deletes a batch and
+folds repeated keys in the request.
 
 ```python
 obj = store.get_object("images/cat.jpg", range="bytes=0-1023")
@@ -562,6 +563,7 @@ for obj_info in objects:
     print(obj_info.key, obj_info.size, obj_info.columns)
 
 store.delete_object("images/dog.jpg")
+store.delete_objects(["images/old-1.jpg", "images/old-2.jpg"])
 ```
 
 ### Update Columns
