@@ -220,7 +220,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         return new PrimaryKeyPartialLookupTable(
                 (filter, cacheRowFilter) ->
                         new LocalQueryExecutor(
-                                new LookupFileStoreTable(table, joinKey),
+                                LookupFileStoreTable.create(table, joinKey),
                                 projection,
                                 tempPath,
                                 filter,

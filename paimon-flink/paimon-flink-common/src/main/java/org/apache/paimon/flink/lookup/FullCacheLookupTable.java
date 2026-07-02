@@ -235,7 +235,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         Long latestSnapshotId = table.snapshotManager().latestSnapshotId();
         Long nextSnapshotId = reader.nextSnapshotId();
-        if (latestSnapshotId != null
+        // For chain tables, the outer table and delta branch use different snapshot sequences,
+        // so the backlog calculation (latestSnapshotId - nextSnapshotId) is meaningless.
+        // Skip the backlog check and always do async refresh.
+        boolean isChainTable = CoreOptions.fromMap(table.options()).isChainTable();
+        if (!isChainTable
+                && latestSnapshotId != null
                 && nextSnapshotId != null
                 && latestSnapshotId - nextSnapshotId > maxPendingSnapshotCount) {
             LOG.warn(
@@ -395,7 +400,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 File tempPath,
                 List<String> joinKey,
                 @Nullable Set<Integer> requiredCachedBucketIds) {
-            this.table = new LookupFileStoreTable(table, joinKey);
+            this.table = LookupFileStoreTable.create(table, joinKey);
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;
