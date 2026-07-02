@@ -850,6 +850,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>When need to lookup, commit will wait for compaction by lookup.</td>
         </tr>
         <tr>
+            <td><h5>lookup.blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, the lookup join stores only the BlobDescriptor (a lightweight reference containing file URI, offset, and length) for BLOB fields instead of the full blob bytes. This dramatically reduces local disk and memory usage for tables with large BLOB columns (e.g., images, videos). The downstream consumer receives the serialized BlobDescriptor bytes and can resolve the actual blob content on demand.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
