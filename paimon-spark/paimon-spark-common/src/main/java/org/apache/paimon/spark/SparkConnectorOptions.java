@@ -32,6 +32,13 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to verify SparkSession is initialized with required configurations.");
 
+    public static final ConfigOption<Boolean> LEGACY_TIMESTAMP_MAPPING =
+            key("legacy-timestamp-mapping.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.");
+
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
