@@ -138,6 +138,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                      <include>org.apache.paimon:paimon-spark3-common_${scala.binary.version}</include>
+                                     <include>org.apache.paimon:paimon-eslib</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
@@ -146,4 +147,29 @@ under the License.
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- paimon-eslib is a Java-11 / Lucene-9.12 module built only under the paimon-eslib
+             profile and is not published to the default snapshot repository. The Spark module has
+             no compile-time reference to it; the dependency exists solely so the shaded Spark jar
+             bundles the ES index backend (see the maven-shade <include> above). Gating it behind
+             the same profile keeps the default reactor build (CI) resolvable while still bundling
+             paimon-eslib when the profile is active. -->
+        <profile>
+            <id>paimon-eslib</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-eslib</artifactId>
+                    <version>${project.version}</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>*</groupId>
+                            <artifactId>*</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>

@@ -695,17 +695,82 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
-    public void testFullTextSearchRequiresTextColumnAsPrimaryField() throws Exception {
+    public void testFullTextSearchServesTextColumnAsExtraField() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
 
         String[] documents = {"Apache Paimon", "vector search"};
         writeDocuments(table, documents);
+        // Multi-column index: primary is "id", the text column is an EXTRA field. Full-text search
+        // on the extra text column is served (matched via extraFieldIds).
         buildAndCommitIndexWithFields(
                 table,
                 documents,
                 Arrays.asList(
                         table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)));
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2);
+
+        assertThat(searchBuilder.newFullTextScan().scan().splits()).isNotEmpty();
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isFalse();
+    }
+
+    @Test
+    public void testFullTextSearchPrefersDedicatedIndexOverExtraFieldCoverage() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+
+        // Two full-text-capable indexes cover the same text column over the same row range:
+        //  (a) a dedicated full-text index whose PRIMARY field is the text column, and
+        //  (b) a multi-column index whose primary is "id" and carries the text column as an EXTRA
+        //      field.
+        // These are different index definitions and must not be merged into one reader input; the
+        // dedicated index (a) takes precedence, so each split carries a single index file.
+        buildAndCommitIndex(table, documents); // (a) primary = content
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Arrays.asList(
+                        table.rowType().getField("id"),
+                        table.rowType().getField(TEXT_FIELD_NAME))); // (b) content as extra
+
+        FullTextSearchBuilder searchBuilder =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("Paimon", TEXT_FIELD_NAME))
+                        .withLimit(2);
+
+        List<FullTextSearchSplit> splits = searchBuilder.newFullTextScan().scan().splits();
+        assertThat(splits).isNotEmpty();
+        int textFieldId = table.rowType().getField(TEXT_FIELD_NAME).id();
+        for (FullTextSearchSplit split : splits) {
+            IndexFullTextSearchSplit indexSplit = (IndexFullTextSearchSplit) split;
+            // Files from different index definitions are never merged into one split ...
+            assertThat(indexSplit.fullTextIndexFiles()).hasSize(1);
+            // ... and the chosen definition is the dedicated one (text column is its primary
+            // field).
+            assertThat(indexSplit.fullTextIndexFiles().get(0).globalIndexMeta().indexFieldId())
+                    .isEqualTo(textFieldId);
+        }
+        assertThat(searchBuilder.executeLocal().results().isEmpty()).isFalse();
+    }
+
+    @Test
+    public void testFullTextSearchSkipsIndexNotCoveringTextColumn() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"Apache Paimon", "vector search"};
+        writeDocuments(table, documents);
+        // The index covers only "id" — the text column is neither the primary nor an extra field —
+        // so full-text search on the text column finds no index and returns empty.
+        buildAndCommitIndexWithFields(
+                table, documents, Arrays.asList(table.rowType().getField("id")));
 
         FullTextSearchBuilder searchBuilder =
                 table.newFullTextSearchBuilder()
