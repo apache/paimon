@@ -190,6 +190,16 @@ class TableUpdate:
             self.table, self.commit_user, commit_identifier
         ).upsert(table, upsert_keys, self.update_cols)
 
+    def _upsert_by_key(
+            self,
+            rows,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        return TableUpsertByKey(
+            self.table, self.commit_user, commit_identifier
+        ).upsert_rows(rows, upsert_keys, self.update_cols)
+
     def _merge_into(
             self,
             source: Any,
@@ -499,6 +509,14 @@ class BatchTableUpdate(TableUpdate):
             table, upsert_keys, BATCH_COMMIT_IDENTIFIER
         )
 
+    def upsert_by_key(
+            self, rows, upsert_keys: List[str]
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by key columns."""
+        return self._upsert_by_key(
+            rows, upsert_keys, BATCH_COMMIT_IDENTIFIER
+        )
+
     def update_by_predicate(
             self,
             predicate: Optional[Predicate],
@@ -559,6 +577,18 @@ class StreamTableUpdate(TableUpdate):
         tagging the produced commit messages with ``commit_identifier``."""
         return self._upsert_by_arrow_with_key(
             table, upsert_keys, commit_identifier
+        )
+
+    def upsert_by_key(
+            self,
+            rows,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by key columns,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._upsert_by_key(
+            rows, upsert_keys, commit_identifier
         )
 
     def update_by_predicate(

@@ -55,6 +55,9 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
     def _apply_upsert(self, table_update, data, upsert_keys, cid):
         raise NotImplementedError
 
+    def _apply_upsert_rows(self, table_update, rows, upsert_keys, cid):
+        raise NotImplementedError
+
     # ------------------------------------------------------------------
     # Helpers built on the primitives
     # ------------------------------------------------------------------
@@ -67,6 +70,18 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             tu.with_update_type(update_cols)
         cid = self._next_commit_id()
         msgs = self._apply_upsert(tu, data, upsert_keys, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _upsert_rows(self, table, rows, upsert_keys, update_cols=None):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        if update_cols:
+            tu.with_update_type(update_cols)
+        cid = self._next_commit_id()
+        msgs = self._apply_upsert_rows(tu, rows, upsert_keys, cid)
         tc = wb.new_commit()
         self._apply_commit(tc, msgs, cid)
         tc.close()
@@ -138,6 +153,34 @@ class _TableUpsertByKeyTestBase(DataEvolutionTestBase):
             key=lambda x: x[0],
         )
         self.assertEqual([(1, 'Alice'), (2, 'Bob_new'), (3, 'Carol')], rows)
+
+    def test_row_upsert_mixed_update_and_append(self):
+        from pypaimon.table.row.generic_row import GenericRow
+
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+
+        rows = [
+            GenericRow([2, 'Bob_row', 31, 'LA2'], table.fields),
+            GenericRow([3, 'Carol', 35, 'Chicago'], table.fields),
+        ]
+        self._upsert_rows(table, rows, upsert_keys=['id'])
+
+        result = self._read_all(table)
+        actual = {
+            row['id']: (row['name'], row['age'], row['city'])
+            for row in result.to_pylist()
+        }
+        self.assertEqual({
+            1: ('Alice', 25, 'NYC'),
+            2: ('Bob_row', 31, 'LA2'),
+            3: ('Carol', 35, 'Chicago'),
+        }, actual)
 
     def test_upsert_for_existing_table_duplicate_keys(self):
         table = self._create_table()
@@ -790,10 +833,16 @@ class _BatchModeMixin(BatchModeMixin):
     def _apply_upsert(self, table_update, data, upsert_keys, cid):
         return table_update.upsert_by_arrow_with_key(data, upsert_keys)
 
+    def _apply_upsert_rows(self, table_update, rows, upsert_keys, cid):
+        return table_update.upsert_by_key(rows, upsert_keys)
+
 
 class _StreamModeMixin(StreamModeMixin):
     def _apply_upsert(self, table_update, data, upsert_keys, cid):
         return table_update.upsert_by_arrow_with_key(data, upsert_keys, cid)
+
+    def _apply_upsert_rows(self, table_update, rows, upsert_keys, cid):
+        return table_update.upsert_by_key(rows, upsert_keys, cid)
 
 
 # ======================================================================

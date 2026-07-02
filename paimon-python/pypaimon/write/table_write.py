@@ -23,6 +23,7 @@ import pyarrow as pa
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.write.row_utils import require_columns, row_to_named_values
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -58,6 +59,20 @@ class TableWrite:
             indices_array = pa.array(row_indices, type=pa.int64())
             sub_table = pa.compute.take(data, indices_array)
             self.file_store_write.write(partition, bucket, sub_table)
+
+    def write_row(self, row):
+        values_by_name = row_to_named_values(row, self.table.table_schema.fields)
+        column_names = (
+            self.file_store_write.write_cols
+            if self.file_store_write.write_cols is not None
+            else list(self.table.field_names)
+        )
+        require_columns(values_by_name, column_names, "write_row")
+        require_columns(values_by_name, self.table.partition_keys, "write_row")
+        partition, bucket = (
+            self.row_key_extractor.extract_partition_bucket_row(values_by_name)
+        )
+        self.file_store_write.write_row(partition, bucket, row, values_by_name)
 
     def write_pandas(self, dataframe):
         pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
