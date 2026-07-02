@@ -64,10 +64,19 @@ def _read_builder(table_id, catalog_options, projection, cache_key=None):
     return rb.with_projection(projection) if projection is not None else rb
 
 
-def _plan_splits_by_bucket(table_id, catalog_options, projection):
+def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total_buckets):
     """Plan the manifest once and group splits by bucket (driver-side, fresh snapshot)."""
+    scan = _read_builder(table_id, catalog_options, projection).new_scan()
+    # Splits carry only ``bucket``; a rescaled table (old files under a different
+    # total_buckets) would falsely co-locate. Reject files outside the current space.
+    stale = {e.total_buckets for e in scan.file_scanner.plan_files()
+             if e.total_buckets != expected_total_buckets}
+    if stale:
+        raise ValueError(
+            f"bucket_join needs {table_id} fully in bucket count {expected_total_buckets}, "
+            f"but files exist under {sorted(stale)} (rescale in progress); rewrite first.")
     by_bucket = {}
-    for s in _read_builder(table_id, catalog_options, projection).new_scan().plan().splits():
+    for s in scan.plan().splits():
         by_bucket.setdefault(s.bucket, []).append(s)
     return by_bucket
 
@@ -130,11 +139,14 @@ def bucket_join(
             "Equal keys only co-locate by bucket when joining on the bucket-key "
             "(the comparison is order-sensitive for composite keys).")
     # Same name isn't enough: differing key types (INT vs BIGINT) can hash apart and
-    # silently drop matches, since the bucket is hash(key) %% bucket_count.
+    # silently drop matches. Compare logical types, ignoring nullability (it doesn't
+    # affect the hash of a present key).
+    def _key_type(table, col):
+        return str(table.field_dict[col].type).replace(" NOT NULL", "")
     key_type_mismatch = [
-        (c, str(ltable.field_dict[c].type), str(rtable.field_dict[c].type))
+        (c, _key_type(ltable, c), _key_type(rtable, c))
         for c in on_cols
-        if str(ltable.field_dict[c].type) != str(rtable.field_dict[c].type)
+        if _key_type(ltable, c) != _key_type(rtable, c)
     ]
     if key_type_mismatch:
         raise ValueError(
@@ -164,8 +176,8 @@ def bucket_join(
 
     # Plan each side's manifest once (driver-side, split metadata only -- the join
     # results stay distributed below), then dispatch per-bucket splits to the tasks.
-    left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection)
-    right_by_bucket = _plan_splits_by_bucket(right, catalog_options, right_projection)
+    left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection, lcount)
+    right_by_bucket = _plan_splits_by_bucket(right, catalog_options, right_projection, rcount)
 
     l_schema_id, r_schema_id = ltable.table_schema.id, rtable.table_schema.id
 

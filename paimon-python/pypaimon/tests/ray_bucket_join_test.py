@@ -138,8 +138,10 @@ class RayBucketJoinTest(unittest.TestCase):
         self._bucketed_table(
             "default.disp_in", ins, "url",
             pa.Table.from_pydict({"url": [f"u{i}" for i in range(100)]}, schema=ins))
-        lbb = bjmod._plan_splits_by_bucket("default.disp_in", self.catalog_options, ["url"])
-        rbb = bjmod._plan_splits_by_bucket("default.disp_loc", self.catalog_options, ["url", "row_id"])
+        lbb = bjmod._plan_splits_by_bucket(
+            "default.disp_in", self.catalog_options, ["url"], self.NUM_BUCKETS)
+        rbb = bjmod._plan_splits_by_bucket(
+            "default.disp_loc", self.catalog_options, ["url", "row_id"], self.NUM_BUCKETS)
         shared = set(lbb) & set(rbb)
         self.assertGreater(len(shared), 1)  # genuinely spread across buckets
 
@@ -280,6 +282,18 @@ class RayBucketJoinTest(unittest.TestCase):
         self._create_bucketed("default.ty_int", pa.schema([("k", pa.int64())]), "k", 8)
         with self.assertRaises(ValueError):
             bucket_join("default.ty_str", "default.ty_int", self.catalog_options, on="k")
+
+    def test_rejects_rescaled_mixed_buckets(self):
+        # Files left under an old bucket count (rescale not yet rewritten) would carry a
+        # different total_buckets; the same bucket id must not be treated as co-located.
+        import types
+        from pypaimon.read.scanner.file_scanner import FileScanner
+        self._create_bucketed("default.rs_a", pa.schema([("url", pa.string())]), "url", 8)
+        self._create_bucketed("default.rs_b", pa.schema([("url", pa.string())]), "url", 8)
+        stale = [types.SimpleNamespace(total_buckets=4)]  # a file from a 4-bucket era
+        with mock.patch.object(FileScanner, "plan_files", return_value=stale):
+            with self.assertRaises(ValueError):
+                bucket_join("default.rs_a", "default.rs_b", self.catalog_options, on="url")
 
     def test_rejects_partitioned_table(self):
         # Bucket ids are per-partition, so bucket-only grouping would join across
