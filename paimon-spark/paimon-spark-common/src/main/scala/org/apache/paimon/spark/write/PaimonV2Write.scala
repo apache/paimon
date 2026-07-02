@@ -53,13 +53,13 @@ class PaimonV2Write(
 
   override def requiredDistribution(): Distribution = {
     val distribution = writeRequirement.distribution
-    logInfo(s"Requesting $distribution as write distribution for table ${table.name()}")
+    logInfo(s"Requesting $distribution as write distribution for table ${table.fullName()}")
     distribution
   }
 
   override def requiredOrdering(): Array[SortOrder] = {
     val ordering = writeRequirement.ordering
-    logInfo(s"Requesting ${ordering.mkString(",")} as write ordering for table ${table.name()}")
+    logInfo(s"Requesting ${ordering.mkString(",")} as write ordering for table ${table.fullName()}")
     ordering
   }
 

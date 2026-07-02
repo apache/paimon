@@ -97,7 +97,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             rowType,
                             extractor,
                             mfFactory,
-                            name(),
+                            fullName(),
                             catalogEnvironment);
         }
         return lazyStore;
