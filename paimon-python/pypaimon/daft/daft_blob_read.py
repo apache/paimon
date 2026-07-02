@@ -73,18 +73,29 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
         from concurrent.futures import ThreadPoolExecutor
         from pypaimon.common.file_io import read_file_range
 
-        objs = files.to_pylist()
-        fio = _get_file_io(_cache_key(catalog_options), table)
         pos_field, size_field = _file_range_fields()
+        # Vectorized field extraction: per-File attr access (to_pylist +
+        # f.path/.position/.size) is GIL-bound and serializes the pool. daft
+        # File is an arrow ExtensionArray; .storage holds url/offset/size.
+        try:
+            struct = files.to_arrow()
+            struct = getattr(struct, "storage", struct)
+            ranges = list(zip(struct.field("url").to_pylist(),
+                              struct.field(pos_field).to_pylist(),
+                              struct.field(size_field).to_pylist()))
+        except Exception:
+            ranges = [None if f is None else _resolve_file_range(f, pos_field, size_field)
+                      for f in files.to_pylist()]
 
-        def _one(f):
-            if f is None:
+        fio = _get_file_io(_cache_key(catalog_options), table)
+
+        def _one(r):
+            if r is None or r[0] is None:
                 return None
-            path, offset, length = _resolve_file_range(f, pos_field, size_field)
-            return read_file_range(fio, path, offset, length)
+            return read_file_range(fio, r[0], r[1], r[2])
 
-        workers = max(1, min(max_concurrency, len(objs) or 1))
+        workers = max(1, min(max_concurrency, len(ranges) or 1))
         with ThreadPoolExecutor(workers) as ex:
-            return list(ex.map(_one, objs))
+            return list(ex.map(_one, ranges))
 
     return _read_blobs(column)

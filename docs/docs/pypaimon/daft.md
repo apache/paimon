@@ -270,8 +270,11 @@ result.show()
 
 ### Reading blob content
 
-Use `read_blob` to read blob bytes — it uses pypaimon's own FileIO with
-a shared client and concurrent ranged GETs:
+Use `read_blob` for bulk blob reads. It reads the whole `File` column to
+`binary` via pypaimon's shared FileIO with concurrent ranged reads (`pread`,
+which releases the GIL), and pulls each blob's offset/size from the column
+vectorized so the thread pool does pure I/O. This is much faster than a
+per-row `file.open()` loop, which is GIL-bound and does not parallelize:
 
 ```python
 from daft import col
@@ -317,10 +320,10 @@ def first_4k(file: daft.File) -> bytes | None:
 result = df.with_column("header", first_4k(col("image")))
 ```
 
-`open_blob` is a drop-in replacement for `file.open()`. Unlike
-`file.open()` which creates a new I/O client per call and holds the GIL,
-`open_blob` uses pypaimon's shared FileIO and releases the GIL during
-network I/O.
+`open_blob` is a drop-in replacement for `file.open()` for streaming an
+individual large blob: it uses pypaimon's shared FileIO and releases the GIL
+during network I/O. It reads one blob per call, so for bulk reads of a whole
+column prefer `read_blob`.
 
 ## Catalog Abstraction
 
