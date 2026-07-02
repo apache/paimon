@@ -47,26 +47,42 @@ _TABLE_CACHE: Dict = {}
 _TABLE_CACHE_LOCK = threading.Lock()
 
 
-def _get_table(table_id, catalog_options, cache_key=None):
+def _get_table(table_id, catalog_options, schema_id=None):
     from pypaimon.catalog.catalog_factory import CatalogFactory
-    if cache_key is None:
+    if schema_id is None:  # planning: always load the latest schema
         return CatalogFactory.create(catalog_options).get_table(table_id)
+    key = (table_id, tuple(sorted(catalog_options.items())), schema_id)
     with _TABLE_CACHE_LOCK:
-        table = _TABLE_CACHE.get(cache_key)
+        table = _TABLE_CACHE.get(key)
         if table is None:
             table = CatalogFactory.create(catalog_options).get_table(table_id)
-            _TABLE_CACHE[cache_key] = table
+            if table.table_schema.id != schema_id:
+                # get_table loads the latest schema; a mismatch means the schema moved
+                # after the driver planned, so the split plan is stale -- fail fast.
+                raise ValueError(
+                    f"{table_id} schema changed during bucket_join (planned {schema_id}, "
+                    f"now {table.table_schema.id}); retry.")
+            _TABLE_CACHE[key] = table
         return table
 
 
-def _read_builder(table_id, catalog_options, projection, cache_key=None):
-    rb = _get_table(table_id, catalog_options, cache_key).new_read_builder()
+def _read_builder(table_id, catalog_options, projection, schema_id=None):
+    rb = _get_table(table_id, catalog_options, schema_id).new_read_builder()
     return rb.with_projection(projection) if projection is not None else rb
 
 
 def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total_buckets):
-    """Plan the manifest once and group splits by bucket (driver-side, fresh snapshot)."""
-    scan = _read_builder(table_id, catalog_options, projection).new_scan()
+    """Plan the manifest and group splits by bucket (driver-side)."""
+    from pypaimon.common.options.core_options import CoreOptions
+    table = _get_table(table_id, catalog_options)  # fresh, latest schema
+    snapshot = table.snapshot_manager().get_latest_snapshot()
+    if snapshot is None:
+        return {}
+    # Pin the guard and the split plan to one snapshot, else a commit between the two
+    # manifest reads could slip stale-bucket files past the guard.
+    table.options.options.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
+    rb = table.new_read_builder()
+    scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
     # Splits carry only ``bucket``; a rescaled table (old files under a different
     # total_buckets) would falsely co-locate. Reject files outside the current space.
     stale = {e.total_buckets for e in scan.file_scanner.plan_files()
@@ -82,10 +98,9 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
 
 
 def _read_splits(table_id, catalog_options, projection, splits, schema_id):
-    # Snapshot-independent but schema-dependent: cache by schema id, not just table id.
-    cache_key = (table_id, tuple(sorted(catalog_options.items())), schema_id)
+    # Snapshot-independent but schema-dependent -> cache by schema id (in _get_table).
     return _read_builder(
-        table_id, catalog_options, projection, cache_key).new_read().to_arrow(splits)
+        table_id, catalog_options, projection, schema_id).new_read().to_arrow(splits)
 
 
 def bucket_join(

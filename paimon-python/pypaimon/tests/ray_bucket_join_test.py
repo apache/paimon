@@ -178,19 +178,18 @@ class RayBucketJoinTest(unittest.TestCase):
         self.assertEqual(len(got), 20)
         self.assertTrue(all(got[(f"k{i}", i)] == i for i in range(20)))
 
-    def test_read_cache_keyed_by_schema_id(self):
-        # A schema change must invalidate the per-worker table cache: different schema
-        # id -> different cache entry (reload), same id -> reuse.
+    def test_read_cache_by_schema_id_and_staleness(self):
+        # Same schema id -> cached (reused). A schema id that is no longer current means
+        # the plan is stale -> fail fast instead of reading with the wrong schema.
         self._create_bucketed("default.cache_t", pa.schema([("url", pa.string())]), "url", 8)
         bjmod._TABLE_CACHE.clear()
         opts = self.catalog_options
-        k0 = ("default.cache_t", tuple(sorted(opts.items())), 0)
-        k1 = ("default.cache_t", tuple(sorted(opts.items())), 1)
-        t0a = bjmod._get_table("default.cache_t", opts, k0)
-        t0b = bjmod._get_table("default.cache_t", opts, k0)
-        t1 = bjmod._get_table("default.cache_t", opts, k1)
-        self.assertIs(t0a, t0b)      # same schema id -> cached
-        self.assertIsNot(t0a, t1)    # different schema id -> reloaded
+        sid = self.catalog.get_table("default.cache_t").table_schema.id
+        t1 = bjmod._get_table("default.cache_t", opts, sid)
+        t2 = bjmod._get_table("default.cache_t", opts, sid)
+        self.assertIs(t1, t2)                       # same schema id -> cached
+        with self.assertRaises(ValueError):         # stale plan: requested schema not current
+            bjmod._get_table("default.cache_t", opts, sid + 99)
 
     def test_empty_result_keeps_schema(self):
         # No shared bucket -> 0 rows, but the join schema must survive.
@@ -288,8 +287,11 @@ class RayBucketJoinTest(unittest.TestCase):
         # different total_buckets; the same bucket id must not be treated as co-located.
         import types
         from pypaimon.read.scanner.file_scanner import FileScanner
-        self._create_bucketed("default.rs_a", pa.schema([("url", pa.string())]), "url", 8)
-        self._create_bucketed("default.rs_b", pa.schema([("url", pa.string())]), "url", 8)
+        sch = pa.schema([("url", pa.string())])
+        self._bucketed_table("default.rs_a", sch, "url",
+                             pa.Table.from_pydict({"url": ["u0", "u1"]}, schema=sch))
+        self._bucketed_table("default.rs_b", sch, "url",
+                             pa.Table.from_pydict({"url": ["u0"]}, schema=sch))
         stale = [types.SimpleNamespace(total_buckets=4)]  # a file from a 4-bucket era
         with mock.patch.object(FileScanner, "plan_files", return_value=stale):
             with self.assertRaises(ValueError):
