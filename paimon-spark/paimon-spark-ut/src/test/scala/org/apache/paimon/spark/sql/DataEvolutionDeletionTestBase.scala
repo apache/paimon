@@ -132,6 +132,48 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution deletion: merge update blob after deletion") {
+    withTable("s", "t") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, picture BINARY)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'blob-field' = 'picture',
+            |  'blob.target-file-size' = '1 b')
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, b, picture FROM VALUES
+            |  (0, 0, X'00'), (1, 1, X'01'), (2, 2, X'02'), (3, 3, X'03'), (4, 4, X'04')
+            |  AS v(id, b, picture)
+            |""".stripMargin)
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, b, picture FROM VALUES
+            |  (5, 5, X'05'), (6, 6, X'06'), (7, 7, X'07'), (8, 8, X'08'), (9, 9, X'09')
+            |  AS v(id, b, picture)
+            |""".stripMargin)
+      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9)")
+
+      sql("CREATE TABLE s (id INT, picture BINARY)")
+      sql("INSERT INTO s VALUES (2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, b, picture, _ROW_ID FROM t ORDER BY id"),
+        Seq(
+          Row(5, 5, Array[Byte](5), 5L),
+          Row(7, 7, Array[Byte](77), 7L),
+          Row(8, 8, Array[Byte](8), 8L)))
+    }
+  }
+
   test("Data Evolution deletion: self merge skips deleted rows") {
     withTable("t") {
       sql("""
