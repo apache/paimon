@@ -49,13 +49,14 @@ def pread(stream, length: int, offset: int) -> bytes:
 
 
 def read_file_range(file_io, path, offset, length):
-    """Read a byte range from a file. Thread-safe."""
+    """Read a byte range. Thread-safe. ``length < 0`` = read to EOF (pread can't
+    express that, so seek + read)."""
     stream = file_io.new_input_stream(path)
     try:
-        if supports_pread(stream):
+        if length >= 0 and supports_pread(stream):
             return pread(stream, length, offset)
         stream.seek(offset)
-        return stream.read(length)
+        return stream.read() if length < 0 else stream.read(length)
     finally:
         stream.close()
 

@@ -1544,6 +1544,36 @@ class BlobParallelismTest(unittest.TestCase):
             self.assertEqual(got[i], self.payloads[i])
 
 
+class ReadFileRangeTest(unittest.TestCase):
+    """read_file_range must accept length == -1 (read to EOF) -- the valid
+    unknown-length BlobDescriptor case -- not pass -1 into pread."""
+
+    def test_negative_length_reads_to_eof(self):
+        from pypaimon.common.file_io import FileIO, read_file_range
+        data = bytes(range(64))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "blob.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            # -1: offset to EOF; positive: exact range (pread)
+            self.assertEqual(read_file_range(file_io, path, 0, -1), data)
+            self.assertEqual(read_file_range(file_io, path, 10, -1), data[10:])
+            self.assertEqual(read_file_range(file_io, path, 10, 8), data[10:18])
+
+    def test_descriptor_negative_length_roundtrip(self):
+        from pypaimon.common.file_io import FileIO
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "blob.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_bytes(BlobDescriptor(path, 0, -1).serialize(), file_io)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
+
+
 class OffsetInputStreamTest(unittest.TestCase):
 
     def setUp(self):
