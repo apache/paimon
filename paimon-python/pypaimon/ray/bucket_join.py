@@ -33,9 +33,10 @@ def _norm(on: OnSpec) -> List[str]:
 
 
 def _bucketing(table):
-    count = table.options.bucket()
-    key = table.options.bucket_key()
-    return count, ([k.strip() for k in key.split(",")] if key else [])
+    # Use the resolved bucket keys, not the raw ``bucket-key`` option: a primary-key
+    # table that does not set ``bucket-key`` explicitly is still bucketed by its
+    # (partition-trimmed) primary key, and reading the raw option would miss that.
+    return table.options.bucket(), list(table.table_schema.bucket_keys)
 
 
 # Per-process table cache so a worker reuses table metadata across the many buckets
@@ -121,6 +122,23 @@ def bucket_join(
         # Outer joins would need the union of buckets (a bucket missing on one side
         # still emits rows); only inner is correct with the per-bucket intersection.
         raise ValueError(f"bucket_join currently supports only join_type='inner'; got {join_type!r}.")
+
+    # The join key must survive projection on both sides, or ``Table.join`` has no key.
+    if left_projection is not None and not set(on_cols) <= set(left_projection):
+        raise ValueError(
+            f"left_projection must include the join key {on_cols}; got {left_projection}.")
+    if right_projection is not None and not set(on_cols) <= set(right_projection):
+        raise ValueError(
+            f"right_projection must include the join key {on_cols}; got {right_projection}.")
+    # The two sides must not share non-key columns, or pyarrow's join collides on them.
+    # Check up front (against the projected columns) instead of failing inside a task.
+    lcols = left_projection if left_projection is not None else ltable.field_names
+    rcols = right_projection if right_projection is not None else rtable.field_names
+    collisions = sorted((set(lcols) & set(rcols)) - set(on_cols))
+    if collisions:
+        raise ValueError(
+            f"bucket_join sides must not share columns other than the join key {on_cols}; "
+            f"both have {collisions}. Project or rename them away.")
 
     # Plan each side's manifest once (driver-side, split metadata only -- the join
     # results stay distributed below), then dispatch per-bucket splits to the tasks.

@@ -54,9 +54,15 @@ class RayBucketJoinTest(unittest.TestCase):
             pass
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _bucketed_table(self, name, schema, key, data):
-        opts = {"bucket": str(self.NUM_BUCKETS), "bucket-key": key}
-        self.catalog.create_table(name, Schema.from_pyarrow_schema(schema, options=opts), False)
+    def _bucketed_table(self, name, schema, key, data, primary_keys=None):
+        opts = {"bucket": str(self.NUM_BUCKETS)}
+        if primary_keys is None:  # append table: bucket-key must be explicit
+            opts["bucket-key"] = key
+        # PK table: leave bucket-key unset so it defaults to the primary key.
+        self.catalog.create_table(
+            name,
+            Schema.from_pyarrow_schema(schema, primary_keys=primary_keys, options=opts),
+            False)
         t = self.catalog.get_table(name)
         wb = t.new_batch_write_builder()
         w = wb.new_write()
@@ -147,6 +153,43 @@ class RayBucketJoinTest(unittest.TestCase):
         self._create_bucketed("default.k2", sch, "url", 8)
         with self.assertRaises(ValueError):  # on=k but bucket-key=url
             bucket_join("default.k1", "default.k2", self.catalog_options, on="k")
+
+    def test_primary_key_default_bucket_key(self):
+        # PK tables bucket by their primary key without an explicit bucket-key option;
+        # bucket_join must resolve that and join on the PK.
+        loc_schema = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
+        in_schema = pa.schema([("url", pa.string())])
+        self._bucketed_table(
+            "default.pk_loc", loc_schema, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(100)],
+                                  "row_id": list(range(100))}, schema=loc_schema),
+            primary_keys=["url"])
+        self._bucketed_table(
+            "default.pk_in", in_schema, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(40)]}, schema=in_schema),
+            primary_keys=["url"])
+        ds = bucket_join(
+            "default.pk_in", "default.pk_loc", self.catalog_options,
+            on="url", left_projection=["url"], right_projection=["url", "row_id"])
+        got = {r["url"]: r["row_id"] for r in ds.take_all()}
+        self.assertEqual(set(got), {f"u{i}" for i in range(40)})
+        self.assertTrue(all(got[f"u{i}"] == i for i in range(40)))
+
+    def test_rejects_projection_missing_join_key(self):
+        sch = pa.schema([("url", pa.string()), ("v", pa.int64())])
+        self._create_bucketed("default.pmj1", sch, "url", 8)
+        self._create_bucketed("default.pmj2", sch, "url", 8)
+        with self.assertRaises(ValueError):  # left projection drops the join key
+            bucket_join("default.pmj1", "default.pmj2", self.catalog_options,
+                        on="url", left_projection=["v"], right_projection=["url"])
+
+    def test_rejects_colliding_columns(self):
+        # Both sides expose a non-key column "v" -> pyarrow join would collide.
+        sch = pa.schema([("url", pa.string()), ("v", pa.int64())])
+        self._create_bucketed("default.col1", sch, "url", 8)
+        self._create_bucketed("default.col2", sch, "url", 8)
+        with self.assertRaises(ValueError):
+            bucket_join("default.col1", "default.col2", self.catalog_options, on="url")
 
     def test_rejects_partitioned_table(self):
         # Bucket ids are per-partition, so bucket-only grouping would join across
