@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.utils.ChainPartitionProjector;
 import org.apache.paimon.utils.ChainTableUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -103,12 +104,16 @@ public class ChainTableStreamScan implements StreamDataTableScan {
     /** Whether the starting plan (Phase 1) has been completed. */
     private boolean startingDone = false;
 
-    /** Predicates and shard for applying to local scans created in {@link #planStarting()}. */
+    /**
+     * Predicates, shard, and bucket filter for applying to local scans in {@link #planStarting()}.
+     */
     private final List<Predicate> predicates = new ArrayList<>();
 
     private int shardIndex = -1;
 
     private int shardCount = -1;
+
+    @Nullable private Filter<Integer> bucketFilter;
 
     /** Maximum number of retries when race condition is detected during position capture. */
     private static final int MAX_RACE_RETRIES = 3;
@@ -119,6 +124,8 @@ public class ChainTableStreamScan implements StreamDataTableScan {
                 new ChainGroupReadTable.ChainTableBatchScan(
                         chainGroupReadTable.schema(), chainGroupReadTable);
         this.deltaStreamScan = (DataTableStreamScan) chainGroupReadTable.other().newStreamScan();
+
+        ChainTableUtils.validateChainTableForIncrementalRead(chainGroupReadTable);
 
         // Initialize partition projector and chain comparator using the established pattern
         // from ChainTableBatchScan.
@@ -223,13 +230,9 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         // 1. Read delta branch data at the pinned snapshot, grouped by partition.
         Map<BinaryRow, List<DataSplit>> deltaSplitsByPartition;
         if (deltaLatestId != null) {
-            FileStoreTable pinnedDelta =
-                    deltaTable.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                    String.valueOf(deltaLatestId)));
+            FileStoreTable pinnedDelta = deltaTable.copy(pinnedOptions(deltaLatestId));
             DataTableScan pinnedDeltaScan = pinnedDelta.newScan();
-            applyPredicatesAndShard(pinnedDeltaScan);
+            applyPredicatesShardAndBucket(pinnedDeltaScan);
             deltaSplitsByPartition = groupByPartition(pinnedDeltaScan);
         } else {
             deltaSplitsByPartition = Collections.emptyMap();
@@ -242,11 +245,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         Map<Object, BinaryRow> latestChainPartitionPerGroup = new HashMap<>();
         FileStoreTable pinnedSnapshot = null;
         if (snapshotLatestId != null) {
-            pinnedSnapshot =
-                    chainGroupReadTable.wrapped.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                    String.valueOf(snapshotLatestId)));
+            pinnedSnapshot = chainGroupReadTable.wrapped.copy(pinnedOptions(snapshotLatestId));
             DataTableScan partitionListingScan = pinnedSnapshot.newScan();
             for (BinaryRow partition : partitionListingScan.listPartitions()) {
                 Object groupKey = toGroupKey(partition);
@@ -268,7 +267,7 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         if (!latestPartitions.isEmpty() && pinnedSnapshot != null) {
             DataTableScan snapshotScan = pinnedSnapshot.newScan();
             snapshotScan.withPartitionFilter(latestPartitions);
-            applyPredicatesAndShard(snapshotScan);
+            applyPredicatesShardAndBucket(snapshotScan);
             snapshotSplitsByPartition = groupByPartition(snapshotScan);
         } else {
             snapshotSplitsByPartition = Collections.emptyMap();
@@ -427,16 +426,39 @@ public class ChainTableStreamScan implements StreamDataTableScan {
         return this;
     }
 
+    @Override
+    public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        this.bucketFilter = bucketFilter;
+        batchScan.withBucketFilter(bucketFilter);
+        deltaStreamScan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
     /**
-     * Applies all previously set predicates and shard to a newly created scan. Used for the pinned
-     * delta scan in {@link #planStarting()}.
+     * Creates options for pinning a branch table to a specific snapshot. Sets {@code
+     * scan.snapshot-id} to the given id and {@code scan.mode=from-snapshot} to ensure the table
+     * reads from the pinned snapshot rather than using its default scan mode.
      */
-    private void applyPredicatesAndShard(DataTableScan scan) {
+    private static Map<String, String> pinnedOptions(long snapshotId) {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(snapshotId));
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        return options;
+    }
+
+    /**
+     * Applies all previously set predicates, shard, and bucket filter to a newly created scan. Used
+     * for the pinned delta scan in {@link #planStarting()}.
+     */
+    private void applyPredicatesShardAndBucket(DataTableScan scan) {
         for (Predicate p : predicates) {
             scan.withFilter(p);
         }
         if (shardIndex >= 0) {
             scan.withShard(shardIndex, shardCount);
+        }
+        if (bucketFilter != null) {
+            scan.withBucketFilter(bucketFilter);
         }
     }
 
