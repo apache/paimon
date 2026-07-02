@@ -126,6 +126,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS).toLong
   }
 
+  def legacyTimestampMappingEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.LEGACY_TIMESTAMP_MAPPING).toBoolean
+  }
+
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }
