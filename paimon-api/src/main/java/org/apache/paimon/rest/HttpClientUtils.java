@@ -88,8 +88,13 @@ public class HttpClientUtils {
     public static InputStream getAsInputStream(String uri) throws IOException {
         HttpGet httpGet = new HttpGet(uri);
         CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet);
-        if (response.getCode() != 200) {
-            throw new RuntimeException("HTTP error code: " + response.getCode());
+        int statusCode = response.getCode();
+        if (statusCode != HttpStatus.SC_OK) {
+            try {
+                throw httpError(statusCode);
+            } finally {
+                response.close();
+            }
         }
         return response.getEntity().getContent();
     }
@@ -98,7 +103,7 @@ public class HttpClientUtils {
      * Checks whether an HTTP resource exists. HEAD is attempted first; when HEAD does not return
      * 200, a lightweight GET with {@code Range: bytes=0-0} is used to verify readability. This
      * avoids treating signed or GET-only URLs as missing when HEAD is rejected or returns a
-     * different status than GET. HTTP 416 from the range probe indicates a zero-length resource.
+     * different status than GET.
      */
     public static boolean exists(String uri) throws IOException {
         int headStatusCode = headStatusCode(uri);
@@ -107,8 +112,7 @@ public class HttpClientUtils {
         }
         int rangeStatusCode = getRangeStatusCode(uri);
         if (rangeStatusCode == HttpStatus.SC_OK
-                || rangeStatusCode == HttpStatus.SC_PARTIAL_CONTENT
-                || rangeStatusCode == HttpStatus.SC_REQUESTED_RANGE_NOT_SATISFIABLE) {
+                || rangeStatusCode == HttpStatus.SC_PARTIAL_CONTENT) {
             return true;
         }
         if (rangeStatusCode == HttpStatus.SC_NOT_FOUND) {
@@ -116,6 +120,64 @@ public class HttpClientUtils {
         }
         throw new IOException(
                 "Unexpected HTTP status code: " + rangeStatusCode + " for uri: " + uri);
+    }
+
+    public static boolean isNotFoundError(Throwable throwable) {
+        Integer statusCode = getHttpStatusCode(throwable);
+        return statusCode != null && statusCode == HttpStatus.SC_NOT_FOUND;
+    }
+
+    public static boolean isInvalidUriException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof java.net.URISyntaxException) {
+                return true;
+            }
+            if (current instanceof IllegalArgumentException
+                    && current.getMessage() != null
+                    && current.getMessage().contains("Illegal character")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    public static Integer getHttpStatusCode(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current.getMessage() != null) {
+                Integer statusCode = parseHttpStatusCode(current.getMessage());
+                if (statusCode != null) {
+                    return statusCode;
+                }
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static Integer parseHttpStatusCode(String message) {
+        if (message.startsWith("HTTP error code: ")) {
+            return parseStatusCodeSuffix(message.substring("HTTP error code: ".length()));
+        }
+        if (message.startsWith("Unexpected HTTP status code: ")) {
+            int end = message.indexOf(' ', "Unexpected HTTP status code: ".length());
+            String statusText =
+                    end < 0
+                            ? message.substring("Unexpected HTTP status code: ".length())
+                            : message.substring("Unexpected HTTP status code: ".length(), end);
+            return parseStatusCodeSuffix(statusText);
+        }
+        return null;
+    }
+
+    private static Integer parseStatusCodeSuffix(String statusText) {
+        try {
+            return Integer.parseInt(statusText.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static int headStatusCode(String uri) throws IOException {
@@ -131,5 +193,9 @@ public class HttpClientUtils {
         try (CloseableHttpResponse response = DEFAULT_HTTP_CLIENT.execute(httpGet)) {
             return response.getCode();
         }
+    }
+
+    private static RuntimeException httpError(int statusCode) {
+        return new RuntimeException("HTTP error code: " + statusCode);
     }
 }

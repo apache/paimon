@@ -35,12 +35,20 @@ public class BlobFileContext {
 
     private final Set<String> blobDescriptorFields;
     private final Set<String> blobInlineFields;
+    private final boolean writeNullOnMissingFile;
+    private final boolean writeNullOnFetchFailure;
 
     private @Nullable BlobConsumer blobConsumer;
 
-    private BlobFileContext(Set<String> blobDescriptorFields, Set<String> blobInlineFields) {
+    private BlobFileContext(
+            Set<String> blobDescriptorFields,
+            Set<String> blobInlineFields,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
+        this.writeNullOnMissingFile = writeNullOnMissingFile;
+        this.writeNullOnFetchFailure = writeNullOnFetchFailure;
     }
 
     @Nullable
@@ -61,7 +69,11 @@ public class BlobFileContext {
         if (!requireBlobFile) {
             return null;
         }
-        return new BlobFileContext(descriptorFields, inlineFields);
+        return new BlobFileContext(
+                descriptorFields,
+                inlineFields,
+                options.blobWriteNullOnMissingFile(),
+                options.blobWriteNullOnFetchFailure());
     }
 
     public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
@@ -87,5 +99,13 @@ public class BlobFileContext {
     @Nullable
     public BlobConsumer blobConsumer() {
         return blobConsumer;
+    }
+
+    public boolean writeNullOnMissingFile() {
+        return writeNullOnMissingFile;
+    }
+
+    public boolean writeNullOnFetchFailure() {
+        return writeNullOnFetchFailure;
     }
 }

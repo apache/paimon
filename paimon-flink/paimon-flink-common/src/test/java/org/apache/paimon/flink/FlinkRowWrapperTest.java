@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FlinkRowWrapper}. */
 public class FlinkRowWrapperTest {
@@ -147,6 +148,60 @@ public class FlinkRowWrapperTest {
         assertThat(blob).isNotNull();
     }
 
+    @Test
+    public void testInvalidUriDefersExistsCheckWhenFetchFailureEnabled() {
+        GenericRowData row =
+                descriptorRow("https://img.alicdn.com/imgextra/##1304008055350781673", 1);
+
+        FlinkRowWrapper wrapper = wrapper(row, true, true);
+
+        assertThat(wrapper.isNullAt(0)).isFalse();
+    }
+
+    @Test
+    public void testInvalidUriThrowsWhenFetchFailureDisabled() {
+        GenericRowData row =
+                descriptorRow("https://img.alicdn.com/imgextra/##1304008055350781673", 1);
+
+        FlinkRowWrapper wrapper = wrapper(row, true, false);
+
+        assertThatThrownBy(() -> wrapper.isNullAt(0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Illegal character");
+    }
+
+    @Test
+    public void testHttpBadRequestDefersExistsCheckWhenFetchFailureEnabled() throws Exception {
+        httpServer.createContext(
+                "/bad.jpg",
+                exchange -> {
+                    sendResponse(exchange, 400, new byte[0]);
+                });
+        GenericRowData row = descriptorRow("http://127.0.0.1:" + httpPort + "/bad.jpg", 1);
+
+        FlinkRowWrapper wrapper = wrapper(row, true, true);
+
+        assertThat(wrapper.isNullAt(0)).isFalse();
+    }
+
+    @Test
+    public void testHttpBadRequestThrowsWhenFetchFailureDisabled() throws Exception {
+        httpServer.createContext(
+                "/bad.jpg",
+                exchange -> {
+                    sendResponse(exchange, 400, new byte[0]);
+                });
+        GenericRowData row = descriptorRow("http://127.0.0.1:" + httpPort + "/bad.jpg", 1);
+
+        FlinkRowWrapper wrapper = wrapper(row, true, false);
+
+        assertThatThrownBy(() -> wrapper.isNullAt(0))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseInstanceOf(IOException.class)
+                .rootCause()
+                .hasMessageContaining("Unexpected HTTP status code: 400");
+    }
+
     private GenericRowData descriptorRow(java.nio.file.Path path, long length) {
         return descriptorRow(path.toUri().toString(), length);
     }
@@ -170,12 +225,32 @@ public class FlinkRowWrapperTest {
     }
 
     private FlinkRowWrapper wrapper(GenericRowData row, boolean checkBlobDescriptorExists) {
-        return wrapper(row, checkBlobDescriptorExists, Collections.singleton(0));
+        return wrapper(row, checkBlobDescriptorExists, false);
+    }
+
+    private FlinkRowWrapper wrapper(
+            GenericRowData row,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
+        return wrapper(
+                row, checkBlobDescriptorExists, writeNullOnFetchFailure, Collections.singleton(0));
     }
 
     private FlinkRowWrapper wrapper(
             GenericRowData row, boolean checkBlobDescriptorExists, Set<Integer> blobFields) {
+        return wrapper(row, checkBlobDescriptorExists, false, blobFields);
+    }
+
+    private FlinkRowWrapper wrapper(
+            GenericRowData row,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure,
+            Set<Integer> blobFields) {
         return new FlinkRowWrapper(
-                row, CatalogContext.create(new Options()), checkBlobDescriptorExists, blobFields);
+                row,
+                CatalogContext.create(new Options()),
+                checkBlobDescriptorExists,
+                writeNullOnFetchFailure,
+                blobFields);
     }
 }
