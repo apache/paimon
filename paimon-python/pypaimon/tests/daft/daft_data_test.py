@@ -765,6 +765,46 @@ def test_read_paimon_partition_filter(append_only_table):
     assert all(dt == "2024-01-01" for dt in result.column("dt").to_pylist())
 
 
+def test_partition_filter_prunes_at_plan_level(append_only_table):
+    """Regression: Daft routes partition predicates to pushdowns.partition_filters
+    (a separate channel from pushdowns.filters). They must become a plan-time
+    predicate so plan() prunes partitions, instead of planning every split and
+    skipping in Python (a full-table plan)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    data = pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-03"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, data)
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    pushdowns = Pushdowns(partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # partition filter must become a plan-time predicate
+    assert state.planning_predicate is not None
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    all_splits = table.new_read_builder().new_scan().plan().splits()
+
+    # pruning reduced the planned splits, and only the matching partition remains
+    assert 0 < len(pruned) < len(all_splits)
+    assert all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
 def test_read_paimon_row_filter(append_only_table):
     """Row-level filter should be applied after reading data."""
     table, _ = append_only_table
