@@ -27,6 +27,7 @@ import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -50,6 +51,10 @@ public class StaticFileStoreSource extends FlinkSource {
 
     @Nullable private final DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
 
+    @Nullable private final SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc;
+
+    @Nullable private final SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc;
+
     private final boolean skipPreloadTargetSnapshot;
 
     public StaticFileStoreSource(
@@ -65,6 +70,8 @@ public class StaticFileStoreSource extends FlinkSource {
                 splitAssignMode,
                 null,
                 null,
+                null,
+                null,
                 blobAsDescriptor,
                 false);
     }
@@ -78,10 +85,57 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable NestedProjectedRowData rowData,
             boolean blobAsDescriptor,
             boolean skipPreloadTargetSnapshot) {
+        this(
+                readBuilder,
+                limit,
+                splitBatchSize,
+                splitAssignMode,
+                dynamicPartitionFilteringInfo,
+                rowData,
+                null,
+                null,
+                blobAsDescriptor,
+                skipPreloadTargetSnapshot);
+    }
+
+    public StaticFileStoreSource(
+            ReadBuilder readBuilder,
+            @Nullable Long limit,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc,
+            boolean blobAsDescriptor) {
+        this(
+                readBuilder,
+                limit,
+                splitBatchSize,
+                splitAssignMode,
+                null,
+                null,
+                splitWeightFunc,
+                splitGroupFunc,
+                blobAsDescriptor,
+                false);
+    }
+
+    public StaticFileStoreSource(
+            ReadBuilder readBuilder,
+            @Nullable Long limit,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            @Nullable NestedProjectedRowData rowData,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc,
+            boolean blobAsDescriptor,
+            boolean skipPreloadTargetSnapshot) {
         super(readBuilder, limit, rowData, blobAsDescriptor);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;
+        this.splitWeightFunc = splitWeightFunc;
+        this.splitGroupFunc = splitGroupFunc;
         this.skipPreloadTargetSnapshot = skipPreloadTargetSnapshot;
     }
 
@@ -97,7 +151,13 @@ public class StaticFileStoreSource extends FlinkSource {
         Collection<FileStoreSourceSplit> splits =
                 checkpoint == null ? getSplits(context) : checkpoint.splits();
         SplitAssigner splitAssigner =
-                createSplitAssigner(context, splitBatchSize, splitAssignMode, splits);
+                createSplitAssigner(
+                        context,
+                        splitBatchSize,
+                        splitAssignMode,
+                        splits,
+                        splitWeightFunc,
+                        splitGroupFunc);
         return new StaticFileStoreSplitEnumerator(
                 context, null, splitAssigner, dynamicPartitionFilteringInfo);
     }
@@ -121,9 +181,20 @@ public class StaticFileStoreSource extends FlinkSource {
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
             Collection<FileStoreSourceSplit> splits) {
+        return createSplitAssigner(context, splitBatchSize, splitAssignMode, splits, null, null);
+    }
+
+    public static SplitAssigner createSplitAssigner(
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            Collection<FileStoreSourceSplit> splits,
+            @Nullable SerializableFunction<FileStoreSourceSplit, Long> splitWeightFunc,
+            @Nullable SerializableFunction<FileStoreSourceSplit, ?> splitGroupFunc) {
         switch (splitAssignMode) {
             case FAIR:
-                return new PreAssignSplitAssigner(splitBatchSize, context, splits);
+                return new PreAssignSplitAssigner(
+                        splitBatchSize, context, splits, splitWeightFunc, splitGroupFunc);
             case PREEMPTIVE:
                 return new FIFOSplitAssigner(splits);
             default:

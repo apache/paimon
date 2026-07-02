@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.table.source.DataSplit;
+
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.junit.jupiter.api.Test;
 
@@ -62,6 +64,41 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
         enumerator.handleSplitRequest(0, "test-host");
         assertThat(assignments.get(0).getAssignedSplits())
                 .containsExactly(splits.get(0), splits.get(2));
+    }
+
+    @Test
+    public void testSplitAllocationWithCustomWeight() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(2);
+
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+        }
+        StaticFileStoreSplitEnumerator enumerator =
+                new StaticFileStoreSplitEnumerator(
+                        context,
+                        null,
+                        StaticFileStoreSource.createSplitAssigner(
+                                context,
+                                10,
+                                SplitAssignMode.FAIR,
+                                splits,
+                                split -> {
+                                    int snapshotId = (int) ((DataSplit) split.split()).snapshotId();
+                                    return snapshotId == 1 || snapshotId == 2 ? 100L : 1L;
+                                }));
+
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(totalWeight(assignments.get(0).getAssignedSplits())).isEqualTo(101L);
+        assertThat(totalWeight(assignments.get(1).getAssignedSplits())).isEqualTo(101L);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(2);
+        assertThat(assignments.get(1).getAssignedSplits()).hasSize(2);
     }
 
     @Test
@@ -144,6 +181,16 @@ public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
         assertThat(assignments.get(0).getAssignedSplits()).containsExactly(splits.get(0));
         assertThat(assignments.get(1).getAssignedSplits()).containsExactly(splits.get(1));
         assertThat(assignments.get(2).getAssignedSplits()).isEmpty();
+    }
+
+    private long totalWeight(List<FileStoreSourceSplit> splits) {
+        return splits.stream()
+                .mapToLong(
+                        split -> {
+                            int snapshotId = (int) ((DataSplit) split.split()).snapshotId();
+                            return snapshotId == 1 || snapshotId == 2 ? 100L : 1L;
+                        })
+                .sum();
     }
 
     @Override
