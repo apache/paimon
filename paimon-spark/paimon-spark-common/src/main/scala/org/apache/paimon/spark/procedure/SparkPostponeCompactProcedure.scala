@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.postpone.BucketFiles
+import org.apache.paimon.spark.PaimonImplicits._
 import org.apache.paimon.spark.commands.{EncoderSerDeGroup, PostponeFixBucketProcessor}
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.{ScanPlanHelper, SparkRowUtils}
@@ -63,13 +64,26 @@ case class SparkPostponeCompactProcedure(
   // Create bucket computer to determine bucket count for each partition
   private lazy val postponePartitionBucketComputer = {
     val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
+    val targetRowNumPerBucket: Option[java.lang.Long] =
+      table.coreOptions.postponeTargetRowNumPerBucket
+    val postponeRowCounts =
+      if (targetRowNumPerBucket.isDefined) {
+        PostponeUtils.getPostponeRowCounts(table)
+      } else {
+        Collections.emptyMap[BinaryRow, java.lang.Long]()
+      }
     val defaultBucketNum =
       if (table.coreOptions.toConfiguration.contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)) {
         table.coreOptions.postponeDefaultBucketNum
       } else {
         spark.sparkContext.defaultParallelism
       }
-    (p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultBucketNum)
+
+    SparkPostponeCompactProcedure.PostponePartitionBucketComputer(
+      knownNumBuckets,
+      targetRowNumPerBucket,
+      postponeRowCounts,
+      defaultBucketNum)
   }
 
   private def partitionCols(df: DataFrame): Seq[Column] = {
@@ -235,5 +249,26 @@ case class SparkPostponeCompactProcedure(
         throw new RuntimeException("Failed to commit postpone bucket compaction result", e)
     }
     LOG.info("Successfully committed postpone bucket compaction for table: {}.", table.name())
+  }
+}
+
+object SparkPostponeCompactProcedure {
+
+  private[procedure] case class PostponePartitionBucketComputer(
+      knownNumBuckets: java.util.Map[BinaryRow, Integer],
+      targetRowNumPerBucket: Option[java.lang.Long],
+      postponeRowCounts: java.util.Map[BinaryRow, java.lang.Long],
+      defaultBucketNum: Int)
+    extends (BinaryRow => Integer)
+    with Serializable {
+
+    override def apply(p: BinaryRow): Integer = {
+      PostponeUtils.determineBucketNum(
+        p,
+        knownNumBuckets,
+        targetRowNumPerBucket.orNull,
+        postponeRowCounts,
+        defaultBucketNum)
+    }
   }
 }

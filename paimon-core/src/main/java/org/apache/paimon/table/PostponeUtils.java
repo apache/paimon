@@ -19,18 +19,73 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 
 /** Utils for postpone table. */
 public class PostponeUtils {
+
+    public static int computeBucketNumByRowCount(long rowCount, long targetRowNumPerBucket) {
+        if (targetRowNumPerBucket <= 0) {
+            throw new IllegalArgumentException(
+                    "Option 'postpone.target-row-num-per-bucket' must be greater than 0.");
+        }
+
+        long bucketNum = rowCount <= 0 ? 1 : (rowCount - 1) / targetRowNumPerBucket + 1;
+        if (bucketNum > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    "Computed postpone bucket number "
+                            + bucketNum
+                            + " exceeds the maximum integer value (Integer.MAX_VALUE = "
+                            + Integer.MAX_VALUE
+                            + "). Consider increasing 'postpone.target-row-num-per-bucket' "
+                            + "to reduce the bucket count.");
+        }
+        return (int) bucketNum;
+    }
+
+    public static int determineBucketNum(
+            BinaryRow partition,
+            Map<BinaryRow, Integer> knownNumBuckets,
+            Optional<Long> targetRowNumPerBucket,
+            Map<BinaryRow, Long> postponeRowCounts,
+            int defaultBucketNum) {
+        return determineBucketNum(
+                partition,
+                knownNumBuckets,
+                targetRowNumPerBucket.orElse(null),
+                postponeRowCounts,
+                defaultBucketNum);
+    }
+
+    public static int determineBucketNum(
+            BinaryRow partition,
+            Map<BinaryRow, Integer> knownNumBuckets,
+            @Nullable Long targetRowNumPerBucket,
+            Map<BinaryRow, Long> postponeRowCounts,
+            int defaultBucketNum) {
+        Integer knownBucketNum = knownNumBuckets.get(partition);
+        if (knownBucketNum != null) {
+            return knownBucketNum;
+        } else if (targetRowNumPerBucket != null) {
+            return computeBucketNumByRowCount(
+                    postponeRowCounts.getOrDefault(partition, 0L), targetRowNumPerBucket);
+        } else {
+            return defaultBucketNum;
+        }
+    }
 
     public static Map<BinaryRow, Integer> getKnownNumBuckets(FileStoreTable table) {
         Map<BinaryRow, Integer> knownNumBuckets = new HashMap<>();
@@ -52,6 +107,18 @@ public class PostponeUtils {
             }
         }
         return knownNumBuckets;
+    }
+
+    /** Returns row counts of current active files in the postpone bucket. */
+    public static Map<BinaryRow, Long> getPostponeRowCounts(FileStoreTable table) {
+        Map<BinaryRow, Long> rowCounts = new HashMap<>();
+        Iterator<ManifestEntry> iterator =
+                table.newSnapshotReader().withBucket(BucketMode.POSTPONE_BUCKET).readFileIterator();
+        while (iterator.hasNext()) {
+            ManifestEntry entry = iterator.next();
+            rowCounts.merge(entry.partition(), entry.file().rowCount(), Long::sum);
+        }
+        return rowCounts;
     }
 
     public static FileStoreTable tableForFixBucketWrite(FileStoreTable table) {
