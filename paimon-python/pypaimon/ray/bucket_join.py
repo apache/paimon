@@ -21,6 +21,7 @@ Same key -> same bucket on both sides, so each bucket is read and joined in its 
 Ray task with no global shuffle -- the no-shuffle alternative to ``ray.data.join``.
 """
 
+import threading
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 __all__ = ["bucket_join"]
@@ -33,30 +34,33 @@ def _norm(on: OnSpec) -> List[str]:
 
 
 def _bucketing(table):
-    # Use the resolved bucket keys, not the raw ``bucket-key`` option: a primary-key
-    # table that does not set ``bucket-key`` explicitly is still bucketed by its
-    # (partition-trimmed) primary key, and reading the raw option would miss that.
-    return table.options.bucket(), list(table.table_schema.bucket_keys)
+    # Resolved bucket keys (a PK table without an explicit bucket-key buckets by its
+    # trimmed primary key) plus the bucket function: same key co-locates only under both.
+    return (table.options.bucket(),
+            list(table.table_schema.bucket_keys),
+            table.table_schema.options.get("bucket-function.type", "default"))
 
 
-# Per-process table cache so a worker reuses table metadata across the many buckets
-# it runs, instead of reloading the catalog per bucket. Only used when reading given
-# splits (snapshot-independent); planning always loads a fresh table.
+# Per-worker table cache, keyed by schema id (so a schema change invalidates it) and
+# lock-guarded against concurrent tasks. Planning always loads a fresh table.
 _TABLE_CACHE: Dict = {}
+_TABLE_CACHE_LOCK = threading.Lock()
 
 
-def _get_table(table_id, catalog_options, use_cache):
+def _get_table(table_id, catalog_options, cache_key=None):
     from pypaimon.catalog.catalog_factory import CatalogFactory
-    if not use_cache:
+    if cache_key is None:
         return CatalogFactory.create(catalog_options).get_table(table_id)
-    key = (table_id, tuple(sorted(catalog_options.items())))
-    if key not in _TABLE_CACHE:
-        _TABLE_CACHE[key] = CatalogFactory.create(catalog_options).get_table(table_id)
-    return _TABLE_CACHE[key]
+    with _TABLE_CACHE_LOCK:
+        table = _TABLE_CACHE.get(cache_key)
+        if table is None:
+            table = CatalogFactory.create(catalog_options).get_table(table_id)
+            _TABLE_CACHE[cache_key] = table
+        return table
 
 
-def _read_builder(table_id, catalog_options, projection, use_cache=False):
-    rb = _get_table(table_id, catalog_options, use_cache).new_read_builder()
+def _read_builder(table_id, catalog_options, projection, cache_key=None):
+    rb = _get_table(table_id, catalog_options, cache_key).new_read_builder()
     return rb.with_projection(projection) if projection is not None else rb
 
 
@@ -68,9 +72,11 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection):
     return by_bucket
 
 
-def _read_splits(table_id, catalog_options, projection, splits):
-    # Reading given splits is snapshot-independent, so the cached table is safe here.
-    return _read_builder(table_id, catalog_options, projection, use_cache=True).new_read().to_arrow(splits)
+def _read_splits(table_id, catalog_options, projection, splits, schema_id):
+    # Snapshot-independent but schema-dependent: cache by schema id, not just table id.
+    cache_key = (table_id, tuple(sorted(catalog_options.items())), schema_id)
+    return _read_builder(
+        table_id, catalog_options, projection, cache_key).new_read().to_arrow(splits)
 
 
 def bucket_join(
@@ -94,8 +100,8 @@ def bucket_join(
     on_cols = _norm(on)
     cat = CatalogFactory.create(catalog_options)
     ltable, rtable = cat.get_table(left), cat.get_table(right)
-    lcount, lkey = _bucketing(ltable)
-    rcount, rkey = _bucketing(rtable)
+    lcount, lkey, lfunc = _bucketing(ltable)
+    rcount, rkey, rfunc = _bucketing(rtable)
 
     if ltable.partition_keys or rtable.partition_keys:
         # Bucket numbers are per-partition, so the same bucket id lives in every
@@ -114,10 +120,26 @@ def bucket_join(
     if lkey != rkey:
         raise ValueError(
             f"bucket_join requires the same bucket-key; {left}={lkey}, {right}={rkey}.")
+    if lfunc != rfunc:
+        # Different bucket functions hash the same key to different buckets.
+        raise ValueError(
+            f"bucket_join requires the same bucket-function.type; {left}={lfunc}, {right}={rfunc}.")
     if on_cols != lkey:
         raise ValueError(
             f"bucket_join requires the join key to be the bucket-key {lkey}; got on={on_cols}. "
-            "Equal keys only co-locate by bucket when joining on the bucket-key.")
+            "Equal keys only co-locate by bucket when joining on the bucket-key "
+            "(the comparison is order-sensitive for composite keys).")
+    # Same name isn't enough: differing key types (INT vs BIGINT) can hash apart and
+    # silently drop matches, since the bucket is hash(key) %% bucket_count.
+    key_type_mismatch = [
+        (c, str(ltable.field_dict[c].type), str(rtable.field_dict[c].type))
+        for c in on_cols
+        if str(ltable.field_dict[c].type) != str(rtable.field_dict[c].type)
+    ]
+    if key_type_mismatch:
+        raise ValueError(
+            "bucket_join requires the bucket-key columns to have the same type on both "
+            f"sides; mismatched (column, left, right): {key_type_mismatch}.")
     if join_type != "inner":
         # Outer joins would need the union of buckets (a bucket missing on one side
         # still emits rows); only inner is correct with the per-bucket intersection.
@@ -145,9 +167,11 @@ def bucket_join(
     left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection)
     right_by_bucket = _plan_splits_by_bucket(right, catalog_options, right_projection)
 
+    l_schema_id, r_schema_id = ltable.table_schema.id, rtable.table_schema.id
+
     def _join_bucket(left_splits, right_splits):
-        left_t = _read_splits(left, catalog_options, left_projection, left_splits)
-        right_t = _read_splits(right, catalog_options, right_projection, right_splits)
+        left_t = _read_splits(left, catalog_options, left_projection, left_splits, l_schema_id)
+        right_t = _read_splits(right, catalog_options, right_projection, right_splits, r_schema_id)
         return left_t.join(right_t, keys=on_cols, join_type=join_type)
 
     # ``@ray.remote()`` (empty parens) is rejected by Ray, so wrap conditionally.
@@ -156,8 +180,8 @@ def bucket_join(
     buckets = sorted(set(left_by_bucket) & set(right_by_bucket))
     if not buckets:
         # No shared bucket: empty result, but keep the join schema (join two empties).
-        empty = _read_splits(left, catalog_options, left_projection, []).join(
-            _read_splits(right, catalog_options, right_projection, []),
+        empty = _read_splits(left, catalog_options, left_projection, [], l_schema_id).join(
+            _read_splits(right, catalog_options, right_projection, [], r_schema_id),
             keys=on_cols, join_type=join_type)
         return ray.data.from_arrow(empty)
     # Keep each bucket's result as a distributed object ref -- never pulled into the driver.

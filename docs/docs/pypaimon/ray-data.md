@@ -380,11 +380,15 @@ ds = bucket_join(
 
 **Notes:**
 - Both tables must be fixed-bucket (`bucket > 0`) with the same bucket count and
-  the same bucket-key; otherwise `bucket_join` raises. For primary-key tables
-  that do not set `bucket-key` explicitly, the bucket-key resolves to the
-  (partition-trimmed) primary key.
+  the same bucket-key (same column names, order, and types); otherwise
+  `bucket_join` raises. For primary-key tables that do not set `bucket-key`
+  explicitly, the bucket-key resolves to the (partition-trimmed) primary key.
 - The two sides must not share columns other than the join key, or the
-  underlying pyarrow join would collide; project or rename them away first.
+  underlying pyarrow join would collide; project them away with
+  `left_projection` / `right_projection` first.
+- Each side is planned at its own latest snapshot, and one bucket is joined by a
+  single Ray task that reads the whole bucket into memory. Choose a bucket count
+  that spreads keys evenly to avoid skewed, memory-heavy tasks.
 - Partitioned tables are not supported yet (bucket ids are per-partition).
 
 ## Merge Into

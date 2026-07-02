@@ -26,8 +26,15 @@ import pytest
 pypaimon = pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
+import importlib
+from unittest import mock
+
 from pypaimon import CatalogFactory, Schema
 from pypaimon.ray import bucket_join
+
+# The package attribute ``pypaimon.ray.bucket_join`` is the function (it shadows the
+# submodule); import the module explicitly to reach its internal helpers.
+bjmod = importlib.import_module("pypaimon.ray.bucket_join")
 
 
 class RayBucketJoinTest(unittest.TestCase):
@@ -71,8 +78,11 @@ class RayBucketJoinTest(unittest.TestCase):
         w.close()
         return name
 
-    def _create_bucketed(self, name, schema, key, num_buckets, partition_keys=None):
+    def _create_bucketed(self, name, schema, key, num_buckets,
+                         partition_keys=None, extra_opts=None):
         opts = {"bucket": str(num_buckets), "bucket-key": key}
+        if extra_opts:
+            opts.update(extra_opts)
         self.catalog.create_table(
             name,
             Schema.from_pyarrow_schema(schema, partition_keys=partition_keys, options=opts),
@@ -116,6 +126,69 @@ class RayBucketJoinTest(unittest.TestCase):
             "default.in_fan", "default.loc_fan", self.catalog_options,
             on="url", left_projection=["url"], right_projection=["url", "row_id"])
         self.assertEqual(sorted(r["row_id"] for r in ds.take_all()), [0, 1])
+
+    def test_dispatches_one_task_per_shared_bucket(self):
+        # No cross-bucket shuffle: exactly one Ray task (object ref) per shared bucket.
+        loc = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
+        ins = pa.schema([("url", pa.string())])
+        self._bucketed_table(
+            "default.disp_loc", loc, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(200)],
+                                  "row_id": list(range(200))}, schema=loc))
+        self._bucketed_table(
+            "default.disp_in", ins, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(100)]}, schema=ins))
+        lbb = bjmod._plan_splits_by_bucket("default.disp_in", self.catalog_options, ["url"])
+        rbb = bjmod._plan_splits_by_bucket("default.disp_loc", self.catalog_options, ["url", "row_id"])
+        shared = set(lbb) & set(rbb)
+        self.assertGreater(len(shared), 1)  # genuinely spread across buckets
+
+        captured = {}
+        real = ray.data.from_arrow_refs
+
+        def spy(refs):
+            captured["n"] = len(refs)
+            return real(refs)
+
+        with mock.patch.object(ray.data, "from_arrow_refs", spy):
+            ds = bucket_join(
+                "default.disp_in", "default.disp_loc", self.catalog_options,
+                on="url", left_projection=["url"], right_projection=["url", "row_id"])
+            ds.take_all()
+        self.assertEqual(captured["n"], len(shared))
+
+    def test_composite_bucket_key(self):
+        # Happy path for a multi-column bucket-key joined on both columns.
+        loc = pa.schema([("a", pa.string()), ("b", pa.int64()), ("row_id", pa.int64())])
+        ins = pa.schema([("a", pa.string()), ("b", pa.int64())])
+        self._bucketed_table(
+            "default.comp_loc", loc, "a,b",
+            pa.Table.from_pydict({"a": [f"k{i}" for i in range(50)], "b": list(range(50)),
+                                  "row_id": list(range(50))}, schema=loc))
+        self._bucketed_table(
+            "default.comp_in", ins, "a,b",
+            pa.Table.from_pydict({"a": [f"k{i}" for i in range(20)], "b": list(range(20))},
+                                 schema=ins))
+        ds = bucket_join(
+            "default.comp_in", "default.comp_loc", self.catalog_options,
+            on=["a", "b"], left_projection=["a", "b"], right_projection=["a", "b", "row_id"])
+        got = {(r["a"], r["b"]): r["row_id"] for r in ds.take_all()}
+        self.assertEqual(len(got), 20)
+        self.assertTrue(all(got[(f"k{i}", i)] == i for i in range(20)))
+
+    def test_read_cache_keyed_by_schema_id(self):
+        # A schema change must invalidate the per-worker table cache: different schema
+        # id -> different cache entry (reload), same id -> reuse.
+        self._create_bucketed("default.cache_t", pa.schema([("url", pa.string())]), "url", 8)
+        bjmod._TABLE_CACHE.clear()
+        opts = self.catalog_options
+        k0 = ("default.cache_t", tuple(sorted(opts.items())), 0)
+        k1 = ("default.cache_t", tuple(sorted(opts.items())), 1)
+        t0a = bjmod._get_table("default.cache_t", opts, k0)
+        t0b = bjmod._get_table("default.cache_t", opts, k0)
+        t1 = bjmod._get_table("default.cache_t", opts, k1)
+        self.assertIs(t0a, t0b)      # same schema id -> cached
+        self.assertIsNot(t0a, t1)    # different schema id -> reloaded
 
     def test_empty_result_keeps_schema(self):
         # No shared bucket -> 0 rows, but the join schema must survive.
@@ -190,6 +263,23 @@ class RayBucketJoinTest(unittest.TestCase):
         self._create_bucketed("default.col2", sch, "url", 8)
         with self.assertRaises(ValueError):
             bucket_join("default.col1", "default.col2", self.catalog_options, on="url")
+
+    def test_rejects_different_bucket_function(self):
+        # Same bucket-key/count but different bucket function -> same key may land in
+        # different buckets, so co-location is not guaranteed.
+        sch = pa.schema([("k", pa.int64())])
+        self._create_bucketed("default.bf_default", sch, "k", 8)
+        self._create_bucketed("default.bf_mod", sch, "k", 8,
+                              extra_opts={"bucket-function.type": "mod"})
+        with self.assertRaises(ValueError):
+            bucket_join("default.bf_default", "default.bf_mod", self.catalog_options, on="k")
+
+    def test_rejects_mismatched_key_type(self):
+        # Same bucket-key name but different type hashes differently -> reject.
+        self._create_bucketed("default.ty_str", pa.schema([("k", pa.string())]), "k", 8)
+        self._create_bucketed("default.ty_int", pa.schema([("k", pa.int64())]), "k", 8)
+        with self.assertRaises(ValueError):
+            bucket_join("default.ty_str", "default.ty_int", self.catalog_options, on="k")
 
     def test_rejects_partitioned_table(self):
         # Bucket ids are per-partition, so bucket-only grouping would join across
