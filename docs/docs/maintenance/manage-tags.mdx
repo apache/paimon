@@ -300,3 +300,22 @@ CALL sys.rollback(table => 'test.t', version => '2');
 </TabItem>
 
 </Tabs>
+
+## Rollback to Tag as Latest
+
+Roll a table back to the state of a specific tag by materializing that state as a new latest snapshot. Unlike
+`rollback_to`, this operation does not delete snapshots or tags whose snapshot id is larger than the target tag.
+
+<Tabs groupId="rollback-to-as-latest">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Run the following command:
+
+```sql
+CALL sys.rollback_to_as_latest(`table` => 'database_name.table_name', tag => 'tag_name');
+```
+
+</TabItem>
+
+</Tabs>

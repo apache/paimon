@@ -56,8 +56,12 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -951,6 +955,105 @@ public class FileStoreCommitTest {
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+    }
+
+    @Test
+    public void testRollbackToAsLatestFileLevelDeleteIsVisibleToStreaming() throws Exception {
+        // Contrast with the DV-only case: when a rollback removes whole data files, the delete is
+        // file-level (FileKind.DELETE) and IS visible to streaming readers, no DV needed.
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1 (target): f1
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2 (latest): add f2
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f2")));
+
+        // roll back to snapshot 1 — f2 must be removed
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+
+        // f2 is retracted (before side) — the file-level delete is visible to streaming
+        assertThat(splits).isNotEmpty();
+        IncrementalSplit split = (IncrementalSplit) splits.get(0);
+        boolean f2Retracted = split.beforeFiles().stream().anyMatch(f -> f.fileName().equals("f2"));
+        assertThat(f2Retracted).isTrue();
+    }
+
+    @Test
+    public void testNormalDeletionVectorDeleteIsInvisibleToStreamingDelta() throws Exception {
+        // Baseline (no rollback involved): without a changelog producer, a plain DV-only delete
+        // produces an empty data delta, so the streaming delta read sees no change at all. DV
+        // deletes are only streamable via a changelog producer, not via the delta/overwrite path.
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+
+        // snapshot 2: a DV-only delete on f1 (data file unchanged, only an index increment)
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        Snapshot dvDelete = store.snapshotManager().latestSnapshot();
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(dvDelete).readChanges().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testRollbackToAsLatestDeletionVectorChangeIsInvisibleToStreaming()
+            throws Exception {
+        // A DV-only rollback changes only the index manifest (the data files are identical), so it
+        // produces an empty data delta and is invisible to streaming readers — consistent with a
+        // plain DV delete, which is also invisible to streaming (DV deletes are only streamable via
+        // a changelog producer, not via the delta/overwrite path).
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors (the rollback target)
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2: DV-only change — add a deletion vector for f1, data file unchanged
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        // sanity check: f1 really has a deletion vector now
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        // snapshot 3: roll back to snapshot 1
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        // The rollback's data delta is empty, so the streaming change read produces no splits — the
+        // DV-only rollback is invisible to streaming (batch / time-travel reads remain correct
+        // since
+        // the snapshot points to the target's index manifest).
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+        assertThat(splits).isEmpty();
     }
 
     @Test
