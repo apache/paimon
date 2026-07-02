@@ -118,6 +118,14 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.TYPE_WIDENING).toBoolean
   }
 
+  def dataEvolutionUpdateConflictRetryMaxAttempts(): Int = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS).toInt
+  }
+
+  def dataEvolutionUpdateConflictRetryWaitMs(): Long = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS).toLong
+  }
+
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
   }

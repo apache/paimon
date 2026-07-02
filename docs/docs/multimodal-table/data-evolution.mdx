@@ -117,16 +117,18 @@ commit.close()
 
 ## Partial Updates
 
-You can update selected columns with Spark `MERGE INTO`, the Flink
-`data_evolution_merge_into` procedure, or the PyPaimon table update API. Only
-the updated column files are written; untouched columns remain in their original
-files.
+You can update selected columns with Spark SQL `UPDATE` or `MERGE INTO`, the
+Flink `data_evolution_merge_into` procedure, or the PyPaimon table update API.
+Only the updated column files are written; untouched columns remain in their
+original files.
 
 <Tabs groupId="data-evolution-partial-update">
 
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
+UPDATE target_table SET b = b + 10 WHERE id = 1;
+
 CREATE TABLE source_table (id INT, b INT);
 INSERT INTO source_table VALUES (1, 11), (2, 22);
 
@@ -201,9 +203,14 @@ commit.close()
 
 Notes:
 
-- SQL `DELETE` and standalone SQL `UPDATE` statements are not supported for
-  Data Evolution tables yet. Use Spark `MERGE INTO`, the Flink procedure, or
-  PyPaimon APIs.
+- Spark SQL supports standalone `UPDATE` statements for Data Evolution tables.
+  SQL `DELETE` statements are not supported for Data Evolution tables yet. Use
+  Spark `UPDATE` or `MERGE INTO`, the Flink procedure, or PyPaimon APIs.
+- Concurrent Spark SQL `UPDATE` statements that update the same data file and
+  columns may be retried automatically. Configure retry attempts with
+  `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
+  retry wait time with
+  `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
 - `MERGE INTO` for Data Evolution tables does not support the
   `WHEN NOT MATCHED BY SOURCE` clause.
 - The Flink `data_evolution_merge_into` procedure currently supports updating
