@@ -39,6 +39,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         return createFieldNestedUpdateAgg(
                 fieldType,
                 options.fieldNestedUpdateAggNestedKey(field),
+                options.fieldNestedUpdateAggNestedKeyNullStrategy(field),
                 options.fieldNestedUpdateAggNestedSequenceField(field),
                 options.fieldNestedUpdateAggCountLimit(field));
     }
@@ -51,6 +52,7 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
     private FieldNestedUpdateAgg createFieldNestedUpdateAgg(
             DataType fieldType,
             List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy,
             List<String> nestedSequenceField,
             int countLimit) {
         if (nestedKey == null) {
@@ -68,6 +70,11 @@ public class FieldNestedUpdateAggFactory implements FieldAggregatorFactory {
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
         return new FieldNestedUpdateAgg(
-                identifier(), arrayType, nestedKey, nestedSequenceField, countLimit);
+                identifier(),
+                arrayType,
+                nestedKey,
+                nestedKeyNullStrategy,
+                nestedSequenceField,
+                countLimit);
     }
 }

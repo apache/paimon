@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.codegen.RecordEqualiser;
@@ -32,7 +33,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,17 +62,14 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Nullable private final RecordComparator sequenceComparator;
     private final boolean hasSequenceField;
 
+    private final CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy;
     private final int countLimit;
-
-    public FieldNestedUpdateAgg(
-            String name, ArrayType dataType, List<String> nestedKey, int countLimit) {
-        this(name, dataType, nestedKey, Collections.emptyList(), countLimit);
-    }
 
     public FieldNestedUpdateAgg(
             String name,
             ArrayType dataType,
             List<String> nestedKey,
+            CoreOptions.NestedKeyNullStrategy nestedKeyNullStrategy,
             List<String> nestedSequenceField,
             int countLimit) {
         super(name, dataType);
@@ -85,12 +83,24 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             this.elementEqualiser = null;
         }
 
+        checkArgument(
+                nestedKeyNullStrategy == null || this.keyProjection != null,
+                "Option 'fields.<field-name>.nested-key-null-strategy' requires "
+                        + "'fields.<field-name>.nested-key' to be configured.");
+
+        // Default to MERGE to preserve the previous behavior.
+        this.nestedKeyNullStrategy =
+                nestedKeyNullStrategy == null
+                        ? CoreOptions.NestedKeyNullStrategy.MERGE
+                        : nestedKeyNullStrategy;
+
         // If nestedSequenceField is set, we need to compare sequence fields to determine
         // whether to update. Only update when the new sequence is greater than the old one.
         if (!nestedSequenceField.isEmpty()) {
             checkArgument(
                     this.keyProjection != null,
-                    "nested-sequence-field requires nested-key to be set.");
+                    "Option 'fields.<field-name>.nested-sequence-field' requires "
+                            + "'fields.<field-name>.nested-key' to be configured.");
             this.sequenceProjection = newProjection(nestedType, nestedSequenceField);
             this.hasSequenceField = true;
 
@@ -179,14 +189,22 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
                     continue;
                 }
                 InternalRow row = acc.getRow(i, nestedFields);
-                map.put(keyProjection.apply(row).copy(), row);
+                BinaryRow key = keyProjection.apply(row).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.put(key, row);
             }
 
             for (int i = 0; i < retract.size(); i++) {
                 if (retract.isNullAt(i)) {
                     continue;
                 }
-                map.remove(keyProjection.apply(retract.getRow(i, nestedFields)));
+                BinaryRow key = keyProjection.apply(retract.getRow(i, nestedFields)).copy();
+                if (!applyNestedKeyNullStrategy(key)) {
+                    continue;
+                }
+                map.remove(key);
             }
 
             return new GenericArray(new ArrayList<>(map.values()).toArray());
@@ -243,6 +261,11 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
             InternalRow row = array.getRow(i, nestedFields);
             BinaryRow key = keyProjection.apply(row).copy();
+
+            if (!applyNestedKeyNullStrategy(key)) {
+                continue;
+            }
+
             InternalRow existing = rows.get(key);
             if (existing != null) {
                 if (!hasSequenceField || compareSequence(row, existing) >= 0) {
@@ -251,6 +274,29 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             } else if (!limitNewKeys || rows.size() < countLimit) {
                 rows.put(key, row);
             }
+        }
+    }
+
+    private boolean applyNestedKeyNullStrategy(BinaryRow key) {
+        if (!key.anyNull()) {
+            // The nested-key satisfies primary key semantics.
+            return true;
+        }
+        switch (nestedKeyNullStrategy) {
+            case MERGE:
+                // Preserve the previous behavior.
+                return true;
+            case IGNORE:
+                return false;
+            case ERROR:
+                throw new IllegalArgumentException(
+                        "Nested key contains null values. Primary key fields must not be null.");
+            default:
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Unsupported nested-key-null-strategy '%s'. Supported values are: %s.",
+                                nestedKeyNullStrategy,
+                                Arrays.toString(CoreOptions.NestedKeyNullStrategy.values())));
         }
     }
 }
