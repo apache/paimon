@@ -962,6 +962,56 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
+    public void testManifestSortMaxRewriteSizeSmallerThanTargetFileSizeStillRewrites() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        for (int manifest = 0; manifest < 5; manifest++) {
+            List<ManifestEntry> entries = new ArrayList<>();
+            for (int partition = manifest; partition <= manifest + 20; partition++) {
+                entries.add(
+                        makeEntry(true, String.format("m%d-p%d", manifest, partition), partition));
+            }
+            input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+        }
+
+        Set<String> inputManifestFileNames =
+                input.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        Options testOptions = new Options();
+        testOptions.set("manifest-sort.enabled", "true");
+        testOptions.set("manifest.target-file-size", "2B");
+        testOptions.set("manifest-sort.max-rewrite-size", "1B");
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMerger.merge(
+                        input,
+                        manifestFile,
+                        getPartitionType(),
+                        CoreOptions.fromMap(testOptions.toMap()));
+
+        assertEquivalentEntries(input, merged);
+
+        boolean hasRewrittenManifest = false;
+        for (ManifestFileMeta meta : merged) {
+            if (inputManifestFileNames.contains(meta.fileName())) {
+                continue;
+            }
+
+            hasRewrittenManifest = true;
+            List<ManifestEntry> entries = manifestFile.read(meta.fileName(), meta.fileSize());
+            for (int i = 1; i < entries.size(); i++) {
+                int prevPartition = entries.get(i - 1).partition().getInt(0);
+                int currPartition = entries.get(i).partition().getInt(0);
+                assertThat(currPartition)
+                        .as("Entries within rewritten manifest should be sorted by partition")
+                        .isGreaterThanOrEqualTo(prevPartition);
+            }
+        }
+        assertThat(hasRewrittenManifest)
+                .as("Small max rewrite size should still rewrite at least one useful batch")
+                .isTrue();
+    }
+
+    @Test
     public void testManifestSortWithSpillableExternalSortBuffer() {
         List<ManifestFileMeta> input = new ArrayList<>();
         for (int manifest = 0; manifest < 4; manifest++) {
