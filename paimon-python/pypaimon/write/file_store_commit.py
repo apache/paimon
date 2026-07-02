@@ -183,6 +183,8 @@ class FileStoreCommit:
         if self.conflict_detection.has_row_id_check_from_snapshot():
             detect_conflicts = True
             allow_rollback = True
+        if self.conflict_detection.has_global_index_additions(index_adds):
+            detect_conflicts = True
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,

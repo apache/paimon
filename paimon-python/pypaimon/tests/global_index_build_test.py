@@ -30,6 +30,7 @@ from pypaimon.globalindex.build_plan import (
     split_by_global_index_shard as _split_by_global_index_shard,
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
+from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
     TANTIVY_FULLTEXT_IDENTIFIER,
@@ -416,6 +417,54 @@ class GlobalIndexBuildTest(
         index_table = index_read_builder.new_read().to_arrow(
             index_read_builder.new_scan().plan().splits())
         self.assertEqual(0, index_table.num_rows)
+
+    def test_stale_global_index_commit_conflicts_when_data_files_removed(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['a', 'b', 'c', 'd'],
+                'age': [10, 20, 30, 40],
+                'city': ['x', 'y', 'z', 'w'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        messages = GlobalIndexBuilder(
+            table,
+            'id',
+            options={'sorted-index.records-per-range': '2'},
+        ).build()
+        self.assertGreater(sum(len(message.index_adds) for message in messages), 0)
+
+        overwrite_wb = table.new_batch_write_builder().overwrite({})
+        overwrite_write = overwrite_wb.new_write()
+        overwrite_commit = overwrite_wb.new_commit()
+        overwrite_write.write_arrow(pa.table(
+            {
+                'id': [5, 6],
+                'name': ['e', 'f'],
+                'age': [50, 60],
+                'city': ['new1', 'new2'],
+            },
+            schema=self.pa_schema,
+        ))
+        overwrite_commit.commit(overwrite_write.prepare_commit())
+        overwrite_write.close()
+        overwrite_commit.close()
+
+        stale_commit = table.new_batch_write_builder().new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            stale_commit.commit(messages)
+        stale_commit.close()
+        self.assertIn(
+            'Global index row ID existence conflict',
+            str(ctx.exception),
+        )
+        self.assertEqual(
+            [],
+            IndexFileHandler(table).scan(table.snapshot_manager().get_latest_snapshot()),
+        )
 
     def test_create_bitmap_global_index_from_python(self):
         table = self._create_table()

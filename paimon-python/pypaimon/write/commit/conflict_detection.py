@@ -173,6 +173,10 @@ class ConflictDetection:
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
 
+    @staticmethod
+    def has_global_index_additions(index_entries=None):
+        return bool(ConflictDetection.global_index_file_additions(index_entries))
+
     def check_conflicts(
             self,
             latest_snapshot,
@@ -218,6 +222,11 @@ class ConflictDetection:
                 return conflict
 
         conflict = self.check_row_id_range_conflicts(commit_kind, merged_entries)
+        if conflict is not None:
+            return conflict
+
+        conflict = self.check_global_index_row_id_existence(
+            base_entries, delta_index_entries)
         if conflict is not None:
             return conflict
 
@@ -292,6 +301,50 @@ class ConflictDetection:
         return [
             meta.data_file_name
             for meta in (index_file.dv_ranges or {}).values()
+        ]
+
+    def check_global_index_row_id_existence(self, base_entries, delta_index_entries=None):
+        if not self.data_evolution_enabled:
+            return None
+
+        indexes_to_check = self.global_index_file_additions(delta_index_entries)
+        if not indexes_to_check:
+            return None
+
+        data_ranges = {}
+        for entry in base_entries or []:
+            row_range = entry.file.row_id_range()
+            if entry.kind == 0 and row_range is not None:
+                key = (tuple(entry.partition.values), entry.bucket)
+                data_ranges.setdefault(key, []).append(row_range)
+
+        data_ranges = {
+            key: Range.sort_and_merge_overlap(ranges, True, True)
+            for key, ranges in data_ranges.items()
+        }
+
+        for index_entry in indexes_to_check:
+            global_index = index_entry.index_file.global_index_meta
+            index_range = Range(
+                global_index.row_range_start,
+                global_index.row_range_end,
+            )
+            key = (tuple(index_entry.partition.values), index_entry.bucket)
+            if index_range.exclude(data_ranges.get(key, [])):
+                return RuntimeError(
+                    "Global index row ID existence conflict: index file '{}' "
+                    "references row range {}, but this range is not fully "
+                    "covered by current data files. The referenced row IDs "
+                    "may have been reassigned or removed by a concurrent "
+                    "commit.".format(index_entry.index_file.file_name, index_range))
+
+        return None
+
+    @staticmethod
+    def global_index_file_additions(index_entries=None):
+        return [
+            entry for entry in (index_entries or [])
+            if entry.kind == 0 and entry.index_file.global_index_meta is not None
         ]
 
     def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
