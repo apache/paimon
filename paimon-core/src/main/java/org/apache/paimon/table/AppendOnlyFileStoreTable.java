@@ -81,7 +81,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.logicalPartitionType(),
                             tableSchema.logicalBucketKeyType(),
                             tableSchema.logicalRowType().notNull(),
-                            name(),
+                            fullName(),
                             catalogEnvironment);
         }
         return lazyStore;
