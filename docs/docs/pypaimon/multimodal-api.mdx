@@ -558,3 +558,29 @@ for obj_info in objects:
 
 store.delete_object("images/dog.jpg")
 ```
+
+### Update Columns
+
+Amazon S3 updates object metadata by copying the object to the same key with
+replacement metadata. BlobStore exposes the corresponding Paimon-native
+operation directly: `update_object_columns` and `update_objects_columns` update
+non-key, non-BLOB table columns without rewriting the blob data. Missing keys
+raise `NoSuchKey`.
+
+```python
+store.update_object_columns(
+    "images/cat.jpg",
+    {"content_type": "image/webp", "owner": "alice"},
+)
+
+store.update_objects_columns([
+    {
+        "key": "images/dog.jpg",
+        "columns": {"content_type": "image/webp"},
+    },
+    {
+        "key": "images/logo.png",
+        "columns": {"content_type": "image/svg+xml"},
+    },
+])
+```

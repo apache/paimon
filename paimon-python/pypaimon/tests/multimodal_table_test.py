@@ -272,6 +272,35 @@ class MultimodalTableTest(unittest.TestCase):
         )
         self.assertEqual(2, table.scan().to_arrow().num_rows)
 
+        previous_descriptor = info.descriptor
+        updated = store.update_object_columns(
+            "images/cat.jpg",
+            {"content_type": "image/webp"},
+        )
+        self.assertEqual(previous_descriptor, updated.descriptor)
+        self.assertEqual("image/webp", updated.columns["content_type"])
+        self.assertEqual("alice", updated.columns["owner"])
+        self.assertEqual(b"cat-image-v2", store.get_object("images/cat.jpg").read())
+
+        batch_updates = store.update_objects_columns([
+            {"key": "images/cat.jpg", "columns": {"owner": "carol"}},
+            {"key": "images/dog.jpg", "columns": {"owner": "dave"}},
+        ])
+        self.assertEqual(
+            ["images/cat.jpg", "images/dog.jpg"],
+            [obj.key for obj in batch_updates],
+        )
+        self.assertEqual("carol", store.head_object("images/cat.jpg").columns["owner"])
+        self.assertEqual("dave", store.head_object("images/dog.jpg").columns["owner"])
+        self.assertEqual(2, table.scan().to_arrow().num_rows)
+
+        with self.assertRaisesRegex(ValueError, "columns must not be empty"):
+            store.update_object_columns("images/cat.jpg", {})
+        with self.assertRaises(pmm.NoSuchKey):
+            store.update_object_columns("images/missing.jpg", {"owner": "nobody"})
+        with self.assertRaisesRegex(ValueError, "columns must not include"):
+            store.update_object_columns("images/cat.jpg", {"image": b"new"})
+
         store.delete_object("images/dog.jpg")
         with self.assertRaises(pmm.NoSuchKey):
             store.head_object("images/dog.jpg")

@@ -22,8 +22,11 @@ from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.special_fields import SpecialFields
+from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
 _RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -130,6 +133,36 @@ class BlobStore:
         return [
             self._put_result(row[self.key_column], snapshot_id)
             for row in rows
+        ]
+
+    def update_object_columns(
+            self,
+            key,
+            columns: Mapping[str, object]) -> ObjectInfo:
+        return self.update_objects_columns([
+            {"key": key, "columns": columns}
+        ])[0]
+
+    def update_objects_columns(
+            self,
+            objects: Iterable[Mapping[str, object]]) -> List[ObjectInfo]:
+        updates = []
+        keys = []
+        for obj in objects:
+            key = _require_key(obj)
+            columns = dict(obj.get("columns") or {})
+            if not columns:
+                raise ValueError("columns must not be empty.")
+            self._selected_update_columns(columns.keys())
+            updates.append((key, columns))
+            keys.append(key)
+        if not updates:
+            return []
+        self._validate_unique_keys(keys)
+        self._commit_column_updates(updates)
+        return [
+            self.head_object(key)
+            for key in keys
         ]
 
     def get_object(
@@ -258,6 +291,80 @@ class BlobStore:
         latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
         return latest_snapshot.id if latest_snapshot is not None else None
 
+    def _commit_column_updates(self, updates: Sequence[tuple]) -> Optional[int]:
+        update_columns = self._column_update_names(updates)
+        targets = self._read_update_targets(
+            [key for key, _ in updates],
+            update_columns,
+        )
+        rows = []
+        row_ids_by_row = []
+        for key, columns in updates:
+            target = targets[key]
+            row = dict(target["columns"])
+            row.update(columns)
+            row[self.key_column] = key
+            rows.append(self._row_to_generic_row(row))
+            row_ids_by_row.append([target["row_id"]])
+
+        write_builder = self._raw_table.new_batch_write_builder()
+        table_commit = write_builder.new_commit()
+        try:
+            messages = TableUpdateByRowId(
+                self._raw_table,
+                write_builder.commit_user,
+                BATCH_COMMIT_IDENTIFIER,
+            ).update_rows_columns(rows, row_ids_by_row, update_columns)
+            if messages:
+                table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
+        return latest_snapshot.id if latest_snapshot is not None else None
+
+    def _column_update_names(self, updates: Sequence[tuple]) -> List[str]:
+        requested = set()
+        for _, columns in updates:
+            requested.update(columns)
+        return [
+            name for name in self._raw_table.field_names
+            if name in requested
+        ]
+
+    def _read_update_targets(
+            self,
+            keys: Sequence[object],
+            columns: Sequence[str]) -> Dict[object, dict]:
+        read_builder = self._raw_table.new_read_builder()
+        projection = [self.key_column, SpecialFields.ROW_ID.name]
+        projection.extend(columns)
+        read_builder = read_builder.with_projection(projection)
+        read_builder = read_builder.with_filter(self._keys_predicate(keys))
+        plan = read_builder.new_scan().plan()
+        table = read_builder.new_read().to_arrow(plan.splits())
+
+        targets = {}
+        duplicates = []
+        for row in table.to_pylist():
+            key = row[self.key_column]
+            if key in targets:
+                duplicates.append(key)
+                continue
+            targets[key] = {
+                "row_id": row[SpecialFields.ROW_ID.name],
+                "columns": {
+                    name: row.get(name)
+                    for name in columns
+                },
+            }
+
+        missing = [key for key in keys if key not in targets]
+        if missing:
+            raise NoSuchKey(missing[0])
+        if duplicates:
+            raise ValueError("Multiple rows found for blob keys: %s" % duplicates)
+        return targets
+
     def _has_unique_rows(self, keys: Sequence[object]) -> bool:
         rows = self._read_rows(keys=keys, columns=[])
         counts = {key: 0 for key in keys}
@@ -277,12 +384,15 @@ class BlobStore:
 
     def _rows_to_generic_rows(self, rows: List[Mapping[str, object]]) -> List[GenericRow]:
         return [
-            GenericRow(
-                [row.get(field.name) for field in self._raw_table.fields],
-                self._raw_table.fields,
-            )
+            self._row_to_generic_row(row)
             for row in rows
         ]
+
+    def _row_to_generic_row(self, row: Mapping[str, object]) -> GenericRow:
+        return GenericRow(
+            [row.get(field.name) for field in self._raw_table.fields],
+            self._raw_table.fields,
+        )
 
     def _read_rows(
             self,
@@ -411,6 +521,16 @@ class BlobStore:
                 )
             if name not in self._raw_table.field_names:
                 raise ValueError("Column %r is not in table schema." % name)
+        return names
+
+    def _selected_update_columns(self, columns: Sequence[str]) -> List[str]:
+        names = self._selected_columns(columns)
+        partition_keys = set(self._raw_table.partition_keys)
+        for name in names:
+            if name in partition_keys:
+                raise ValueError(
+                    "columns must not include partition column %r." % name
+                )
         return names
 
     @staticmethod
