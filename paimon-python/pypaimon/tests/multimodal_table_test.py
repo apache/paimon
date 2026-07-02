@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import json
 import os
 import shutil
@@ -282,9 +283,20 @@ class MultimodalTableTest(unittest.TestCase):
             options=_PARQUET_OPTIONS,
         )
         data = b"streamed-managed-payload"
-        external_path = os.path.join(self.temp_dir, "streamed.bin")
-        with open(external_path, "wb") as f:
-            f.write(data)
+        stream_uri = "stream://payloads/1"
+        stream_calls = []
+
+        class StreamOnlyReader:
+
+            def new_input_stream(self, uri):
+                stream_calls.append(("new_input_stream", uri))
+                return io.BytesIO(data)
+
+        class StreamOnlyReaderFactory:
+
+            def create(self, uri):
+                stream_calls.append(("create", uri))
+                return StreamOnlyReader()
 
         class DescriptorOnlyBlob(Blob):
 
@@ -292,16 +304,25 @@ class MultimodalTableTest(unittest.TestCase):
                 raise AssertionError("put_object should not materialize Blob data")
 
             def to_descriptor(self):
-                return BlobDescriptor(external_path, 0, len(data))
+                return BlobDescriptor(stream_uri, 0, len(data))
 
             def new_input_stream(self):
-                raise AssertionError("put_object should pass descriptor to writer")
+                raise AssertionError("put_object should use the URI stream")
 
         store = table.blobs(column="payload")
-        result = store.put_object("payloads/1", DescriptorOnlyBlob())
+        original_factory = table.raw_table.file_io.uri_reader_factory
+        table.raw_table.file_io.uri_reader_factory = StreamOnlyReaderFactory()
+        try:
+            result = store.put_object("payloads/1", DescriptorOnlyBlob())
+        finally:
+            table.raw_table.file_io.uri_reader_factory = original_factory
 
         self.assertEqual(len(data), result.size)
-        self.assertNotEqual(external_path, result.descriptor.uri)
+        self.assertEqual([
+            ("create", stream_uri),
+            ("new_input_stream", stream_uri),
+        ], stream_calls)
+        self.assertNotEqual(stream_uri, result.descriptor.uri)
         self.assertEqual(data, store.get_object("payloads/1").read())
 
     def test_blob_store_put_object_recovers_absent_key_race(self):
