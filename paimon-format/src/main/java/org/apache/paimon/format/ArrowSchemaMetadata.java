@@ -63,11 +63,11 @@ import java.util.stream.Collectors;
  * Minimal Arrow IPC schema metadata encoder and decoder used by format metadata.
  *
  * <p>NOTE: The RowType-to-Arrow-field conversion in this class is copied from {@code
- * org.apache.paimon.arrow.ArrowUtils} and must be kept in sync with that class. The IPC
- * serialization code is a minimal implementation of the public Arrow IPC FlatBuffers layout used by
- * {@code ARROW:schema}. It implements only the subset needed by Paimon field metadata so that
- * {@code paimon-format} can stay compatible with Arrow metadata without depending on the Arrow
- * runtime.
+ * org.apache.paimon.arrow.ArrowUtils} and must be kept in sync with that class. The Arrow IPC
+ * FlatBuffers layout, enum values, and defaults are adapted from Apache Arrow Java / Arrow format
+ * generated classes. This class implements only the subset needed by Paimon field metadata so that
+ * {@code paimon-format} can stay compatible with {@code ARROW:schema} without depending on the
+ * Arrow runtime.
  */
 class ArrowSchemaMetadata {
 
@@ -102,11 +102,15 @@ class ArrowSchemaMetadata {
     private static final short PRECISION_DOUBLE = 2;
 
     private static final short DATE_UNIT_DAY = 0;
+    private static final short DATE_UNIT_MILLISECOND = 1;
 
     private static final short TIME_UNIT_SECOND = 0;
     private static final short TIME_UNIT_MILLISECOND = 1;
     private static final short TIME_UNIT_MICROSECOND = 2;
     private static final short TIME_UNIT_NANOSECOND = 3;
+
+    private static final int TIME_BIT_WIDTH_MILLISECOND = 32;
+    private static final int DECIMAL_BIT_WIDTH_128 = 128;
 
     private ArrowSchemaMetadata() {}
 
@@ -242,16 +246,16 @@ class ArrowSchemaMetadata {
                 builder.startTable(3);
                 builder.addInt(0, type.precisionValue, 0);
                 builder.addInt(1, type.scale, 0);
-                builder.addInt(2, type.bitWidth, 0);
+                builder.addInt(2, type.bitWidth, DECIMAL_BIT_WIDTH_128);
                 return builder.endTable();
             case TYPE_DATE:
                 builder.startTable(1);
-                builder.addShort(0, DATE_UNIT_DAY, 0);
+                builder.addShort(0, DATE_UNIT_DAY, DATE_UNIT_MILLISECOND);
                 return builder.endTable();
             case TYPE_TIME:
                 builder.startTable(2);
-                builder.addShort(0, type.unit, 0);
-                builder.addInt(1, type.bitWidth, 0);
+                builder.addShort(0, type.unit, TIME_UNIT_MILLISECOND);
+                builder.addInt(1, type.bitWidth, TIME_BIT_WIDTH_MILLISECOND);
                 return builder.endTable();
             case TYPE_TIMESTAMP:
                 int timezone = type.timezone == null ? 0 : builder.createString(type.timezone);
@@ -566,7 +570,7 @@ class ArrowSchemaMetadata {
             ArrowTypeInfo type = ArrowTypeInfo.simple(TYPE_DECIMAL);
             type.precisionValue = decimalType.getPrecision();
             type.scale = decimalType.getScale();
-            type.bitWidth = 128;
+            type.bitWidth = DECIMAL_BIT_WIDTH_128;
             return type;
         }
 
@@ -613,7 +617,7 @@ class ArrowSchemaMetadata {
         public ArrowTypeInfo visit(TimeType timeType) {
             ArrowTypeInfo type = ArrowTypeInfo.simple(TYPE_TIME);
             type.unit = TIME_UNIT_MILLISECOND;
-            type.bitWidth = 32;
+            type.bitWidth = TIME_BIT_WIDTH_MILLISECOND;
             return type;
         }
 

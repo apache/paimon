@@ -314,6 +314,141 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testMapSharedShreddingCannotCombineWithVariant() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(2, "payload", DataTypes.VARIANT()));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with Variant fields.");
+
+        options.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with Variant fields.");
+
+        options.remove(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key());
+        options.put(CoreOptions.VARIANT_SHREDDING_SCHEMA.key(), "{}");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with Variant fields.");
+    }
+
+    @Test
+    public void testMapSharedShreddingFileFormatValidation() {
+        Map<String, String> fileFormatOptions = mapSharedShreddingOptions();
+        fileFormatOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(fileFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but file.format is avro.");
+
+        Map<String, String> levelFormatOptions = mapSharedShreddingOptions();
+        levelFormatOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(levelFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but file.format.per.level.0 is avro.");
+
+        Map<String, String> changelogFormatOptions = mapSharedShreddingOptions();
+        changelogFormatOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                changelogFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but changelog-file.format is avro.");
+
+        Map<String, String> vectorFormatOptions = mapSharedShreddingOptions();
+        vectorFormatOptions.put(DATA_EVOLUTION_ENABLED.key(), "true");
+        vectorFormatOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        vectorFormatOptions.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(vectorFormatOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports parquet/orc file formats, but vector.file.format is json.");
+    }
+
+    @Test
+    public void testMapSharedShreddingTableModeValidation() {
+        Map<String, String> primaryKeyOptions = mapSharedShreddingOptions();
+        primaryKeyOptions.put(BUCKET.key(), "-1");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                primaryKeyOptions, singletonList("id"))))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently only supports append-only tables.");
+
+        Map<String, String> fixedBucketOptions = mapSharedShreddingOptions();
+        fixedBucketOptions.put(BUCKET.key(), "1");
+        fixedBucketOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(fixedBucketOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently requires bucket = -1 or write-only = true because rewrite/compaction is not supported.");
+
+        Map<String, String> writeOnlyOptions = mapSharedShreddingOptions();
+        writeOnlyOptions.put(BUCKET.key(), "1");
+        writeOnlyOptions.put(CoreOptions.BUCKET_KEY.key(), "id");
+        writeOnlyOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(writeOnlyOptions, emptyList())));
+    }
+
+    @Test
     public void testChainTableAllowsNonDeduplicateMergeEngine() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
@@ -1039,6 +1174,24 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "input");
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    private Map<String, String> mapSharedShreddingOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        return options;
+    }
+
+    private TableSchema mapSharedShreddingSchema(
+            Map<String, String> options, List<String> primaryKeys) {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())));
+        return new TableSchema(1, fields, 10, emptyList(), primaryKeys, options, "");
     }
 
     private TableSchema vectorTypeSchema(

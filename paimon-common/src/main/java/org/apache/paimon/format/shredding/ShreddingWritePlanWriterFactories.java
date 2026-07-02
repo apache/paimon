@@ -25,6 +25,8 @@ import org.apache.paimon.data.shredding.MapSharedShreddingWritePlanFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Helpers for composing per-file shredding writer factories. */
@@ -43,6 +45,16 @@ public class ShreddingWritePlanWriterFactories {
         MapSharedShreddingContext context =
                 new MapSharedShreddingContext(
                         MapSharedShreddingUtils.buildColumnToNumColumns(shreddingFields, options));
+        return wrapMapSharedShredding(delegate, rowType, context);
+    }
+
+    public static FormatWriterFactory wrapMapSharedShredding(
+            FormatWriterFactory delegate,
+            RowType rowType,
+            @Nullable MapSharedShreddingContext context) {
+        if (context == null || context.isEmpty()) {
+            return delegate;
+        }
         return new ShreddingWritePlanWriterFactory(
                 delegate, new MapSharedShreddingWritePlanFactory(rowType, context));
     }

@@ -35,6 +35,7 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
     @Nullable private final MapSharedShreddingContext context;
 
     @Nullable private Map<String, Map<String, String>> fieldMetadata;
+    @Nullable private String fieldMetadataCompression;
 
     public MapSharedShreddingWritePlan(
             RowType logicalRowType,
@@ -62,8 +63,9 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
 
     @Override
     public Map<String, Map<String, String>> fieldMetadata(String compression) {
-        if (fieldMetadata == null) {
-            fieldMetadata = buildFieldMetadata(compression == null ? "none" : compression);
+        if (fieldMetadata == null || !compressionEquals(fieldMetadataCompression, compression)) {
+            fieldMetadata = buildFieldMetadata(compression);
+            fieldMetadataCompression = compression;
         }
         return fieldMetadata;
     }
@@ -73,7 +75,7 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
         for (String fieldName : converter.shreddingFieldNames()) {
             MapSharedShreddingFieldMeta fieldMeta = converter.buildFieldMeta(fieldName);
             Map<String, String> fieldMetadata = new LinkedHashMap<>();
-            MapSharedShreddingUtils.serializeMetadata(fieldMeta, compression, fieldMetadata);
+            MapSharedShreddingUtils.serializeMetadata(fieldMeta, fieldMetadata, compression);
             metadata.put(fieldName, Collections.unmodifiableMap(fieldMetadata));
 
             if (context != null) {
@@ -81,5 +83,9 @@ public class MapSharedShreddingWritePlan implements ShreddingWritePlan {
             }
         }
         return Collections.unmodifiableMap(metadata);
+    }
+
+    private static boolean compressionEquals(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 }
