@@ -86,7 +86,7 @@ def cmd_table_read(args):
     # When both select and where are specified, ensure where-referenced fields
     # are included in the projection so the filter can work correctly.
     if user_columns and where_clause:
-        from pypaimon.cli.where_parser import extract_fields_from_where
+        from pypaimon.common.where_parser import extract_fields_from_where
         where_fields = extract_fields_from_where(where_clause, available_fields)
         user_column_set = set(user_columns)
         extra_where_columns = [f for f in where_fields if f not in user_column_set]
@@ -97,7 +97,7 @@ def cmd_table_read(args):
 
     # Apply where filter if specified
     if where_clause:
-        from pypaimon.cli.where_parser import parse_where_clause
+        from pypaimon.common.where_parser import parse_where_clause
         try:
             predicate = parse_where_clause(where_clause, table.table_schema.fields)
             if predicate:
@@ -191,7 +191,7 @@ def cmd_table_explain(args):
 
     where_clause = getattr(args, 'where', None)
     if where_clause:
-        from pypaimon.cli.where_parser import parse_where_clause
+        from pypaimon.common.where_parser import parse_where_clause
         try:
             predicate = parse_where_clause(where_clause, table.table_schema.fields)
             if predicate:

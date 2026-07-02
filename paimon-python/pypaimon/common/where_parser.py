@@ -16,7 +16,7 @@
 # under the License.
 
 """
-SQL WHERE clause parser for Paimon CLI.
+SQL WHERE clause parser for PyPaimon.
 
 Parses simple SQL-like WHERE expressions into Predicate objects.
 
