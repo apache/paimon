@@ -840,6 +840,27 @@ def test_row_and_partition_filters_both_reach_planning_predicate(append_only_tab
     assert pruned and all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
 
 
+def test_isnull_partition_filter_keeps_null_partition(append_only_table):
+    """isNull must NOT be pushed to plan pruning: plan pruning would drop the
+    null partition and the Python post-filter can't restore it. It must be left
+    to the post-filter so col(dt).is_null() still returns the null-partition row."""
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["a", "b"], pa.string()),
+            "value": pa.array([1.0, 2.0], pa.float64()),
+            "dt": pa.array([None, "2024-01-02"], pa.string()),
+        }
+    ))
+
+    result = _read_table(table).where(col("dt").is_null()).to_arrow()
+
+    assert result.num_rows == 1
+    assert result.column("id").to_pylist() == [1]
+    assert result.column("dt").to_pylist() == [None]
+
+
 def test_read_paimon_row_filter(append_only_table):
     """Row-level filter should be applied after reading data."""
     table, _ = append_only_table
