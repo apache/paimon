@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
@@ -28,6 +29,7 @@ import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.LimitRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
@@ -135,6 +137,31 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
+    public RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
+        return LimitRecordReader.limit(super.createReader(splits), limit);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        // Query-auth filters run after split read; skip merge-read limit for those splits.
+        if (!hasLateAppliedRowFilter(split)) {
+            return super.createReader(split);
+        }
+
+        Integer savedLimit = this.limit;
+        this.limit = null;
+        initialized().forEach(r -> r.withLimit(null));
+        try {
+            return LimitRecordReader.limit(super.createReader(split), savedLimit);
+        } finally {
+            this.limit = savedLimit;
+            if (savedLimit != null) {
+                initialized().forEach(r -> r.withLimit(savedLimit));
+            }
+        }
+    }
+
+    @Override
     public TableRead withIOManager(IOManager ioManager) {
         initialized().forEach(r -> r.withIOManager(ioManager));
         this.ioManager = ioManager;
@@ -150,6 +177,14 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         }
 
         throw new RuntimeException("Should not happen.");
+    }
+
+    private static boolean hasLateAppliedRowFilter(Split split) {
+        if (split instanceof QueryAuthSplit) {
+            TableQueryAuthResult authResult = ((QueryAuthSplit) split).authResult();
+            return authResult != null && authResult.extractPredicate() != null;
+        }
+        return false;
     }
 
     public static RecordReader<InternalRow> unwrap(

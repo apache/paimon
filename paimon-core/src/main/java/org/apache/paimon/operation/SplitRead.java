@@ -84,6 +84,18 @@ public interface SplitRead<T> {
             }
 
             @Override
+            public SplitRead<R> withTopN(@Nullable TopN topN) {
+                read.withTopN(topN);
+                return this;
+            }
+
+            @Override
+            public SplitRead<R> withLimit(@Nullable Integer limit) {
+                read.withLimit(limit);
+                return this;
+            }
+
+            @Override
             public RecordReader<R> createReader(Split split) throws IOException {
                 return splitConvert.apply(split);
             }
