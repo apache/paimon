@@ -18,10 +18,13 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.ROW_ID_COLUMN
+import org.apache.paimon.spark.util.OptionUtils
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, EqualTo, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
@@ -36,9 +39,33 @@ case class UpdatePaimonDataEvolutionTableCommand(
     condition: Expression,
     alignedExpressions: Seq[(Expression, Attribute)])
   extends PaimonLeafRunnableCommand
-  with SupportsSubquery {
+  with SupportsSubquery
+  with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    val maxAttempts = math.max(1, OptionUtils.dataEvolutionUpdateConflictRetryMaxAttempts())
+    val retryWaitMs = math.max(0L, OptionUtils.dataEvolutionUpdateConflictRetryWaitMs())
+    val canRetry = deterministicUpdate
+    var attempt = 1
+
+    while (attempt < maxAttempts) {
+      try {
+        return runOnce(sparkSession)
+      } catch {
+        case e: RuntimeException if canRetry && isDataEvolutionUpdateConflict(e) =>
+          val nextAttempt = attempt + 1
+          logInfo(
+            s"Retry Spark V1 UPDATE for data-evolution table after concurrent update conflict " +
+              s"(next attempt $nextAttempt/$maxAttempts).")
+          sleepBeforeRetry(retryWaitMs)
+          attempt += 1
+      }
+    }
+
+    runOnce(sparkSession)
+  }
+
+  private def runOnce(sparkSession: SparkSession): Seq[Row] = {
     val (updateTable, updateRelation) =
       MergeIntoPaimonDataEvolutionTable.withMatchedUpdateScanOptions(v2Table, relation)
     val targetRowId = rowIdAttribute(updateRelation)
@@ -58,6 +85,42 @@ case class UpdatePaimonDataEvolutionTableCommand(
       Seq(updateAction),
       Nil,
       Nil).run(sparkSession)
+  }
+
+  private def deterministicUpdate: Boolean = {
+    condition.deterministic && alignedExpressions.forall {
+      case (expression, _) =>
+        expression.deterministic
+    }
+  }
+
+  private def sleepBeforeRetry(retryWaitMs: Long): Unit = {
+    if (retryWaitMs > 0) {
+      try {
+        Thread.sleep(retryWaitMs)
+      } catch {
+        case e: InterruptedException =>
+          Thread.currentThread().interrupt()
+          throw new RuntimeException(
+            "Interrupted while retrying data-evolution UPDATE conflict.",
+            e)
+      }
+    }
+  }
+
+  private def isDataEvolutionUpdateConflict(e: Throwable): Boolean = {
+    var current = e
+    while (current != null) {
+      val message = current.getMessage
+      if (
+        message != null &&
+        message.contains(ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE)
+      ) {
+        return true
+      }
+      current = current.getCause
+    }
+    false
   }
 
   private def updatedRowIdSource(
