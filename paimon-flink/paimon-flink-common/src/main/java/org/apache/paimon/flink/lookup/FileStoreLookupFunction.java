@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -196,7 +197,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 joinKeys);
 
         LOG.info("Creating lookup table for {}.", table.name());
-        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+        if (!CoreOptions.fromMap(table.options()).isChainTable()
+                && options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             if (isRemoteServiceAvailable(table)) {
                 this.lookupTable =

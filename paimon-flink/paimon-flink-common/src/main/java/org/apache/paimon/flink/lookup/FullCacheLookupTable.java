@@ -395,7 +395,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 File tempPath,
                 List<String> joinKey,
                 @Nullable Set<Integer> requiredCachedBucketIds) {
-            this.table = new LookupFileStoreTable(table, joinKey);
+            this.table = LookupFileStoreTable.create(table, joinKey);
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;

@@ -88,28 +88,77 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        return new ChainGroupReadTable(
-                wrapped.copy(dynamicOptions), other().copy(rewriteOtherOptions(dynamicOptions)));
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(dynamicOptions, wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(dynamicOptions),
+                        other().coreOptions().branch(),
+                        other());
+
+        return new ChainGroupReadTable(wrapped.copy(wrappedOptions), other().copy(otherOptions));
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(
+                        newTableSchema.options(), wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(newTableSchema.options()),
+                        other().coreOptions().branch(),
+                        other());
+
         return new ChainGroupReadTable(
-                wrapped.copy(newTableSchema),
-                other().copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))));
+                wrapped.copy(newTableSchema.copy(wrappedOptions)),
+                other().copy(newTableSchema.copy(otherOptions)));
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        Map<String, String> wrappedOptions =
+                prepareBranchOptions(dynamicOptions, wrapped.coreOptions().branch(), wrapped);
+
+        Map<String, String> otherOptions =
+                prepareBranchOptions(
+                        rewriteOtherOptions(dynamicOptions),
+                        other().coreOptions().branch(),
+                        other());
+
         return new ChainGroupReadTable(
-                wrapped.copyWithoutTimeTravel(dynamicOptions),
-                other().copyWithoutTimeTravel(rewriteOtherOptions(dynamicOptions)));
+                wrapped.copyWithoutTimeTravel(wrappedOptions),
+                other().copyWithoutTimeTravel(otherOptions));
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
         return new ChainGroupReadTable(
                 wrapped.copyWithLatestSchema(), other().copyWithLatestSchema());
+    }
+
+    /** Prepares options for a specific branch in chain table. */
+    private static Map<String, String> prepareBranchOptions(
+            Map<String, String> options, String branch, FileStoreTable sourceTable) {
+        Map<String, String> result = new HashMap<>(options);
+
+        // Setting the branch name (each sub-table has its own branch identity)
+        result.put(CoreOptions.BRANCH.key(), branch);
+
+        // Parent's rewriteOtherOptions() removes bucket from options (since main and fallback
+        // branches may have different bucket numbers). Each sub-table must preserve its own
+        // bucket value from its original schema.
+        String bucket = sourceTable.options().get(CoreOptions.BUCKET.key());
+        if (bucket != null) {
+            result.put(CoreOptions.BUCKET.key(), bucket);
+        }
+
+        // Stripping chain-table-level directives like {@code scan.mode} (branch tables manage their
+        // own snapshots independently and should not inherit chain-table-level scan modes)
+        result.remove(CoreOptions.SCAN_MODE.key());
+        return result;
     }
 
     @Override
