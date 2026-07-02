@@ -20,12 +20,10 @@ import re
 from dataclasses import dataclass
 from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence
 
-import pyarrow as pa
-
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.table.row.blob import Blob, BlobDescriptor
+from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
+from pypaimon.table.row.generic_row import GenericRow
 
 
 _RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -123,7 +121,7 @@ class BlobStore:
             key = _require_key(obj)
             row = dict(obj.get("columns") or {})
             row[self.key_column] = key
-            row[self.column] = _object_to_blob_value(obj)
+            row[self.column] = self._object_to_blob(obj)
             rows.append(row)
         if not rows:
             return []
@@ -226,13 +224,13 @@ class BlobStore:
         )
 
     def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> Optional[int]:
-        arrow_table = self._rows_to_arrow(rows)
+        generic_rows = self._rows_to_generic_rows(rows)
         write_builder = self._raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
         table_commit = write_builder.new_commit()
         try:
-            messages = table_update.upsert_by_arrow_with_key(
-                arrow_table, [self.key_column])
+            messages = table_update.upsert_by_key(
+                generic_rows, [self.key_column])
             table_commit.commit(messages)
         finally:
             table_commit.close()
@@ -243,7 +241,6 @@ class BlobStore:
             self,
             rows: List[Mapping[str, object]],
             keys: Sequence[object]) -> Optional[int]:
-        arrow_table = self._rows_to_arrow(rows)
         write_builder = self._raw_table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_update = write_builder.new_update()
@@ -251,7 +248,8 @@ class BlobStore:
         try:
             messages = table_update.delete_by_predicate(
                 self._keys_predicate(keys))
-            table_write.write_arrow(arrow_table)
+            for row in self._rows_to_generic_rows(rows):
+                table_write.write_row(row)
             messages.extend(table_write.prepare_commit())
             table_commit.commit(messages)
         finally:
@@ -277,16 +275,14 @@ class BlobStore:
             snapshot_id=snapshot_id,
         )
 
-    def _rows_to_arrow(self, rows: List[Mapping[str, object]]) -> pa.Table:
-        schema = PyarrowFieldParser.from_paimon_schema(
-            self._raw_table.table_schema.fields)
-        names = []
-        arrays = []
-        for field in schema:
-            values = [row.get(field.name) for row in rows]
-            arrays.append(pa.array(values, type=field.type))
-            names.append(field.name)
-        return pa.Table.from_arrays(arrays, names=names)
+    def _rows_to_generic_rows(self, rows: List[Mapping[str, object]]) -> List[GenericRow]:
+        return [
+            GenericRow(
+                [row.get(field.name) for field in self._raw_table.fields],
+                self._raw_table.fields,
+            )
+            for row in rows
+        ]
 
     def _read_rows(
             self,
@@ -372,6 +368,29 @@ class BlobStore:
         if self.key_column == self.column:
             raise ValueError("key_column and blob column must be different.")
 
+    def _object_to_blob(self, obj: Mapping[str, object]) -> Blob:
+        has_body = "body" in obj and obj.get("body") is not None
+        has_reference = obj.get("descriptor") is not None or obj.get("uri") is not None
+        if has_body and has_reference:
+            raise ValueError(
+                "Blob object spec must use either 'body' or descriptor/uri, not both."
+            )
+        if has_reference:
+            descriptor = _coerce_descriptor(obj)
+            uri_reader = self._raw_table.file_io.uri_reader_factory.create(descriptor.uri)
+            return Blob.from_descriptor(uri_reader, descriptor)
+        if not has_body:
+            raise ValueError("Blob object spec requires 'body', 'descriptor', or 'uri'.")
+        body = obj.get("body")
+        if isinstance(body, Blob):
+            try:
+                descriptor = body.to_descriptor()
+            except RuntimeError:
+                return body
+            uri_reader = self._raw_table.file_io.uri_reader_factory.create(descriptor.uri)
+            return Blob.from_descriptor(uri_reader, descriptor)
+        return BlobData(_body_to_bytes(body))
+
     def _selected_columns(
             self,
             columns: Optional[Sequence[str]]) -> List[str]:
@@ -426,26 +445,7 @@ def _require_key(obj: Mapping[str, object]):
     return key
 
 
-def _object_to_blob_value(obj: Mapping[str, object]) -> bytes:
-    has_body = "body" in obj and obj.get("body") is not None
-    has_reference = obj.get("descriptor") is not None or obj.get("uri") is not None
-    if has_body and has_reference:
-        raise ValueError(
-            "Blob object spec must use either 'body' or descriptor/uri, not both."
-        )
-    if has_reference:
-        return _coerce_descriptor(obj).serialize()
-    if not has_body:
-        raise ValueError("Blob object spec requires 'body', 'descriptor', or 'uri'.")
-    return _body_to_bytes(obj.get("body"))
-
-
 def _body_to_bytes(body) -> bytes:
-    if isinstance(body, Blob):
-        try:
-            return body.to_descriptor().serialize()
-        except RuntimeError:
-            return body.to_data()
     if isinstance(body, bytes):
         return body
     if isinstance(body, bytearray):

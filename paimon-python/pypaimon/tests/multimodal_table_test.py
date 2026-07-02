@@ -351,7 +351,13 @@ class MultimodalTableTest(unittest.TestCase):
         stale_commit = write_builder.new_commit()
         stale_messages = stale_update.delete_by_predicate(
             store._keys_predicate(["payloads/1"]))
-        stale_write.write_arrow(store._rows_to_arrow(stale_rows))
+        stale_write.write_arrow(pa.Table.from_pylist(
+            stale_rows,
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+        ))
         stale_messages.extend(stale_write.prepare_commit())
 
         original_commit = store._commit_upsert_once
