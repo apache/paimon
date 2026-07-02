@@ -213,9 +213,11 @@ class BlobStore:
 
     def _overwrite_rows(self, rows: List[Mapping[str, object]]) -> Optional[int]:
         keys = [row[self.key_column] for row in rows]
-        snapshot_id = None
-        for _ in range(_MAX_OVERWRITE_ATTEMPTS):
-            snapshot_id = self._commit_overwrite_once(rows, keys)
+        snapshot_id = self._commit_upsert_once(rows)
+        if self._has_unique_rows(keys):
+            return snapshot_id
+        for _ in range(_MAX_OVERWRITE_ATTEMPTS - 1):
+            snapshot_id = self._commit_replace_once(rows, keys)
             if self._has_unique_rows(keys):
                 return snapshot_id
         raise ValueError(
@@ -223,7 +225,21 @@ class BlobStore:
             % list(keys)
         )
 
-    def _commit_overwrite_once(
+    def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> Optional[int]:
+        arrow_table = self._rows_to_arrow(rows)
+        write_builder = self._raw_table.new_batch_write_builder()
+        table_update = write_builder.new_update()
+        table_commit = write_builder.new_commit()
+        try:
+            messages = table_update.upsert_by_arrow_with_key(
+                arrow_table, [self.key_column])
+            table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
+        return latest_snapshot.id if latest_snapshot is not None else None
+
+    def _commit_replace_once(
             self,
             rows: List[Mapping[str, object]],
             keys: Sequence[object]) -> Optional[int]:
@@ -268,9 +284,8 @@ class BlobStore:
         arrays = []
         for field in schema:
             values = [row.get(field.name) for row in rows]
-            if any(field.name in row for row in rows):
-                arrays.append(pa.array(values, type=field.type))
-                names.append(field.name)
+            arrays.append(pa.array(values, type=field.type))
+            names.append(field.name)
         return pa.Table.from_arrays(arrays, names=names)
 
     def _read_rows(

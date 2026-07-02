@@ -328,21 +328,21 @@ class MultimodalTableTest(unittest.TestCase):
         stale_write.write_arrow(store._rows_to_arrow(stale_rows))
         stale_messages.extend(stale_write.prepare_commit())
 
-        original_commit = store._commit_overwrite_once
+        original_commit = store._commit_upsert_once
         injected = {"done": False}
 
-        def commit_with_race(rows, keys):
-            snapshot_id = original_commit(rows, keys)
+        def commit_with_race(rows):
+            snapshot_id = original_commit(rows)
             if not injected["done"]:
                 injected["done"] = True
                 stale_commit.commit(stale_messages)
             return snapshot_id
 
-        store._commit_overwrite_once = commit_with_race
+        store._commit_upsert_once = commit_with_race
         try:
             result = store.put_object("payloads/1", b"winner")
         finally:
-            store._commit_overwrite_once = original_commit
+            store._commit_upsert_once = original_commit
             stale_write.close()
             stale_commit.close()
 
