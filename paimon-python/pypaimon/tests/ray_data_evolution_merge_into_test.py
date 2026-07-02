@@ -1861,9 +1861,9 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             on=['id'],
             when_matched=[
                 WhenMatched.update({'name': 's.name'},
-                            condition='s.age > 50'),
+                                   condition='s.age > 50'),
                 WhenMatched.update({'age': 's.age'},
-                            condition='s.age > 10'),
+                                   condition='s.age > 10'),
             ],
             num_partitions=_TEST_NUM_PARTITIONS,
         )
