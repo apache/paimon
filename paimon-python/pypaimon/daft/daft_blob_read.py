@@ -40,14 +40,21 @@ def _file_range_fields():
     return file_range_position_field(), file_range_size_field()
 
 
+def _range_attr(file, name):
+    # Prefer _inner accessors: they read the embedded range; public File.size
+    # does a network stat (~200ms/blob).
+    inner = getattr(file, "_inner", None)
+    src = inner if inner is not None and hasattr(inner, name) else file
+    v = getattr(src, name)
+    return v() if callable(v) else v
+
+
 def _resolve_file_range(file, pos_field=None, size_field=None):
     if pos_field is None:
         pos_field, size_field = _file_range_fields()
-    offset = getattr(file, pos_field)
-    offset = offset() if callable(offset) else offset
-    length = getattr(file, size_field)
-    length = length() if callable(length) else length
-    return file.path, offset, length
+    return (_range_attr(file, "path"),
+            _range_attr(file, pos_field),
+            _range_attr(file, size_field))
 
 
 def open_blob(file, catalog_options: Dict[str, str], table: str) -> BinaryIO:
@@ -82,7 +89,8 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
             ranges = list(zip(struct.field("url").to_pylist(),
                               struct.field(pos_field).to_pylist(),
                               struct.field(size_field).to_pylist()))
-        except Exception:
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # Unexpected column layout: fall back to per-File resolution (cheap).
             ranges = [None if f is None else _resolve_file_range(f, pos_field, size_field)
                       for f in files.to_pylist()]
 

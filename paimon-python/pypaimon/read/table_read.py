@@ -216,9 +216,7 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            sr = self._create_split_read(split)
-            sr._blob_parallelism = blob_parallelism
-            reader = sr.create_reader()
+            reader = self._create_split_read(split, blob_parallelism).create_reader()
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
@@ -381,9 +379,7 @@ class TableRead:
         """
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        sr = self._create_split_read(split)
-        sr._blob_parallelism = blob_parallelism
-        reader = sr.create_reader()
+        reader = self._create_split_read(split, blob_parallelism).create_reader()
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
@@ -624,7 +620,12 @@ class TableRead:
             dataset = TorchDataset(self, splits)
             return dataset
 
-    def _create_split_read(self, split: Split) -> SplitRead:
+    def _create_split_read(self, split: Split, blob_parallelism: int = 1) -> SplitRead:
+        sr = self._build_split_read(split)
+        sr._blob_parallelism = blob_parallelism
+        return sr
+
+    def _build_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
             inner_read_type = self.read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None

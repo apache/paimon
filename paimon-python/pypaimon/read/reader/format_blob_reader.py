@@ -59,6 +59,8 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = file_io.new_input_stream(file_path)
             self._read_index()
             self._apply_row_indices(row_indices)
+            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
+            # that each open their own stream (one stream isn't thread-safe).
             if self._blob_as_descriptor or self._blob_parallelism > 1:
                 self._input_stream.close()
                 self._input_stream = None

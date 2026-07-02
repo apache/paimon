@@ -98,8 +98,12 @@ def read_ranges_coalesced(file_io, ranges, parallelism,
     bytes in the same order. Same-file nearby ranges are merged into one read to
     cut round trips, then sliced; reads run on a thread pool. Negative length
     (read to EOF) is read on its own, never merged.
+
+    A failed read propagates and aborts the whole batch (unlike a per-row
+    ``file.open()`` loop that fails one row at a time).
     """
     from concurrent.futures import ThreadPoolExecutor
+    # Threads write disjoint results[idx]; safe under the GIL (no list resize).
     results: List[Optional[bytes]] = [None] * len(ranges)
     coalescible, singletons = [], []
     for i, r in enumerate(ranges):
