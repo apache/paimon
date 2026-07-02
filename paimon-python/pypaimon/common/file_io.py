@@ -107,10 +107,11 @@ def read_ranges_coalesced(file_io, ranges, parallelism,
     results: List[Optional[bytes]] = [None] * len(ranges)
     coalescible, singletons = [], []
     for i, r in enumerate(ranges):
-        if r is None or r[0] is None:
+        # None path/offset/length => null blob, leave result None.
+        if r is None or r[0] is None or r[1] is None or r[2] is None:
             continue
         path, offset, length = r
-        if length is None or length < 0:
+        if length < 0:  # unknown length => read to EOF, never coalesced
             singletons.append((i, path, offset, length))
         else:
             coalescible.append((i, path, offset, length))

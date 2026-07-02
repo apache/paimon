@@ -1585,13 +1585,15 @@ class CoalesceRangesTest(unittest.TestCase):
             with open(path, 'wb') as f:
                 f.write(data)
             fio = FileIO.get(f"file://{tmp_dir}", {})
-            ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20), (path, 100, -1)]
+            ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
+                      (path, 100, -1), (path, None, None)]
             got = read_ranges_coalesced(fio, ranges, parallelism=4)
             self.assertEqual(got[0], data[0:10])
             self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
             self.assertIsNone(got[2])
             self.assertEqual(got[3], data[500:520])
             self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
+            self.assertIsNone(got[5])                # None offset/length => skipped
 
 
 class ReadFileRangeTest(unittest.TestCase):
