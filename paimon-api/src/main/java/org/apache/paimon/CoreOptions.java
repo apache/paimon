@@ -2557,6 +2557,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
+    public static final ConfigOption<Long> POSTPONE_TARGET_ROW_NUM_PER_BUCKET =
+            key("postpone.target-row-num-per-bucket")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Target row number per bucket for partitions compacted from postpone bucket files for the first time.");
+
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
                     .longType()
@@ -4107,6 +4114,10 @@ public class CoreOptions implements Serializable {
 
     public int postponeDefaultBucketNum() {
         return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
+    }
+
+    public Optional<Long> postponeTargetRowNumPerBucket() {
+        return options.getOptional(POSTPONE_TARGET_ROW_NUM_PER_BUCKET);
     }
 
     public long globalIndexRowCountPerShard() {
