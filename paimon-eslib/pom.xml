@@ -50,13 +50,13 @@ under the License.
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-core</artifactId>
-            <version>1.0.2</version>
+            <version>1.0.3</version>
             <classifier>lucene9</classifier>
         </dependency>
         <dependency>
             <groupId>io.github.paimon.eslib</groupId>
             <artifactId>eslib-simdvec</artifactId>
-            <version>1.0.2</version>
+            <version>1.0.3</version>
         </dependency>
         <!-- eslib-native (Havenask JNI) intentionally omitted: it is a JDK 21 module (Phase 3,
              not implemented) and is not referenced by paimon-eslib. Re-add when NATIVE algorithm
@@ -107,7 +107,7 @@ under the License.
     <repositories>
         <repository>
             <id>eslib-oss</id>
-            <url>https://es-demo-test.oss-cn-hangzhou.aliyuncs.com/maven/</url>
+            <url>https://paimon-es-public-bucket.oss-cn-beijing.aliyuncs.com/maven/</url>
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>false</enabled></snapshots>
         </repository>
