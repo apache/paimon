@@ -438,6 +438,57 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expectedData);
     }
 
+    @Test
+    public void testCompactWithTargetRowNumPerBucket() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.target-row-num-per-bucket' = '200',\n"
+                        + "  'postpone.batch-write-fixed-bucket' = 'false'\n"
+                        + ")");
+
+        List<String> values = new ArrayList<>();
+        for (int j = 0; j < 100; j++) {
+            values.add(String.format("(0, %d, %d)", j, j));
+        }
+        for (int j = 0; j < 450; j++) {
+            values.add(String.format("(1, %d, %d)", j, j));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T"))).isEmpty();
+
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT pt, COUNT(*) FROM T GROUP BY pt")))
+                .containsExactlyInAnyOrder("+I[0, 100]", "+I[1, 450]");
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT `partition`, COUNT(DISTINCT bucket) FROM `T$files` "
+                                                + "GROUP BY `partition`")))
+                .containsExactlyInAnyOrder("+I[{0}, 1]", "+I[{1}, 3]");
+    }
+
     @Timeout(TIMEOUT)
     @Test
     public void testInputChangelogProducer() throws Exception {
