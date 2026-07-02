@@ -232,16 +232,18 @@ object PaimonTableValuedFunctions {
             "LATERAL vector_search only supports deterministic subquery predicates " +
               "convertible to Paimon predicates on searched-table columns.")
         }
+        val stripOuterRef: Expression => Expression =
+          _.transform { case OuterReference(a) => a.toAttribute }
         val lateralVectorSearch =
           LateralVectorSearch(
             left,
             relation.innerTable,
             relation.columnName,
-            relation.queryVectorExpr,
+            stripOuterRef(relation.queryVectorExpr),
             relation.limit,
             relation.options,
             vectorSearchOutput,
-            projectList,
+            projectList.map(stripOuterRef),
             projectOutput,
             searchFilters
           )
