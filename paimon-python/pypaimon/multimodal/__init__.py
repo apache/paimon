@@ -17,6 +17,13 @@
 
 """High-level APIs for mutable multimodal Paimon tables."""
 
+from pypaimon.multimodal.blob_store import (
+    BlobObject,
+    BlobStore,
+    NoSuchKey,
+    ObjectInfo,
+    PutObjectResult,
+)
 from pypaimon.multimodal.connection import MultimodalConnection, connect
 from pypaimon.multimodal.table import (
     MultimodalTable,
@@ -32,8 +39,13 @@ from pypaimon.table.data_evolution_merge_into import (
 )
 
 __all__ = [
+    "BlobObject",
+    "BlobStore",
     "MultimodalConnection",
     "MultimodalTable",
+    "NoSuchKey",
+    "ObjectInfo",
+    "PutObjectResult",
     "TextRoute",
     "VectorRoute",
     "connect",

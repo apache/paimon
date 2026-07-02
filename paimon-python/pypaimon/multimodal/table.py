@@ -141,6 +141,10 @@ class MultimodalTable:
     def scan(self):
         return ScanQuery(self.raw_table)
 
+    def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
+        from pypaimon.multimodal.blob_store import BlobStore
+        return BlobStore(self, column=column, key_column=key_column)
+
     def search(
             self,
             query,
