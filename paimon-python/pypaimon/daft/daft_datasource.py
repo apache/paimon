@@ -484,6 +484,7 @@ class PaimonDataSource(DataSource):
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
                 has_deletion_vectors=self._split_has_deletion_vectors(split),
+                has_auth=self._split_has_auth(split),
             )
 
             if routing.use_native_reader:
@@ -546,6 +547,7 @@ class PaimonDataSource(DataSource):
             routing = self._reader_routing(
                 raw_convertible=split.raw_convertible,
                 has_deletion_vectors=split.has_deletion_vectors,
+                has_auth=self._split_has_auth(split),
             )
             if routing.use_native_reader:
                 native_split_count += 1
@@ -597,12 +599,14 @@ class PaimonDataSource(DataSource):
         self,
         raw_convertible: bool,
         has_deletion_vectors: bool,
+        has_auth: bool = False,
     ) -> _ReaderRouting:
         can_use_native_reader = (
             self._is_parquet
             and not self._has_blob_columns
             and (not self._table.is_primary_key_table or raw_convertible)
             and not has_deletion_vectors
+            and not has_auth
         )
         if can_use_native_reader:
             return _ReaderRouting(READER_MODE_NATIVE_PARQUET, None)
@@ -611,6 +615,8 @@ class PaimonDataSource(DataSource):
             reason = "non-parquet format"
         elif self._has_blob_columns:
             reason = "blob columns present"
+        elif has_auth:
+            reason = "query auth active"
         elif has_deletion_vectors:
             reason = "deletion vectors present"
         else:
@@ -621,6 +627,11 @@ class PaimonDataSource(DataSource):
     def _split_has_deletion_vectors(split: Split) -> bool:
         deletion_files = getattr(split, "data_deletion_files", None)
         return deletion_files is not None and any(df is not None for df in deletion_files)
+
+    @staticmethod
+    def _split_has_auth(split) -> bool:
+        from pypaimon.read.query_auth_split import QueryAuthSplit
+        return isinstance(split, QueryAuthSplit)
 
     def _partition_filter_skips_split(
         self,
