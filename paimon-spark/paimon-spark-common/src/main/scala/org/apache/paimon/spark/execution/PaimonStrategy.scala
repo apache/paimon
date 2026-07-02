@@ -39,7 +39,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, OuterReference, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
@@ -277,18 +277,9 @@ case class LateralVectorSearchExec(
   override protected def doExecute(): RDD[InternalRow] = {
     child.execute().mapPartitions {
       outerRows =>
-        val strippedQueryExpr = queryVectorExpr.transform {
-          case OuterReference(namedExpression) => namedExpression.toAttribute
-        }
-        val queryVectorProjection = UnsafeProjection.create(Seq(strippedQueryExpr), child.output)
-        val strippedProjectList = projectList.map {
-          project =>
-            project.transform {
-              case OuterReference(namedExpression) => namedExpression.toAttribute
-            }
-        }
+        val queryVectorProjection = UnsafeProjection.create(Seq(queryVectorExpr), child.output)
         val rightProjection =
-          UnsafeProjection.create(strippedProjectList, child.output ++ vectorSearchOutput)
+          UnsafeProjection.create(projectList, child.output ++ vectorSearchOutput)
         val joinedRow = new JoinedRow
         val readerTracker = new LateralVectorSearchReaderTracker
         Option(TaskContext.get())
@@ -301,7 +292,7 @@ case class LateralVectorSearchExec(
             val searchBatch = ArrayBuffer[LateralVectorSearchQuery]()
             outerRowBatch.foreach {
               outerRow =>
-                toFloatArray(queryVectorProjection(outerRow).get(0, strippedQueryExpr.dataType))
+                toFloatArray(queryVectorProjection(outerRow).get(0, queryVectorExpr.dataType))
                   .foreach(
                     queryVector => searchBatch += LateralVectorSearchQuery(outerRow, queryVector))
             }
