@@ -149,7 +149,8 @@ class FormatMosaicReader(RecordBatchReader):
             null_counts[i] = stats.null_count
             if stats.has_min_max:
                 min_values[i] = _convert_stats_value(stats.min, field.type)
-                max_values[i] = _convert_stats_value(stats.max, field.type)
+                max_values[i] = _convert_stats_value(
+                    stats.max, field.type, round_up_timestamp=True)
 
         return SimpleStats(
             GenericRow(min_values, self._read_fields),
@@ -200,7 +201,8 @@ class FormatMosaicReader(RecordBatchReader):
 _EPOCH = datetime(1970, 1, 1)
 
 
-def _convert_stats_value(value: Optional[bytes], data_type) -> Any:
+def _convert_stats_value(
+        value: Optional[bytes], data_type, round_up_timestamp: bool = False) -> Any:
     if value is None:
         return None
 
@@ -240,9 +242,12 @@ def _convert_stats_value(value: Optional[bytes], data_type) -> Any:
         if precision <= 6:
             return _EPOCH + timedelta(microseconds=struct.unpack(">q", value)[0])
         millis, nanos_of_milli = struct.unpack(">qi", value)
+        microseconds = nanos_of_milli // 1000
+        if round_up_timestamp and nanos_of_milli % 1000 != 0:
+            microseconds += 1
         return _EPOCH + timedelta(
             milliseconds=millis,
-            microseconds=nanos_of_milli // 1000)
+            microseconds=microseconds)
 
     return None
 
