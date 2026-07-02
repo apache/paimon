@@ -161,3 +161,21 @@ def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
             return new_children[0]
         return PredicateBuilder.or_predicates(new_children)
     return predicate
+
+
+def exclude_predicate_with_fields(predicate: Optional[Predicate], fields: Set[str]) -> Optional[Predicate]:
+    """Drop predicate parts referencing any of ``fields`` (mirrors Java
+    PredicateBuilder.excludePredicateWithFields)."""
+    if not predicate or not fields:
+        return predicate
+    if predicate.method == "and":
+        kept = []
+        for p in _split_and(predicate):
+            r = exclude_predicate_with_fields(p, fields)
+            if r is not None:
+                kept.append(r)
+        return PredicateBuilder.and_predicates(kept) if kept else None
+    # leaf or OR: drop the whole thing if it touches any field (OR isn't split apart)
+    if _get_all_fields(predicate) & fields:
+        return None
+    return predicate
