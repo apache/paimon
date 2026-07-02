@@ -466,12 +466,13 @@ explicit `key_column`.
 
 `put_object` writes one object. `put_objects` writes a batch of objects in one
 Paimon commit. Both methods upsert by key: existing matching rows are updated,
-and missing keys append new rows. BlobStore does not enforce object-key
-uniqueness; that should be modeled with a table-level unique key when available.
-The object body can be raw bytes, a binary file-like object, or a PyPaimon
-`Blob`. Use `columns` to set the non-key, non-BLOB table columns for the object
-row. For managed BLOB storage, use `head_object` or `get_object` to inspect the
-stored descriptor after the write.
+and missing keys append new rows. If the same key appears more than once in a
+single `put_objects` batch, the last object wins. BlobStore does not enforce
+object-key uniqueness; that should be modeled with a table-level unique key when
+available. The object body can be raw bytes, a binary file-like object, or a
+PyPaimon `Blob`. Use `columns` to set the non-key, non-BLOB table columns for
+the object row. For managed BLOB storage, use `head_object` or `get_object` to
+inspect the stored descriptor after the write.
 
 ```python
 store = docs.blobs(column="image", key_column="key")

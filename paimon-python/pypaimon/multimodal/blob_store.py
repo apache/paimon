@@ -127,8 +127,7 @@ class BlobStore:
             rows.append(row)
         if not rows:
             return []
-        self._validate_unique_keys([row[self.key_column] for row in rows])
-        return self._put_rows(rows)
+        return self._put_rows(self._deduplicate_rows_last_write_wins(rows))
 
     def update_object_columns(
             self,
@@ -243,6 +242,19 @@ class BlobStore:
         return [
             self._put_result_from_row(row, snapshot_id, descriptor_storage)
             for row in rows
+        ]
+
+    def _deduplicate_rows_last_write_wins(
+            self,
+            rows: List[Mapping[str, object]]) -> List[Mapping[str, object]]:
+        key_to_last_index = {}
+        for index, row in enumerate(rows):
+            key_to_last_index[row[self.key_column]] = index
+        if len(key_to_last_index) == len(rows):
+            return rows
+        return [
+            rows[index]
+            for index in sorted(key_to_last_index.values())
         ]
 
     def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> Optional[int]:

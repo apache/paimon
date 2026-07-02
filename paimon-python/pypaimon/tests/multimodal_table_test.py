@@ -200,6 +200,11 @@ class MultimodalTableTest(unittest.TestCase):
         results = store.put_objects([
             {
                 "key": "images/cat.jpg",
+                "body": b"cat-image-old",
+                "columns": {"content_type": "image/gif", "owner": "ignored"},
+            },
+            {
+                "key": "images/cat.jpg",
                 "body": b"cat-image-v1",
                 "columns": {"content_type": "image/jpeg", "owner": "alice"},
             },
