@@ -17,6 +17,10 @@ name: Check licensing
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'paimon-python/**'
   pull_request:
     paths-ignore:
       - 'docs/**'

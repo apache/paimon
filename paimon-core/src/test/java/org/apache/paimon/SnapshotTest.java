@@ -78,6 +78,52 @@ public class SnapshotTest {
         assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
     }
 
+    @Test
+    public void testSnapshotWithOperation() {
+        // Old snapshot without operation field: operation should be null
+        String oldJson =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 1,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : \"m-0\",\n"
+                        + "  \"deltaManifestList\" : \"m-1\",\n"
+                        + "  \"commitUser\" : \"user\",\n"
+                        + "  \"commitIdentifier\" : 0,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 1000,\n"
+                        + "  \"totalRecordCount\" : 10,\n"
+                        + "  \"deltaRecordCount\" : 5\n"
+                        + "}";
+        Snapshot old = Snapshot.fromJson(oldJson);
+        assertThat(old.operation()).isNull();
+
+        // New snapshot with operation field
+        String newJson =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 2,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : \"m-0\",\n"
+                        + "  \"deltaManifestList\" : \"m-1\",\n"
+                        + "  \"commitUser\" : \"user\",\n"
+                        + "  \"commitIdentifier\" : 1,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 2000,\n"
+                        + "  \"totalRecordCount\" : 20,\n"
+                        + "  \"deltaRecordCount\" : 10,\n"
+                        + "  \"operation\" : \"MERGE\"\n"
+                        + "}";
+        Snapshot withOp = Snapshot.fromJson(newJson);
+        assertThat(withOp.operation()).isEqualTo(Snapshot.Operation.MERGE);
+
+        // Round-trip: toJson -> fromJson preserves operation
+        assertThat(Snapshot.fromJson(withOp.toJson())).isEqualTo(withOp);
+
+        // Null operation is omitted in JSON
+        assertThat(old.toJson()).doesNotContain("operation");
+    }
+
     public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath) {
         return newSnapshotManager(fileIO, tablePath, DEFAULT_MAIN_BRANCH);
     }

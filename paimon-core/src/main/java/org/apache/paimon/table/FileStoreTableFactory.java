@@ -181,7 +181,7 @@ public class FileStoreTableFactory {
                                 catalogEnvironment);
         FileStoreTable chainGroupFileStoreTable =
                 new ChainGroupReadTable(snapshotTable, deltaTable);
-        return new FallbackReadFileStoreTable(table, chainGroupFileStoreTable, true);
+        return new ChainTableFileStoreTable(table, chainGroupFileStoreTable);
     }
 
     private static FileStoreTable createOtherBranchTable(

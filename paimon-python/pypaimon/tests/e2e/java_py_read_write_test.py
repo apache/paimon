@@ -1473,6 +1473,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
             self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
 
+    def test_read_data_evolution_deletion_vector_table(self):
+        """Read a data evolution table with deletion vectors and blob files written by Java."""
+        table = self.catalog.get_table('default.data_evolution_dv_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+        result = table_sort_by(result, 'f0')
+
+        expected_ids = [0, 2, 3, 11, 13, 14]
+        self.assertEqual(result.num_rows, len(expected_ids))
+        self.assertEqual(result.column('f0').to_pylist(), expected_ids)
+        self.assertEqual(
+            result.column('f1').to_pylist(),
+            [f'name-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f2').to_pylist(),
+            [f'base-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f3').to_pylist(),
+            [bytes([i]) for i in expected_ids])
+
     @parameterized.expand(get_file_format_params())
     def test_py_write_data_evolution_table(self, file_format):
         """Python writes data evolution tables for Java to read."""

@@ -398,7 +398,7 @@ class LocalFileIO(FileIO):
             import mosaic
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, 'wb') as f:
-                mosaic.write_table(data, f)
+                mosaic.write_table(data, f, options=kwargs.get("options"))
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Mosaic file {path}: {e}") from e

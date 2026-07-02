@@ -45,10 +45,15 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
+        int maxSize = options.get(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE);
+        if (maxSize <= 0) {
+            return new TantivyFullTextGlobalIndexer(
+                    new TantivySearcherPool(0),
+                    new TantivyFullTextIndexOptions(removeTantivyPrefix(options)));
+        }
         if (searcherPool == null) {
             synchronized (this) {
                 if (searcherPool == null) {
-                    int maxSize = options.get(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE);
                     searcherPool = new TantivySearcherPool(maxSize);
                 }
             }

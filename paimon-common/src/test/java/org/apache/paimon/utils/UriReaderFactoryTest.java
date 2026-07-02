@@ -23,9 +23,16 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.UriReader.FileUriReader;
 import org.apache.paimon.utils.UriReader.HttpUriReader;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,6 +44,23 @@ public class UriReaderFactoryTest {
             new UriReaderFactory(CatalogContext.create(new Options()));
 
     @TempDir java.nio.file.Path tempPath;
+
+    private HttpServer httpServer;
+    private int httpPort;
+
+    @BeforeEach
+    public void setUpHttpServer() throws Exception {
+        httpServer = HttpServer.create(new InetSocketAddress(0), 0);
+        httpPort = httpServer.getAddress().getPort();
+        httpServer.start();
+    }
+
+    @AfterEach
+    public void tearDownHttpServer() {
+        if (httpServer != null) {
+            httpServer.stop(0);
+        }
+    }
 
     @Test
     public void testCreateHttpUriReader() {
@@ -93,8 +117,25 @@ public class UriReaderFactoryTest {
     }
 
     @Test
-    public void testExistsSkipsHttpUriReader() throws Exception {
-        assertThat(factory.exists("https://example.com/missing.txt")).isTrue();
+    public void testExistsReturnsFalseForMissingHttpResource() throws Exception {
+        registerHttpHandler(
+                "/missing.txt",
+                exchange -> {
+                    sendResponse(exchange, 404, new byte[0]);
+                });
+
+        assertThat(factory.exists(httpUrl("/missing.txt"))).isFalse();
+    }
+
+    @Test
+    public void testExistsReturnsTrueForAvailableHttpResource() throws Exception {
+        registerHttpHandler(
+                "/ok.txt",
+                exchange -> {
+                    sendResponse(exchange, 200, "ok".getBytes());
+                });
+
+        assertThat(factory.exists(httpUrl("/ok.txt"))).isTrue();
     }
 
     @Test
@@ -103,5 +144,27 @@ public class UriReaderFactoryTest {
         UriReader reader1 = deserializedFactory.create("http://my_bucket/path/to/file1.txt");
         UriReader reader2 = deserializedFactory.create("http://my_bucket/path/to/file2.txt");
         assertThat(reader1).isSameAs(reader2);
+    }
+
+    private void registerHttpHandler(String path, com.sun.net.httpserver.HttpHandler handler) {
+        httpServer.createContext(path, handler);
+    }
+
+    private String httpUrl(String path) {
+        return "http://127.0.0.1:" + httpPort + path;
+    }
+
+    private static void sendResponse(HttpExchange exchange, int statusCode, byte[] body)
+            throws IOException {
+        boolean headRequest = "HEAD".equals(exchange.getRequestMethod());
+        long responseLength = headRequest ? -1 : body.length;
+        exchange.sendResponseHeaders(statusCode, responseLength);
+        if (!headRequest && body.length > 0) {
+            try (OutputStream outputStream = exchange.getResponseBody()) {
+                outputStream.write(body);
+            }
+        } else {
+            exchange.close();
+        }
     }
 }

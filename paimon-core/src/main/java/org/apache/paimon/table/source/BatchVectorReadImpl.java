@@ -98,6 +98,8 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
             List<IndexVectorSearchSplit> splits, GlobalIndexer globalIndexer) {
         int n = vectors.length;
         List<RoaringNavigableMap64> preFilters = preFilters(splits);
+        String indexType = vectorIndexType(splits);
+        int searchLimit = indexedSearchLimit(indexType);
 
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
@@ -116,6 +118,7 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                             split.rowRangeEnd(),
                             split.vectorIndexFiles(),
                             vectors,
+                            searchLimit,
                             preFilters.isEmpty() ? null : preFilters.get(i),
                             executor));
         }
@@ -134,6 +137,9 @@ public class BatchVectorReadImpl extends AbstractVectorRead implements BatchVect
                     merged[i] = merged[i].or(splitResults.get(i).get());
                 }
             }
+        }
+        for (int i = 0; i < n; i++) {
+            merged[i] = maybeRerankIndexedResult(merged[i], indexType, globalIndexer, vectors[i]);
         }
         return merged;
     }

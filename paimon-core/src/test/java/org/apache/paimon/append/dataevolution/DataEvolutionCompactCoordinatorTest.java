@@ -34,6 +34,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -56,6 +57,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -552,6 +554,40 @@ public class DataEvolutionCompactCoordinatorTest {
         assertThat(tasks.get(0).partition()).isEqualTo(partitionB);
         assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
                 .containsExactly(b1.file().fileName(), b2.file().fileName());
+    }
+
+    @Test
+    public void testPlanEndsScanWhenDeletionVectorsEnabled() {
+        Options options = new Options();
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false, false);
+
+        assertThatThrownBy(coordinator::plan).isInstanceOf(EndOfScanException.class);
+    }
+
+    @Test
+    public void testCompactTaskRejectsDeletionVectorEnabledTable() {
+        Options options = new Options();
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        FileStoreTable table = mock(FileStoreTable.class);
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+
+        DataEvolutionCompactTask task =
+                new DataEvolutionCompactTask(
+                        BinaryRow.EMPTY_ROW,
+                        Collections.singletonList(
+                                createDataFileMeta("file1.parquet", 0L, 100L, 0, 1024)),
+                        false);
+
+        assertThatThrownBy(() -> task.doCompact(table, "user"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Data evolution compaction does not support deletion vectors.");
     }
 
     private ManifestEntry makeEntry(

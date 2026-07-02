@@ -70,7 +70,6 @@ import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -81,7 +80,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -447,39 +445,8 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
-    public void testExternalStorageBlobField() throws Exception {
-        createExternalStorageTable();
-        FileStoreTable table = getTableDefault();
-
-        writeDataDefault(
-                Collections.singletonList(
-                        GenericRow.of(
-                                1, BinaryString.fromString("copy-test"), new BlobData(blobBytes))));
-
-        readDefault(
-                row -> {
-                    assertThat(row.getString(1).toString()).isEqualTo("copy-test");
-                    // The blob should be readable via descriptor
-                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
-                });
-
-        // Verify the blob file was written to the external storage path
-        java.nio.file.Path externalStoragePath = tempPath.resolve("external-storage-blob-path");
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-
-        // Verify no .blob files were created in the table directory
-        long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
-        assertThat(blobFiles).isEqualTo(0);
-    }
-
-    @Test
-    public void testThreeTypeBlobCoexistence() throws Exception {
-        createThreeTypeBlobTable();
+    public void testRawAndDescriptorBlobCoexistence() throws Exception {
+        createRawAndDescriptorBlobTable();
         FileStoreTable table = getTableDefault();
 
         // Prepare external blob for the descriptor field
@@ -492,98 +459,27 @@ public class BlobTableTest extends TableTestBase {
         UriReader uriReader = UriReader.fromFile(table.fileIO());
         Blob blobRef = Blob.fromDescriptor(uriReader, descriptor);
 
-        // Prepare data for the descriptor field backed by external storage
-        byte[] copyBytes = randomBytes();
-
         writeDataDefault(
                 Collections.singletonList(
                         GenericRow.of(
                                 1,
-                                BinaryString.fromString("three-types"),
+                                BinaryString.fromString("mixed-types"),
                                 new BlobData(blobBytes), // raw-data blob
-                                blobRef, // descriptor blob
-                                new BlobData(copyBytes)))); // descriptor blob with external storage
+                                blobRef))); // descriptor blob
 
         readDefault(
                 row -> {
-                    assertThat(row.getString(1).toString()).isEqualTo("three-types");
+                    assertThat(row.getString(1).toString()).isEqualTo("mixed-types");
                     // Raw-data blob
                     assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
                     // Descriptor blob
                     assertThat(row.getBlob(3).toDescriptor()).isEqualTo(descriptor);
                     assertThat(row.getBlob(3).toData()).isEqualTo(descriptorBytes);
-                    // External-storage descriptor blob
-                    assertThat(row.getBlob(4).toData()).isEqualTo(copyBytes);
                 });
 
         // Verify raw-data blob files exist (for f2)
         long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
         assertThat(blobFiles).isGreaterThanOrEqualTo(1);
-
-        // Verify descriptor files backed by external storage exist in the configured path
-        java.nio.file.Path externalStoragePath =
-                tempPath.resolve("external-storage-blob-path-3type");
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-    }
-
-    @Test
-    public void testExternalStorageFieldValidationRequiresPath() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
-                            schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                            // No external storage path set
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "'"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key()
-                                + "' must be set when '"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
-                                + "' is configured.");
-    }
-
-    @Test
-    public void testExternalStorageFieldMustBeSubsetOfDescriptorField() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            // f2 is configured for external storage but not in
-                            // blob-descriptor-field
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/target");
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Field 'f2' in '"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
-                                + "' must also be in '"
-                                + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
-                                + "'.");
     }
 
     @Test
@@ -1788,23 +1684,6 @@ public class BlobTableTest extends TableTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    private void createExternalStorageTable() throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.STRING());
-        schemaBuilder.column("f2", DataTypes.BLOB());
-        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
-        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-        schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-        schemaBuilder.option(
-                CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                tempPath.resolve("external-storage-blob-path").toString());
-        catalog.createTable(identifier(), schemaBuilder.build(), true);
-    }
-
     private void writeRows(Table table, Iterable<InternalRow> rows) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         BatchTableWrite write = builder.newWrite();
@@ -1833,22 +1712,17 @@ public class BlobTableTest extends TableTestBase {
                 });
     }
 
-    private void createThreeTypeBlobTable() throws Exception {
+    private void createRawAndDescriptorBlobTable() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.BLOB()); // raw-data blob
         schemaBuilder.column("f3", DataTypes.BLOB()); // descriptor blob
-        schemaBuilder.column("f4", DataTypes.BLOB()); // descriptor blob with external storage
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3,f4");
-        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3,f4");
-        schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f4");
-        schemaBuilder.option(
-                CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                tempPath.resolve("external-storage-blob-path-3type").toString());
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 

@@ -255,7 +255,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
-            return SystemTableLoader.loadGlobalTableNames();
+            return SystemTableLoader.loadGlobalTableNames(context.options());
         }
 
         // check db exists
@@ -289,7 +289,7 @@ public abstract class AbstractCatalog implements Catalog {
         CatalogUtils.validateTableType(this, tableType);
         if (isSystemDatabase(databaseName)) {
             List<Table> systemTables =
-                    SystemTableLoader.loadGlobalTableNames().stream()
+                    SystemTableLoader.loadGlobalTableNames(context.options()).stream()
                             .map(
                                     tableName -> {
                                         try {
@@ -364,15 +364,21 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotBranch(identifier, "dropTable");
         checkNotSystemTable(identifier, "dropTable");
 
+        if (!tableExists(identifier)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
+
         Set<Path> externalPaths = new HashSet<>();
-        try {
+        if (tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH)) {
             Table table = getTable(identifier);
             if (table instanceof FileStoreTable) {
                 FileStoreTable fileStoreTable = (FileStoreTable) table;
                 List<Path> schemaExternalPaths =
                         getSchemaExternalPaths(fileStoreTable.schemaManager().listAll());
                 externalPaths.addAll(schemaExternalPaths);
-                // get table branch external path
                 List<String> branches = fileStoreTable.branchManager().branches();
                 for (String branch : branches) {
                     SchemaManager schemaManager =
@@ -380,14 +386,13 @@ public abstract class AbstractCatalog implements Catalog {
                     externalPaths.addAll(getSchemaExternalPaths(schemaManager.listAll()));
                 }
             }
-        } catch (TableNotExistException e) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-            throw new TableNotExistException(identifier);
         }
 
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
+    }
+
+    protected boolean tableExists(Identifier identifier) {
+        return tableExistsInFileSystem(getTableLocation(identifier), DEFAULT_MAIN_BRANCH);
     }
 
     private List<Path> getSchemaExternalPaths(List<TableSchema> schemas) {

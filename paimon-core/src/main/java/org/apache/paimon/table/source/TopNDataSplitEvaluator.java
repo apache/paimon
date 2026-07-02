@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
+import static org.apache.paimon.table.source.PushDownUtils.tightBoundsAvailable;
 
 /** Evaluate DataSplit TopN result. */
 public class TopNDataSplitEvaluator {
@@ -68,7 +69,8 @@ public class TopNDataSplitEvaluator {
         List<Split> results = new ArrayList<>();
         List<RichSplit> richSplits = new ArrayList<>();
         for (Split split : splits) {
-            if (!minmaxAvailable(split, Collections.singleton(field.name()))) {
+            if (!minmaxAvailable(split, Collections.singleton(field.name()))
+                    || !tightBoundsAvailable(split)) {
                 // unknown split, read it
                 results.add(split);
                 continue;

@@ -242,7 +242,6 @@ public interface FileEntry {
                         manifestFile.read(
                                 m.fileName(),
                                 m.fileSize(),
-                                Filter.alwaysTrue(),
                                 deletedFilter(),
                                 Filter.alwaysTrue(),
                                 SimpleFileEntry::from),

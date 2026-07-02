@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
@@ -34,6 +35,8 @@ import java.util.Map;
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
 
+    FileStoreCommit withIOManager(IOManager ioManager);
+
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
@@ -41,6 +44,8 @@ public interface FileStoreCommit extends AutoCloseable {
     FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
 
     FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
+
+    FileStoreCommit withOperation(Snapshot.Operation operation);
 
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);

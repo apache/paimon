@@ -160,7 +160,8 @@ class FileStoreTable(Table):
             self,
             tag_name: str,
             snapshot_id: Optional[int] = None,
-            ignore_if_exists: bool = False
+            ignore_if_exists: bool = False,
+            time_retained: Optional[str] = None
     ) -> None:
         """
         Create a tag for a snapshot.
@@ -169,6 +170,8 @@ class FileStoreTable(Table):
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
             ignore_if_exists: If True, don't raise error if tag already exists
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the tag
+                carries a create-time and TTL.
 
         Raises:
             ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
@@ -186,7 +189,7 @@ class FileStoreTable(Table):
                 raise ValueError("No snapshot exists in this table.")
 
         tag_mgr = self.tag_manager()
-        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists, time_retained)
 
     def delete_tag(self, tag_name: str) -> bool:
         """
@@ -335,7 +338,12 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         tag_mgr.rename_tag(old_name, new_name)
 
-    def replace_tag(self, tag_name: str, snapshot_id: int = None) -> None:
+    def replace_tag(
+            self,
+            tag_name: str,
+            snapshot_id: int = None,
+            time_retained: Optional[str] = None
+    ) -> None:
         """
         Replace an existing tag with a new snapshot.
 
@@ -343,6 +351,8 @@ class FileStoreTable(Table):
             tag_name: Name of the tag to replace
             snapshot_id: The snapshot id to associate with the tag.
                         If None, uses the latest snapshot.
+            time_retained: Optional retention (e.g. ``"1d"``); when set, the
+                replaced tag carries a create-time and TTL.
 
         Raises:
             ValueError: If tag doesn't exist, or snapshot doesn't exist
@@ -355,7 +365,7 @@ class FileStoreTable(Table):
             snapshot = self.snapshot_manager().get_snapshot_by_id(snapshot_id)
             if snapshot is None:
                 raise ValueError(f"Snapshot id '{snapshot_id}' doesn't exist.")
-        self.tag_manager().replace_tag(snapshot, tag_name)
+        self.tag_manager().replace_tag(snapshot, tag_name, time_retained)
 
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
@@ -384,6 +394,7 @@ class FileStoreTable(Table):
             external_path_strategy=self.options.data_file_external_paths_strategy(),
             external_path_weights=self.options.data_file_external_paths_weights(),
             index_file_in_data_file_dir=False,
+            global_index_external_path=self.options.global_index_external_path(),
         )
 
     def new_snapshot_commit(self):
@@ -438,6 +449,32 @@ class FileStoreTable(Table):
         from pypaimon.table.source.batch_vector_search_builder import \
             BatchVectorSearchBuilderImpl
         return BatchVectorSearchBuilderImpl(self)
+
+    def create_global_index(self, index_column, index_type: str = "btree",
+                            partition_filter=None, partitions=None,
+                            options: Optional[dict] = None) -> int:
+        from pypaimon.globalindex.create_global_index import create_global_index
+        return create_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            options=options,
+        )
+
+    def drop_global_index(self, index_column, index_type: str = "btree",
+                          partition_filter=None, partitions=None,
+                          dry_run: bool = False) -> int:
+        from pypaimon.globalindex.drop_global_index import drop_global_index
+        return drop_global_index(
+            self,
+            index_column,
+            index_type=index_type,
+            partition_filter=partition_filter,
+            partitions=partitions,
+            dry_run=dry_run,
+        )
 
     def create_row_key_extractor(self) -> RowKeyExtractor:
         bucket_mode = self.bucket_mode()

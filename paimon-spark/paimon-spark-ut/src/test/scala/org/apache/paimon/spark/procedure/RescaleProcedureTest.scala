@@ -146,6 +146,37 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Procedure: rescale partitions accept unquoted string values") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('primary-key'='id, dt, hh', 'bucket'='2')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', '2024-01-01', 0), (2, 'b', '2024-01-01', 0)")
+      spark.sql(s"INSERT INTO T VALUES (3, 'c', '2024-01-02', 0), (4, 'd', '2024-01-02', 0)")
+
+      spark.sql("ALTER TABLE T SET TBLPROPERTIES ('bucket' = '4')")
+      checkAnswer(
+        spark.sql(
+          "CALL sys.rescale(table => 'T', bucket_num => 4, partitions => 'dt=2024-01-01,hh=0')"),
+        Row(true) :: Nil)
+
+      val reloadedTable = loadTable("T")
+      val predicate = PartitionPredicate.fromMap(
+        reloadedTable.schema().logicalPartitionType(),
+        Map("dt" -> "2024-01-01", "hh" -> "0").asJava,
+        reloadedTable.coreOptions().partitionDefaultName())
+      reloadedTable.newSnapshotReader
+        .withPartitionFilter(predicate)
+        .read
+        .dataSplits
+        .asScala
+        .foreach(split => Assertions.assertThat(split.bucket()).isLessThan(4))
+    }
+  }
+
   test("Paimon Procedure: rescale with where clause") {
     withTable("T") {
       spark.sql(s"""

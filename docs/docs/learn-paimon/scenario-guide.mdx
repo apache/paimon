@@ -390,22 +390,6 @@ while metadata stays in standard columnar files (Parquet/ORC). This means:
 - Blob data supports streaming reads for large objects (videos, model weights) without loading entire files into memory.
 - Supports multiple input methods: local files, HTTP URLs, InputStreams, and byte arrays.
 
-**For external storage (e.g., blobs already in S3):**
-
-```sql
-CREATE TABLE video_table (
-    id INT,
-    title STRING,
-    video BYTES COMMENT '__BLOB_EXTERNAL_STORAGE_FIELD'
-) WITH (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-external-storage-path' = 's3://my-bucket/paimon-blobs/'
-);
-```
-
-This stores only descriptor references inline, while the actual blob data resides in external storage.
-
 ### Scenario 9: Vector Search / RAG Applications
 
 **When:** You are building a recommendation system, image retrieval, or RAG (Retrieval Augmented Generation)

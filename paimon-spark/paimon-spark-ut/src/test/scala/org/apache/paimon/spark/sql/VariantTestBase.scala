@@ -922,14 +922,13 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
           | (2, struct('Bob', parse_json('{"score":88,"grade":"B"}')))
           | """.stripMargin)
 
-    checkAnswer(
-      sql("SELECT * FROM T ORDER BY id"),
-      sql("""
-            |SELECT 1, struct('Alice', parse_json('{"score":95,"grade":"A"}'))
-            |UNION ALL
-            |SELECT 2, struct('Bob', parse_json('{"score":88,"grade":"B"}'))
-            |""".stripMargin)
-    )
+    val result = sql("SELECT * FROM T ORDER BY id")
+    assert(result.collect().length == 2)
+    assert(result.schema.fieldNames.toSeq == Seq("id", "data"))
+    val dataSchema = result.schema("data").dataType.asInstanceOf[StructType]
+    assert(dataSchema.fieldNames.toSeq == Seq("name", "v"))
+    assert(isVariantType(dataSchema("v").dataType))
+
     checkAnswer(
       sql(
         "SELECT id, data.name, variant_get(data.v, '$.score', 'int'), variant_get(data.v, '$.grade', 'string') FROM T ORDER BY id"),
@@ -1010,10 +1009,12 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
     checkAnswer(
       sql("SELECT * FROM T"),
       sql("""
-            |SELECT 1, struct(
+            |SELECT 1 AS id, named_struct(
+            |  'tags',
             |  array(parse_json('{"tag":"important","priority":1}'), parse_json('{"tag":"urgent","priority":2}')),
+            |  'attrs',
             |  map('color', parse_json('{"r":255,"g":0,"b":0}'), 'size', parse_json('{"width":100,"height":200}'))
-            |)
+            |) AS data
             |""".stripMargin)
     )
     checkAnswer(

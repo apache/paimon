@@ -23,3 +23,25 @@ if sys.version_info[:2] == (3, 6):
         from pypaimon.manifest import fastavro_py36_compat  # noqa: F401
     except ImportError:
         pass
+
+
+_SUPPORTED_MANIFEST_COMPRESSIONS = {
+    'null', 'deflate', 'snappy', 'zstd', 'bzip2', 'xz',
+}
+
+
+_DEFAULT_MANIFEST_CODEC = 'zstandard'
+
+
+def avro_codec(compression):
+    """Map Paimon manifest.compression config value to fastavro codec name."""
+    if not isinstance(compression, str):
+        return _DEFAULT_MANIFEST_CODEC
+    lower = compression.lower()
+    if lower not in _SUPPORTED_MANIFEST_COMPRESSIONS:
+        raise ValueError(
+            f"Unsupported manifest compression '{compression}'. "
+            f"Supported: {sorted(_SUPPORTED_MANIFEST_COMPRESSIONS)}")
+    if lower == 'zstd':
+        return 'zstandard'
+    return lower

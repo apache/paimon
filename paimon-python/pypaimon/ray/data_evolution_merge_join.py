@@ -24,6 +24,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     SourceColumnRef,
     _NormalizedClause,
     build_update_schema,
+    cast_to_schema,
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
@@ -398,7 +399,6 @@ def build_not_matched_insert_ds(
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ):
     from pypaimon.ray.ray_paimon import read_paimon
-    from pypaimon.ray.shuffle import _coerce_large_string_types
 
     captured_field_names = list(target_field_names)
     out_schema = target_pa_schema
@@ -465,8 +465,8 @@ def build_not_matched_insert_ds(
                 ))
                 remaining = remaining.slice(0, 0)
         if not parts:
-            return _coerce_large_string_types(out_schema.empty_table())
-        return _coerce_large_string_types(pa.concat_tables(parts))
+            return out_schema.empty_table()
+        return cast_to_schema(pa.concat_tables(parts), out_schema)
 
     return unmatched.map_batches(
         _transform, **_map_kwargs(ray_remote_args)

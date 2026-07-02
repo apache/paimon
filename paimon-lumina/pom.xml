@@ -53,7 +53,7 @@ under the License.
         <dependency>
             <groupId>org.aliyun.lumina</groupId>
             <artifactId>lumina-jni</artifactId>
-            <version>0.2.0</version>
+            <version>0.3.0</version>
         </dependency>
 
         <dependency>

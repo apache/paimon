@@ -3,6 +3,9 @@ title: "Global Index"
 sidebar_position: 8
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -55,6 +58,10 @@ Global indexes work on top of Data Evolution tables. To use global indexes, your
 
 Create a table with the required properties:
 
+<Tabs groupId="global-index-create-table">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 CREATE TABLE my_table (
     id INT,
@@ -69,10 +76,44 @@ CREATE TABLE my_table (
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+import pyarrow as pa
+
+from pypaimon import Schema
+
+schema = Schema.from_pyarrow_schema(
+    pa.schema([
+        pa.field("id", pa.int32()),
+        pa.field("name", pa.string()),
+        pa.field("embedding", pa.list_(pa.float32())),
+        pa.field("content", pa.string()),
+    ]),
+    options={
+        "bucket": "-1",
+        "row-tracking.enabled": "true",
+        "data-evolution.enabled": "true",
+        "global-index.enabled": "true",
+    },
+)
+
+catalog.create_table("db.my_table", schema, ignore_if_exists=False)
+```
+
+</TabItem>
+
+</Tabs>
+
 ## Lifecycle
 
-Create global indexes with the `create_global_index` procedure. You can build an index for all
-partitions or only selected partitions:
+Create global indexes for all partitions or only selected partitions:
+
+<Tabs groupId="global-index-build">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 CALL sys.create_global_index(
@@ -89,7 +130,42 @@ CALL sys.create_global_index(
 );
 ```
 
-Drop index files with `drop_global_index`:
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+added_files = table.create_global_index("name")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass build options and restrict the
+build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={"sorted-index.records-per-range": "10000000"},
+)
+```
+
+</TabItem>
+
+</Tabs>
+
+PyPaimon global index build currently supports single-column BTree indexes,
+single-column Bitmap indexes, and single-column paimon-vindex IVF vector indexes
+on tables with row tracking enabled.
+
+Drop index files:
+
+<Tabs groupId="global-index-drop">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 CALL sys.drop_global_index(
@@ -99,8 +175,38 @@ CALL sys.drop_global_index(
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("name", index_type="btree")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+```
+
+</TabItem>
+
+</Tabs>
+
 Global indexes are stored in index files and recorded in table metadata. To inspect index files and
 their row-id coverage, query the `table_indexes` system table:
+
+<Tabs groupId="global-index-table-indexes">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 SELECT index_type, index_field_name, row_range_start, row_range_end
@@ -108,15 +214,71 @@ FROM my_table$table_indexes
 WHERE index_field_name IS NOT NULL;
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+import pyarrow.compute as pc
+
+table_indexes = catalog.get_table("db.my_table$table_indexes")
+read_builder = table_indexes.new_read_builder().with_projection([
+    "index_type",
+    "index_field_name",
+    "row_range_start",
+    "row_range_end",
+])
+
+pa_table = read_builder.new_read().to_arrow(
+    read_builder.new_scan().plan().splits()
+)
+pa_table = pa_table.filter(pc.is_valid(pa_table["index_field_name"]))
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
 You can also query `file_key_ranges` to inspect data file row-id ranges and diagnose coverage:
+
+<Tabs groupId="global-index-file-key-ranges">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 SELECT file_path, first_row_id, record_count
 FROM my_table$file_key_ranges;
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+file_key_ranges = catalog.get_table("db.my_table$file_key_ranges")
+read_builder = file_key_ranges.new_read_builder().with_projection([
+    "file_path",
+    "first_row_id",
+    "record_count",
+])
+
+pa_table = read_builder.new_read().to_arrow(
+    read_builder.new_scan().plan().splits()
+)
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
 For workloads that need newly appended rows to become visible only after existing global indexes
 cover them, enable the visibility callback:
+
+<Tabs groupId="global-index-visibility-callback">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 ALTER TABLE my_table SET (
@@ -125,18 +287,65 @@ ALTER TABLE my_table SET (
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+
+catalog.alter_table(
+    "db.my_table",
+    [
+        SchemaChange.set_option("visibility-callback.enabled", "true"),
+        SchemaChange.set_option("visibility-callback.timeout", "30 min"),
+    ],
+)
+```
+
+</TabItem>
+
+</Tabs>
+
 ## Coverage and Freshness
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
-new rows are not automatically covered by the existing index files. Run `create_global_index` again
-to build index files for newly uncovered data. By default, queries use fast search and only read
+new rows are not automatically covered by the existing index files. Build the global index again
+to create index files for newly uncovered data. By default, queries use fast search and only read
 indexed row ranges; rows in uncovered ranges are not returned for that indexed query.
 
 To improve freshness for query types that support raw-data search, set:
 
+<Tabs groupId="global-index-search-mode">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 ALTER TABLE my_table SET ('global-index.search-mode' = 'full');
 ```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+
+catalog.alter_table(
+    "db.my_table",
+    [SchemaChange.set_option("global-index.search-mode", "full")],
+)
+```
+
+For a read-only override on an existing `Table` instance:
+
+```python
+full_table = table.copy({"global-index.search-mode": "full"})
+```
+
+</TabItem>
+
+</Tabs>
 
 With `full` search, supported global-index queries first use the snapshot `nextRowId` and global
 index row-id coverage to detect whether any row range is missing from the index. Raw data is scanned
@@ -146,9 +355,30 @@ handle index invalidation caused by updates or rewrites.
 
 To temporarily disable global-index scan acceleration while keeping the index files, set:
 
+<Tabs groupId="global-index-enabled">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 ALTER TABLE my_table SET ('global-index.enabled' = 'false');
 ```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+
+catalog.alter_table(
+    "db.my_table",
+    [SchemaChange.set_option("global-index.enabled", "false")],
+)
+```
+
+</TabItem>
+
+</Tabs>
 
 Set it back to `true` to use global indexes during scans again.
 

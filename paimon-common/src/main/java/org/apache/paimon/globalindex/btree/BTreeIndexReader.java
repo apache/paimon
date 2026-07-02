@@ -23,6 +23,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
@@ -250,7 +251,23 @@ public class BTreeIndexReader implements Closeable {
     }
 
     public Optional<GlobalIndexResult> visitStartsWith(Object literal) {
-        return createResult(this::allNonNullRows);
+        return createResult(
+                () -> {
+                    if (minKey == null) {
+                        return new RoaringNavigableMap64();
+                    }
+                    byte[] upperBound =
+                            SortedFileMetaSelector.prefixUpperBound(
+                                    keySerializer.serialize(literal));
+                    if (upperBound == null) {
+                        return rangeQuery(literal, maxKey, true, true);
+                    }
+                    return rangeQuery(
+                            literal,
+                            keySerializer.deserialize(MemorySlice.wrap(upperBound)),
+                            true,
+                            false);
+                });
     }
 
     public Optional<GlobalIndexResult> visitEndsWith(Object literal) {

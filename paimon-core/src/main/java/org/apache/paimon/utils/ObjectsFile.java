@@ -102,12 +102,7 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
 
     public List<T> read(String fileName, @Nullable Long fileSize) {
         return read(
-                fileName,
-                fileSize,
-                Filter.alwaysTrue(),
-                Filter.alwaysTrue(),
-                Filter.alwaysTrue(),
-                Function.identity());
+                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Function.identity());
     }
 
     public List<T> readWithIOException(String fileName) throws IOException {
@@ -117,12 +112,7 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
     public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
             throws IOException {
         return readWithIOException(
-                fileName,
-                fileSize,
-                Filter.alwaysTrue(),
-                Filter.alwaysTrue(),
-                Filter.alwaysTrue(),
-                Function.identity());
+                fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue(), Function.identity());
     }
 
     public boolean exists(String fileName) {
@@ -136,13 +126,11 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
     public <R> List<R> read(
             String fileName,
             @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter,
             Filter<T> readTFilter,
             Function<T, R> convertor) {
         try {
-            return readWithIOException(
-                    fileName, fileSize, loadFilter, readFilter, readTFilter, convertor);
+            return readWithIOException(fileName, fileSize, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read " + fileName, e);
         }
@@ -153,19 +141,12 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
             @Nullable Long fileSize,
             Filter<InternalRow> readFilter,
             Filter<T> readTFilter) {
-        return read(
-                fileName,
-                fileSize,
-                Filter.alwaysTrue(),
-                readFilter,
-                readTFilter,
-                Function.identity());
+        return read(fileName, fileSize, readFilter, readTFilter, Function.identity());
     }
 
     private <R> List<R> readWithIOException(
             String fileName,
             @Nullable Long fileSize,
-            Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter,
             Filter<T> readTFilter,
             Function<T, R> convertor)

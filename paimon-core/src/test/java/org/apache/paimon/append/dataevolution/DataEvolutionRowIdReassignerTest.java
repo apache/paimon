@@ -993,7 +993,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         latest.watermark(),
                         latest.statistics(),
                         latest.properties(),
-                        latest.nextRowId());
+                        latest.nextRowId(),
+                        latest.operation());
         SnapshotManager snapshotManager = table.snapshotManager();
         snapshotManager
                 .fileIO()

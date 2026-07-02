@@ -277,6 +277,65 @@ public class SortedFileMetaSelectorTest {
         return BinaryString.fromString(value);
     }
 
+    @Test
+    public void testEmptyStringKeyDoesNotThrowNPE() {
+        KeySerializer serializer = KeySerializer.create(new VarCharType());
+        FieldRef ref = new FieldRef(1, "page_host", new VarCharType());
+
+        byte[] emptyKey = serializer.serialize(BinaryString.EMPTY_UTF8);
+        byte[] normalKey = serializer.serialize(BinaryString.fromString("www.example.com"));
+
+        SortedIndexFileMeta metaWithEmptyFirstKey =
+                new SortedIndexFileMeta(emptyKey, normalKey, false);
+        SortedIndexFileMeta metaWithNormalKeys =
+                new SortedIndexFileMeta(
+                        serializer.serialize(BinaryString.fromString("aaa.com")),
+                        serializer.serialize(BinaryString.fromString("zzz.com")),
+                        false);
+        SortedIndexFileMeta metaOnlyNulls = new SortedIndexFileMeta(null, null, true);
+
+        List<GlobalIndexIOMeta> testFiles =
+                Arrays.asList(
+                        new GlobalIndexIOMeta(
+                                new Path("file_empty"), 1, metaWithEmptyFirstKey.serialize()),
+                        new GlobalIndexIOMeta(
+                                new Path("file_normal"), 1, metaWithNormalKeys.serialize()),
+                        new GlobalIndexIOMeta(
+                                new Path("file_nulls"), 1, metaOnlyNulls.serialize()));
+
+        SortedFileMetaSelector selector = new SortedFileMetaSelector(testFiles, serializer);
+
+        // visitEqual should not throw NPE
+        Optional<List<GlobalIndexIOMeta>> result =
+                selector.visitEqual(ref, BinaryString.fromString("www.example.com"));
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file_empty", "file_normal"));
+
+        // visitLessThan should not throw NPE
+        result = selector.visitLessThan(ref, BinaryString.fromString("bbb.com"));
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file_empty", "file_normal"));
+
+        // visitGreaterThan should not throw NPE
+        result = selector.visitGreaterThan(ref, BinaryString.fromString("www.example.com"));
+        Assertions.assertThat(result).isNotEmpty();
+
+        // visitIn should not throw NPE
+        result =
+                selector.visitIn(
+                        ref,
+                        Arrays.asList(
+                                BinaryString.fromString("www.example.com"),
+                                BinaryString.fromString("zzz.com")));
+        Assertions.assertThat(result).isNotEmpty();
+
+        // visitBetween should not throw NPE
+        result =
+                selector.visitBetween(
+                        ref, BinaryString.EMPTY_UTF8, BinaryString.fromString("zzz.com"));
+        Assertions.assertThat(result).isNotEmpty();
+    }
+
     private static class LengthPrefixedStringSerializer implements KeySerializer {
 
         @Override

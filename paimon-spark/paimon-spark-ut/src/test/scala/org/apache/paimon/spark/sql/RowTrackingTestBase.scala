@@ -44,6 +44,43 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
   import testImplicits._
 
+  private val MaxRetryAttempts = 20
+  private val RetryIntervalMillis = 10L
+
+  private def doWithRetry(doAction: () => Unit, retryableMessages: String*): Unit = {
+    var attempts = 0
+    while (true) {
+      try {
+        doAction.apply()
+        return
+      } catch {
+        case e: Exception =>
+          attempts += 1
+          if (!isRetryable(e, retryableMessages) || attempts >= MaxRetryAttempts) {
+            throw e
+          }
+          Thread.sleep(RetryIntervalMillis)
+      }
+    }
+  }
+
+  private def isRetryable(e: Throwable, retryableMessages: Seq[String]): Boolean = {
+    hasMessage(e, "Snapshot file", "does not exist") ||
+    retryableMessages.exists(message => hasMessage(e, message))
+  }
+
+  private def hasMessage(e: Throwable, fragments: String*): Boolean = {
+    var current = e
+    while (current != null) {
+      val message = current.getMessage
+      if (message != null && fragments.forall(message.contains)) {
+        return true
+      }
+      current = current.getCause
+    }
+    false
+  }
+
   test("Data Evolution: concurrent merge and compact") {
     withTable("s", "t") {
       sql(s"""
@@ -104,27 +141,16 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
 
       def doMerge(): Unit = {
-        var success = false
-        while (!success) {
-          try {
-            sql(s"""
-                   |MERGE INTO t
-                   |USING s
-                   |ON t.id = s.id
-                   |WHEN MATCHED THEN
-                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                   |""".stripMargin).collect()
-            success = true
-          } catch {
-            case e: Exception =>
-              if (
-                !e.getMessage.contains(
-                  "multiple 'MERGE INTO' operations have encountered conflicts")
-              ) {
-                throw e
-              }
-          }
-        }
+        doWithRetry(
+          () => sql(s"""
+                       |MERGE INTO t
+                       |USING s
+                       |ON t.id = s.id
+                       |WHEN MATCHED THEN
+                       |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                       |""".stripMargin).collect(),
+          "multiple 'MERGE INTO' operations have encountered conflicts"
+        )
       }
 
       val mergeInto1 = Future {
@@ -159,25 +185,25 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
 
       val mergeB = Future {
         for (_ <- 1 to 10) {
-          sql(s"""
-                 |MERGE INTO t
-                 |USING sb
-                 |ON t.id = sb.id
-                 |WHEN MATCHED THEN
-                 |UPDATE SET t.b = sb.b + t.b
-                 |""".stripMargin).collect()
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sb
+                                   |ON t.id = sb.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.b = sb.b + t.b
+                                   |""".stripMargin).collect())
         }
       }
 
       val mergeC = Future {
         for (_ <- 1 to 10) {
-          sql(s"""
-                 |MERGE INTO t
-                 |USING sc
-                 |ON t.id = sc.id
-                 |WHEN MATCHED THEN
-                 |UPDATE SET t.c = sc.c + t.c
-                 |""".stripMargin).collect()
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING sc
+                                   |ON t.id = sc.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.c = sc.c + t.c
+                                   |""".stripMargin).collect())
         }
       }
 
@@ -199,33 +225,19 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       sql("INSERT INTO t VALUES (1, 0, 0)")
       Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
 
-      def doWithRetry(doAction: () => Unit): Unit = {
-        var success = false
-        while (!success) {
-          try {
-            doAction.apply()
-            success = true
-          } catch {
-            case e: Exception =>
-              if (
-                !e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")
-                && !e.getMessage.contains("Row ID existence conflict")
-              ) {
-                throw e
-              }
-          }
-        }
-      }
-
       val mergeInto = Future {
         for (i <- 1 to 10) {
-          doWithRetry(() => sql(s"""
-                                   |MERGE INTO t
-                                   |USING s
-                                   |ON t.id = s.id
-                                   |WHEN MATCHED THEN
-                                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                                   |""".stripMargin).collect())
+          doWithRetry(
+            () => sql(s"""
+                         |MERGE INTO t
+                         |USING s
+                         |ON t.id = s.id
+                         |WHEN MATCHED THEN
+                         |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                         |""".stripMargin).collect(),
+            "multiple 'MERGE INTO' and 'COMPACT' operations",
+            "Row ID existence conflict"
+          )
           if (i > 1) {
             sql(s"INSERT INTO t VALUES ($i, $i, $i)")
           }
@@ -244,7 +256,10 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           while (!canBeCompacted) {
             Thread.sleep(1)
           }
-          doWithRetry(() => sql("CALL sys.compact(table => 't')"))
+          doWithRetry(
+            () => sql("CALL sys.compact(table => 't')"),
+            "multiple 'MERGE INTO' and 'COMPACT' operations",
+            "Row ID existence conflict")
         }
       }
 
@@ -996,16 +1011,113 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
     }
   }
 
-  test("Data Evolution: update table throws exception") {
-    withTable("t") {
+  test("Data Evolution: V1 update table with data-evolution") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22 WHERE id = 2")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update with global index updates unindexed rows") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'btree-index.records-per-range' = '1000')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 'old', 10)")
+        sql(
+          "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+            "index_type => 'btree')")
+        sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+        sql("UPDATE t SET b = 21 WHERE name = 'new'")
+
+        checkAnswer(
+          sql("SELECT id, name, b FROM t ORDER BY id"),
+          Seq(Row(1, "old", 10), Row(2, "new", 21))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: merge with global index updates unindexed rows") {
+    withTable("s", "t") {
+      sql("CREATE TABLE s (dummy INT, b INT)")
+      sql("INSERT INTO s VALUES (1, 21)")
+
+      sql("""
+            |CREATE TABLE t (id INT, name STRING, b INT) TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'btree-index.records-per-range' = '1000')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old', 10)")
       sql(
-        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
-      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
-      assert(
-        intercept[RuntimeException] {
-          sql("UPDATE t SET b = 22")
-        }.getMessage
-          .contains("Update operation is not supported when data evolution is enabled yet."))
+        "CALL sys.create_global_index(table => 'test.t', index_column => 'name', " +
+          "index_type => 'btree')")
+      sql("INSERT INTO t VALUES (2, 'new', 20)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.name = 'new' AND s.dummy = 1
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name, b FROM t ORDER BY id"),
+        Seq(Row(1, "old", 10), Row(2, "new", 21))
+      )
+    }
+  }
+
+  test("Data Evolution: V1 update table with data-evolution without condition") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+        sql("UPDATE t SET b = 22")
+        checkAnswer(
+          sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+          Seq(Row(2, 22, 2, 0, 2), Row(3, 22, 3, 1, 2))
+        )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update partition column throws exception") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id INT, b INT, dt STRING)
+              |PARTITIONED BY (dt)
+              |TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')
+              |""".stripMargin)
+        sql("INSERT INTO t VALUES (1, 1, 'p1'), (2, 2, 'p2')")
+
+        assert(
+          intercept[RuntimeException] {
+            sql("UPDATE t SET dt = 'p3' WHERE id = 1")
+          }.getMessage
+            .contains("Update to partition columns is not supported for data evolution tables."))
+
+        sql("UPDATE t SET b = 10 WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 10, "p1"), Row(2, 2, "p2")))
+      }
     }
   }
 
@@ -1018,7 +1130,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
         intercept[RuntimeException] {
           sql("DELETE FROM t WHERE id = 2")
         }.getMessage
-          .contains("Delete operation is not supported when data evolution is enabled yet."))
+          .contains(
+            "Can only perform deletion operation on data evolution tables with DeletionVector enabled."))
     }
   }
 

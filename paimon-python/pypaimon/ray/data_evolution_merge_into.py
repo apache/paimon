@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
     build_matched_update_ds,
     build_not_matched_insert_ds,
@@ -119,14 +120,8 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             f"merge_into requires 'row-tracking.enabled' = 'true' on '{target}'."
         )
 
-    blob_cols = _blob_col_names(table)
     full_target_field_names = list(table.field_names)
-    # SET specs only cover non-blob columns: update can't rewrite blob files
-    # (data evolution puts them in dedicated .blob files), and insert leaves
-    # blob columns null since the source can't carry them through SET="*".
-    settable_field_names = [
-        c for c in full_target_field_names if c not in blob_cols
-    ]
+    settable_field_names = list(full_target_field_names)
     on_map = dict(zip(target_on_cols, source_on_cols))
     matched_specs = [
         _NormalizedClause(
@@ -153,9 +148,9 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     )
     if has_condition:
         from pypaimon.ray.merge_condition import (
-            _require_datafusion, extract_target_columns,
+            _load_datafusion, extract_target_columns,
         )
-        _require_datafusion()
+        _load_datafusion()
         for c in when_not_matched:
             if c.condition is not None:
                 t_refs = extract_target_columns(c.condition)
@@ -163,14 +158,6 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
                     raise ValueError(
                         f"WhenNotMatched condition must not reference "
                         f"target columns (t.*), but found: {sorted(t_refs)}"
-                    )
-        for c in list(when_matched) + list(when_not_matched):
-            if c.condition is not None:
-                blob_refs = extract_target_columns(c.condition) & blob_cols
-                if blob_refs:
-                    raise ValueError(
-                        f"condition must not reference blob columns, "
-                        f"but found: {sorted(blob_refs)}"
                     )
     not_matched_specs = []
     for c in when_not_matched:
@@ -238,9 +225,6 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     full_pa_schema = PyarrowFieldParser.from_paimon_schema(
         table.table_schema.fields
     )
-    # update_pa_schema strips blob (only non-blob cols are written by the
-    # update path); insert_pa_schema is the full table schema so the writer
-    # gets every column (blob columns end up null).
     update_pa_schema = pa.schema(
         [full_pa_schema.field(c) for c in settable_field_names]
     )
@@ -282,17 +266,18 @@ def _build_datasets(
     if ctx.is_self_merge:
         if matched_specs and base_snapshot is not None:
             update_cols_union = _union_update_cols(matched_specs)
-            update_ds = build_self_merge_update_ds(
-                target_identifier=target,
-                clauses=matched_specs,
-                target_field_names=ctx.full_target_field_names,
-                target_pa_schema=ctx.update_pa_schema,
-                update_cols=update_cols_union,
-                catalog_options=ctx.catalog_options,
-                resolve_target_projection=_resolve_target_projection,
-                snapshot_id=base_snapshot_id,
-                ray_remote_args=ray_remote_args,
-            )
+            if update_cols_union:
+                update_ds = build_self_merge_update_ds(
+                    target_identifier=target,
+                    clauses=matched_specs,
+                    target_field_names=ctx.full_target_field_names,
+                    target_pa_schema=ctx.update_pa_schema,
+                    update_cols=update_cols_union,
+                    catalog_options=ctx.catalog_options,
+                    resolve_target_projection=_resolve_target_projection,
+                    snapshot_id=base_snapshot_id,
+                    ray_remote_args=ray_remote_args,
+                )
         return update_ds, insert_ds, update_cols_union
 
     # Mirror Spark: matched/not-matched run as two independent joins
@@ -300,25 +285,24 @@ def _build_datasets(
     # joined.materialize() to feed both branches, which can OOM on large merges.
     if matched_specs and base_snapshot is not None:
         update_cols_union = _union_update_cols(matched_specs)
-        update_ds = build_matched_update_ds(
-            target_identifier=target,
-            source_ds=source_ds,
-            target_on=ctx.target_on_cols,
-            source_on=ctx.source_on_cols,
-            clauses=matched_specs,
-            target_field_names=ctx.settable_field_names,
-            target_pa_schema=ctx.update_pa_schema,
-            update_cols=update_cols_union,
-            catalog_options=ctx.catalog_options,
-            num_partitions=num_partitions,
-            resolve_target_projection=_resolve_target_projection,
-            snapshot_id=base_snapshot_id,
-            ray_remote_args=ray_remote_args,
-        )
+        if update_cols_union:
+            update_ds = build_matched_update_ds(
+                target_identifier=target,
+                source_ds=source_ds,
+                target_on=ctx.target_on_cols,
+                source_on=ctx.source_on_cols,
+                clauses=matched_specs,
+                target_field_names=ctx.settable_field_names,
+                target_pa_schema=ctx.update_pa_schema,
+                update_cols=update_cols_union,
+                catalog_options=ctx.catalog_options,
+                num_partitions=num_partitions,
+                resolve_target_projection=_resolve_target_projection,
+                snapshot_id=base_snapshot_id,
+                ray_remote_args=ray_remote_args,
+            )
 
     if not_matched_specs:
-        # Insert writes the full target schema; SET spec only covers
-        # settable cols, so blob columns fall through to null.
         insert_ds = build_not_matched_insert_ds(
             target_identifier=target,
             source_ds=source_ds,
@@ -369,7 +353,10 @@ def _execute_and_commit(
         except Exception as e:
             _reraise_inner(e)
         num_inserted = sum(
-            f.row_count for m in insert_msgs for f in m.new_files
+            f.row_count
+            for m in insert_msgs
+            for f in m.new_files
+            if not DataFileMeta.is_blob_file(f.file_name)
         )
         all_msgs.extend(insert_msgs)
     if all_msgs:
@@ -419,14 +406,6 @@ def _require_ray_join() -> None:
             f"merge_into requires ray>=2.50; "
             f"installed ray is {ray.__version__}."
         )
-
-
-def _blob_col_names(table) -> set:
-    return {
-        f.name
-        for f in table.table_schema.fields
-        if getattr(f.type, "type", None) == "BLOB"
-    }
 
 
 def _reraise_inner(err: BaseException) -> None:
@@ -533,6 +512,8 @@ def _normalize_set_spec(
                     f"SET spec references unknown target column "
                     f"'{val.column}'"
                 )
+            if val.column == key:
+                continue
             result[key] = val
         elif isinstance(val, LiteralValue):
             result[key] = val
@@ -549,6 +530,8 @@ def _normalize_set_spec(
                 raise ValueError(
                     f"SET spec references unknown target column '{ref}'"
                 )
+            if ref == key:
+                continue
             result[key] = TargetColumnRef(ref)
         else:
             result[key] = LiteralValue(val)

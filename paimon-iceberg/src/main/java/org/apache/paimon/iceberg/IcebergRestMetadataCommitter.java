@@ -50,8 +50,10 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -155,20 +157,33 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 icebergTable = getTable();
 
                 TableMetadata metadata = ((BaseTable) icebergTable).operations().current();
-                boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
-                if (withBase) {
-                    LOG.info("create updates with base metadata.");
-                    updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
-                } else {
+
+                if (metadata.currentSnapshot() == null) {
+                    // Table exists in the REST catalog but has no snapshots yet. This happens
+                    // when a previous createTable() or recreateTable() succeeded but the
+                    // subsequent commit() failed (e.g. network error, REST server timeout).
+                    // Treat it as a new table — populate schemas, partition spec, and the
+                    // current snapshot from scratch WITHOUT dropping and recreating the table.
+                    // Routing through updatesForIncorrectBase would call recreateTable(), which
+                    // on a repeated commit failure would create an infinite drop+create loop.
                     LOG.info(
-                            "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
-                            metadata.currentSnapshot() != null
-                                    ? metadata.currentSnapshot().snapshotId()
-                                    : "No snapshot",
-                            newMetadata.currentSnapshot() != null
-                                    ? newMetadata.currentSnapshot().snapshotId()
-                                    : "No snapshot");
-                    updateBuilder = updatesForIncorrectBase(newMetadata);
+                            "Iceberg table {} exists but has no snapshots, treating as new table.",
+                            icebergTableIdentifier);
+                    updateBuilder = updatesForCorrectBase(metadata, newMetadata, true);
+                } else {
+                    boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
+                    if (withBase) {
+                        LOG.info("create updates with base metadata.");
+                        updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
+                    } else {
+                        LOG.info(
+                                "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
+                                metadata.currentSnapshot().snapshotId(),
+                                newMetadata.currentSnapshot() != null
+                                        ? newMetadata.currentSnapshot().snapshotId()
+                                        : "No snapshot");
+                        updateBuilder = updatesForIncorrectBase(newMetadata);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -243,6 +258,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             removeSnapshots(snapshotIdsToRemove, updateBuilder);
         }
 
+        updateProperties(updateBuilder);
         return updateBuilder;
     }
 
@@ -398,16 +414,27 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             update.addSchema(schema);
         }
         update.setCurrentSchema(currentSchemaId);
+    }
 
-        // update properties
-        Map<String, String> properties = new HashMap<>();
-        properties.put(
-                METADATA_PREVIOUS_VERSIONS_MAX,
-                String.valueOf(icebergOptions.previousVersionsMax()));
-        properties.put(
-                METADATA_DELETE_AFTER_COMMIT_ENABLED,
-                String.valueOf(icebergOptions.deleteAfterCommitEnabled()));
-        update.setProperties(properties);
+    // Update Iceberg REST table properties from current IcebergOptions, but only
+    // if the values differ from what the REST catalog already has. This avoids
+    // emitting a redundant SetProperties update on every commit.
+    private void updateProperties(TableMetadata.Builder update) {
+        String desiredMax = String.valueOf(icebergOptions.previousVersionsMax());
+        String desiredDeleteAfter = String.valueOf(icebergOptions.deleteAfterCommitEnabled());
+
+        Map<String, String> current = icebergTable.properties();
+        boolean changed =
+                !desiredMax.equals(current.get(METADATA_PREVIOUS_VERSIONS_MAX))
+                        || !desiredDeleteAfter.equals(
+                                current.get(METADATA_DELETE_AFTER_COMMIT_ENABLED));
+
+        if (changed) {
+            Map<String, String> properties = new HashMap<>();
+            properties.put(METADATA_PREVIOUS_VERSIONS_MAX, desiredMax);
+            properties.put(METADATA_DELETE_AFTER_COMMIT_ENABLED, desiredDeleteAfter);
+            update.setProperties(properties);
+        }
     }
 
     // -------------------------------------------------------------------------------------
@@ -432,37 +459,149 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         }
 
         // if the iceberg table is existed, check whether the current metadata of the table is the
-        // base of the new table metadata, we use current snapshot id to check
+        // base of the new table metadata, we use current snapshot id to check.
+        // Note: callers must ensure currentMetadata.currentSnapshot() is non-null before calling
+        // this method (guarded in commitMetadataImpl).
         return currentMetadata.currentSnapshot().snapshotId()
                 == newMetadata.currentSnapshot().snapshotId() - 1;
     }
 
     private IcebergMetadata adjustMetadataForRest(IcebergMetadata newIcebergMetadata) {
-        // why need this:
-        // Since we will use an empty schema to create iceberg table in rest catalog and id-0 will
-        // be occupied by the empty schema, there will be 1-unit offset between the schema-id in
-        // metadata stored in rest catalog and the schema-id in paimon.
+        // --- Why we shift schema IDs by +1 ---
+        // When we create an Iceberg table via the REST catalog, we register it with
+        // an empty schema that occupies schema ID 0. Paimon's own schema IDs start
+        // at 0 as well, so we shift every Paimon schema ID by +1 to avoid colliding
+        // with that placeholder.
+        //
+        // --- Why we deduplicate schemas ---
+        // Option-only alterTable calls in Paimon (e.g. changing table properties
+        // like metadata.iceberg.* settings) increment Paimon's internal schema
+        // version without modifying the column definitions. This means Paimon can
+        // accumulate multiple schema versions (e.g. IDs 0, 1, 2, 3) that all have
+        // identical field lists.
+        //
+        // When these schemas are forwarded to Iceberg, addAndSetCurrentSchema()
+        // calls TableMetadata.Builder.addSchema() for each one. Iceberg internally
+        // deduplicates identical schemas via its sameSchema() check — it keeps only
+        // the first occurrence and silently drops duplicates. So if schemas 1, 2, 3
+        // all have the same fields, Iceberg keeps only schema 1.
+        //
+        // By deduplicating here (using IcebergDataField.equals() which compares id,
+        // name, required, type, and doc), we keep only unique schemas and build a
+        // remap table so that currentSchemaId and snapshot schemaId references point
+        // to the surviving schema's ID. The downstream metadata is then internally
+        // consistent with what Iceberg catalog will actually store.
 
-        List<IcebergSchema> schemas =
+        // Step 1 — Shift and convert: produce Iceberg Schema objects so we can call
+        // sameSchema() in the dedup step.
+        List<IcebergSchema> shiftedIcebergSchemas =
                 newIcebergMetadata.schemas().stream()
-                        .map(schema -> new IcebergSchema(schema.schemaId() + 1, schema.fields()))
+                        .map(s -> new IcebergSchema(s.schemaId() + 1, s.fields()))
                         .collect(Collectors.toList());
-        int currentSchemaId = newIcebergMetadata.currentSchemaId() + 1;
+        int shiftedCurrentSchemaId = newIcebergMetadata.currentSchemaId() + 1;
+        // Build a temporary IcebergMetadata with shifted IDs to obtain Iceberg Schema objects.
+        IcebergMetadata shiftedForConversion =
+                new IcebergMetadata(
+                        newIcebergMetadata.formatVersion(),
+                        newIcebergMetadata.tableUuid(),
+                        newIcebergMetadata.location(),
+                        newIcebergMetadata.currentSnapshotId(),
+                        newIcebergMetadata.lastColumnId(),
+                        shiftedIcebergSchemas,
+                        shiftedCurrentSchemaId,
+                        newIcebergMetadata.partitionSpecs(),
+                        newIcebergMetadata.lastPartitionId(),
+                        newIcebergMetadata.snapshots().stream()
+                                .map(
+                                        s ->
+                                                new IcebergSnapshot(
+                                                        s.sequenceNumber(),
+                                                        s.snapshotId(),
+                                                        s.parentSnapshotId(),
+                                                        s.timestampMs(),
+                                                        s.summary(),
+                                                        s.manifestList(),
+                                                        s.schemaId() + 1,
+                                                        s.firstRowId(),
+                                                        s.addedRows()))
+                                .collect(Collectors.toList()),
+                        newIcebergMetadata.currentSnapshotId(),
+                        newIcebergMetadata.refs());
+        TableMetadata shiftedTableMetadata =
+                TableMetadataParser.fromJson(shiftedForConversion.toJson());
+        Map<Integer, IcebergSchema> shiftedById =
+                shiftedIcebergSchemas.stream()
+                        .collect(Collectors.toMap(IcebergSchema::schemaId, s -> s));
+
+        // Step 2 — Deduplicate using sameSchema(): keeps first occurrence (insertion order
+        // preserved by LinkedHashMap), remaps duplicates to the surviving schema ID.
+        // Maps each shifted schema ID → the surviving (deduped) schema ID (before renumbering).
+        LinkedHashMap<Integer, Schema> survivingById = new LinkedHashMap<>();
+        Map<Integer, Integer> schemaIdRemap = new HashMap<>();
+
+        for (Schema schema : shiftedTableMetadata.schemas()) {
+            int shiftedId = schema.schemaId();
+            Integer survivingId =
+                    survivingById.keySet().stream()
+                            .filter(sid -> survivingById.get(sid).sameSchema(schema))
+                            .findFirst()
+                            .orElse(null);
+            if (survivingId != null) {
+                // Duplicate: remap this ID to the first schema with the same structure
+                schemaIdRemap.put(shiftedId, survivingId);
+            } else {
+                // First occurrence: keep it
+                survivingById.put(shiftedId, schema);
+                schemaIdRemap.put(shiftedId, shiftedId);
+            }
+        }
+
+        // Step 2 — Renumber: after dedup, there may be gaps in the schema ID sequence
+        // (e.g. [1, 2, 4] when schema 3 was deduped into 2). Iceberg's addSchema() assigns
+        // IDs sequentially as max(existing) + 1, so it would produce [1, 2, 3] — not [1, 2, 4].
+        // Calling setCurrentSchema(4) would then fail with "unknown schema: 4".
+        // We renumber the surviving schemas to 1, 2, 3, ... and update the remap table so
+        // that currentSchemaId and snapshot schemaId references stay consistent.
+        Map<Integer, Integer> renumberMap = new HashMap<>(); // old deduped ID → new sequential ID
+        int nextId = 1;
+        List<IcebergSchema> schemas = new ArrayList<>();
+        for (int survivingId : survivingById.keySet()) {
+            renumberMap.put(survivingId, nextId);
+            schemas.add(new IcebergSchema(nextId, shiftedById.get(survivingId).fields()));
+            nextId++;
+        }
+        // Apply renumbering on top of the dedup remap
+        schemaIdRemap.replaceAll((k, dedupedId) -> renumberMap.get(dedupedId));
+
+        // 3. Remap currentSchemaId through dedup + renumber
+        int currentSchemaId =
+                schemaIdRemap.getOrDefault(
+                        newIcebergMetadata.currentSchemaId() + 1,
+                        newIcebergMetadata.currentSchemaId() + 1);
+
+        // Remap snapshot schema references so they point to surviving schema IDs
         List<IcebergSnapshot> snapshots =
                 newIcebergMetadata.snapshots().stream()
                         .map(
-                                snapshot ->
-                                        new IcebergSnapshot(
-                                                snapshot.sequenceNumber(),
-                                                snapshot.snapshotId(),
-                                                snapshot.parentSnapshotId(),
-                                                snapshot.timestampMs(),
-                                                snapshot.summary(),
-                                                snapshot.manifestList(),
-                                                snapshot.schemaId() + 1,
-                                                snapshot.firstRowId(),
-                                                snapshot.addedRows()))
+                                snapshot -> {
+                                    int shiftedSnapshotSchemaId = snapshot.schemaId() + 1;
+                                    int remappedSchemaId =
+                                            schemaIdRemap.getOrDefault(
+                                                    shiftedSnapshotSchemaId,
+                                                    shiftedSnapshotSchemaId);
+                                    return new IcebergSnapshot(
+                                            snapshot.sequenceNumber(),
+                                            snapshot.snapshotId(),
+                                            snapshot.parentSnapshotId(),
+                                            snapshot.timestampMs(),
+                                            snapshot.summary(),
+                                            snapshot.manifestList(),
+                                            remappedSchemaId,
+                                            snapshot.firstRowId(),
+                                            snapshot.addedRows());
+                                })
                         .collect(Collectors.toList());
+
         return new IcebergMetadata(
                 newIcebergMetadata.formatVersion(),
                 newIcebergMetadata.tableUuid(),

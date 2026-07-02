@@ -60,8 +60,8 @@ CALL sys.create_global_index(
 
 For Spark SQL, use the `hybrid_search(table_name, vector_routes, full_text_routes, limit[, ranker])`
 table-valued function. The fourth argument is the final number of ranked results to return.
-The optional fifth argument selects the ranker. Supported rankers are `rrf` and
-`weighted_score`; the default is `rrf`.
+The optional fifth argument selects the ranker. Supported rankers are `rrf`, `weighted_score`,
+and `mrr`; the default is `rrf`.
 
 Rankers combine route scores differently:
 
@@ -69,6 +69,7 @@ Rankers combine route scores differently:
 |---|---|---|
 | `rrf` | Combining routes with different score scales | Reciprocal rank fusion uses each route's rank order, so vector and full-text scores do not need to be normalized. |
 | `weighted_score` | Weighting routes by normalized score, not just rank | Min-max normalizes each route's scores to `[0, 1]`, then sums them weighted by route `weight`, so weights (not raw score magnitude) control each route's influence. The exposed `__paimon_search_score` is therefore a per-query relative value in `[0, sum of weights]`, not a raw similarity or BM25 score. |
+| `mrr` | Emphasizing top-ranked hits from each route | Weighted reciprocal-rank fusion sums `weight / rank` for each row returned by a route, where rank starts at 1. |
 
 The second argument is an array of vector route configs created by `named_struct`:
 
@@ -87,10 +88,11 @@ The third argument is an array of full-text route configs created by `named_stru
 | `query` | Yes | N/A | LanceDB-style full-text query JSON for this route. |
 | `limit` | No | Final limit | Top K results to retrieve from this text column before ranking. |
 | `weight` | No | `1.0` | Weight for this route when ranking results. |
-| `options` | No | Empty map | Route-specific full-text search options. |
+| `options` | No | Empty map | Reserved for future full-text search options. Only an empty map is accepted. |
 
 Within each route array, every `named_struct` should use the same fields because
-Spark requires array elements to have the same struct type.
+Spark requires array elements to have the same struct type. Full-text route `options` is
+currently a reserved field; pass `map()` when the field is needed for struct-type consistency.
 
 Use route `limit` values larger than the final limit when each route should contribute enough
 candidates for ranking. For example, with a final limit of `10`, route limits such as `50` or `100`
@@ -147,6 +149,24 @@ FROM hybrid_search(
   'weighted_score');
 ```
 
+Use `mrr` when you want weighted reciprocal-rank fusion:
+
+```sql
+SELECT id, __paimon_search_score
+FROM hybrid_search(
+  'my_table',
+  array(
+    named_struct(
+      'field', 'title_embedding',
+      'query_vector', array(1.0f, 0.0f, 0.0f),
+      'limit', 50,
+      'weight', 2.0f,
+      'options', map('ivf.nprobe', '32'))),
+  array(),
+  10,
+  'mrr');
+```
+
 Spark SQL adds `__paimon_search_score` to expose the ranked score.
 
 </TabItem>
@@ -201,6 +221,22 @@ GlobalIndexResult vectorOnlyResult =
                         java.util.Collections.singletonMap("ivf.nprobe", "32"))
                 .withLimit(10)
                 .withWeightedScoreRanker()
+                .executeLocal();
+```
+
+Use `withRanker("mrr")` for weighted reciprocal-rank fusion:
+
+```java
+GlobalIndexResult mrrResult =
+        table.newHybridSearchBuilder()
+                .addVectorRoute(
+                        "title_embedding",
+                        new float[] {1.0f, 0.0f, 0.0f},
+                        50,
+                        1.0f,
+                        java.util.Collections.singletonMap("ivf.nprobe", "32"))
+                .withLimit(10)
+                .withRanker("mrr")
                 .executeLocal();
 ```
 
@@ -262,6 +298,24 @@ result = (
     )
     .with_limit(10)
     .with_weighted_score_ranker()
+    .execute_local()
+)
+```
+
+Use `with_ranker("mrr")` for weighted reciprocal-rank fusion:
+
+```python
+result = (
+    table.new_hybrid_search_builder()
+    .add_vector_route(
+        "title_embedding",
+        [1.0, 0.0, 0.0],
+        limit=50,
+        weight=1.0,
+        options={"ivf.nprobe": "32"},
+    )
+    .with_limit(10)
+    .with_ranker("mrr")
     .execute_local()
 )
 ```

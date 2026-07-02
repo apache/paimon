@@ -337,7 +337,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         dynamicOptions.forEach(
                 (k, newValue) -> {
                     String oldValue = oldOptions.get(k);
-                    if (!Objects.equals(oldValue, newValue)) {
+                    if (!Objects.equals(oldValue, newValue)
+                            && !SchemaManager.isUnchangedNormalizedKey(
+                                    k, oldValue, newValue, tableSchema)) {
                         SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });
@@ -347,12 +349,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
-        // merge non-null dynamic options into schema.options
+        // merge dynamic options into schema.options
         dynamicOptions.forEach(
                 (k, v) -> {
                     if (v == null) {
                         options.remove(k);
-                    } else {
+                    } else if (!SchemaManager.isUnchangedNormalizedKey(
+                            k, tableSchema.options().get(k), v, tableSchema)) {
                         options.put(k, v);
                     }
                 });

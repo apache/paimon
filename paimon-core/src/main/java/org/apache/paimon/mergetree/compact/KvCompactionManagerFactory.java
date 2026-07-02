@@ -104,5 +104,5 @@ public interface KvCompactionManagerFactory extends Closeable {
             ExecutorService compactExecutor,
             List<DataFileMeta> restoreFiles,
             @Nullable BucketedDvMaintainer dvMaintainer,
-            boolean lookupEnabled);
+            boolean ignorePreviousFiles);
 }

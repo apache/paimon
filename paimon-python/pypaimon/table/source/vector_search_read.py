@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from concurrent.futures import wait
 
+from pypaimon.globalindex.batch_vector_search import BatchVectorSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
@@ -168,12 +169,11 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
-    def _eval(self, row_range_start, row_range_end, vector_index_files,
-              query_vector, include_row_ids):
-        from pypaimon.globalindex.global_index_reader import _completed_future
+    def _open_offset_reader(self, vector_index_files, row_range_start, row_range_end):
+        """Open a vector index reader for the split, wrapped with the row-id offset.
 
-        if not vector_index_files:
-            return _completed_future(None)
+        The caller must close the returned reader once its future completes.
+        """
         index_io_meta_list = []
         for index_file in vector_index_files:
             meta = index_file.global_index_meta
@@ -187,25 +187,33 @@ class AbstractVectorSearchReadImpl:
                 )
             )
 
-        index_type = vector_index_files[0].index_type
-        index_path = self._table.path_factory().global_index_path_factory().index_path()
-        file_io = self._table.file_io
-        options = self._table.table_schema.options
+        reader = _create_vector_reader(
+            vector_index_files[0].index_type,
+            self._table.file_io,
+            self._table.path_factory().global_index_path_factory().index_path(),
+            index_io_meta_list,
+            self._table.table_schema.options,
+        )
+        return reader, OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+
+    def _eval(self, row_range_start, row_range_end, vector_index_files,
+              query_vector, search_limit, include_row_ids):
+        from pypaimon.globalindex.global_index_reader import _completed_future
+
+        if not vector_index_files:
+            return _completed_future(None)
 
         vector_search = VectorSearch(
             vector=query_vector,
-            limit=self._limit,
+            limit=search_limit,
             field_name=self._vector_column.name,
             options=self._options,
         )
         if include_row_ids is not None:
             vector_search = vector_search.with_include_row_ids(include_row_ids)
 
-        reader = _create_vector_reader(
-            index_type, file_io, index_path,
-            index_io_meta_list, options
-        )
-        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        reader, offset_reader = self._open_offset_reader(
+            vector_index_files, row_range_start, row_range_end)
         future = offset_reader.visit_vector_search(vector_search)
         future.add_done_callback(lambda _: reader.close())
         return future
@@ -253,6 +261,64 @@ class AbstractVectorSearchReadImpl:
             scores[row_id] = _compute_score(query_vector, stored_vector, metric)
         return DictBasedScoredIndexResult(scores).top_k(self._limit)
 
+    def _eval_batch(self, row_range_start, row_range_end, vector_index_files,
+                    query_vectors, search_limit, include_row_ids):
+        from pypaimon.globalindex.global_index_reader import _completed_future
+
+        if not vector_index_files:
+            return _completed_future([None] * len(query_vectors))
+
+        batch_vector_search = BatchVectorSearch(
+            vectors=query_vectors,
+            limit=search_limit,
+            field_name=self._vector_column.name,
+            options=self._options,
+        )
+        if include_row_ids is not None:
+            batch_vector_search = batch_vector_search.with_include_row_ids(include_row_ids)
+
+        reader, offset_reader = self._open_offset_reader(
+            vector_index_files, row_range_start, row_range_end)
+        future = offset_reader.visit_batch_vector_search(batch_vector_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
+
+    def _indexed_search_limit(self, index_type):
+        refine_factor = self._configured_refine_factor(index_type)
+        if refine_factor == 0:
+            return self._limit
+        return self._limit * refine_factor
+
+    def _maybe_rerank_indexed_result(self, result, index_type, query_vector):
+        if (self._configured_refine_factor(index_type) == 0 or
+                result.results().is_empty()):
+            return result
+        candidates = result.top_k(self._indexed_search_limit(index_type))
+        return self._read_raw_search(
+            candidates.results().to_range_list(),
+            candidates.results(),
+            query_vector,
+            index_type,
+        )
+
+    def _configured_refine_factor(self, index_type):
+        value = _configured_refine_factor(
+            self._options, self._vector_column.name, index_type)
+        if value is None:
+            value = _configured_refine_factor(
+                _table_options_map(self._table), self._vector_column.name, index_type)
+        if value is None:
+            return 0
+        try:
+            factor = int(value)
+        except ValueError as e:
+            raise ValueError(
+                "Invalid vector refine factor: %s. Must be an integer." % value
+            ) from e
+        if factor <= 0:
+            raise ValueError("Vector refine factor must be positive, got: %s" % value)
+        return factor
+
 
 class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
     """Implementation for VectorSearchRead."""
@@ -285,12 +351,15 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
         return indexed.or_(raw_result).top_k(self._limit)
 
     def _read_indexed(self, splits, query_vector):
+        index_type = _vector_index_type(splits)
+        search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(splits)
         futures = [
             self._eval(
                 split.row_range_start, split.row_range_end,
                 split.vector_index_files,
                 query_vector,
+                search_limit,
                 None if not pre_filters else pre_filters[i]
             )
             for i, split in enumerate(splits)
@@ -307,7 +376,8 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
                     if row_id not in merged_scores:
                         merged_scores[row_id] = score_getter(row_id)
 
-        return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
+        indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
+        return self._maybe_rerank_indexed_result(indexed, index_type, query_vector)
 
 
 class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
@@ -329,40 +399,47 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         if not index_splits and not raw_splits:
             return [GlobalIndexResult.create_empty() for _ in range(n)]
 
+        # One native batch call per INDEX split (all query vectors at once),
+        # passing that split's pre-filter. Each future returns n per-query results.
+        index_type = _vector_index_type(index_splits)
+        search_limit = self._indexed_search_limit(index_type)
         pre_filters = self._pre_filters(index_splits)
-        futures_by_vector = [
-            [
-                self._eval(
-                    split.row_range_start, split.row_range_end,
-                    split.vector_index_files,
-                    vector,
-                    None if not pre_filters else pre_filters[i]
-                )
-                for i, split in enumerate(index_splits)
-            ]
-            for vector in self._query_vectors
+        futures = [
+            self._eval_batch(
+                split.row_range_start, split.row_range_end,
+                split.vector_index_files, self._query_vectors,
+                search_limit,
+                None if not pre_filters else pre_filters[i],
+            )
+            for i, split in enumerate(index_splits)
         ]
 
-        for futures in futures_by_vector:
-            wait(futures)
+        wait(futures)
 
-        results = []
+        # Merge each query vector's indexed results across index splits.
+        merged_scores = [{} for _ in range(n)]
+        for future in futures:
+            split_results = future.result()
+            for i in range(n):
+                split_result = split_results[i]
+                if split_result is None:
+                    continue
+                score_getter = split_result.score_getter()
+                for row_id in split_result.results():
+                    if row_id not in merged_scores[i]:
+                        merged_scores[i][row_id] = score_getter(row_id)
+
+        # Each query: merge indexed results with the raw (brute-force) fallback.
         raw_pre_filter = self._raw_pre_filter(raw_splits)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
-        for futures in futures_by_vector:
-            merged_scores = {}
-            for future in futures:
-                split_result = future.result()
-                if split_result is not None:
-                    score_getter = split_result.score_getter()
-                    for row_id in split_result.results():
-                        if row_id not in merged_scores:
-                            merged_scores[row_id] = score_getter(row_id)
-            indexed = DictBasedScoredIndexResult(merged_scores)
-            vector = self._query_vectors[len(results)]
+        results = []
+        for i in range(n):
+            indexed = DictBasedScoredIndexResult(merged_scores[i]).top_k(search_limit)
+            indexed = self._maybe_rerank_indexed_result(
+                indexed, index_type, self._query_vectors[i])
             raw = self._read_raw_search(
-                raw_ranges, raw_pre_filter, vector, raw_index_type)
+                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type)
             results.append(indexed.or_(raw).top_k(self._limit))
         return results
 
@@ -413,6 +490,13 @@ def _raw_search_index_type(raw_splits):
     return None
 
 
+def _vector_index_type(index_splits):
+    for split in index_splits:
+        if split.vector_index_files:
+            return split.vector_index_files[0].index_type
+    return None
+
+
 def _empty_bitmaps(size):
     return [RoaringBitmap64() for _ in range(size)]
 
@@ -438,6 +522,45 @@ def _to_vector_list(value):
     return list(value)
 
 
+def _configured_refine_factor(options, vector_column_name, index_type):
+    prefixes = []
+    field_prefix = "fields.%s." % vector_column_name
+    _add_refine_prefixes(prefixes, field_prefix, index_type)
+    _add_refine_prefixes(prefixes, "", index_type)
+
+    for prefix in prefixes:
+        for suffix in (
+            "refine_factor",
+            "refine-factor",
+            "rerank_factor",
+            "rerank-factor",
+        ):
+            value = options.get(prefix + suffix)
+            if value is not None:
+                return str(value).strip()
+    return None
+
+
+def _add_refine_prefixes(prefixes, base, index_type):
+    if index_type:
+        prefixes.append(base + index_type + ".")
+        normalized = _normalize_index_type(index_type)
+        if normalized != index_type:
+            prefixes.append(base + normalized + ".")
+        if normalized.startswith("ivf"):
+            prefixes.append(base + "ivf.")
+    prefixes.append(base)
+
+
+def _normalize_index_type(index_type):
+    return str(index_type).lower().replace("-", "_")
+
+
+def _table_options_map(table):
+    table_options = getattr(getattr(table, "options", None), "options", None)
+    return table_options.to_map() if table_options is not None else {}
+
+
 def _raw_search_metric(table, vector_column, options, index_type=None):
     candidates = []
     field_prefix = "fields.%s." % vector_column.name
@@ -456,8 +579,7 @@ def _raw_search_metric(table, vector_column, options, index_type=None):
     ]:
         if key in options:
             candidates.append(options[key])
-    table_options = getattr(getattr(table, "options", None), "options", None)
-    table_map = table_options.to_map() if table_options is not None else {}
+    table_map = _table_options_map(table)
     for key in [
         field_prefix + "distance.metric",
         field_prefix + "metric",

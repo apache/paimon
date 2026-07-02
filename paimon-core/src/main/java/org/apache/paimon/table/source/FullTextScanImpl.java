@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.GlobalIndexCoverage;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -140,8 +141,17 @@ public class FullTextScanImpl implements FullTextScan {
                     columnEntry.getValue().entrySet()) {
                 Range range = rangeEntry.getKey();
                 splits.add(
-                        new FullTextSearchSplit(
+                        new IndexFullTextSearchSplit(
                                 columnName, range.from, range.to, rangeEntry.getValue()));
+            }
+        }
+
+        if (!allIndexFiles.isEmpty()) {
+            List<Range> rawRowRanges =
+                    new GlobalIndexCoverage(table, snapshot, partitionFilter, allIndexFiles)
+                            .unindexedRanges(textColumnIds);
+            if (!rawRowRanges.isEmpty()) {
+                splits.add(new RawFullTextSearchSplit(rawRowRanges));
             }
         }
 

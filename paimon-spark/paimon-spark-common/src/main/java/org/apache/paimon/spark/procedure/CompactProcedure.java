@@ -183,7 +183,6 @@ public class CompactProcedure extends BaseProcedure {
         checkArgument(
                 partitions == null || where == null,
                 "partitions and where cannot be used together.");
-        String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
         return modifySparkTable(
                 tableIdent,
                 sparkTable -> {
@@ -197,12 +196,19 @@ public class CompactProcedure extends BaseProcedure {
                             sortColumns,
                             table.partitionKeys());
                     DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
-                    PartitionPredicate partitionPredicate =
-                            SparkProcedureUtils.convertToPartitionPredicate(
-                                    finalWhere,
-                                    table.schema().logicalPartitionType(),
-                                    spark(),
-                                    relation);
+                    PartitionPredicate partitionPredicate;
+                    if (partitions != null) {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertPartitionsToPartitionPredicate(
+                                        partitions, table, spark());
+                    } else {
+                        partitionPredicate =
+                                SparkProcedureUtils.convertToPartitionPredicate(
+                                        where,
+                                        table.schema().logicalPartitionType(),
+                                        spark(),
+                                        relation);
+                    }
                     HashMap<String, String> dynamicOptions = new HashMap<>();
                     ProcedureUtils.putIfNotEmpty(
                             dynamicOptions, CoreOptions.WRITE_ONLY.key(), "false");

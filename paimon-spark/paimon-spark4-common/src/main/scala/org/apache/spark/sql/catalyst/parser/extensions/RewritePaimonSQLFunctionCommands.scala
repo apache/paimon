@@ -19,8 +19,6 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.catalog.SupportV1Function
-import org.apache.paimon.spark.catalog.functions.SQLFunctionConverter
-import org.apache.paimon.spark.execution.CreatePaimonV1FunctionCommand
 import org.apache.paimon.spark.util.OptionUtils
 
 import org.apache.spark.sql.SparkSession
@@ -29,10 +27,10 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.CatalogManager
 
 /**
- * Parser-stage rule that rewrites a Paimon-catalog `CREATE FUNCTION ... RETURN ...`
- * (`CreateUserDefinedFunction`) into [[CreatePaimonV1FunctionCommand]], before Spark's
- * `ResolveSessionCatalog` throws `MISSING_CATALOG_ABILITY.CREATE_FUNCTION`. Fields are read by name
- * (not positional unapply) since `CreateUserDefinedFunction`'s arity differs across Spark 4.0/4.1.
+ * Parser-stage rule that rewrites a Paimon-catalog CREATE FUNCTION ... RETURN
+ * (CreateUserDefinedFunction) into CreatePaimonSQLFunctionCommand before Spark's
+ * ResolveSessionCatalog rejects it. Only does plan rewriting; analysis, validation, and derivation
+ * happen in CreatePaimonSQLFunctionCommand.run().
  */
 case class RewritePaimonSQLFunctionCommands(spark: SparkSession) extends Rule[LogicalPlan] {
 
@@ -56,7 +54,8 @@ case class RewritePaimonSQLFunctionCommands(spark: SparkSession) extends Rule[Lo
               throw new UnsupportedOperationException(
                 s"Paimon does not support creating SQL table functions yet: $funcIdent")
             }
-            val paimonFunction = SQLFunctionConverter.toPaimonFunction(
+            CreatePaimonSQLFunctionCommand(
+              catalog,
               funcIdent,
               c.inputParamText,
               c.returnTypeText,
@@ -65,13 +64,10 @@ case class RewritePaimonSQLFunctionCommands(spark: SparkSession) extends Rule[Lo
               c.comment,
               c.isDeterministic,
               c.containsSQL,
-              spark.sessionState.sqlParser)
-            CreatePaimonV1FunctionCommand(
-              catalog,
-              funcIdent,
-              paimonFunction,
+              isTableFunc = false,
               c.ignoreIfExists,
-              c.replace)
+              c.replace
+            )
           case _ => c
         }
     }

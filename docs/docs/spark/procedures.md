@@ -80,6 +80,18 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>compact_chain_table</td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: The target chain table identifier. Cannot be empty.</li>
+            <li>partition: Partition specification format (e.g., 'dt="20250810",hour="22"'). Cannot be empty.</li>
+            <li>overwrite: Whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(table => 'default.T', partition => 'dt="20250810",hour="22"')<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>expire_snapshots</td>
       <td>
          To expire snapshots. Argument:
@@ -429,9 +441,11 @@ This section introduce all available spark procedures about paimon.
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
+            <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. The result is printed to the application log; the SQL return value is still `true`.</li>
       </td>
       <td>
-         CALL sys.compact_manifest(`table` => 'default.T')
+         CALL sys.compact_manifest(`table` => 'default.T')<br/>
+         CALL sys.compact_manifest(`table` => 'default.T', dry_run => true)
       </td>
    </tr>
    <tr>
@@ -538,9 +552,12 @@ This section introduce all available spark procedures about paimon.
             <li>index_column: the name of the indexed column. Cannot be empty.</li>
             <li>index_type: type of the index to drop, e.g. 'btree'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions from which to drop the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+            <li>dry_run: when true, return the number of index files that would be dropped without committing any change. Default is false.</li>
       </td>
       <td>
-         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')<br/><br/>
+         -- Preview what would be dropped without deleting<br/>
+         CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', dry_run => true)
       </td>
    </tr>
    <tr>

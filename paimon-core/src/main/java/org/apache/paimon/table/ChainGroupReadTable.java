@@ -128,6 +128,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final ChainPartitionProjector partitionProjector;
         private Predicate dataPredicate;
         private Filter<Integer> bucketFilter;
+        protected boolean preloadTargetSnapshot = true;
 
         public ChainTableBatchScan(
                 TableSchema tableSchema, ChainGroupReadTable chainGroupReadTable) {
@@ -210,6 +211,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             return this;
         }
 
+        public FallbackReadScan skipPreloadTargetSnapshot() {
+            this.preloadTargetSnapshot = false;
+            return this;
+        }
+
         /**
          * Builds a plan for chain tables.
          *
@@ -237,26 +243,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         public Plan plan() {
             List<Split> splits = new ArrayList<>();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
-            for (Split split : mainScan.plan().splits()) {
-                DataSplit dataSplit = (DataSplit) split;
-                HashMap<String, String> fileBucketPathMapping = new HashMap<>();
-                HashMap<String, String> fileBranchMapping = new HashMap<>();
-                for (DataFileMeta file : dataSplit.dataFiles()) {
-                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
-                    fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
-                }
-                splits.add(
-                        new ChainSplit(
-                                dataSplit.partition(),
-                                dataSplit.dataFiles(),
-                                fileBranchMapping,
-                                fileBucketPathMapping));
-            }
-
-            Set<BinaryRow> snapshotPartitions =
-                    new HashSet<>(
-                            newChainPartitionListingScan(true, getMainPartitionPredicate())
-                                    .listPartitions());
+            Set<BinaryRow> snapshotPartitions = preloadTargetSnapshotSplits(splits);
 
             DataTableScan deltaPartitionScan =
                     newChainPartitionListingScan(false, getFallbackPartitionPredicate());
@@ -453,6 +440,34 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
             return scan;
         }
 
+        private Set<BinaryRow> preloadTargetSnapshotSplits(List<Split> splits) {
+            Set<BinaryRow> snapshotPartitions = new HashSet<>();
+            if (!preloadTargetSnapshot) {
+                return snapshotPartitions;
+            }
+
+            for (Split split : mainScan.plan().splits()) {
+                DataSplit dataSplit = (DataSplit) split;
+                HashMap<String, String> fileBucketPathMapping = new HashMap<>();
+                HashMap<String, String> fileBranchMapping = new HashMap<>();
+                for (DataFileMeta file : dataSplit.dataFiles()) {
+                    fileBucketPathMapping.put(file.fileName(), ((DataSplit) split).bucketPath());
+                    fileBranchMapping.put(file.fileName(), options.scanFallbackSnapshotBranch());
+                }
+                splits.add(
+                        new ChainSplit(
+                                dataSplit.partition(),
+                                dataSplit.dataFiles(),
+                                fileBranchMapping,
+                                fileBucketPathMapping));
+            }
+
+            snapshotPartitions.addAll(
+                    newChainPartitionListingScan(true, getMainPartitionPredicate())
+                            .listPartitions());
+            return snapshotPartitions;
+        }
+
         private DataTableScan newFilteredScan(boolean snapshot) {
             DataTableScan scan =
                     snapshot
@@ -520,8 +535,11 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            checkArgument(split instanceof ChainSplit);
-            return fallbackRead.createReader(split);
+            if (split instanceof ChainSplit || split instanceof DataSplit) {
+                return fallbackRead.createReader(split);
+            }
+            throw new IllegalArgumentException(
+                    "Unsupported split type for chain table read: " + split.getClass().getName());
         }
     }
 }

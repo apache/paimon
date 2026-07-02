@@ -32,13 +32,16 @@ import org.apache.spark.sql.types.{DataType => SparkDataType, StructType}
 
 import java.util.{Collections, HashMap => JHashMap, List => JList}
 
+import scala.collection.JavaConverters._
+
 /** Converts between Spark SQLFunction and Paimon Function with a SQLFunctionDefinition body. */
 object SQLFunctionConverter {
 
-  // Spark-specific metadata stored in Paimon Function.options().
-  private val IS_QUERY = "spark.sql-function.is-query"
-  private val DETERMINISTIC = "spark.sql-function.deterministic"
-  private val CONTAINS_SQL = "spark.sql-function.contains-sql"
+  // Paimon-specific option keys (prefixed to avoid collision with Spark properties).
+  private val PAIMON_OPTION_PREFIX = "spark.sql-function."
+  private val IS_QUERY = PAIMON_OPTION_PREFIX + "is-query"
+  private val DETERMINISTIC = PAIMON_OPTION_PREFIX + "deterministic"
+  private val CONTAINS_SQL = PAIMON_OPTION_PREFIX + "contains-sql"
 
   /** Build a Paimon function from a parsed CREATE FUNCTION ... RETURN statement. */
   def toPaimonFunction(
@@ -50,10 +53,11 @@ object SQLFunctionConverter {
       comment: Option[String],
       isDeterministic: Option[Boolean],
       containsSQL: Option[Boolean],
-      parser: ParserInterface): PaimonFunction = {
+      parser: ParserInterface,
+      properties: Map[String, String] = Map.empty): PaimonFunction = {
     require(
       returnTypeText != null && returnTypeText.trim.nonEmpty,
-      s"SQL function $funcIdent must declare an explicit RETURNS type.")
+      s"SQL function $funcIdent must have a return type (explicit or inferred).")
     val identifier = FunctionIdentifierConverter.toPaimonIdentifier(funcIdent)
 
     val inputParams: JList[DataField] = inputParamText.filter(_.trim.nonEmpty) match {
@@ -78,12 +82,13 @@ object SQLFunctionConverter {
     options.put(IS_QUERY, isQuery.toString)
     isDeterministic.foreach(d => options.put(DETERMINISTIC, d.toString))
     containsSQL.foreach(c => options.put(CONTAINS_SQL, c.toString))
+    properties.foreach { case (k, v) => options.put(k, v) }
 
     new FunctionImpl(
       identifier,
       inputParams,
       returnParams,
-      isDeterministic.getOrElse(true),
+      isDeterministic.getOrElse(true), // caller should always pass Some after analysis
       Collections.singletonMap(FUNCTION_DEFINITION_NAME, FunctionDefinition.sql(body)),
       comment.orNull,
       options
@@ -139,7 +144,7 @@ object SQLFunctionConverter {
       deterministic = deterministic,
       containsSQL = Option(options.get(CONTAINS_SQL)).map(_.toBoolean),
       isTableFunc = false,
-      properties = Map.empty
+      properties = options.asScala.filterNot(_._1.startsWith(PAIMON_OPTION_PREFIX)).toMap
     )
 
     SQLFunctionExpression(
