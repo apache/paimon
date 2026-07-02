@@ -34,12 +34,12 @@ a Paimon catalog plus a default database, and exposes a compact table API for
 scalar, text, vector, and blob data.
 
 Creating a multimodal table enables `row-tracking.enabled`,
-`data-evolution.enabled`, and `deletion-vectors.enabled` by default. Global
-index scans use full fallback coverage through `global-index.search-mode` set
-to `FULL`. Data files use Vortex by default through `file.format = vortex`, and
-vector columns are stored in dedicated Vortex files through
-`vector.file.format` set to `vortex`. Install the Vortex extra when writing or
-reading default multimodal tables from Python:
+`data-evolution.enabled`, `deletion-vectors.enabled`, and
+`blob-as-descriptor` by default. Global index scans use full fallback coverage
+through `global-index.search-mode` set to `FULL`. Data files use Vortex by
+default through `file.format = vortex`, and vector columns are stored in
+dedicated Vortex files through `vector.file.format` set to `vortex`. Install
+the Vortex extra when writing or reading default multimodal tables from Python:
 
 ```shell
 pip install pypaimon[vortex]
