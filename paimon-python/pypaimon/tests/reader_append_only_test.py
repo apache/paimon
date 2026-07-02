@@ -1010,6 +1010,103 @@ class AoReaderTest(unittest.TestCase):
 
             print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")
 
+    def test_is_in_with_partitions(self):
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+        from io import BytesIO
+        import fastavro
+
+        num_partitions = 5000
+        in_size = 2000
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('pk', pa.int32()), ('val', pa.string()),
+                       ('pt', pa.string())]),
+            partition_keys=['pt'])
+        self.catalog.create_table(
+            'default.test_is_in_partition_bench', schema, False)
+        table = self.catalog.get_table(
+            'default.test_is_in_partition_bench')
+
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        bench_schema = pa.schema(
+            [('pk', pa.int32()), ('val', pa.string()),
+             ('pt', pa.string())])
+        for i in range(num_partitions):
+            w.write_arrow(pa.Table.from_pydict(
+                {'pk': [i], 'val': [f'v_{i}'], 'pt': [f'pt_{i}']},
+                schema=bench_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        builder = table.new_read_builder().new_predicate_builder()
+        in_values = [f'pt_{i}' for i in range(in_size)]
+        pred = builder.is_in('pt', in_values)
+
+        splits = table.new_read_builder().with_filter(
+            pred).new_scan().plan().splits()
+        self.assertEqual(len(splits), in_size)
+
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+        entry_counts = {'avro_total': 0, 'constructed': 0}
+        original_read = ManifestFileManager.read
+        original_dfm_init = DataFileMeta.__init__
+
+        def counting_read(self_mgr, manifest_file_name,
+                          manifest_entry_filter=None,
+                          drop_stats=True, early_entry_filter=None,
+                          early_record_filter=None, partition_filter=None):
+            # avro_total = every entry in the manifest (no manifest-file pruning
+            # here: single file, is_in spans its partition stats).
+            path = f"{self_mgr.manifest_path}/{manifest_file_name}"
+            with self_mgr.file_io.new_input_stream(path) as s:
+                for _ in fastavro.reader(BytesIO(s.read())):
+                    entry_counts['avro_total'] += 1
+            return original_read(
+                self_mgr, manifest_file_name,
+                manifest_entry_filter, drop_stats,
+                early_entry_filter, early_record_filter, partition_filter)
+
+        def counting_dfm_init(self_dfm, *args, **kwargs):
+            entry_counts['constructed'] += 1
+            original_dfm_init(self_dfm, *args, **kwargs)
+
+        ManifestFileManager.read = counting_read
+        DataFileMeta.__init__ = counting_dfm_init
+        try:
+            table.new_read_builder().with_filter(
+                pred).new_scan().plan()
+        finally:
+            ManifestFileManager.read = original_read
+            DataFileMeta.__init__ = original_dfm_init
+
+        # all entries scanned, but only matching ones build a DataFileMeta
+        # (_FILE + drop_stats copy = 2 each); non-matching skipped pre-construct.
+        self.assertEqual(entry_counts['avro_total'], num_partitions)
+        self.assertEqual(entry_counts['constructed'], in_size * 2)
+
+    def test_partition_filter_test_handles_isnull(self):
+        # The early filter keeps/drops an entry via Predicate.test on its exact
+        # partition value: isNull keeps null, drops non-null; equal is the reverse.
+        from pypaimon.table.row.generic_row import GenericRow
+        from pypaimon.table.row.row_kind import RowKind
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('pk', pa.int32()), ('pt', pa.string())]),
+            partition_keys=['pt'])
+        self.catalog.create_table('default.test_isnull_pt_pred', schema, False)
+        table = self.catalog.get_table('default.test_isnull_pt_pred')
+        fields = table.table_schema.fields  # predicate index is table-schema space
+        row_null = GenericRow([1, None], fields, RowKind.INSERT)
+        row_x = GenericRow([2, 'x'], fields, RowKind.INSERT)
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self.assertTrue(pb.is_null('pt').test(row_null))
+        self.assertFalse(pb.is_null('pt').test(row_x))
+        self.assertFalse(pb.equal('pt', 'x').test(row_null))
+        self.assertTrue(pb.equal('pt', 'x').test(row_x))
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
 
