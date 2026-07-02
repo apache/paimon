@@ -381,6 +381,7 @@ class FileStoreCommit:
         new_index_manifest = None
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
+        index_entries = (index_deletes or []) + (index_adds or [])
 
         # Base entries for conflict detection. On retry, reuse the previous
         # attempt's base + read only the incremental changes (mirrors Java).
@@ -391,7 +392,10 @@ class FileStoreCommit:
                     and retry_result.latest_snapshot is not None
                     and retry_result.base_data_files is not None):
                 incremental = self.commit_scanner.read_incremental_changes(
-                    retry_result.latest_snapshot, latest_snapshot, commit_entries)
+                    retry_result.latest_snapshot,
+                    latest_snapshot,
+                    commit_entries,
+                    index_entries)
             if incremental is not None:
                 base_data_files = list(retry_result.base_data_files)
                 if incremental:
@@ -401,14 +405,14 @@ class FileStoreCommit:
                 # First attempt, or incremental could not be built (missing
                 # snapshot): scan the changed partitions in full.
                 base_data_files = self.commit_scanner.read_all_entries_from_changed_partitions(
-                    latest_snapshot, commit_entries)
+                    latest_snapshot, commit_entries, index_entries)
 
             conflict_exception = self.conflict_detection.check_conflicts(
                 latest_snapshot,
                 base_data_files,
                 commit_entries,
                 commit_kind,
-                (index_deletes or []) + (index_adds or []),
+                index_entries,
             )
 
             if conflict_exception is not None:

@@ -206,7 +206,7 @@ class ConflictDetection:
             return conflict
 
         conflict = self.check_deletion_vector_index_conflicts(
-            latest_snapshot, delta_index_entries)
+            latest_snapshot, delta_index_entries, base_entries, delta_entries)
         if conflict is not None:
             return conflict
 
@@ -223,7 +223,11 @@ class ConflictDetection:
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
 
-    def check_deletion_vector_index_conflicts(self, latest_snapshot, delta_index_entries=None):
+    def check_deletion_vector_index_conflicts(self,
+                                              latest_snapshot,
+                                              delta_index_entries=None,
+                                              base_entries=None,
+                                              delta_entries=None):
         dv_entries = [
             entry for entry in (delta_index_entries or [])
             if entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX
@@ -252,24 +256,43 @@ class ConflictDetection:
                     "is not present in the latest snapshot.".format(
                         delete.index_file.file_name))
 
+        existing_data_files = {
+            (tuple(entry.partition.values), entry.bucket, entry.file.file_name)
+            for entry in list(base_entries or []) + list(delta_entries or [])
+            if entry.kind == 0
+        }
         affected_files = []
         for add in add_entries:
-            for data_file_name in (add.index_file.dv_ranges or {}):
+            for data_file_name in self._deletion_vector_data_file_names(add.index_file):
                 affected_files.append((add.partition, add.bucket, data_file_name))
 
         for partition, bucket, data_file_name in affected_files:
+            data_file_key = (tuple(partition.values), bucket, data_file_name)
+            if data_file_key not in existing_data_files:
+                return RuntimeError(
+                    "Deletion vector index conflict detected: data file {} "
+                    "is not present in the latest snapshot.".format(
+                        data_file_name))
+
             for current in current_entries:
                 if current.index_file.file_name in delete_names:
                     continue
                 if current.partition != partition or current.bucket != bucket:
                     continue
-                if data_file_name in (current.index_file.dv_ranges or {}):
+                if data_file_name in self._deletion_vector_data_file_names(current.index_file):
                     return RuntimeError(
                         "Deletion vector index conflict detected: data file {} "
                         "already has a newer deletion vector index file {}.".format(
                             data_file_name, current.index_file.file_name))
 
         return None
+
+    @staticmethod
+    def _deletion_vector_data_file_names(index_file):
+        return [
+            meta.data_file_name
+            for meta in (index_file.dv_ranges or {}).values()
+        ]
 
     def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
         if commit_kind != "OVERWRITE":

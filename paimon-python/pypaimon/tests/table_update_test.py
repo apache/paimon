@@ -586,6 +586,41 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         result = self._read_all(table).sort_by('id')
         self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
 
+    def test_row_level_delete_conflicts_when_target_file_removed(self):
+        table = self._create_seeded_deletion_vector_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        first_wb = self._make_write_builder(table)
+        first_update = first_wb.new_update()
+        first_cid = self._next_commit_id()
+        first_msgs = self._apply_delete_by_predicate(
+            first_update,
+            pb.equal('id', 2),
+            first_cid,
+        )
+
+        overwrite_wb = table.new_batch_write_builder().overwrite({'city': 'LA'})
+        overwrite_write = overwrite_wb.new_write()
+        overwrite_commit = overwrite_wb.new_commit()
+        overwrite_write.write_arrow(pa.Table.from_pydict({
+            'id': [6],
+            'name': ['Frank'],
+            'age': [28],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+        overwrite_commit.commit(overwrite_write.prepare_commit())
+        overwrite_write.close()
+        overwrite_commit.close()
+
+        first_commit = first_wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(first_commit, first_msgs, first_cid)
+        first_commit.close()
+        self.assertIn('Deletion vector index conflict', str(ctx.exception))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5, 6], result['id'].to_pylist())
+
     def test_delete_by_partition_predicate_drops_partition_without_dv(self):
         table = self._create_seeded_table(partition_keys=['city'])
         pb = table.new_read_builder().new_predicate_builder()
