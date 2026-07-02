@@ -201,18 +201,30 @@ docs.update(
 )
 ```
 
+## Delete
+
+`delete` removes rows matched by a SQL-like predicate. It uses the same
+predicate syntax as `scan().where(...)` and `update(...)`. Multimodal tables
+enable deletion vectors by default; on partitioned tables, a predicate that
+references only partition columns uses the partition drop path.
+
+```python
+docs.delete(where="id = 2")
+```
+
 ## Merge
 
-Use `merge` for idempotent ingestion. The builder delegates to Paimon's local
-`MERGE INTO` implementation.
+Use `merge` for idempotent ingestion and matched-row deletes. The builder
+delegates to Paimon's local `MERGE INTO` implementation.
 
 `execute` takes the source rows for the merge. It accepts the same input formats
 as `add`, including `pyarrow.Table`, `pyarrow.RecordBatch`, a list of
 dictionaries, a dictionary of arrays, or a pandas DataFrame. A list of
 dictionaries is convenient for small batches. `when_matched_update()` updates
 the columns present in the source data and leaves omitted target columns
-unchanged. `when_not_matched_insert()` inserts the columns present in the source
-data and fills omitted target columns with null.
+unchanged. `when_matched_delete()` deletes matched rows.
+`when_not_matched_insert()` inserts the columns present in the source data and
+fills omitted target columns with null.
 
 ```python
 from pypaimon.multimodal import source_col
@@ -232,9 +244,26 @@ docs.merge("id") \
     ])
 ```
 
-Clause predicates use `where`. Refer to source rows with `source.<column>` and
-target rows with `target.<column>`. Install `pypaimon[sql]` when using merge
-clause predicates.
+Use `when_matched_delete()` for matched rows that should be removed:
+
+```python
+docs.merge("id") \
+    .when_matched_delete(where="source.deleted = TRUE") \
+    .when_matched_update() \
+    .execute([
+        {
+            "id": 2,
+            "content": "Updated text",
+            "embedding": [0.7, 0.8, 0.9],
+            "category": "docs",
+            "deleted": True,
+        }
+    ])
+```
+
+Clause predicates use `where` for update and delete clauses. Refer to source
+rows with `source.<column>` and target rows with `target.<column>`. Install
+`pypaimon[sql]` when using merge clause predicates.
 
 When source and target key names differ, pass a mapping from target column to
 source column:

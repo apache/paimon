@@ -54,11 +54,17 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self, table_update, predicate, assignments, cid):
         raise NotImplementedError
 
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        raise NotImplementedError
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        raise NotImplementedError
+
     # ------------------------------------------------------------------
     # Helpers built on the primitives
     # ------------------------------------------------------------------
 
-    def _create_seeded_table(self, partition_keys=None):
+    def _create_seeded_table(self, partition_keys=None, options=None):
         """Create the canonical 5-row / 2-file table used by most tests.
 
         Layout (row_id → row):
@@ -68,7 +74,10 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             3: (4, David,   40, Houston)
             4: (5, Eve,     45, Phoenix)
         """
-        table = self._create_table(partition_keys=partition_keys)
+        table = self._create_table(
+            partition_keys=partition_keys,
+            options=options,
+        )
         self._write_arrow(table, pa.Table.from_pydict({
             'id': [1, 2],
             'name': ['Alice', 'Bob'],
@@ -139,6 +148,35 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self._apply_commit(tc, msgs, cid)
         tc.close()
         return msgs
+
+    def _do_delete_by_predicate(self, table, predicate):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_predicate(tu, predicate, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _do_delete_by_row_id(self, table, row_ids):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_row_id(tu, row_ids, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _create_seeded_deletion_vector_table(self, partition_keys=None):
+        options = dict(self.table_options)
+        options['deletion-vectors.enabled'] = 'true'
+        table = self._create_seeded_table(
+            partition_keys=partition_keys,
+            options=options,
+        )
+        return table
 
     # ==================================================================
     # Shared tests (run under both batch and stream modes)
@@ -480,6 +518,112 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
                 {'city': 'LA'},
             )
         self.assertIn('partition column', str(ctx.exception))
+
+    def test_delete_by_predicate(self):
+        table = self._create_seeded_deletion_vector_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        msgs = self._do_delete_by_predicate(
+            table,
+            pb.greater_or_equal('age', 35),
+        )
+
+        self.assertEqual(1, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2], result['id'].to_pylist())
+        self.assertEqual(['Alice', 'Bob'], result['name'].to_pylist())
+
+    def test_delete_by_predicate_requires_deletion_vectors(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_predicate(table, pb.equal('id', 1))
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
+
+    def test_delete_by_row_id(self):
+        table = self._create_seeded_deletion_vector_table()
+
+        msgs = self._do_delete_by_row_id(table, [0, 2, 4])
+
+        self.assertEqual(1, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([2, 4], result['id'].to_pylist())
+        self.assertEqual(['Bob', 'David'], result['name'].to_pylist())
+
+    def test_delete_by_row_id_requires_deletion_vectors(self):
+        table = self._create_seeded_table()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_row_id(table, [0])
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
+
+    def test_delete_by_partition_predicate_drops_partition_without_dv(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        msgs = self._do_delete_by_predicate(table, pb.equal('city', 'LA'))
+
+        self.assertGreater(sum(len(m.deleted_files) for m in msgs), 0)
+        self.assertEqual(0, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+
+    def test_delete_by_partition_predicate_deletes_matching_indexes(self):
+        table = self._create_seeded_deletion_vector_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        self._do_delete_by_predicate(table, pb.equal('id', 2))
+        msgs = self._do_delete_by_predicate(table, pb.equal('city', 'LA'))
+
+        self.assertGreater(sum(len(m.deleted_files) for m in msgs), 0)
+        self.assertGreater(sum(len(m.index_deletes) for m in msgs), 0)
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+
+    def test_delete_by_partition_predicate_conflicts_when_partition_changes(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        pb = tu.new_predicate_builder()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_predicate(tu, pb.equal('city', 'LA'), cid)
+
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [6],
+            'name': ['Frank'],
+            'age': [28],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        tc = wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(tc, msgs, cid)
+        tc.close()
+        self.assertIn('Overwrite conflict', str(ctx.exception))
+
+    def test_delete_by_mixed_partition_predicate_still_requires_dv(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+        predicate = pb.and_predicates([
+            pb.equal('city', 'LA'),
+            pb.equal('age', 30),
+        ])
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_predicate(table, predicate)
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
 
     def test_update_multiple_columns(self):
         """Update ``age`` + ``city`` together; other columns are untouched."""
@@ -1037,6 +1181,12 @@ class _BatchModeMixin(BatchModeMixin):
             self, table_update, predicate, assignments, cid):
         return table_update.update_by_predicate(predicate, assignments)
 
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        return table_update.delete_by_predicate(predicate)
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        return table_update.delete_by_row_id(row_ids)
+
 
 class _StreamModeMixin(StreamModeMixin):
     def _apply_update(self, table_update, data, cid):
@@ -1049,6 +1199,12 @@ class _StreamModeMixin(StreamModeMixin):
             assignments,
             cid,
         )
+
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        return table_update.delete_by_predicate(predicate, cid)
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        return table_update.delete_by_row_id(row_ids, cid)
 
 
 # ======================================================================

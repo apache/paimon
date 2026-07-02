@@ -144,6 +144,52 @@ commit.commit(messages)
 commit.close()
 ```
 
+## Delete Rows
+
+Use `delete_by_predicate` for SQL-like `DELETE ... WHERE ...` operations.
+For row-level deletes, the target table must enable deletion vectors in
+addition to the [Prerequisites](#prerequisites):
+
+- **`deletion-vectors.enabled`**: `true`
+
+Deletes are written as deletion-vector index updates. If the predicate only
+references partition columns, PyPaimon uses a partition overwrite/drop path
+instead of scanning `_ROW_ID` values; that partition-only fast path does not
+require deletion vectors.
+
+```python
+schema = Schema.from_pyarrow_schema(
+    pa_schema,
+    options={
+        'row-tracking.enabled': 'true',
+        'data-evolution.enabled': 'true',
+        'deletion-vectors.enabled': 'true',
+    },
+)
+catalog.create_table('default.users_delete', schema, False)
+table = catalog.get_table('default.users_delete')
+
+# ... write initial data ...
+
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update()
+table_commit = write_builder.new_commit()
+
+# DELETE FROM users_delete WHERE age >= 35
+predicate = table_update.new_predicate_builder().greater_or_equal('age', 35)
+messages = table_update.delete_by_predicate(predicate)
+table_commit.commit(messages)
+table_commit.close()
+```
+
+If you already have `_ROW_ID` values, use `delete_by_row_id` to write deletion
+vectors directly:
+
+```python
+messages = table_update.delete_by_row_id([0, 2, 4])
+table_commit.commit(messages)
+```
+
 ## Filter by _ROW_ID
 
 Requires the same [Prerequisites](#prerequisites) (row-tracking and data-evolution enabled). On such tables you can filter by `_ROW_ID` to prune files at scan time. Supported: `equal('_ROW_ID', id)`, `is_in('_ROW_ID', [id1, ...])`, `between('_ROW_ID', low, high)`.
@@ -284,21 +330,23 @@ table_commit.close()
 
 ## Merge Into
 
-Use `merge_into` when your source data should update matched target rows and
-optionally insert rows that do not match, similar to SQL `MERGE INTO`.
+Use `merge_into` when your source data should update or delete matched target
+rows and optionally insert rows that do not match, similar to SQL `MERGE INTO`.
 `merge_into` is exposed from `TableUpdate`, so it follows the same
 commit-message lifecycle as other PyPaimon update APIs. The PyPaimon
 implementation runs in a single process and materializes the rows it needs
 locally.
 
-Matched rows are updated by `_ROW_ID` internally. Only the columns touched by
-the matched clauses are rewritten. `merge_into` derives the update columns from
-the `WhenMatched` clauses; `with_update_type` is not needed.
+Matched rows are updated by `_ROW_ID` internally, or deleted through deletion
+vectors for delete clauses. Only the columns touched by update clauses are
+rewritten. `merge_into` derives the update columns from the `WhenMatched`
+clauses; `with_update_type` is not needed.
 
 **Requirements**
 
 - The target table must have `data-evolution.enabled = true` and
   `row-tracking.enabled = true`.
+- Matched delete clauses require `deletion-vectors.enabled = true`.
 - `source` must be a `pyarrow.Table`, `pandas.DataFrame`, or another PyPaimon
   table object.
 - `on` can be a list of same-named key columns, or `{target_col: source_col}`
@@ -354,7 +402,7 @@ table_commit = write_builder.new_commit()
 messages = table_update.merge_into(
     source,
     on=['id'],
-    when_matched=[WhenMatched(update='*')],
+    when_matched=[WhenMatched.update('*')],
     when_not_matched=[WhenNotMatched(insert='*')],
 )
 table_commit.commit(messages)
@@ -377,7 +425,7 @@ messages = table_update.merge_into(
     source,
     on={'id': 'source_id'},
     when_matched=[
-        WhenMatched(update={
+        WhenMatched.update({
             'age': source_col('new_age'),
             'name': target_col('name'),
         }),
@@ -401,8 +449,21 @@ Install the extra before using conditions: `pip install pypaimon[sql]`.
 messages = table_update.merge_into(
     source,
     on=['id'],
-    when_matched=[WhenMatched(update='*', condition='s.age > t.age')],
+    when_matched=[WhenMatched.update('*', condition='s.age > t.age')],
     when_not_matched=[WhenNotMatched(insert='*', condition='s.age > 18')],
+)
+```
+
+Use `WhenMatched.delete()` to delete matched rows:
+
+```python
+messages = table_update.merge_into(
+    source,
+    on=['id'],
+    when_matched=[
+        WhenMatched.delete(condition='s.deleted = TRUE'),
+        WhenMatched.update('*'),
+    ],
 )
 ```
 
@@ -411,6 +472,8 @@ messages = table_update.merge_into(
 - Multiple clauses are evaluated in order; the first matching condition wins.
 - Matched clauses cannot update partition key columns, because cross-partition
   row movement is not implemented.
+- Matched delete clauses use deletion vectors, so the target table must enable
+  `deletion-vectors.enabled`.
 - Blob columns can be updated and inserted by `merge_into`. With `update="*"`
   or `insert="*"`, the source must include the corresponding blob columns.
   If an insert mapping omits a blob column, that column is written as `NULL`.
@@ -535,6 +598,8 @@ The API mapping is:
 | `write.prepare_commit()` | `write.prepare_commit(commit_identifier)` |
 | `update.update_by_arrow_with_row_id(table)` | `update.update_by_arrow_with_row_id(table, commit_identifier)` |
 | `update.update_by_predicate(predicate, assignments)` | `update.update_by_predicate(predicate, assignments, commit_identifier)` |
+| `update.delete_by_predicate(predicate)` | `update.delete_by_predicate(predicate, commit_identifier)` |
+| `update.delete_by_row_id(row_ids)` | `update.delete_by_row_id(row_ids, commit_identifier)` |
 | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |
 | `update.merge_into(source, on=..., when_matched=..., when_not_matched=...)` | `update.merge_into(source, on=..., when_matched=..., when_not_matched=..., commit_identifier=...)` |
 | `commit.commit(messages)` | `commit.commit(messages, commit_identifier)` |

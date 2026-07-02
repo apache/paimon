@@ -122,6 +122,19 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def delete(self, where):
+        query = self.scan().where(where)
+        predicate = query._predicate
+        write_builder = self.raw_table.new_batch_write_builder()
+        table_update = write_builder.new_update()
+        table_commit = write_builder.new_commit()
+        try:
+            messages = table_update.delete_by_predicate(predicate)
+            table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        return self
+
     def merge(self, on):
         return _MergeBuilder(self, on)
 
@@ -251,8 +264,15 @@ class _MergeBuilder:
 
     def when_matched_update(self, values=None, where: Optional[str] = None):
         self._when_matched.append(
-            WhenMatched(
-                update=_ALL_SOURCE_COLUMNS if values is None else values,
+            WhenMatched.update(
+                _ALL_SOURCE_COLUMNS if values is None else values,
+                condition=_normalize_merge_where(where),
+            ))
+        return self
+
+    def when_matched_delete(self, where: Optional[str] = None):
+        self._when_matched.append(
+            WhenMatched.delete(
                 condition=_normalize_merge_where(where),
             ))
         return self
@@ -391,10 +411,14 @@ def _resolve_merge_clauses(
     source_names = set(source_table.column_names)
     return (
         [
-            WhenMatched(
-                update=_resolve_merge_set_spec(
-                    clause.update, target_names, source_names, on_map),
-                condition=clause.condition,
+            (
+                WhenMatched.delete(condition=clause.condition)
+                if clause.delete
+                else WhenMatched.update(
+                    _resolve_merge_set_spec(
+                        clause.update, target_names, source_names, on_map),
+                    condition=clause.condition,
+                )
             )
             for clause in when_matched
         ],

@@ -22,6 +22,7 @@ Conflict detection for commit operations.
 import bisect
 
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.special_fields import SpecialFields
@@ -160,20 +161,43 @@ class ConflictDetection:
         self._row_id_check_from_snapshot = None
         self.commit_scanner = commit_scanner
 
-    def should_be_overwrite_commit(self):
+    def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
+        for entry in append_file_entries or []:
+            if entry.kind == 1:
+                return True
+        for entry in append_index_files or []:
+            if entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX:
+                return True
         return False
 
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
 
     def check_conflicts(self, latest_snapshot, base_entries, delta_entries, commit_kind):
-        all_entries = list(base_entries) + list(delta_entries)
+        try:
+            FileEntry.merge_entries(delta_entries)
+        except Exception as e:
+            return RuntimeError(
+                "File deletion conflicts detected! Give up committing. " + str(e))
 
+        all_entries = list(base_entries) + list(delta_entries)
         try:
             merged_entries = FileEntry.merge_entries(all_entries)
         except Exception as e:
             return RuntimeError(
                 "File deletion conflicts detected! Give up committing. " + str(e))
+
+        for entry in merged_entries:
+            if entry.kind == 1:
+                return RuntimeError(
+                    "File deletion conflicts detected! Give up committing. "
+                    "Trying to delete file {} which is not previously added.".format(
+                        entry.file.file_name))
+
+        conflict = self.check_overwrite_from_snapshot(
+            latest_snapshot, delta_entries, commit_kind)
+        if conflict is not None:
+            return conflict
 
         if commit_kind != "COMPACT":
             next_row_id = latest_snapshot.next_row_id if latest_snapshot else None
@@ -187,6 +211,41 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
+        if commit_kind != "OVERWRITE":
+            return None
+        if self._row_id_check_from_snapshot is None:
+            return None
+        if latest_snapshot is None or latest_snapshot.id <= self._row_id_check_from_snapshot:
+            return None
+        if not any(entry.kind == 1 for entry in delta_entries):
+            return None
+
+        check_snapshot = self.snapshot_manager.get_snapshot_by_id(
+            self._row_id_check_from_snapshot)
+        if check_snapshot is None:
+            return RuntimeError(
+                "Overwrite conflict detected: base snapshot {} cannot be found.".format(
+                    self._row_id_check_from_snapshot))
+
+        for snapshot_id in range(
+                self._row_id_check_from_snapshot + 1,
+                latest_snapshot.id + 1):
+            snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                return RuntimeError(
+                    "Overwrite conflict detected: snapshot {} cannot be found.".format(
+                        snapshot_id))
+            incremental_entries = (
+                self.commit_scanner.read_incremental_raw_entries_from_changed_partitions(
+                    snapshot, delta_entries))
+            if incremental_entries:
+                return RuntimeError(
+                    "Overwrite conflict detected: target partitions were modified "
+                    "after snapshot {}.".format(self._row_id_check_from_snapshot))
+
+        return None
 
     def check_row_id_existence(self, base_entries, delta_entries, next_row_id=None):
         if not self.data_evolution_enabled:
