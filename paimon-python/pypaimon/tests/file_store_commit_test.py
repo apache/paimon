@@ -21,10 +21,32 @@ from unittest.mock import MagicMock, Mock, patch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.file_store_commit import FileStoreCommit
+
+
+def _make_data_file(name="data.parquet", *, file_source=0, first_row_id=None,
+                    row_count=10, min_sequence_number=5, max_sequence_number=10):
+    return DataFileMeta.create(
+        file_name=name,
+        file_size=4096,
+        row_count=row_count,
+        min_key=GenericRow([], []),
+        max_key=GenericRow([], []),
+        key_stats=SimpleStats.empty_stats(),
+        value_stats=SimpleStats.empty_stats(),
+        min_sequence_number=min_sequence_number,
+        max_sequence_number=max_sequence_number,
+        schema_id=0,
+        level=0,
+        extra_files=[],
+        file_source=file_source,
+        first_row_id=first_row_id,
+    )
 
 
 @patch('pypaimon.write.file_store_commit.ManifestFileManager')
@@ -88,7 +110,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -153,7 +175,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta_1, file_meta_2]
+            data_increment=DataIncrement(new_files=[file_meta_1, file_meta_2])
         )
 
         # Test method
@@ -225,13 +247,13 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message_1 = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta_1]
+            data_increment=DataIncrement(new_files=[file_meta_1])
         )
 
         commit_message_2 = CommitMessage(
             partition=('2024-01-15', 'us-west-2'),
             bucket=0,
-            new_files=[file_meta_2]
+            data_increment=DataIncrement(new_files=[file_meta_2])
         )
 
         # Test method
@@ -294,7 +316,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=(),  # Empty partition for unpartitioned table
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -333,7 +355,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1'),
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -375,7 +397,7 @@ class TestFileStoreCommit(unittest.TestCase):
         commit_message = CommitMessage(
             partition=('2024-01-15', 'us-east-1', 'extra-value'),  # 3 values but table has 2 keys
             bucket=0,
-            new_files=[file_meta]
+            data_increment=DataIncrement(new_files=[file_meta])
         )
 
         # Test method
@@ -447,6 +469,159 @@ class TestFileStoreCommit(unittest.TestCase):
             "index-manifest-existing",
             snapshot_commit.commit.call_args[0][0].index_manifest
         )
+
+    def test_compact_commit_inherits_index_manifest(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        # A COMPACT snapshot must inherit the previous index manifest just like
+        # APPEND does; the index manifest is cumulative table state, not a
+        # per-kind delta. Without this, forwarding index_deletes through the
+        # compact side of commit() would combine against an empty base and drop
+        # the whole index.
+        file_store_commit = self._create_file_store_commit()
+
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options.row_tracking_enabled.return_value = False
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.return_value = True
+        file_store_commit.snapshot_commit = snapshot_commit
+
+        file_store_commit._write_manifest_files = Mock(return_value=[Mock()])
+        file_store_commit._generate_partition_statistics = Mock(return_value=[])
+        file_store_commit.manifest_list_manager.read_all.return_value = []
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 3
+        latest_snapshot.total_record_count = 10
+        latest_snapshot.index_manifest = "index-manifest-existing"
+
+        commit_entry = Mock()
+        commit_entry.kind = 0
+        commit_entry.file = Mock()
+        commit_entry.file.row_count = 2
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="COMPACT",
+            commit_entries=[commit_entry],
+            changelog_entries=[],
+            commit_identifier=12,
+            latest_snapshot=latest_snapshot
+        )
+
+        self.assertTrue(result.is_success())
+        self.assertEqual(
+            "index-manifest-existing",
+            snapshot_commit.commit.call_args[0][0].index_manifest
+        )
+
+    def _setup_row_tracking_commit(self):
+        """Shared scaffold for the row-tracking _try_commit_once tests."""
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.identifier = 'default.test_table'
+        self.mock_table.table_schema = Mock()
+        self.mock_table.table_schema.id = 7
+        self.mock_table.options.row_tracking_enabled.return_value = True
+
+        snapshot_commit = MagicMock()
+        snapshot_commit.__enter__.return_value = snapshot_commit
+        snapshot_commit.__exit__.return_value = False
+        snapshot_commit.commit.return_value = True
+        file_store_commit.snapshot_commit = snapshot_commit
+
+        file_store_commit._write_manifest_files = Mock(return_value=[Mock()])
+        file_store_commit._generate_partition_statistics = Mock(return_value=[])
+        file_store_commit.manifest_list_manager.read_all.return_value = []
+
+        latest_snapshot = Mock()
+        latest_snapshot.id = 3
+        latest_snapshot.total_record_count = 10
+        latest_snapshot.index_manifest = None
+        latest_snapshot.next_row_id = 50
+        return file_store_commit, snapshot_commit, latest_snapshot
+
+    def test_compact_commit_preserves_row_ids(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        # A COMPACT commit must not run row-tracking assignment: compact_after
+        # files keep their (possibly None) first_row_id and the snapshot keeps the
+        # previous next_row_id, otherwise row-id based updates/conflict checks can
+        # no longer locate the compacted rows. The compact_after file here has
+        # first_row_id=None and file_source=APPEND so the *old* (ungated) path
+        # would assign it a fresh id and advance next_row_id.
+        file_store_commit, snapshot_commit, latest_snapshot = self._setup_row_tracking_commit()
+        entry = ManifestEntry(
+            kind=0, partition=GenericRow([], []), bucket=0, total_buckets=1,
+            file=_make_data_file(first_row_id=None, row_count=10))
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="COMPACT",
+            commit_entries=[entry],
+            changelog_entries=[],
+            commit_identifier=20,
+            latest_snapshot=latest_snapshot,
+        )
+
+        self.assertTrue(result.is_success())
+        # next_row_id carried over from latest, not advanced by the 10-row file.
+        self.assertEqual(50, snapshot_commit.commit.call_args[0][0].next_row_id)
+        # The entry that reached the manifest still has no first_row_id assigned.
+        written = file_store_commit._write_manifest_files.call_args[0][0]
+        self.assertIsNone(written[0].file.first_row_id)
+
+    def test_append_commit_still_assigns_row_ids(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        # Control for test_compact_commit_preserves_row_ids: the COMPACT gate must
+        # not disable row-tracking for the normal write path.
+        file_store_commit, snapshot_commit, latest_snapshot = self._setup_row_tracking_commit()
+        entry = ManifestEntry(
+            kind=0, partition=GenericRow([], []), bucket=0, total_buckets=1,
+            file=_make_data_file(first_row_id=None, row_count=10, min_sequence_number=0))
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="APPEND",
+            commit_entries=[entry],
+            changelog_entries=[],
+            commit_identifier=21,
+            latest_snapshot=latest_snapshot,
+        )
+
+        self.assertTrue(result.is_success())
+        # APPEND assigns the fresh row id from next_row_id and advances it.
+        self.assertEqual(60, snapshot_commit.commit.call_args[0][0].next_row_id)
+        written = file_store_commit._write_manifest_files.call_args[0][0]
+        self.assertEqual(50, written[0].file.first_row_id)
+
+    def test_collect_changelog_entries_uses_message_total_buckets(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        # Changelog manifest entries must honor the plan's total_buckets (captured
+        # at write time) just like the delta entries, so a plan that survived a
+        # bucket rescale does not publish inconsistent bucket metadata in one
+        # commit.
+        file_store_commit = self._create_file_store_commit()
+        self.mock_table.total_buckets = 4
+        msg = CommitMessage(
+            partition=(),
+            bucket=0,
+            total_buckets=8,
+            data_increment=DataIncrement(
+                new_files=[_make_data_file("d.parquet")],
+                changelog_files=[_make_data_file("c.parquet")],
+            ),
+        )
+
+        changelog_entries = file_store_commit._collect_changelog_entries([msg])
+        delta_entries = file_store_commit._build_data_entries([msg])
+
+        self.assertEqual([8], [e.total_buckets for e in changelog_entries])
+        # Delta and changelog entries of the same commit agree on the bucket count.
+        self.assertEqual({8}, {e.total_buckets for e in delta_entries}
+                         | {e.total_buckets for e in changelog_entries})
 
     def test_null_partition_value(
             self, mock_manifest_list_manager, mock_manifest_file_manager):

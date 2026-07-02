@@ -124,32 +124,61 @@ class FileStoreCommit:
         self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
-        """Commit the given commit messages in normal append mode."""
+        """Commit the given messages, splitting write and compaction results.
+
+        Each CommitMessage may carry a data_increment (normal write), a
+        compact_increment (compaction result), or both. Data increments feed an
+        APPEND (or OVERWRITE) snapshot; compact increments feed a separate
+        COMPACT snapshot, so a single commit() call produces up to two
+        snapshots, mirroring Java's FileStoreCommitImpl. Compaction never
+        assigns row-ids or runs conflict detection.
+        """
         if not commit_messages:
             return
 
-        # Extract the minimum check_from_snapshot from commit messages
-        valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
-                           if msg.check_from_snapshot != -1]
-        if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+        self._reject_unwired_slots(commit_messages)
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
             self.table.identifier,
             len(commit_messages),
         )
-        commit_entries = self._collect_manifest_entries(commit_messages)
+
+        # index_adds / index_deletes ride with the snapshot their payload
+        # belongs to: messages carrying a compact increment go to the COMPACT
+        # snapshot, everything else (writes and pure index updates) goes to the
+        # APPEND snapshot. Attributing them to exactly one side keeps the same
+        # index manifest change from being committed twice.
+        data_index_adds, data_index_deletes = [], []
+        compact_index_adds, compact_index_deletes = [], []
+        for msg in commit_messages:
+            if msg.compact_increment.is_empty():
+                data_index_adds.extend(msg.index_adds)
+                data_index_deletes.extend(msg.index_deletes)
+            else:
+                compact_index_adds.extend(msg.index_adds)
+                compact_index_deletes.extend(msg.index_deletes)
+
+        # APPEND/OVERWRITE snapshot first, COMPACT second, mirroring Java's
+        # FileStoreCommitImpl.commit ordering.
+        self._commit_data(commit_messages, commit_identifier,
+                          data_index_adds, data_index_deletes)
+        self._commit_compact(commit_messages, commit_identifier,
+                             compact_index_adds, compact_index_deletes)
+
+    def _commit_data(self, commit_messages: List[CommitMessage], commit_identifier: int,
+                     index_adds: List, index_deletes: List) -> None:
+        # Extract the minimum check_from_snapshot from commit messages
+        valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
+                           if msg.check_from_snapshot != -1]
+        if valid_snapshots:
+            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+
+        commit_entries = self._build_data_entries(commit_messages)
         changelog_entries = self._collect_changelog_entries(commit_messages)
 
         logger.info("Finished collecting changes, including: %d entries, %d changelog entries",
                     len(commit_entries), len(changelog_entries))
-
-        index_deletes = []
-        index_adds = []
-        for msg in commit_messages:
-            index_deletes.extend(msg.index_deletes)
-            index_adds.extend(msg.index_adds)
 
         if not index_deletes:
             from pypaimon.write.global_index_update_checker import (
@@ -186,6 +215,12 @@ class FileStoreCommit:
         if self.conflict_detection.has_global_index_additions(index_adds):
             detect_conflicts = True
 
+        # Nothing on the data side to commit (e.g. a compaction-only batch):
+        # skip so we do not emit an empty APPEND snapshot. Mirrors the
+        # short-circuit inside _try_commit.
+        if not commit_entries and not index_deletes and not index_adds:
+            return
+
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
                          commit_entries_plan=lambda snapshot: commit_entries,
@@ -194,6 +229,91 @@ class FileStoreCommit:
                          allow_rollback=allow_rollback,
                          index_deletes=index_deletes,
                          index_adds=index_adds)
+
+    def _commit_compact(self, commit_messages: List[CommitMessage], commit_identifier: int,
+                        index_adds: List, index_deletes: List) -> None:
+        # compact_before → DELETE entries, compact_after → ADD entries; snapshot
+        # kind = COMPACT. Skips row-id assignment and conflict detection (a
+        # compaction never produces new rows). Only ships the index changes
+        # attributed to this side; the new_files-driven global-index derivation
+        # lives on the data side. A message whose only content is index changes
+        # still needs to commit, so the empty-entries short-circuit accounts for
+        # them.
+        commit_entries = self._build_compact_entries(commit_messages)
+
+        if not commit_entries and not index_deletes and not index_adds:
+            return
+
+        logger.info("Finished collecting compact changes: %d entries", len(commit_entries))
+
+        self._try_commit(
+            commit_kind="COMPACT",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: commit_entries,
+            detect_conflicts=False,
+            allow_rollback=False,
+            index_deletes=index_deletes,
+            index_adds=index_adds,
+        )
+
+    def _reject_unwired_slots(self, commit_messages: List[CommitMessage]) -> None:
+        # Reject increment slots the commit path does not yet wire up, loudly, so
+        # a future writer that starts filling them cannot silently lose data at
+        # commit time. data_increment.new_files / deleted_files / changelog_files
+        # are all wired (ADD / DELETE delta entries and the changelog manifest);
+        # the index-file slots are not yet handled.
+        for msg in commit_messages:
+            di = msg.data_increment
+            if di.new_index_files or di.deleted_index_files:
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle DataIncrement.new_index_files / "
+                    "deleted_index_files; these slots "
+                    "will be wired in by the feature that first needs each one."
+                )
+            ci = msg.compact_increment
+            if (ci.changelog_files or ci.new_index_files or ci.deleted_index_files):
+                raise NotImplementedError(
+                    "FileStoreCommit does not yet handle CompactIncrement.changelog_files / "
+                    "new_index_files / deleted_index_files; these slots will be wired in by "
+                    "the feature that first needs each one."
+                )
+
+    def _entry(self, msg: CommitMessage, file: DataFileMeta, kind: int) -> ManifestEntry:
+        partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+        # Prefer the message's total_buckets (captured when the plan was built)
+        # over the current table value, so a plan that survived a bucket rescale
+        # is not silently rewritten with the new count.
+        total_buckets = msg.total_buckets if msg.total_buckets is not None \
+            else self.table.total_buckets
+        return ManifestEntry(
+            kind=kind,
+            partition=partition,
+            bucket=msg.bucket,
+            total_buckets=total_buckets,
+            file=file,
+        )
+
+    def _build_data_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        # Data-side delta entries: new_files → ADD, deleted_files → DELETE.
+        # data_increment.changelog_files is written to the changelog manifest by
+        # _collect_changelog_entries, not here, so it produces no delta entry.
+        entries: List[ManifestEntry] = []
+        for msg in commit_messages:
+            for file in msg.new_files:
+                entries.append(self._entry(msg, file, kind=0))
+            for file in msg.deleted_files:
+                entries.append(self._entry(msg, file, kind=1))
+        return entries
+
+    def _build_compact_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        # Compact-side delta entries: compact_before → DELETE, compact_after → ADD.
+        entries: List[ManifestEntry] = []
+        for msg in commit_messages:
+            for file in msg.compact_before:
+                entries.append(self._entry(msg, file, kind=1))
+            for file in msg.compact_after:
+                entries.append(self._entry(msg, file, kind=0))
+        return entries
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -429,9 +549,20 @@ class FileStoreCommit:
         row_tracking_enabled = self.table.options.row_tracking_enabled()
         next_row_id = None
         if row_tracking_enabled:
-            commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
-            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
-            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
+            if commit_kind == "COMPACT":
+                # Compaction preserves the logical row ids of its input files: no
+                # snapshot-id sequence stamping, no fresh row-id assignment, and the
+                # snapshot keeps the previous next_row_id. Matches Java, where
+                # assignRowTracking leaves COMPACT files untouched and nextRowId is
+                # not advanced for a pure-compaction commit; otherwise a compact_after
+                # file would be re-stamped like a new append and row-id based
+                # updates/conflict checks could no longer locate the compacted rows.
+                next_row_id = self._get_next_row_id_start(latest_snapshot)
+            else:
+                commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+                first_row_id_start = self._get_next_row_id_start(latest_snapshot)
+                commit_entries, next_row_id = self._assign_row_tracking_meta(
+                    first_row_id_start, commit_entries)
 
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
@@ -477,6 +608,10 @@ class FileStoreCommit:
                     delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
+            # The index manifest is cumulative table state, not a per-kind delta,
+            # so every snapshot kind (APPEND / OVERWRITE / COMPACT) inherits the
+            # previous one; otherwise forwarding index changes through compaction
+            # would combine against an empty base and drop the whole index.
             index_manifest = latest_snapshot.index_manifest if latest_snapshot else None
             if index_deletes or index_adds:
                 from pypaimon.manifest.index_manifest_file import IndexManifestFile
@@ -646,17 +781,14 @@ class FileStoreCommit:
         time.sleep(total_wait_ms / 1000.0)
 
     def _collect_changelog_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
+        # changelog files become ADD entries in the changelog manifest. Reuse
+        # _entry() so they carry the same message-preferred total_buckets as the
+        # data entries in the same commit; otherwise a plan that survived a bucket
+        # rescale would publish data and changelog entries with mismatched counts.
         changelog_entries = []
         for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.changelog_files:
-                changelog_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+                changelog_entries.append(self._entry(msg, file, kind=0))
         return changelog_entries
 
     def _collect_manifest_entries(self, commit_messages: List[CommitMessage]) -> List[ManifestEntry]:
@@ -721,7 +853,13 @@ class FileStoreCommit:
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
         for message in commit_messages:
-            for file in list(message.new_files) + list(message.changelog_files):
+            # Delete every file this message produced: data-side new_files /
+            # changelog, and compaction outputs (compact_after + compact
+            # changelog). compact_before are pre-existing inputs consumed by the
+            # compaction and must be left untouched.
+            produced = (list(message.new_files) + list(message.changelog_files)
+                        + list(message.compact_after) + list(message.compact_changelog_files))
+            for file in produced:
                 try:
                     path_to_delete = file.external_path if file.external_path else file.file_path
                     if path_to_delete:

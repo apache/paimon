@@ -41,6 +41,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -408,7 +409,6 @@ class TableUpdate:
             messages[key] = CommitMessage(
                 partition=partition,
                 bucket=bucket,
-                new_files=[],
                 check_from_snapshot=snapshot_id,
             )
         return messages[key]
@@ -692,7 +692,13 @@ class ShardTableUpdator:
     def prepare_commit(self) -> List[CommitMessage]:
         commit_messages = []
         for (partition, files) in self.dict.items():
-            commit_messages.append(CommitMessage(partition, 0, files, self.snapshot_id))
+            commit_messages.append(CommitMessage(
+                partition=partition,
+                bucket=0,
+                total_buckets=self.table.total_buckets,
+                data_increment=DataIncrement(new_files=files),
+                check_from_snapshot=self.snapshot_id,
+            ))
         return commit_messages
 
     def update_by_arrow_batch(self, data: pa.RecordBatch):

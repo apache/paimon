@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.row_utils import row_values_to_arrow_table
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
@@ -261,8 +262,11 @@ class FileStoreWrite:
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
-                    new_files=committed_files,
-                    changelog_files=changelog_files,
+                    total_buckets=self.table.total_buckets,
+                    data_increment=DataIncrement(
+                        new_files=committed_files,
+                        changelog_files=changelog_files,
+                    ),
                 )
                 commit_messages.append(commit_message)
         return commit_messages

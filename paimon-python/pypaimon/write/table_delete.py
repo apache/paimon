@@ -225,7 +225,6 @@ class TableDeleteByRowId:
         return CommitMessage(
             partition=partition,
             bucket=bucket,
-            new_files=[],
             check_from_snapshot=snapshot_id,
             index_adds=[new_entry],
             index_deletes=delete_entries,

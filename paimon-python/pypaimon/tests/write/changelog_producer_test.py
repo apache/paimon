@@ -30,6 +30,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.schema.data_types import DataField, AtomicType
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 
 
 class ChangelogProducerTest(unittest.TestCase):
@@ -70,10 +71,12 @@ class ChangelogProducerTest(unittest.TestCase):
         }, schema=self.pk_schema)
 
     def test_commit_message_with_changelog(self):
-        msg = CommitMessage(partition=('p1',), bucket=0, new_files=[], changelog_files=[])
+        msg = CommitMessage(partition=('p1',), bucket=0,
+                            data_increment=DataIncrement(new_files=[], changelog_files=[]))
         self.assertTrue(msg.is_empty())
 
-        msg2 = CommitMessage(partition=('p1',), bucket=0, new_files=['fake'])
+        msg2 = CommitMessage(partition=('p1',), bucket=0,
+                             data_increment=DataIncrement(new_files=['fake']))
         self.assertFalse(msg2.is_empty())
         self.assertEqual(msg2.changelog_files, [])
 
