@@ -65,9 +65,12 @@ class RayBucketJoinTest(unittest.TestCase):
         w.close()
         return name
 
-    def _create_bucketed(self, name, schema, key, num_buckets):
+    def _create_bucketed(self, name, schema, key, num_buckets, partition_keys=None):
         opts = {"bucket": str(num_buckets), "bucket-key": key}
-        self.catalog.create_table(name, Schema.from_pyarrow_schema(schema, options=opts), False)
+        self.catalog.create_table(
+            name,
+            Schema.from_pyarrow_schema(schema, partition_keys=partition_keys, options=opts),
+            False)
         return name
 
     def test_bucket_join_matches_global_join(self):
@@ -144,6 +147,15 @@ class RayBucketJoinTest(unittest.TestCase):
         self._create_bucketed("default.k2", sch, "url", 8)
         with self.assertRaises(ValueError):  # on=k but bucket-key=url
             bucket_join("default.k1", "default.k2", self.catalog_options, on="k")
+
+    def test_rejects_partitioned_table(self):
+        # Bucket ids are per-partition, so bucket-only grouping would join across
+        # partitions; partitioned tables are rejected until (partition, bucket) grouping.
+        sch = pa.schema([("url", pa.string()), ("dt", pa.string())])
+        self._create_bucketed("default.part_p", sch, "url", 8, partition_keys=["dt"])
+        self._create_bucketed("default.part_np", sch, "url", 8)
+        with self.assertRaises(ValueError):
+            bucket_join("default.part_p", "default.part_np", self.catalog_options, on="url")
 
     def test_rejects_non_inner_join(self):
         sch = pa.schema([("url", pa.string())])

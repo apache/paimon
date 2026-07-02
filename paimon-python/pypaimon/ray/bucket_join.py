@@ -92,9 +92,17 @@ def bucket_join(
 
     on_cols = _norm(on)
     cat = CatalogFactory.create(catalog_options)
-    lcount, lkey = _bucketing(cat.get_table(left))
-    rcount, rkey = _bucketing(cat.get_table(right))
+    ltable, rtable = cat.get_table(left), cat.get_table(right)
+    lcount, lkey = _bucketing(ltable)
+    rcount, rkey = _bucketing(rtable)
 
+    if ltable.partition_keys or rtable.partition_keys:
+        # Bucket numbers are per-partition, so the same bucket id lives in every
+        # partition -- grouping splits by bucket alone would join across partitions.
+        # Supporting this needs grouping by (partition, bucket); not done yet.
+        raise ValueError(
+            "bucket_join does not support partitioned tables yet; got partition keys "
+            f"{left}={ltable.partition_keys}, {right}={rtable.partition_keys}.")
     if not lcount or lcount <= 0 or not rcount or rcount <= 0:
         raise ValueError(
             "bucket_join requires both tables to be fixed-bucket (bucket > 0); "
