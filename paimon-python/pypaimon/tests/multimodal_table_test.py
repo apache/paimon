@@ -306,6 +306,33 @@ class MultimodalTableTest(unittest.TestCase):
             rows,
         )
 
+    def test_delete_by_filter(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.delete(where="id = 2")
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            rows,
+        )
+
     def test_merge_updates_matches_and_inserts_new_rows(self):
         users = self.conn.create_table(
             "users",
@@ -335,6 +362,37 @@ class MultimodalTableTest(unittest.TestCase):
                 {"id": 1, "name": "Alice", "age": 30},
                 {"id": 2, "name": "Bob_v2", "age": 26},
                 {"id": 3, "name": "Carol", "age": 40},
+            ],
+            rows,
+        )
+
+    def test_merge_deletes_matched_rows(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.merge("id") \
+            .when_matched_delete() \
+            .execute([
+                {"id": 2},
+                {"id": 3},
+            ])
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 1, "name": "Alice", "age": 30},
             ],
             rows,
         )
@@ -464,6 +522,62 @@ class MultimodalTableTest(unittest.TestCase):
             calls["matched"][0].condition,
         )
         self.assertEqual("s.age > 0", calls["not_matched"][0].condition)
+        self.assertEqual([], calls["messages"])
+
+    def test_merge_delete_where_uses_source_and_target_aliases(self):
+        users = self.conn.create_table(
+            "users",
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        calls = {}
+
+        class FakeUpdate:
+            def merge_into(
+                    self,
+                    source,
+                    on,
+                    when_matched=None,
+                    when_not_matched=None):
+                calls["matched"] = list(when_matched or [])
+                return []
+
+        class FakeCommit:
+            def commit(self, messages):
+                calls["messages"] = messages
+
+            def close(self):
+                pass
+
+        class FakeWriteBuilder:
+            def new_update(self):
+                return FakeUpdate()
+
+            def new_commit(self):
+                return FakeCommit()
+
+        users.raw_table.new_batch_write_builder = lambda: FakeWriteBuilder()
+
+        (
+            users.merge("id")
+            .when_matched_delete(
+                where="source.age < target.age and source.name != 'target.name'",
+            )
+            .execute([
+                {"id": 1, "name": "Alice", "age": 29},
+            ])
+        )
+
+        self.assertTrue(calls["matched"][0].delete)
+        self.assertEqual(
+            "s.age < t.age and s.name != 'target.name'",
+            calls["matched"][0].condition,
+        )
         self.assertEqual([], calls["messages"])
 
     def test_merge_validates_on_columns(self):

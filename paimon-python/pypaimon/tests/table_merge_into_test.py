@@ -17,6 +17,7 @@
 ################################################################################
 
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
@@ -68,6 +69,51 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
         commit.close()
         return msgs
 
+    def test_when_matched_action_constructors(self):
+        update = WhenMatched.update(
+            {"age": source_col("age")},
+            condition="s.age > t.age",
+        )
+        delete = WhenMatched.delete(condition="s.deleted = TRUE")
+
+        self.assertEqual({"age": source_col("age")}, update.update)
+        self.assertEqual("s.age > t.age", update.condition)
+        self.assertFalse(update.delete)
+        self.assertIsNone(delete.update)
+        self.assertEqual("s.deleted = TRUE", delete.condition)
+        self.assertTrue(delete.delete)
+
+    def test_ray_merge_rejects_mixed_update_delete_duplicate_row_ids(self):
+        import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        with self.assertRaisesRegex(ValueError, "multiple source rows"):
+            ray_merge._validate_disjoint_action_row_ids([7], [7])
+
+    def test_ray_execute_validates_mixed_update_delete_duplicate_row_ids(self):
+        import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        with patch.object(
+                ray_merge,
+                "distributed_update_apply",
+                return_value=([], 1, [7])
+        ), patch.object(
+                ray_merge,
+                "distributed_delete_apply",
+                return_value=([], 1, [7])
+        ):
+            with self.assertRaisesRegex(ValueError, "multiple source rows"):
+                ray_merge._execute_and_commit(
+                    table=object(),
+                    update_ds=object(),
+                    delete_ds=object(),
+                    insert_ds=None,
+                    update_cols_union=["age"],
+                    base_snapshot=None,
+                    num_partitions=1,
+                    ray_remote_args=None,
+                    concurrency=None,
+                )
+
     def test_table_merge_into_updates_and_inserts(self):
         target = self._create_table()
         self._write_arrow(target, pa.Table.from_pydict({
@@ -88,7 +134,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target,
             source,
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             when_not_matched=[WhenNotMatched(insert="*")],
         )
 
@@ -150,7 +196,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             source,
             on={"id": "source_id"},
             when_matched=[
-                WhenMatched(update={
+                WhenMatched.update({
                     "name": source_col("new_name"),
                     "age": source_col("new_age"),
                     "city": source_col("new_city"),
@@ -197,7 +243,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                     target,
                     source,
                     on=["id"],
-                    when_matched=[WhenMatched(update={"name": assignment})],
+                    when_matched=[WhenMatched.update({"name": assignment})],
                 )
 
                 self.assertEqual([], msgs)
@@ -231,7 +277,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target,
             source,
             on=["id"],
-            when_matched=[WhenMatched(update={"name": source_col("name")})],
+            when_matched=[WhenMatched.update({"name": source_col("name")})],
         )
 
         self.assertTrue(msgs)
@@ -257,7 +303,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target.new_batch_write_builder().new_update().merge_into(
                 source,
                 on=["id"],
-                when_matched=[WhenMatched(update={"name.first": lit("A")})],
+                when_matched=[WhenMatched.update({"name.first": lit("A")})],
             )
 
     def test_table_merge_into_rejects_partition_column_update(self):
@@ -279,7 +325,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target.new_batch_write_builder().new_update().merge_into(
                 source,
                 on=["id"],
-                when_matched=[WhenMatched(update={"city": source_col("city")})],
+                when_matched=[WhenMatched.update({"city": source_col("city")})],
             )
 
     def test_table_merge_into_preserves_row_ids_for_matched_rows(self):
@@ -301,7 +347,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                 "city": ["LA2", "SF"],
             }, schema=self.pa_schema),
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             when_not_matched=[WhenNotMatched(insert="*")],
         )
 
@@ -309,6 +355,40 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
         self.assertEqual(row_ids_before[1], row_ids_after[1])
         self.assertEqual(row_ids_before[2], row_ids_after[2])
         self.assertGreater(row_ids_after[3], max(row_ids_before.values()))
+
+    def test_table_merge_into_delete_matched_rows(self):
+        options = dict(self.table_options)
+        options["deletion-vectors.enabled"] = "true"
+        target = self._create_table(options=options)
+        self._write_arrow(target, pa.Table.from_pydict({
+            "id": pa.array([1, 2, 3], type=pa.int32()),
+            "name": ["Alice", "Bob", "Charlie"],
+            "age": pa.array([25, 30, 35], type=pa.int32()),
+            "city": ["NYC", "LA", "Chicago"],
+        }, schema=self.pa_schema))
+
+        msgs = self._merge_and_commit(
+            target,
+            pa.Table.from_pydict({
+                "id": pa.array([2, 3], type=pa.int32()),
+                "name": ["ignored", "ignored"],
+                "age": pa.array([99, 99], type=pa.int32()),
+                "city": ["ignored", "ignored"],
+            }, schema=self.pa_schema),
+            on=["id"],
+            when_matched=[WhenMatched.delete()],
+        )
+
+        self.assertEqual(1, sum(len(m.index_adds) for m in msgs))
+        self.assertEqual(
+            {
+                "id": [1],
+                "name": ["Alice"],
+                "age": [25],
+                "city": ["NYC"],
+            },
+            self._read_sorted(target),
+        )
 
     def test_table_merge_into_second_round_updates_first_round_insert(self):
         target = self._create_table()
@@ -341,7 +421,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                 "city": ["LA2"],
             }, schema=self.pa_schema),
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
         )
 
         self.assertEqual(
@@ -375,7 +455,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target,
             source,
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             when_not_matched=[WhenNotMatched(insert="*")],
         )
 
@@ -415,7 +495,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                 ),
             }, schema=blob_schema),
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             when_not_matched=[WhenNotMatched(insert="*")],
         )
 
@@ -486,8 +566,8 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             source,
             on=["id"],
             when_matched=[
-                WhenMatched(update={"age": lit(99)}, condition="s.age > t.age"),
-                WhenMatched(update={"name": lit("kept")}),
+                WhenMatched.update({"age": lit(99)}, condition="s.age > t.age"),
+                WhenMatched.update({"name": lit("kept")}),
             ],
             when_not_matched=[
                 WhenNotMatched(insert="*", condition="s.age > 45"),
@@ -525,7 +605,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target.new_batch_write_builder().new_update().merge_into(
                 source,
                 on=["id"],
-                when_matched=[WhenMatched(update={"age": "s.age"})],
+                when_matched=[WhenMatched.update({"age": "s.age"})],
             )
 
     def test_table_merge_into_self_merge_by_row_id(self):
@@ -541,7 +621,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
             target,
             target,
             on=["_ROW_ID"],
-            when_matched=[WhenMatched(update={"name": lit("updated")})],
+            when_matched=[WhenMatched.update({"name": lit("updated")})],
         )
 
         self.assertTrue(msgs)
@@ -575,7 +655,7 @@ class StreamTableMergeIntoTest(StreamModeMixin, DataEvolutionTestBase, unittest.
         msgs = wb.new_update().merge_into(
             source,
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             when_not_matched=[WhenNotMatched(insert="*")],
             commit_identifier=cid,
         )
@@ -632,7 +712,7 @@ class StreamTableMergeIntoTest(StreamModeMixin, DataEvolutionTestBase, unittest.
                 "city": ["LA2"],
             }, schema=self.pa_schema),
             on=["id"],
-            when_matched=[WhenMatched(update="*")],
+            when_matched=[WhenMatched.update("*")],
             commit_identifier=cid2,
         )
         commit.commit(msgs2, cid2)

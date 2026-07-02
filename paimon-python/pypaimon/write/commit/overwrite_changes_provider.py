@@ -57,27 +57,27 @@ class OverwriteChangesProvider:
             return self._build_result([])
 
         if self._cached_snapshot is None:
-            self._cached_entries = self._full_scan(latest_snapshot)
+            self._cached_entries = self._full_scan_manifest_entries(latest_snapshot)
             self._cached_snapshot = latest_snapshot
         elif self._cached_snapshot.id > latest_snapshot.id:
             raise RuntimeError(
                 f"Cached snapshot id {self._cached_snapshot.id} is greater than "
                 f"latest snapshot id {latest_snapshot.id}")
         elif self._cached_snapshot.id < latest_snapshot.id:
-            if not self._advance_cache(latest_snapshot):
-                self._cached_entries = self._full_scan(latest_snapshot)
+            if not self._update_cache(latest_snapshot):
+                self._cached_entries = self._full_scan_manifest_entries(latest_snapshot)
             self._cached_snapshot = latest_snapshot
         # cached_snapshot.id == latest_snapshot.id -> reuse cache as-is
 
         return self._build_result(self._cached_entries)
 
-    def _full_scan(self, latest_snapshot: Snapshot) -> List[ManifestEntry]:
+    def _full_scan_manifest_entries(self, latest_snapshot: Snapshot) -> List[ManifestEntry]:
         self.full_scan_count += 1
         return (FileScanner(self.table, lambda: ([], None),
                             partition_predicate=self.partition_filter)
                 .read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
 
-    def _advance_cache(self, latest_snapshot: Snapshot) -> bool:
+    def _update_cache(self, latest_snapshot: Snapshot) -> bool:
         pending_entries = []
         applied_count = 0
         manifest_file_manager = ManifestFileManager(self.table)
@@ -87,7 +87,7 @@ class OverwriteChangesProvider:
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if snapshot is None:
                     return False
-                entries = self._read_delta_entries(snapshot, manifest_file_manager)
+                entries = self._read_delta_manifest_entries(snapshot, manifest_file_manager)
                 if entries:
                     pending_entries.extend(entries)
                     applied_count += 1
@@ -100,7 +100,7 @@ class OverwriteChangesProvider:
             return False
         return True
 
-    def _read_delta_entries(
+    def _read_delta_manifest_entries(
             self, snapshot: Snapshot,
             manifest_file_manager: ManifestFileManager) -> List[ManifestEntry]:
         delta_manifests = self.manifest_list_manager.read_delta(snapshot)

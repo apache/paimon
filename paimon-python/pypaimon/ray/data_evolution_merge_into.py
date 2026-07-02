@@ -25,9 +25,12 @@ import pyarrow as pa
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
+    build_matched_delete_ds,
     build_matched_update_ds,
     build_not_matched_insert_ds,
+    build_self_merge_delete_ds,
     build_self_merge_update_ds,
+    distributed_delete_apply,
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
@@ -79,13 +82,13 @@ def merge_into(
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
 
-    update_ds, insert_ds, update_cols_union = _build_datasets(
+    update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
         target, source_ds, matched_specs, not_matched_specs,
         ctx, base_snapshot, num_partitions, ray_remote_args,
     )
 
     return _execute_and_commit(
-        table, update_ds, insert_ds, update_cols_union,
+        table, update_ds, delete_ds, insert_ds, update_cols_union,
         base_snapshot, num_partitions,
         ray_remote_args, concurrency,
     )
@@ -119,19 +122,31 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         raise ValueError(
             f"merge_into requires 'row-tracking.enabled' = 'true' on '{target}'."
         )
+    if any(c.delete for c in when_matched) and not (
+        table.options.deletion_vectors_enabled(False)
+    ):
+        raise ValueError(
+            f"merge_into DELETE requires 'deletion-vectors.enabled' = "
+            f"'true' on '{target}'."
+        )
 
     full_target_field_names = list(table.field_names)
     settable_field_names = list(full_target_field_names)
     on_map = dict(zip(target_on_cols, source_on_cols))
-    matched_specs = [
-        _NormalizedClause(
-            spec=_normalize_set_spec(
+    matched_specs = []
+    for c in when_matched:
+        spec = {}
+        if not c.delete:
+            spec = _normalize_set_spec(
                 c.update, settable_field_names, on_map,
-            ),
-            condition=c.condition,
+            )
+        matched_specs.append(
+            _NormalizedClause(
+                spec=spec,
+                condition=c.condition,
+                delete=c.delete,
+            )
         )
-        for c in when_matched
-    ]
     if matched_specs and table.partition_keys:
         partition_set = set(table.partition_keys)
         for clause in matched_specs:
@@ -260,6 +275,7 @@ def _build_datasets(
     base_snapshot_id = base_snapshot.id if base_snapshot is not None else None
 
     update_ds = None
+    delete_ds = None
     insert_ds = None
     update_cols_union: List[str] = []
 
@@ -278,7 +294,17 @@ def _build_datasets(
                     snapshot_id=base_snapshot_id,
                     ray_remote_args=ray_remote_args,
                 )
-        return update_ds, insert_ds, update_cols_union
+            if any(c.delete for c in matched_specs):
+                delete_ds = build_self_merge_delete_ds(
+                    target_identifier=target,
+                    clauses=matched_specs,
+                    target_field_names=ctx.full_target_field_names,
+                    catalog_options=ctx.catalog_options,
+                    resolve_target_projection=_resolve_target_projection,
+                    snapshot_id=base_snapshot_id,
+                    ray_remote_args=ray_remote_args,
+                )
+        return update_ds, delete_ds, insert_ds, update_cols_union
 
     # Mirror Spark: matched/not-matched run as two independent joins
     # (inner / left_anti). One unified left_outer join would force
@@ -295,6 +321,20 @@ def _build_datasets(
                 target_field_names=ctx.settable_field_names,
                 target_pa_schema=ctx.update_pa_schema,
                 update_cols=update_cols_union,
+                catalog_options=ctx.catalog_options,
+                num_partitions=num_partitions,
+                resolve_target_projection=_resolve_target_projection,
+                snapshot_id=base_snapshot_id,
+                ray_remote_args=ray_remote_args,
+            )
+        if any(c.delete for c in matched_specs):
+            delete_ds = build_matched_delete_ds(
+                target_identifier=target,
+                source_ds=source_ds,
+                target_on=ctx.target_on_cols,
+                source_on=ctx.source_on_cols,
+                clauses=matched_specs,
+                target_field_names=ctx.settable_field_names,
                 catalog_options=ctx.catalog_options,
                 num_partitions=num_partitions,
                 resolve_target_projection=_resolve_target_projection,
@@ -318,19 +358,22 @@ def _build_datasets(
             ray_remote_args=ray_remote_args,
         )
 
-    return update_ds, insert_ds, update_cols_union
+    return update_ds, delete_ds, insert_ds, update_cols_union
 
 
 def _execute_and_commit(
-    table, update_ds, insert_ds, update_cols_union,
+    table, update_ds, delete_ds, insert_ds, update_cols_union,
     base_snapshot, num_partitions,
     ray_remote_args, concurrency,
 ):
+    collect_action_row_ids = update_ds is not None and delete_ds is not None
+
     update_msgs: list = []
     num_updated = 0
+    update_row_ids = []
     if update_ds is not None:
         try:
-            update_msgs, num_updated = distributed_update_apply(
+            update_msgs, num_updated, update_row_ids = distributed_update_apply(
                 update_ds, table, update_cols_union,
                 num_partitions=num_partitions,
                 ray_remote_args=ray_remote_args,
@@ -338,11 +381,33 @@ def _execute_and_commit(
                     base_snapshot.id
                     if base_snapshot is not None else None
                 ),
+                collect_row_ids=collect_action_row_ids,
             )
         except Exception as e:
             _reraise_inner(e)
 
-    all_msgs: list = list(update_msgs)
+    delete_msgs: list = []
+    num_deleted = 0
+    delete_row_ids = []
+    if delete_ds is not None:
+        try:
+            delete_msgs, num_deleted, delete_row_ids = distributed_delete_apply(
+                delete_ds, table,
+                num_partitions=num_partitions,
+                ray_remote_args=ray_remote_args,
+                base_snapshot_id=(
+                    base_snapshot.id
+                    if base_snapshot is not None else None
+                ),
+                collect_row_ids=collect_action_row_ids,
+            )
+        except Exception as e:
+            _reraise_inner(e)
+
+    if collect_action_row_ids:
+        _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids)
+
+    all_msgs: list = list(update_msgs) + list(delete_msgs)
     num_inserted = 0
     if insert_ds is not None:
         try:
@@ -365,9 +430,9 @@ def _execute_and_commit(
         tc.commit(all_msgs)
         tc.close()
 
-    # num_matched = rows that passed the condition and were updated
+    # num_matched = rows that passed a matched condition and changed
     return {
-        "num_matched": num_updated,
+        "num_matched": num_updated + num_deleted,
         "num_inserted": num_inserted,
         "num_unchanged": 0,
     }
@@ -418,6 +483,17 @@ def _reraise_inner(err: BaseException) -> None:
     if inner is err:
         raise err
     raise inner from err
+
+
+def _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids) -> None:
+    seen = set()
+    for row_id in list(update_row_ids) + list(delete_row_ids):
+        if row_id in seen:
+            raise ValueError(
+                "MERGE matched multiple source rows to the same target "
+                "_ROW_ID. Deduplicate the source before merging."
+            )
+        seen.add(row_id)
 
 
 def _union_update_cols(clauses: List[_NormalizedClause]) -> List[str]:
