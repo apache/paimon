@@ -70,8 +70,7 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
 
     @daft.func.batch(return_dtype=DataType.binary())
     def _read_blobs(files):
-        from concurrent.futures import ThreadPoolExecutor
-        from pypaimon.common.file_io import read_file_range
+        from pypaimon.common.file_io import read_ranges_coalesced
 
         pos_field, size_field = _file_range_fields()
         # Vectorized field extraction: per-File attr access (to_pylist +
@@ -88,14 +87,7 @@ def read_blob(column, catalog_options: Dict[str, str], table: str, *, max_concur
                       for f in files.to_pylist()]
 
         fio = _get_file_io(_cache_key(catalog_options), table)
-
-        def _one(r):
-            if r is None or r[0] is None:
-                return None
-            return read_file_range(fio, r[0], r[1], r[2])
-
-        workers = max(1, min(max_concurrency, len(ranges) or 1))
-        with ThreadPoolExecutor(workers) as ex:
-            return list(ex.map(_one, ranges))
+        # Coalesce same-file adjacent reads to cut per-request round trips.
+        return read_ranges_coalesced(fio, ranges, max_concurrency)
 
     return _read_blobs(column)

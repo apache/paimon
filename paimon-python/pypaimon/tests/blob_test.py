@@ -1562,6 +1562,38 @@ class CapBlobParallelismTest(unittest.TestCase):
             self.assertLessEqual(w * f(w, 999), cap)
 
 
+class CoalesceRangesTest(unittest.TestCase):
+    """read_ranges_coalesced merges same-file adjacent reads into fewer requests
+    (JingsongLi's IO-merging suggestion) while returning identical bytes."""
+
+    def test_coalesce_ranges_grouping(self):
+        from pypaimon.common.file_io import _coalesce_ranges
+        items = [(0, "a", 0, 10), (1, "a", 10, 10), (2, "a", 1000, 10), (3, "b", 0, 5)]
+        # a:[0,20) merged, a:[1000,1010) split by gap, b:[0,5) separate file
+        spans = _coalesce_ranges(items, max_gap=100, max_span=1 << 30)
+        self.assertEqual(len(spans), 3)
+        self.assertEqual(sorted(i for _, _, _, mem in spans for i, _, _ in mem), [0, 1, 2, 3])
+        # max_span forces a split even when contiguous
+        self.assertEqual(len(_coalesce_ranges(
+            [(0, "a", 0, 10), (1, "a", 10, 10)], max_gap=100, max_span=15)), 2)
+
+    def test_read_ranges_coalesced(self):
+        from pypaimon.common.file_io import FileIO, read_ranges_coalesced
+        data = bytes(range(256)) * 4  # 1024 bytes
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            fio = FileIO.get(f"file://{tmp_dir}", {})
+            ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20), (path, 100, -1)]
+            got = read_ranges_coalesced(fio, ranges, parallelism=4)
+            self.assertEqual(got[0], data[0:10])
+            self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
+            self.assertIsNone(got[2])
+            self.assertEqual(got[3], data[500:520])
+            self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
+
+
 class ReadFileRangeTest(unittest.TestCase):
     """read_file_range must accept length == -1 (read to EOF) -- the valid
     unknown-length BlobDescriptor case -- not pass -1 into pread."""

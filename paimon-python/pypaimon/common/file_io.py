@@ -61,21 +61,103 @@ def read_file_range(file_io, path, offset, length):
         stream.close()
 
 
-def read_blobs_concurrent(file_io, blobs, parallelism):
-    """Read a list of Blobs concurrently via ThreadPool + pread."""
+# Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
+# merged read at SPAN so threads stay busy and memory stays bounded.
+_COALESCE_GAP = 1 << 20
+_COALESCE_SPAN = 8 << 20
+
+
+def _coalesce_ranges(items, max_gap, max_span):
+    """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
+    ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
+    from collections import defaultdict
+    by_path = defaultdict(list)
+    for it in items:
+        by_path[it[1]].append(it)
+    spans = []
+    for path, group in by_path.items():
+        group.sort(key=lambda x: x[2])
+        cur, start, end = [], None, None
+        for idx, _, off, length in group:
+            stop = off + length
+            if cur and off - end <= max_gap and stop - start <= max_span:
+                cur.append((idx, off, length))
+                end = max(end, stop)
+            else:
+                if cur:
+                    spans.append((path, start, end - start, cur))
+                cur, start, end = [(idx, off, length)], off, stop
+        if cur:
+            spans.append((path, start, end - start, cur))
+    return spans
+
+
+def read_ranges_coalesced(file_io, ranges, parallelism,
+                          max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
+    """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
+    bytes in the same order. Same-file nearby ranges are merged into one read to
+    cut round trips, then sliced; reads run on a thread pool. Negative length
+    (read to EOF) is read on its own, never merged.
+    """
     from concurrent.futures import ThreadPoolExecutor
+    results: List[Optional[bytes]] = [None] * len(ranges)
+    coalescible, singletons = [], []
+    for i, r in enumerate(ranges):
+        if r is None or r[0] is None:
+            continue
+        path, offset, length = r
+        if length is None or length < 0:
+            singletons.append((i, path, offset, length))
+        else:
+            coalescible.append((i, path, offset, length))
 
-    def _read_one(blob):
-        if blob is None:
-            return None
-        return blob.to_data()
+    spans = _coalesce_ranges(coalescible, max_gap, max_span)
 
-    non_null = [b for b in blobs if b is not None]
-    if not non_null:
-        return [None] * len(blobs)
-    workers = min(parallelism, len(non_null))
+    def _run(task):
+        kind, payload = task
+        if kind == "span":
+            path, span_off, span_len, members = payload
+            buf = read_file_range(file_io, path, span_off, span_len)
+            for idx, off, length in members:
+                s = off - span_off
+                results[idx] = buf[s:s + length]
+        else:
+            idx, path, off, length = payload
+            results[idx] = read_file_range(file_io, path, off, length)
+
+    tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
+    if not tasks:
+        return results
+    workers = max(1, min(parallelism, len(tasks)))
     with ThreadPoolExecutor(workers) as pool:
-        return list(pool.map(_read_one, blobs))
+        list(pool.map(_run, tasks))
+    return results
+
+
+def read_blobs_concurrent(file_io, blobs, parallelism):
+    """Read a list of Blobs concurrently, coalescing same-file ranged reads.
+
+    ``BlobRef`` values expose a file range and are coalesced; in-memory
+    ``BlobData`` values are returned directly.
+    """
+    from pypaimon.table.row.blob import BlobRef
+    results: List[Optional[bytes]] = [None] * len(blobs)
+    ranges: List[Optional[tuple]] = [None] * len(blobs)
+    inmem = []
+    for i, b in enumerate(blobs):
+        if b is None:
+            continue
+        if isinstance(b, BlobRef):
+            d = b.to_descriptor()
+            ranges[i] = (d.uri, d.offset, d.length)
+        else:
+            inmem.append((i, b))
+    for i, v in enumerate(read_ranges_coalesced(file_io, ranges, parallelism)):
+        if v is not None:
+            results[i] = v
+    for idx, b in inmem:
+        results[idx] = b.to_data()
+    return results
 
 
 class FileIO(ABC):
