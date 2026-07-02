@@ -17,7 +17,7 @@
 
 import bisect
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pyarrow as pa
@@ -26,13 +26,18 @@ import pyarrow.compute as pc
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+from pypaimon.write.row_utils import (
+    require_columns,
+    row_to_named_values,
+    value_for_arrow,
+)
 from pypaimon.write.writer.blob_writer import BlobWriter
 
 
@@ -187,6 +192,82 @@ class TableUpdateByRowId:
 
         return self.commit_messages
 
+    def update_row_columns(
+            self,
+            row,
+            row_ids: List[int],
+            column_names: List[str],
+    ) -> List[CommitMessage]:
+        return self.update_rows_columns([row], [row_ids], column_names)
+
+    def update_rows_columns(
+            self,
+            rows: List,
+            row_ids_by_row: List[List[int]],
+            column_names: List[str],
+    ) -> List[CommitMessage]:
+        if not column_names:
+            raise ValueError("column_names cannot be empty")
+        if len(rows) != len(row_ids_by_row):
+            raise ValueError(
+                "rows and row_ids_by_row must have the same length: "
+                f"{len(rows)} != {len(row_ids_by_row)}"
+            )
+
+        values_by_row = [
+            row_to_named_values(row, self.table.table_schema.fields)
+            for row in rows
+        ]
+        for values_by_name in values_by_row:
+            require_columns(values_by_name, column_names, "update_rows_columns")
+
+        row_entries = []
+        for values_by_name, row_ids in zip(values_by_row, row_ids_by_row):
+            row_entries.extend((row_id, values_by_name) for row_id in row_ids)
+
+        if not row_entries:
+            return []
+
+        row_entries.sort(key=lambda item: item[0])
+
+        for col_name in column_names:
+            if col_name not in self.table.field_names:
+                raise ValueError(f"Column {col_name} not found in table schema")
+
+        arrays = [
+            pa.array([row_id for row_id, _ in row_entries], type=pa.int64())
+        ]
+        fields = [pa.field(SpecialFields.ROW_ID.name, pa.int64())]
+        blob_object_columns: Dict[str, List[Any]] = {}
+
+        for col_name in column_names:
+            if self._is_blob_column(col_name):
+                blob_object_columns[col_name] = [
+                    values_by_name[col_name]
+                    for _, values_by_name in row_entries
+                ]
+                continue
+
+            table_field = self.table.field_dict[col_name]
+            arrow_field = PyarrowFieldParser.from_paimon_field(table_field)
+            arrays.append(
+                pa.array(
+                    [
+                        value_for_arrow(values_by_name[col_name])
+                        for _, values_by_name in row_entries
+                    ],
+                    type=arrow_field.type,
+                )
+            )
+            fields.append(arrow_field)
+
+        update_data = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+        data_with_first_row_id = self._calculate_first_row_id(update_data)
+        self._write_by_first_row_id(
+            data_with_first_row_id, column_names, blob_object_columns)
+
+        return self.commit_messages
+
     def _calculate_first_row_id(self, data: pa.Table) -> pa.Table:
         """Append ``_FIRST_ROW_ID`` to *data* by looking up each ``_ROW_ID``.
 
@@ -225,10 +306,15 @@ class TableUpdateByRowId:
             pa.array(first_row_id_values, type=pa.int64()),
         )
 
-    def _write_by_first_row_id(self, data: pa.Table, column_names: List[str]):
+    def _write_by_first_row_id(
+            self,
+            data: pa.Table,
+            column_names: List[str],
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None):
         """Write data grouped by first_row_id."""
         first_row_id_array = data[self.FIRST_ROW_ID_COLUMN]
         unique_first_row_ids = pc.unique(first_row_id_array).to_pylist()
+        first_row_id_values = first_row_id_array.to_pylist()
 
         for first_row_id in unique_first_row_ids:
             entry = self._first_row_id_index.get(first_row_id)
@@ -237,7 +323,23 @@ class TableUpdateByRowId:
             split, _files = entry
 
             group_data = data.filter(pc.equal(first_row_id_array, first_row_id))
-            self._write_group(split.partition, first_row_id, group_data, column_names)
+            group_blob_object_columns = None
+            if blob_object_columns:
+                group_indices = [
+                    i for i, value in enumerate(first_row_id_values)
+                    if value == first_row_id
+                ]
+                group_blob_object_columns = {
+                    col_name: [values[i] for i in group_indices]
+                    for col_name, values in blob_object_columns.items()
+                }
+            self._write_group(
+                split.partition,
+                first_row_id,
+                group_data,
+                column_names,
+                group_blob_object_columns,
+            )
 
     def _read_original_file_data(self, first_row_id: int, column_names: List[str]) -> Optional[pa.Table]:
         """Read original file data for the given first_row_id.
@@ -281,6 +383,7 @@ class TableUpdateByRowId:
             update_data: pa.Table,
             column_names: List[str],
             first_row_id: int,
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None,
     ) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
@@ -323,6 +426,7 @@ class TableUpdateByRowId:
         update_by_col = {
             col_name: update_data[col_name].combine_chunks()
             for col_name in column_names
+            if col_name in update_data.column_names
         }
         update_positions = {
             int(relative_index.as_py()): idx
@@ -332,8 +436,17 @@ class TableUpdateByRowId:
         # non-empty group, so update_positions is non-empty here.
         blob_row_count = max(update_positions) + 1
         for col_name in column_names:
-            update_col = update_by_col[col_name]
             if self._is_blob_column(col_name):
+                if blob_object_columns and col_name in blob_object_columns:
+                    update_values = blob_object_columns[col_name]
+                    blob_columns[col_name] = [
+                        update_values[update_positions[i]]
+                        if i in update_positions
+                        else Blob.PLACE_HOLDER
+                        for i in range(blob_row_count)
+                    ]
+                    continue
+                update_col = update_by_col[col_name]
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
                     if i in update_positions
@@ -341,6 +454,7 @@ class TableUpdateByRowId:
                     for i in range(blob_row_count)
                 ]
                 continue
+            update_col = update_by_col[col_name]
             original_col = original_data[col_name].combine_chunks()
             if update_col.type != original_col.type:
                 update_col = self._coerce_column(
@@ -399,8 +513,13 @@ class TableUpdateByRowId:
                 return getattr(table_field.type, 'type', None) == 'BLOB'
         return False
 
-    def _write_group(self, partition: GenericRow, first_row_id: int,
-                     data: pa.Table, column_names: List[str]):
+    def _write_group(
+            self,
+            partition: GenericRow,
+            first_row_id: int,
+            data: pa.Table,
+            column_names: List[str],
+            blob_object_columns: Optional[Dict[str, List[Any]]] = None):
         """Write a group of data with the same first_row_id.
 
         Reads the original file data, merges in the update values, and
@@ -408,7 +527,11 @@ class TableUpdateByRowId:
         """
         original_data = self._read_original_file_data(first_row_id, column_names)
         merged_data, blob_columns = self._merge_update_with_original(
-            original_data, data, column_names, first_row_id,
+            original_data,
+            data,
+            column_names,
+            first_row_id,
+            blob_object_columns,
         )
 
         partition_tuple = tuple(partition.values)
