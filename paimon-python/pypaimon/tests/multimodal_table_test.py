@@ -28,6 +28,8 @@ from pypaimon.multimodal import source_col
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.table.row.blob import BlobData
+from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 
 
@@ -341,23 +343,17 @@ class MultimodalTableTest(unittest.TestCase):
         )
         store = table.blobs(column="payload")
 
-        stale_rows = [{
-            "key": "payloads/1",
-            "payload": b"stale",
-        }]
+        stale_row = GenericRow(
+            ["payloads/1", BlobData(b"stale")],
+            table.raw_table.fields,
+        )
         write_builder = table.raw_table.new_batch_write_builder()
         stale_write = write_builder.new_write()
         stale_update = write_builder.new_update()
         stale_commit = write_builder.new_commit()
         stale_messages = stale_update.delete_by_predicate(
             store._keys_predicate(["payloads/1"]))
-        stale_write.write_arrow(pa.Table.from_pylist(
-            stale_rows,
-            schema=_schema({
-                "key": pa.string(),
-                "payload": pa.large_binary(),
-            }),
-        ))
+        stale_write.write_row(stale_row)
         stale_messages.extend(stale_write.prepare_commit())
 
         original_commit = store._commit_upsert_once
