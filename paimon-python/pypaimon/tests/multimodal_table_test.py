@@ -182,6 +182,193 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("ROW<rank: INT>", types_by_name["meta"])
         self.assertEqual("VECTOR<FLOAT, 3>", types_by_name["embedding"])
 
+    def test_blob_store_put_objects_get_list_and_delete(self):
+        table = self.conn.create_table(
+            "objects",
+            schema=_schema({
+                "key": pa.string(),
+                "image": pa.large_binary(),
+                "content_type": pa.string(),
+                "owner": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        store = table.blobs(column="image")
+
+        results = store.put_objects([
+            {
+                "key": "images/cat.jpg",
+                "body": b"cat-image-v1",
+                "columns": {"content_type": "image/jpeg", "owner": "alice"},
+            },
+            {
+                "key": "images/dog.jpg",
+                "body": bytearray(b"dog-image"),
+                "columns": {"content_type": "image/jpeg", "owner": "bob"},
+            },
+        ])
+
+        self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
+                         [result.key for result in results])
+        self.assertEqual([12, 9], [result.size for result in results])
+        self.assertTrue(all(result.descriptor is not None for result in results))
+
+        cat = store.get_object("images/cat.jpg")
+        self.assertEqual(b"cat-image-v1", cat.read())
+        self.assertEqual(b"at-i", store.get_object(
+            "images/cat.jpg", range="bytes=1-4").read())
+        self.assertEqual("image/jpeg", cat.columns["content_type"])
+        self.assertEqual("alice", cat.columns["owner"])
+        owner_only = store.get_object(
+            "images/cat.jpg",
+            columns=["owner"],
+        )
+        self.assertEqual({"owner": "alice"}, owner_only.columns)
+
+        listed = store.list_objects(prefix="images/")
+        self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
+                         sorted(obj.key for obj in listed))
+        self.assertEqual(
+            {
+                "images/cat.jpg": "image/jpeg",
+                "images/dog.jpg": "image/jpeg",
+            },
+            {obj.key: obj.columns["content_type"] for obj in listed},
+        )
+        listed_without_columns = store.list_objects(
+            prefix="images/",
+            columns=[],
+        )
+        self.assertEqual(
+            {"images/cat.jpg": {}, "images/dog.jpg": {}},
+            {obj.key: obj.columns for obj in listed_without_columns},
+        )
+
+        store.put_object(
+            "images/cat.jpg",
+            b"cat-image-v2",
+            columns={"content_type": "image/png", "owner": "alice"},
+        )
+        self.assertEqual(b"cat-image-v2", store.get_object("images/cat.jpg").read())
+        info = store.head_object("images/cat.jpg")
+        self.assertEqual("image/png", info.columns["content_type"])
+        self.assertEqual(
+            {"content_type": "image/png"},
+            store.head_object(
+                "images/cat.jpg",
+                columns="content_type",
+            ).columns,
+        )
+        self.assertEqual(2, table.scan().to_arrow().num_rows)
+
+        store.delete_object("images/dog.jpg")
+        with self.assertRaises(pmm.NoSuchKey):
+            store.head_object("images/dog.jpg")
+        self.assertEqual(["images/cat.jpg"],
+                         [obj.key for obj in store.list_objects(prefix="images/")])
+
+    def test_blob_store_put_object_accepts_blob_without_materializing(self):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+
+        table = self.conn.create_table(
+            "streamed_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        data = b"streamed-managed-payload"
+        external_path = os.path.join(self.temp_dir, "streamed.bin")
+        with open(external_path, "wb") as f:
+            f.write(data)
+
+        class DescriptorOnlyBlob(Blob):
+
+            def to_data(self):
+                raise AssertionError("put_object should not materialize Blob data")
+
+            def to_descriptor(self):
+                return BlobDescriptor(external_path, 0, len(data))
+
+            def new_input_stream(self):
+                raise AssertionError("put_object should pass descriptor to writer")
+
+        store = table.blobs(column="payload")
+        result = store.put_object("payloads/1", DescriptorOnlyBlob())
+
+        self.assertEqual(len(data), result.size)
+        self.assertNotEqual(external_path, result.descriptor.uri)
+        self.assertEqual(data, store.get_object("payloads/1").read())
+
+    def test_blob_store_put_object_reference_preserves_descriptor_uri(self):
+        table = self.conn.create_table(
+            "referenced_objects",
+            schema=_schema({
+                "object_key": pa.string(),
+                "payload": pa.large_binary(),
+                "media_type": pa.string(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-descriptor-field": "payload",
+            }),
+        )
+        data = b"external-video-payload"
+        external_path = os.path.join(self.temp_dir, "video.bin")
+        with open(external_path, "wb") as f:
+            f.write(data)
+
+        store = table.blobs(column="payload")
+        result = store.put_object(
+            "videos/1",
+            uri=external_path,
+            length=len(data),
+            columns={"media_type": "video/mp4"},
+        )
+        more = store.put_objects([
+            {
+                "key": "videos/2",
+                "descriptor": result.descriptor,
+                "columns": {"media_type": "video/mp4"},
+            }
+        ])
+
+        self.assertEqual("videos/1", result.key)
+        self.assertEqual(len(data), result.size)
+        self.assertEqual(external_path, result.descriptor.uri)
+        self.assertEqual("videos/2", more[0].key)
+        self.assertEqual(external_path, more[0].descriptor.uri)
+        obj = store.get_object("videos/1")
+        self.assertEqual(data, obj.read())
+        self.assertEqual("video/mp4", obj.columns["media_type"])
+        self.assertEqual(external_path, store.head_object("videos/1").descriptor.uri)
+        self.assertEqual(data, store.get_object("videos/2").read())
+
+    def test_blob_store_put_object_uri_streams_into_managed_blob(self):
+        table = self.conn.create_table(
+            "managed_only_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        data = b"external-managed-payload"
+        external_path = os.path.join(self.temp_dir, "managed.bin")
+        with open(external_path, "wb") as f:
+            f.write(data)
+
+        store = table.blobs(column="payload")
+        result = store.put_object(
+            "payloads/1",
+            uri=external_path,
+            length=len(data),
+        )
+
+        self.assertEqual(len(data), result.size)
+        self.assertNotEqual(external_path, result.descriptor.uri)
+        self.assertEqual(data, store.get_object("payloads/1").read())
+
     def test_drop_table_can_ignore_missing_table(self):
         self.conn.drop_table("missing", ignore_if_not_exists=True)
 

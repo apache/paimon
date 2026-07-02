@@ -455,3 +455,104 @@ batch_neighbors = (
     .to_list()
 )
 ```
+
+## Blobs
+
+Use `blobs()` to work with a BLOB column through an S3-like object API. A blob
+store maps object keys to a table column such as `key`, `object_key`, or an
+explicit `key_column`.
+
+### Put Objects
+
+`put_object` writes one object. `put_objects` writes a batch of objects in one
+Paimon commit. Both methods overwrite existing rows with the same keys. The
+object body can be raw bytes, a binary file-like object, or a PyPaimon `Blob`.
+Use `columns` to set the non-key, non-BLOB table columns for the object row.
+
+```python
+store = docs.blobs(column="image", key_column="key")
+
+store.put_object(
+    "images/cat.jpg",
+    body=open("cat.jpg", "rb"),
+    columns={"content_type": "image/jpeg"},
+)
+
+store.put_objects([
+    {
+        "key": "images/dog.jpg",
+        "body": open("dog.jpg", "rb"),
+        "columns": {"content_type": "image/jpeg"},
+    },
+    {
+        "key": "images/logo.png",
+        "body": b"...",
+        "columns": {"content_type": "image/png"},
+    },
+])
+```
+
+For Paimon-native reference storage, configure the BLOB column as a
+`blob-descriptor-field` and pass `uri`/`offset`/`length` or `descriptor` to
+`put_object` and `put_objects`. The table stores the external `BlobDescriptor`
+instead of copying the object into Paimon `.blob` files. Without
+`blob-descriptor-field`, descriptor-backed inputs are streamed into managed
+Paimon `.blob` files. External S3 URIs are read with the table's FileIO, so S3
+credentials such as `fs.s3.accessKeyId`, `fs.s3.accessKeySecret`,
+`fs.s3.securityToken`, `fs.s3.endpoint`, and `fs.s3.region` can be supplied in
+the options passed to `connect`. The same options are used for every external
+URI; there is no per-object credential override.
+
+```python
+store.put_objects([
+    {
+        "key": "videos/intro.mp4",
+        "uri": "s3://bucket/videos/intro.mp4",
+        "offset": 0,
+        "length": intro_content_length,
+        "columns": {"content_type": "video/mp4"},
+    },
+    {
+        "key": "videos/demo.mp4",
+        "uri": "s3://bucket/videos/demo.mp4",
+        "offset": 0,
+        "length": demo_content_length,
+        "columns": {"content_type": "video/mp4"},
+    },
+])
+
+store.put_object(
+    "videos/trailer.mp4",
+    uri="s3://bucket/videos/trailer.mp4",
+    offset=0,
+    length=trailer_content_length,
+    columns={"content_type": "video/mp4"},
+)
+```
+
+### Read Objects
+
+`get_object` reads an object by key. Its `range` parameter accepts a single
+S3-style byte range such as `bytes=0-1023`, `bytes=1024-`, or `bytes=-512`.
+`head_object` and `list_objects` return object information without opening the
+object stream. `get_object`, `head_object`, and `list_objects` expose non-key,
+non-BLOB table columns through `columns`. These columns are all returned by
+default. Pass `columns` to return only selected columns, or `[]` to skip them.
+
+```python
+obj = store.get_object("images/cat.jpg", range="bytes=0-1023")
+with obj.open() as stream:
+    chunk = stream.read()
+
+info = store.head_object(
+    "images/cat.jpg",
+    columns=["content_type"],
+)
+content_type = info.columns["content_type"]
+
+objects = store.list_objects(prefix="images/", columns=[])
+for obj_info in objects:
+    print(obj_info.key, obj_info.size, obj_info.columns)
+
+store.delete_object("images/dog.jpg")
+```
