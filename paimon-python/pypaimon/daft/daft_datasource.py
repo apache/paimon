@@ -800,6 +800,12 @@ class PaimonDataSource(DataSource):
     ) -> _ReadPushdownState:
         reader_predicate, filters_consumed = self._pushdown_filter_state(pushdowns)
         planning_predicate = self._planning_predicate(reader_predicate)
+        # Partition filters arrive on a separate Daft channel (pushdowns.
+        # partition_filters), not in pushdowns.filters. Convert and AND them in
+        # so plan() prunes partitions at the manifest level; otherwise plan()
+        # enumerates every split and we skip in Python -- a full-table plan.
+        planning_predicate = self._and_predicates(
+            planning_predicate, self._partition_planning_predicate(pushdowns))
         requested_columns = self._valid_output_columns(pushdowns.columns)
         task_columns = self._task_columns(table, requested_columns, pushdowns)
         read_columns = self._fallback_read_columns(table, task_columns, reader_predicate)
@@ -836,6 +842,32 @@ class PaimonDataSource(DataSource):
         if self._paimon_predicate is not None or self._requires_fallback_reader():
             return pushdown_predicate
         return None
+
+    def _partition_planning_predicate(self, pushdowns: Pushdowns) -> Predicate | None:
+        """partition_filters -> Paimon predicate for plan-time pruning. Excludes
+        isNull (_predicate_contains_is_null): pruning drops the whole null
+        partition, which the post-filter can't restore -- so exclude it even for
+        PK tables (stricter than the row path's _can_plan_predicate)."""
+        partition_filters = getattr(pushdowns, "partition_filters", None)
+        if partition_filters is None:
+            return None
+        py_expr = getattr(partition_filters, "_expr", partition_filters)
+        _, remaining, paimon_predicate = convert_filters_to_paimon(self._table, [py_expr])
+        if remaining:
+            # Unconverted parts still apply via _partition_filter_skips_split.
+            logger.debug("Partition filter not pushed to plan: %s", remaining)
+        if paimon_predicate is None or self._predicate_contains_is_null(paimon_predicate):
+            return None  # isNull -> post-filter only (see docstring)
+        return paimon_predicate
+
+    @staticmethod
+    def _and_predicates(left: Predicate | None, right: Predicate | None) -> Predicate | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        return PredicateBuilder.and_predicates([left, right])
 
     @staticmethod
     def _source_limit(
