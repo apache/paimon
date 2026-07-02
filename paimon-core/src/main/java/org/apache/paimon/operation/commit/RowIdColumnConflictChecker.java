@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -50,7 +51,7 @@ public class RowIdColumnConflictChecker {
 
     private final SchemaManager schemaManager;
     private final List<WriteRange> writeRanges;
-    private final Map<Long, Map<String, Integer>> fieldIdByNameCache = new HashMap<>();
+    private final Map<Long, RowType> rowTypeCache = new HashMap<>();
 
     private RowIdColumnConflictChecker(SchemaManager schemaManager, List<DataFileMeta> deltaFiles) {
         this.schemaManager = schemaManager;
@@ -96,18 +97,13 @@ public class RowIdColumnConflictChecker {
     private void addWriteFieldIds(Set<Integer> fieldIds, DataFileMeta file) {
         List<String> writeCols = file.writeCols();
         if (writeCols == null) {
-            fieldIds.addAll(
-                    fieldIdByNameCache
-                            .computeIfAbsent(file.schemaId(), this::fieldIdByName)
-                            .values());
+            // full-schema write touches every leaf field
+            collectLeafIds(rowType(file.schemaId()).getFields(), fieldIds);
             return;
         }
 
         for (String writeCol : writeCols) {
-            Integer fieldId = fieldId(file, writeCol);
-            if (fieldId != null) {
-                fieldIds.add(fieldId);
-            }
+            fieldIds.addAll(leafFieldIds(file.schemaId(), writeCol));
         }
     }
 
@@ -185,37 +181,54 @@ public class RowIdColumnConflictChecker {
         }
 
         for (String writeCol : writeCols) {
-            Integer fieldId = fieldId(file, writeCol);
-            if (fieldId != null && fieldIds.contains(fieldId)) {
-                return true;
+            for (Integer fieldId : leafFieldIds(file.schemaId(), writeCol)) {
+                if (fieldIds.contains(fieldId)) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
-    private Integer fieldId(DataFileMeta file, String writeCol) {
-        Integer fieldId =
-                fieldIdByNameCache
-                        .computeIfAbsent(file.schemaId(), this::fieldIdByName)
-                        .get(writeCol);
-        if (fieldId == null) {
-            if (SpecialFields.isSystemField(writeCol)) {
-                return null;
-            }
+    /**
+     * Resolve a (possibly nested, dotted) write column such as {@code "nest.a"} to the set of leaf
+     * field ids it covers. A whole top-level struct column (e.g. {@code "nest"}) expands to all of
+     * its leaf ids, so a whole-struct write and a sub-field write of the same struct still
+     * conflict.
+     */
+    private List<Integer> leafFieldIds(long schemaId, String writeCol) {
+        if (SpecialFields.isSystemField(writeCol)) {
+            return Collections.emptyList();
+        }
+        // projectByPaths handles both plain top-level names and dotted nested paths, and throws if
+        // the path does not exist in the schema
+        RowType projected;
+        try {
+            projected = rowType(schemaId).projectByPaths(Collections.singletonList(writeCol));
+        } catch (IllegalArgumentException e) {
             throw new RuntimeException(
                     String.format(
-                            "Cannot find write column '%s' in schema %s.",
-                            writeCol, file.schemaId()));
+                            "Cannot find write column '%s' in schema %s.", writeCol, schemaId),
+                    e);
         }
-        return fieldId;
+        List<Integer> ids = new ArrayList<>();
+        collectLeafIds(projected.getFields(), ids);
+        return ids;
     }
 
-    private Map<String, Integer> fieldIdByName(long schemaId) {
-        Map<String, Integer> fieldIdByName = new HashMap<>();
-        for (DataField field : schemaManager.schema(schemaId).logicalRowType().getFields()) {
-            fieldIdByName.put(field.name(), field.id());
+    private static void collectLeafIds(List<DataField> fields, java.util.Collection<Integer> out) {
+        for (DataField field : fields) {
+            if (field.type() instanceof RowType) {
+                collectLeafIds(((RowType) field.type()).getFields(), out);
+            } else {
+                out.add(field.id());
+            }
         }
-        return fieldIdByName;
+    }
+
+    private RowType rowType(long schemaId) {
+        return rowTypeCache.computeIfAbsent(
+                schemaId, id -> schemaManager.schema(id).logicalRowType());
     }
 
     /** Range and field id Set. */

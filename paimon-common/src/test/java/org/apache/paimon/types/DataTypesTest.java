@@ -206,6 +206,97 @@ public class DataTypesTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void testProjectByPaths() {
+        RowType type =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "nest",
+                                        DataTypes.ROW(
+                                                new DataField(2, "a", DataTypes.INT()),
+                                                new DataField(3, "b", DataTypes.STRING())))));
+
+        // dotted path selects only the addressed sub-field, preserving ids
+        RowType onlyNestA = type.projectByPaths(Collections.singletonList("nest.a"));
+        Assertions.assertThat(onlyNestA.getFieldNames()).containsExactly("nest");
+        RowType nestSub = (RowType) onlyNestA.getField("nest").type();
+        Assertions.assertThat(nestSub.getFieldNames()).containsExactly("a");
+        Assertions.assertThat(nestSub.getField("a").id()).isEqualTo(2);
+
+        // a plain top-level name selects the whole field
+        RowType wholeNest =
+                (RowType)
+                        type.projectByPaths(Collections.singletonList("nest"))
+                                .getField("nest")
+                                .type();
+        Assertions.assertThat(wholeNest.getFieldNames()).containsExactly("a", "b");
+
+        // mixing a whole column and a sub-field
+        Assertions.assertThat(type.projectByPaths(Arrays.asList("id", "nest.b")).getFieldNames())
+                .containsExactly("id", "nest");
+
+        // a dotted path whose head is not a ROW is rejected (not silently widened to the scalar)
+        assertThatThrownBy(() -> type.projectByPaths(Collections.singletonList("id.a")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("non-ROW field 'id'");
+
+        // an unknown path is rejected
+        assertThatThrownBy(() -> type.projectByPaths(Collections.singletonList("missing")))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // a column whose name itself contains a dot is matched exactly (not split)
+        RowType dotted =
+                new RowType(Collections.singletonList(new DataField(0, "a.b", DataTypes.INT())));
+        Assertions.assertThat(
+                        dotted.projectByPaths(Collections.singletonList("a.b")).getFieldNames())
+                .containsExactly("a.b");
+    }
+
+    @Test
+    void testLeafPaths() {
+        RowType full =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "nest",
+                                        DataTypes.ROW(
+                                                new DataField(2, "a", DataTypes.INT()),
+                                                new DataField(
+                                                        3,
+                                                        "sub",
+                                                        DataTypes.ROW(
+                                                                new DataField(
+                                                                        4, "x", DataTypes.INT()),
+                                                                new DataField(
+                                                                        5,
+                                                                        "y",
+                                                                        DataTypes.INT())))))));
+
+        // a full write collapses to top-level names (no dotted paths)
+        Assertions.assertThat(full.leafPaths(full)).containsExactly("id", "nest");
+
+        // one level of partial nesting: a direct sub-field of a top-level struct
+        Assertions.assertThat(
+                        full.projectByPaths(Collections.singletonList("nest.a")).leafPaths(full))
+                .containsExactly("nest.a");
+
+        // a whole sub-struct under a partial top-level struct is still one level
+        Assertions.assertThat(
+                        full.projectByPaths(Collections.singletonList("nest.sub")).leafPaths(full))
+                .containsExactly("nest.sub");
+
+        // deeper than one level (a partial sub-struct) is rejected so it can never be committed
+        RowType deepPartial = full.projectByPaths(Collections.singletonList("nest.sub.x"));
+        assertThatThrownBy(() -> deepPartial.leafPaths(full))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("one level");
+    }
+
     // --------------------------------------------------------------------------------------------
 
     private static ThrowingConsumer<DataType> baseAssertions(String sqlString, DataType otherType) {
