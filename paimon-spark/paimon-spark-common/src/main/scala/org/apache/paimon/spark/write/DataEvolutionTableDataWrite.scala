@@ -35,6 +35,7 @@ import org.apache.paimon.utils.RecordWriter
 import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql.Row
+import org.slf4j.LoggerFactory
 
 import java.util.Collections
 
@@ -152,6 +153,7 @@ case class DataEvolutionTableDataWrite(
       numRecords: Long) {
 
     private var numWritten = 0L
+    private var fillerRows = 0L
     private var fillerRow: InternalRow = _
 
     def matchFirstRowId(firstRowId: Long): Boolean = {
@@ -181,6 +183,12 @@ case class DataEvolutionTableDataWrite(
         assert(
           numRecords == numWritten,
           s"Number of written records $numWritten does not match expected number $numRecords for first row ID $firstRowId.")
+        if (fillerRows > 0) {
+          DataEvolutionTableDataWrite.LOG.warn(
+            s"Data evolution merge wrote $fillerRows filler rows out of $numRecords rows " +
+              s"for row-id range [$firstRowId, ${firstRowId + numRecords}) to preserve " +
+              "row-id continuity. Raw blob fields in filler rows are written as NULL.")
+        }
         val result = recordWriter.prepareCommit(false)
         val dataFiles = result.newFilesIncrement().newFiles()
         val dataFileMetas = assignFirstRowIds(dataFiles.asScala.toSeq)
@@ -218,6 +226,7 @@ case class DataEvolutionTableDataWrite(
       while (firstRowId + numWritten < rowId) {
         recordWriter.write(fillerRow)
         numWritten += 1
+        fillerRows += 1
       }
     }
 
@@ -259,4 +268,8 @@ case class DataEvolutionTableDataWrite(
       assigned.toSeq
     }
   }
+}
+
+object DataEvolutionTableDataWrite {
+  private val LOG = LoggerFactory.getLogger(classOf[DataEvolutionTableDataWrite])
 }
