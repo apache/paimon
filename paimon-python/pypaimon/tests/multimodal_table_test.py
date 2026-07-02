@@ -218,7 +218,6 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
                          [result.key for result in results])
         self.assertEqual([12, 9], [result.size for result in results])
-        self.assertTrue(all(result.descriptor is None for result in results))
 
         cat = store.get_object("images/cat.jpg")
         self.assertEqual(b"cat-image-v1", cat.read())
@@ -362,7 +361,6 @@ class MultimodalTableTest(unittest.TestCase):
             ("create", stream_uri),
             ("new_input_stream", stream_uri),
         ], stream_calls)
-        self.assertIsNone(result.descriptor)
         stored = store.get_object("payloads/1")
         self.assertNotEqual(stream_uri, stored.descriptor.uri)
         self.assertEqual(data, stored.read())
@@ -391,19 +389,18 @@ class MultimodalTableTest(unittest.TestCase):
             length=len(data),
             columns={"media_type": "video/mp4"},
         )
+        descriptor = store.head_object("videos/1").descriptor
         more = store.put_objects([
             {
                 "key": "videos/2",
-                "descriptor": result.descriptor,
+                "descriptor": descriptor,
                 "columns": {"media_type": "video/mp4"},
             }
         ])
 
         self.assertEqual("videos/1", result.key)
         self.assertEqual(len(data), result.size)
-        self.assertEqual(external_path, result.descriptor.uri)
         self.assertEqual("videos/2", more[0].key)
-        self.assertEqual(external_path, more[0].descriptor.uri)
         obj = store.get_object("videos/1")
         self.assertEqual(data, obj.read())
         self.assertEqual("video/mp4", obj.columns["media_type"])
@@ -432,7 +429,6 @@ class MultimodalTableTest(unittest.TestCase):
         )
 
         self.assertEqual(len(data), result.size)
-        self.assertIsNone(result.descriptor)
         stored = store.get_object("payloads/1")
         self.assertNotEqual(external_path, stored.descriptor.uri)
         self.assertEqual(data, stored.read())

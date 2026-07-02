@@ -40,8 +40,6 @@ class NoSuchKey(KeyError):
 class PutObjectResult:
     key: object
     size: Optional[int]
-    descriptor: Optional[BlobDescriptor]
-    snapshot_id: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -50,7 +48,6 @@ class ObjectInfo:
     size: Optional[int]
     descriptor: Optional[BlobDescriptor]
     columns: Dict[str, object]
-    snapshot_id: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -60,7 +57,6 @@ class BlobObject:
     columns: Dict[str, object]
     file_io: object
     range_header: Optional[str] = None
-    snapshot_id: Optional[int] = None
 
     @property
     def size(self) -> int:
@@ -175,7 +171,6 @@ class BlobStore:
             columns=info.columns,
             file_io=self._raw_table.file_io,
             range_header=range,
-            snapshot_id=info.snapshot_id,
         )
 
     def head_object(
@@ -237,10 +232,9 @@ class BlobStore:
             table_commit.close()
 
     def _put_rows(self, rows: List[Mapping[str, object]]) -> List[PutObjectResult]:
-        snapshot_id = self._commit_upsert_once(rows)
-        descriptor_storage = self._stores_blob_descriptor()
+        self._commit_upsert_once(rows)
         return [
-            self._put_result_from_row(row, snapshot_id, descriptor_storage)
+            self._put_result_from_row(row)
             for row in rows
         ]
 
@@ -257,7 +251,7 @@ class BlobStore:
             for index in sorted(key_to_last_index.values())
         ]
 
-    def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> Optional[int]:
+    def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> None:
         generic_rows = self._rows_to_generic_rows(rows)
         write_builder = self._raw_table.new_batch_write_builder()
         table_update = write_builder.new_update()
@@ -268,10 +262,8 @@ class BlobStore:
             table_commit.commit(messages)
         finally:
             table_commit.close()
-        latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
-        return latest_snapshot.id if latest_snapshot is not None else None
 
-    def _commit_column_updates(self, updates: Sequence[tuple]) -> Optional[int]:
+    def _commit_column_updates(self, updates: Sequence[tuple]) -> None:
         update_columns = self._column_update_names(updates)
         targets = self._read_update_targets(
             [key for key, _ in updates],
@@ -299,8 +291,6 @@ class BlobStore:
                 table_commit.commit(messages)
         finally:
             table_commit.close()
-        latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
-        return latest_snapshot.id if latest_snapshot is not None else None
 
     def _column_update_names(self, updates: Sequence[tuple]) -> List[str]:
         requested = set()
@@ -345,18 +335,11 @@ class BlobStore:
             raise ValueError("Multiple rows found for blob keys: %s" % duplicates)
         return targets
 
-    def _put_result_from_row(
-            self,
-            row: Mapping[str, object],
-            snapshot_id: Optional[int],
-            descriptor_storage: bool) -> PutObjectResult:
+    def _put_result_from_row(self, row: Mapping[str, object]) -> PutObjectResult:
         blob = row.get(self.column)
-        descriptor = _blob_descriptor(blob) if descriptor_storage else None
         return PutObjectResult(
             key=row[self.key_column],
             size=_blob_size(blob),
-            descriptor=descriptor,
-            snapshot_id=snapshot_id,
         )
 
     def _rows_to_generic_rows(self, rows: List[Mapping[str, object]]) -> List[GenericRow]:
@@ -408,13 +391,11 @@ class BlobStore:
             for name, value in row.items()
             if name not in (self.key_column, self.column)
         }
-        snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
         return ObjectInfo(
             key=row[self.key_column],
             size=descriptor.length if descriptor is not None else None,
             descriptor=descriptor,
             columns=columns,
-            snapshot_id=snapshot.id if snapshot is not None else None,
         )
 
     def _keys_predicate(self, keys: Sequence[object]):
@@ -454,9 +435,6 @@ class BlobStore:
             raise ValueError("Column %r is not a BLOB column." % self.column)
         if self.key_column == self.column:
             raise ValueError("key_column and blob column must be different.")
-
-    def _stores_blob_descriptor(self) -> bool:
-        return self.column in CoreOptions.blob_descriptor_fields(self._raw_table.options)
 
     def _object_to_blob(self, obj: Mapping[str, object]) -> Blob:
         has_body = "body" in obj and obj.get("body") is not None
