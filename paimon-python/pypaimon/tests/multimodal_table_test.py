@@ -407,6 +407,52 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(b"winner", store.get_object("payloads/1").read())
         self.assertEqual(1, table.scan().to_arrow().num_rows)
 
+    def test_blob_store_put_object_recovers_result_read_race(self):
+        table = self.conn.create_table(
+            "result_raced_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        store = table.blobs(column="payload")
+
+        stale_row = GenericRow(
+            ["payloads/1", BlobData(b"stale")],
+            table.raw_table.fields,
+        )
+        write_builder = table.raw_table.new_batch_write_builder()
+        stale_write = write_builder.new_write()
+        stale_update = write_builder.new_update()
+        stale_commit = write_builder.new_commit()
+        stale_messages = stale_update.delete_by_predicate(
+            store._keys_predicate(["payloads/1"]))
+        stale_write.write_row(stale_row)
+        stale_messages.extend(stale_write.prepare_commit())
+
+        original_read_results = store._read_put_results
+        injected = {"done": False}
+
+        def read_results_with_race(keys, snapshot_id):
+            if not injected["done"]:
+                injected["done"] = True
+                stale_commit.commit(stale_messages)
+            return original_read_results(keys, snapshot_id)
+
+        store._read_put_results = read_results_with_race
+        try:
+            result = store.put_object("payloads/1", b"winner")
+        finally:
+            store._read_put_results = original_read_results
+            stale_write.close()
+            stale_commit.close()
+
+        self.assertTrue(injected["done"])
+        self.assertEqual(len(b"winner"), result.size)
+        self.assertEqual(b"winner", store.get_object("payloads/1").read())
+        self.assertEqual(1, table.scan().to_arrow().num_rows)
+
     def test_blob_store_put_object_reference_preserves_descriptor_uri(self):
         table = self.conn.create_table(
             "referenced_objects",

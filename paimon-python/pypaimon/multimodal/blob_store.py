@@ -129,11 +129,7 @@ class BlobStore:
         if not rows:
             return []
         self._validate_unique_keys([row[self.key_column] for row in rows])
-        snapshot_id = self._overwrite_rows(rows)
-        return [
-            self._put_result(row[self.key_column], snapshot_id)
-            for row in rows
-        ]
+        return self._overwrite_rows(rows)
 
     def update_object_columns(
             self,
@@ -242,17 +238,19 @@ class BlobStore:
         finally:
             table_commit.close()
 
-    def _overwrite_rows(self, rows: List[Mapping[str, object]]) -> Optional[int]:
+    def _overwrite_rows(self, rows: List[Mapping[str, object]]) -> List[PutObjectResult]:
         keys = [row[self.key_column] for row in rows]
         snapshot_id = self._commit_upsert_once(rows)
-        if self._has_unique_rows(keys):
-            return snapshot_id
+        results = self._read_put_results(keys, snapshot_id)
+        if results is not None:
+            return results
         for _ in range(_MAX_OVERWRITE_ATTEMPTS - 1):
             snapshot_id = self._commit_replace_once(rows, keys)
-            if self._has_unique_rows(keys):
-                return snapshot_id
+            results = self._read_put_results(keys, snapshot_id)
+            if results is not None:
+                return results
         raise ValueError(
-            "Concurrent blob put conflict left duplicate rows for keys: %s"
+            "Concurrent blob put conflict left non-unique rows for keys: %s"
             % list(keys)
         )
 
@@ -365,22 +363,33 @@ class BlobStore:
             raise ValueError("Multiple rows found for blob keys: %s" % duplicates)
         return targets
 
-    def _has_unique_rows(self, keys: Sequence[object]) -> bool:
-        rows = self._read_rows(keys=keys, columns=[])
-        counts = {key: 0 for key in keys}
+    def _read_put_results(
+            self,
+            keys: Sequence[object],
+            snapshot_id: Optional[int]) -> Optional[List[PutObjectResult]]:
+        rows = self._read_rows(keys=keys, include_blob=True)
+        rows_by_key = {}
         for row in rows:
             key = row[self.key_column]
-            counts[key] = counts.get(key, 0) + 1
-        return all(counts.get(key, 0) == 1 for key in keys)
+            if key in rows_by_key:
+                return None
+            rows_by_key[key] = row
 
-    def _put_result(self, key, snapshot_id: Optional[int]) -> PutObjectResult:
-        info = self.head_object(key)
-        return PutObjectResult(
-            key=key,
-            size=info.size,
-            descriptor=info.descriptor,
-            snapshot_id=snapshot_id,
-        )
+        results = []
+        for key in keys:
+            row = rows_by_key.get(key)
+            if row is None:
+                return None
+            info = self._row_to_info(row)
+            if info.descriptor is None:
+                return None
+            results.append(PutObjectResult(
+                key=key,
+                size=info.size,
+                descriptor=info.descriptor,
+                snapshot_id=snapshot_id,
+            ))
+        return results
 
     def _rows_to_generic_rows(self, rows: List[Mapping[str, object]]) -> List[GenericRow]:
         return [
