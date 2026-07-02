@@ -221,7 +221,7 @@ public class PredicateBuilder {
     public Predicate in(Transform transform, List<Object> literals) {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
-        if (literals.size() > 20) {
+        if (literals.size() > 20 || literals.isEmpty()) {
             return LeafPredicate.of(transform, In.INSTANCE, literals);
         }
 

@@ -195,8 +195,7 @@ public class TableQueryAuthResult implements Serializable {
                                         + "' which is not present in output row type "
                                         + outputRowType);
                     }
-                    DataType type = outputRowType.getTypeAt(newIndex);
-                    newInputs.add(new FieldRef(newIndex, ref.name(), type));
+                    newInputs.add(ref.withIndex(newIndex));
                 } else {
                     newInputs.add(input);
                 }
@@ -229,8 +228,7 @@ public class TableQueryAuthResult implements Serializable {
                                         "Unable to read data without column %s when row filter enabled.",
                                         fieldName));
                     }
-                    DataType type = outputRowType.getTypeAt(newIndex);
-                    newInputs.add(new FieldRef(newIndex, fieldName, type));
+                    newInputs.add(ref.withIndex(newIndex));
                 } else {
                     newInputs.add(input);
                 }
