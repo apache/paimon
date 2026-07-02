@@ -24,6 +24,7 @@ import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -104,11 +105,11 @@ public class PendingSubtask {
             return CommitResult.NONE;
         }
 
-        stageCheckpointsUpTo(envelopeCheckpointId);
-
         if (envelopeCheckpointId != restoredCheckpointId) {
             return CommitResult.NONE;
         }
+
+        saveCheckpointsUpTo(envelopeCheckpointId);
 
         if (!envelopeAllRecovered(envelopeCheckpointId)) {
             throw new IllegalStateException(
@@ -127,13 +128,14 @@ public class PendingSubtask {
         if (checkpointId <= maxCommittedCheckpointId) {
             return new CommitResult(true, 0, maxCommittedCheckpointId, false);
         }
-        if (!stagedEnvelope(checkpointId)) {
+        if (!envelopeAllReceived(checkpointId)) {
             throw new IllegalStateException(
                     String.format(
-                            "Checkpoint %d completed before PWC staged file info from all subtasks.",
+                            "Checkpoint %d completed before PWC received file info from all subtasks.",
                             checkpointId));
         }
 
+        saveCheckpointsUpTo(checkpointId);
         coordinator.notifyCheckpointComplete(checkpointId);
         maxCommittedCheckpointId = Math.max(maxCommittedCheckpointId, checkpointId);
         cleanupCommittedCheckpoints(checkpointId);
@@ -217,26 +219,36 @@ public class PendingSubtask {
         return subtasks;
     }
 
-    private void stageCheckpointsUpTo(long checkpointId) throws Exception {
+    private void saveCheckpointsUpTo(long checkpointId) throws Exception {
+        long watermark = envelopeWatermark(checkpointId);
+        boolean savedEnvelopeCheckpoint = false;
         for (PendingCheckpoint checkpoint : checkpoints.headMap(checkpointId, true).values()) {
             if (!checkpoint.staged()) {
-                saveCheckpoint(checkpoint);
+                saveCheckpoint(checkpoint, watermark);
                 checkpoint.markStaged();
             }
+            if (checkpoint.checkpointId() == checkpointId) {
+                savedEnvelopeCheckpoint = true;
+            }
+        }
+        if (!savedEnvelopeCheckpoint) {
+            coordinator.save(Collections.emptyList(), checkpointId, watermark);
         }
     }
 
-    private boolean stagedEnvelope(long checkpointId) {
-        return envelopeAllReceived(checkpointId)
-                && checkpoints.headMap(checkpointId, true).values().stream()
-                        .allMatch(PendingCheckpoint::staged);
+    private long envelopeWatermark(long checkpointId) {
+        long watermark = Long.MAX_VALUE;
+        for (FileInfoRequest request : pendingEnvelopes.get(checkpointId).values()) {
+            watermark = Math.min(watermark, request.watermark());
+        }
+        return watermark;
     }
 
-    private void saveCheckpoint(PendingCheckpoint checkpoint) throws Exception {
+    private void saveCheckpoint(PendingCheckpoint checkpoint, long watermark) throws Exception {
         coordinator.save(
                 checkpoint.committablesAfter(maxCommittedCheckpointId),
                 checkpoint.checkpointId(),
-                checkpoint.maxWatermark());
+                watermark);
     }
 
     private void cleanupCommittedCheckpoints(long checkpointId) {

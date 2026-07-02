@@ -183,6 +183,23 @@ public class PaimonWriterCoordinatorTest {
         coordinator.close();
     }
 
+    @Test
+    public void testCheckpointWatermarkUsesMinWriterWatermark() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        PaimonWriterCoordinator coordinator = createCoordinator(table, 2);
+        coordinator.start();
+
+        register(coordinator, 0);
+        register(coordinator, 1);
+        sendRequest(coordinator, fileInfoRequest(table, CK1, 0, 0, 1000L, GenericRow.of(1, 10L)));
+        sendRequest(coordinator, fileInfoRequest(table, CK1, 1, 0, 0L, GenericRow.of(2, 20L)));
+        coordinator.notifyCheckpointComplete(CK1);
+        waitForCoordinator(coordinator);
+
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(0L);
+        coordinator.close();
+    }
+
     // ------------------------------------------------------------------------
     //  restore and recovered file-info tests
     // ------------------------------------------------------------------------
@@ -527,6 +544,34 @@ public class PaimonWriterCoordinatorTest {
         coordinator.close();
     }
 
+    @Test
+    public void testSubtaskFailoverReplacesFullyReceivedButUncompletedFileInfo() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        PaimonWriterCoordinator coordinator = createCoordinator(table, 2);
+        coordinator.start();
+
+        register(coordinator, 0, 0);
+        register(coordinator, 1, 0);
+        sendRequest(coordinator, fileInfoRequest(table, CK1, 0, 0, GenericRow.of(1, 10L)));
+        sendRequest(coordinator, fileInfoRequest(table, CK1, 1, 0, GenericRow.of(4, 40L)));
+        waitForCoordinator(coordinator);
+
+        coordinator.executionAttemptFailed(0, 0, new RuntimeException("failover"));
+        waitForCoordinator(coordinator);
+        register(coordinator, 0, 1);
+
+        List<Committable> recoveredSubtask0 = new ArrayList<>();
+        recoveredSubtask0.addAll(committables(table, CK1, GenericRow.of(9, 90L)));
+        recoveredSubtask0.addAll(committables(table, CK2, GenericRow.of(2, 20L)));
+        sendRequest(coordinator, fileInfoRequest(CK2, 0, 1, recoveredSubtask0));
+        sendRequest(coordinator, fileInfoRequest(table, CK2, 1, 0, GenericRow.of(3, 30L)));
+        coordinator.notifyCheckpointComplete(CK2);
+        waitForCoordinator(coordinator);
+
+        assertResults(table, "2, 20", "3, 30", "4, 40", "9, 90");
+        coordinator.close();
+    }
+
     /**
      * A writer resends file info for a checkpoint that PWC has already committed. The table remains
      * committed once, and the registered gateway receives a second commit-complete event in
@@ -622,8 +667,23 @@ public class PaimonWriterCoordinatorTest {
             int attemptNumber,
             GenericRow... rows)
             throws Exception {
+        return fileInfoRequest(table, checkpointId, subtask, attemptNumber, Long.MIN_VALUE, rows);
+    }
+
+    private FileInfoRequest fileInfoRequest(
+            FileStoreTable table,
+            long checkpointId,
+            int subtask,
+            int attemptNumber,
+            long watermark,
+            GenericRow... rows)
+            throws Exception {
         return fileInfoRequest(
-                checkpointId, subtask, attemptNumber, committables(table, checkpointId, rows));
+                checkpointId,
+                subtask,
+                attemptNumber,
+                watermark,
+                committables(table, checkpointId, rows));
     }
 
     private FileInfoRequest fileInfoRequest(
@@ -634,11 +694,21 @@ public class PaimonWriterCoordinatorTest {
     private FileInfoRequest fileInfoRequest(
             long checkpointId, int subtask, int attemptNumber, List<Committable> committables)
             throws Exception {
+        return fileInfoRequest(checkpointId, subtask, attemptNumber, Long.MIN_VALUE, committables);
+    }
+
+    private FileInfoRequest fileInfoRequest(
+            long checkpointId,
+            int subtask,
+            int attemptNumber,
+            long watermark,
+            List<Committable> committables)
+            throws Exception {
         return FileInfoRequest.fileInfo(
                 checkpointId,
                 subtask,
                 attemptNumber,
-                Long.MIN_VALUE,
+                watermark,
                 serialize(committables),
                 committables.size());
     }

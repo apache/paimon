@@ -78,9 +78,13 @@ class PendingCheckpoint {
         return new ArrayList<>(fileInfos.values());
     }
 
+    TreeSet<Integer> receivedSubtasks() {
+        return new TreeSet<>(fileInfos.keySet());
+    }
+
     List<Committable> allCommittables() {
         List<Committable> result = new ArrayList<>();
-        for (Integer subtask : new TreeSet<>(fileInfos.keySet())) {
+        for (Integer subtask : receivedSubtasks()) {
             result.addAll(fileInfos.get(subtask).committables());
         }
         return result;
@@ -94,13 +98,5 @@ class PendingCheckpoint {
             }
         }
         return result;
-    }
-
-    long maxWatermark() {
-        long watermark = Long.MIN_VALUE;
-        for (SubtaskFileInfo fileInfo : fileInfos.values()) {
-            watermark = Math.max(watermark, fileInfo.request().watermark());
-        }
-        return watermark;
     }
 }
