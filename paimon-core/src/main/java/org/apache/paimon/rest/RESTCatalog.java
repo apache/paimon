@@ -368,6 +368,20 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Table getTableVia(Identifier table, Identifier via) throws TableNotExistException {
+        return CatalogUtils.loadTable(
+                this,
+                table,
+                path -> fileIOForData(path, table),
+                this::fileIOFromOptions,
+                i -> loadTableMetadataVia(i, via),
+                null,
+                null,
+                context,
+                true);
+    }
+
+    @Override
     public Optional<TableSnapshot> loadSnapshot(Identifier identifier)
             throws TableNotExistException {
         try {
@@ -526,6 +540,25 @@ public class RESTCatalog implements Catalog {
         }
 
         return toTableMetadata(identifier.getDatabaseName(), response);
+    }
+
+    /**
+     * Load table metadata via a view identifier (view penetration).
+     *
+     * <p>This API can only be called by trusted engines. The server must authenticate whether the
+     * caller is a trusted engine.
+     */
+    public TableMetadata loadTableMetadataVia(Identifier table, Identifier via)
+            throws TableNotExistException {
+        GetTableResponse response;
+        try {
+            response = api.getTableVia(table, via);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(table);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(table, e);
+        }
+        return toTableMetadata(table.getDatabaseName(), response);
     }
 
     private TableMetadata toTableMetadata(String db, GetTableResponse response) {

@@ -555,6 +555,8 @@ class RESTCatalogServer:
                 return self._branches_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+        elif len(path_parts) == 6 and path_parts[3] == ResourcePaths.VIA:
+            return self._table_via_handle(lookup_identifier)
         elif len(path_parts) == 5 and path_parts[3] == ResourcePaths.TAGS:
             tag_name = RESTUtil.decode_string(path_parts[4])
             return self._tag_handle(method, lookup_identifier, tag_name)
@@ -1020,6 +1022,21 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_via_handle(self, identifier: Identifier) -> Tuple[str, int]:
+        """Handle get table via view (view penetration).
+
+        This API can only be called by trusted engines. The server must authenticate
+        whether the caller is a trusted engine.
+        """
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+        table_metadata = self.table_metadata_store[identifier.get_full_name()]
+        table_path = (f'file://{self.data_path}/{self.warehouse}/'
+                      f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+        schema = table_metadata.schema.to_schema()
+        response = self.mock_table(identifier, table_metadata, table_path, schema)
+        return self._mock_response(response, 200)
 
     def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
         if method != "GET":

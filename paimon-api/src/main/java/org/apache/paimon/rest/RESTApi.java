@@ -520,6 +520,32 @@ public class RESTApi {
     }
 
     /**
+     * Get table via a view (view penetration). If the caller has permission on the view identified
+     * by {@code via}, they can access the underlying table referenced by the view.
+     *
+     * <p>This API can only be called by trusted engines. The server must authenticate whether the
+     * caller is a trusted engine.
+     *
+     * @param table database name and table name of the target table.
+     * @param via database name and object name of the view through which access is granted.
+     * @return {@link GetTableResponse}
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or view not
+     *     exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission
+     */
+    public GetTableResponse getTableVia(Identifier table, Identifier via) {
+        return client.post(
+                resourcePaths.tableVia(
+                        table.getDatabaseName(),
+                        table.getObjectName(),
+                        via.getDatabaseName(),
+                        via.getObjectName()),
+                new ForwardBranchRequest(),
+                GetTableResponse.class,
+                restAuthFunction);
+    }
+
+    /**
      * Load latest snapshot for table.
      *
      * @param identifier database name and table name.
