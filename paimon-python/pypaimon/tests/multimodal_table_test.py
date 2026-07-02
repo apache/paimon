@@ -28,8 +28,6 @@ from pypaimon.multimodal import source_col
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.table.row.blob import BlobData
-from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
 
 
@@ -215,7 +213,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
                          [result.key for result in results])
         self.assertEqual([12, 9], [result.size for result in results])
-        self.assertTrue(all(result.descriptor is not None for result in results))
+        self.assertTrue(all(result.descriptor is None for result in results))
 
         cat = store.get_object("images/cat.jpg")
         self.assertEqual(b"cat-image-v1", cat.read())
@@ -359,100 +357,10 @@ class MultimodalTableTest(unittest.TestCase):
             ("create", stream_uri),
             ("new_input_stream", stream_uri),
         ], stream_calls)
-        self.assertNotEqual(stream_uri, result.descriptor.uri)
-        self.assertEqual(data, store.get_object("payloads/1").read())
-
-    def test_blob_store_put_object_recovers_absent_key_race(self):
-        table = self.conn.create_table(
-            "raced_objects",
-            schema=_schema({
-                "key": pa.string(),
-                "payload": pa.large_binary(),
-            }),
-            options=_PARQUET_OPTIONS,
-        )
-        store = table.blobs(column="payload")
-
-        stale_row = GenericRow(
-            ["payloads/1", BlobData(b"stale")],
-            table.raw_table.fields,
-        )
-        write_builder = table.raw_table.new_batch_write_builder()
-        stale_write = write_builder.new_write()
-        stale_update = write_builder.new_update()
-        stale_commit = write_builder.new_commit()
-        stale_messages = stale_update.delete_by_predicate(
-            store._keys_predicate(["payloads/1"]))
-        stale_write.write_row(stale_row)
-        stale_messages.extend(stale_write.prepare_commit())
-
-        original_commit = store._commit_upsert_once
-        injected = {"done": False}
-
-        def commit_with_race(rows):
-            snapshot_id = original_commit(rows)
-            if not injected["done"]:
-                injected["done"] = True
-                stale_commit.commit(stale_messages)
-            return snapshot_id
-
-        store._commit_upsert_once = commit_with_race
-        try:
-            result = store.put_object("payloads/1", b"winner")
-        finally:
-            store._commit_upsert_once = original_commit
-            stale_write.close()
-            stale_commit.close()
-
-        self.assertEqual(len(b"winner"), result.size)
-        self.assertEqual(b"winner", store.get_object("payloads/1").read())
-        self.assertEqual(1, table.scan().to_arrow().num_rows)
-
-    def test_blob_store_put_object_recovers_result_read_race(self):
-        table = self.conn.create_table(
-            "result_raced_objects",
-            schema=_schema({
-                "key": pa.string(),
-                "payload": pa.large_binary(),
-            }),
-            options=_PARQUET_OPTIONS,
-        )
-        store = table.blobs(column="payload")
-
-        stale_row = GenericRow(
-            ["payloads/1", BlobData(b"stale")],
-            table.raw_table.fields,
-        )
-        write_builder = table.raw_table.new_batch_write_builder()
-        stale_write = write_builder.new_write()
-        stale_update = write_builder.new_update()
-        stale_commit = write_builder.new_commit()
-        stale_messages = stale_update.delete_by_predicate(
-            store._keys_predicate(["payloads/1"]))
-        stale_write.write_row(stale_row)
-        stale_messages.extend(stale_write.prepare_commit())
-
-        original_read_results = store._read_put_results
-        injected = {"done": False}
-
-        def read_results_with_race(keys, snapshot_id):
-            if not injected["done"]:
-                injected["done"] = True
-                stale_commit.commit(stale_messages)
-            return original_read_results(keys, snapshot_id)
-
-        store._read_put_results = read_results_with_race
-        try:
-            result = store.put_object("payloads/1", b"winner")
-        finally:
-            store._read_put_results = original_read_results
-            stale_write.close()
-            stale_commit.close()
-
-        self.assertTrue(injected["done"])
-        self.assertEqual(len(b"winner"), result.size)
-        self.assertEqual(b"winner", store.get_object("payloads/1").read())
-        self.assertEqual(1, table.scan().to_arrow().num_rows)
+        self.assertIsNone(result.descriptor)
+        stored = store.get_object("payloads/1")
+        self.assertNotEqual(stream_uri, stored.descriptor.uri)
+        self.assertEqual(data, stored.read())
 
     def test_blob_store_put_object_reference_preserves_descriptor_uri(self):
         table = self.conn.create_table(
@@ -519,8 +427,10 @@ class MultimodalTableTest(unittest.TestCase):
         )
 
         self.assertEqual(len(data), result.size)
-        self.assertNotEqual(external_path, result.descriptor.uri)
-        self.assertEqual(data, store.get_object("payloads/1").read())
+        self.assertIsNone(result.descriptor)
+        stored = store.get_object("payloads/1")
+        self.assertNotEqual(external_path, stored.descriptor.uri)
+        self.assertEqual(data, stored.read())
 
     def test_drop_table_can_ignore_missing_table(self):
         self.conn.drop_table("missing", ignore_if_not_exists=True)

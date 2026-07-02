@@ -30,7 +30,6 @@ from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 
 _RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
-_MAX_OVERWRITE_ATTEMPTS = 3
 
 
 class NoSuchKey(KeyError):
@@ -129,7 +128,7 @@ class BlobStore:
         if not rows:
             return []
         self._validate_unique_keys([row[self.key_column] for row in rows])
-        return self._overwrite_rows(rows)
+        return self._put_rows(rows)
 
     def update_object_columns(
             self,
@@ -238,21 +237,13 @@ class BlobStore:
         finally:
             table_commit.close()
 
-    def _overwrite_rows(self, rows: List[Mapping[str, object]]) -> List[PutObjectResult]:
-        keys = [row[self.key_column] for row in rows]
+    def _put_rows(self, rows: List[Mapping[str, object]]) -> List[PutObjectResult]:
         snapshot_id = self._commit_upsert_once(rows)
-        results = self._read_put_results(keys, snapshot_id)
-        if results is not None:
-            return results
-        for _ in range(_MAX_OVERWRITE_ATTEMPTS - 1):
-            snapshot_id = self._commit_replace_once(rows, keys)
-            results = self._read_put_results(keys, snapshot_id)
-            if results is not None:
-                return results
-        raise ValueError(
-            "Concurrent blob put conflict left non-unique rows for keys: %s"
-            % list(keys)
-        )
+        descriptor_storage = self._stores_blob_descriptor()
+        return [
+            self._put_result_from_row(row, snapshot_id, descriptor_storage)
+            for row in rows
+        ]
 
     def _commit_upsert_once(self, rows: List[Mapping[str, object]]) -> Optional[int]:
         generic_rows = self._rows_to_generic_rows(rows)
@@ -264,27 +255,6 @@ class BlobStore:
                 generic_rows, [self.key_column])
             table_commit.commit(messages)
         finally:
-            table_commit.close()
-        latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
-        return latest_snapshot.id if latest_snapshot is not None else None
-
-    def _commit_replace_once(
-            self,
-            rows: List[Mapping[str, object]],
-            keys: Sequence[object]) -> Optional[int]:
-        write_builder = self._raw_table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_update = write_builder.new_update()
-        table_commit = write_builder.new_commit()
-        try:
-            messages = table_update.delete_by_predicate(
-                self._keys_predicate(keys))
-            for row in self._rows_to_generic_rows(rows):
-                table_write.write_row(row)
-            messages.extend(table_write.prepare_commit())
-            table_commit.commit(messages)
-        finally:
-            table_write.close()
             table_commit.close()
         latest_snapshot = self._raw_table.snapshot_manager().get_latest_snapshot()
         return latest_snapshot.id if latest_snapshot is not None else None
@@ -363,33 +333,19 @@ class BlobStore:
             raise ValueError("Multiple rows found for blob keys: %s" % duplicates)
         return targets
 
-    def _read_put_results(
+    def _put_result_from_row(
             self,
-            keys: Sequence[object],
-            snapshot_id: Optional[int]) -> Optional[List[PutObjectResult]]:
-        rows = self._read_rows(keys=keys, include_blob=True)
-        rows_by_key = {}
-        for row in rows:
-            key = row[self.key_column]
-            if key in rows_by_key:
-                return None
-            rows_by_key[key] = row
-
-        results = []
-        for key in keys:
-            row = rows_by_key.get(key)
-            if row is None:
-                return None
-            info = self._row_to_info(row)
-            if info.descriptor is None:
-                return None
-            results.append(PutObjectResult(
-                key=key,
-                size=info.size,
-                descriptor=info.descriptor,
-                snapshot_id=snapshot_id,
-            ))
-        return results
+            row: Mapping[str, object],
+            snapshot_id: Optional[int],
+            descriptor_storage: bool) -> PutObjectResult:
+        blob = row.get(self.column)
+        descriptor = _blob_descriptor(blob) if descriptor_storage else None
+        return PutObjectResult(
+            key=row[self.key_column],
+            size=_blob_size(blob),
+            descriptor=descriptor,
+            snapshot_id=snapshot_id,
+        )
 
     def _rows_to_generic_rows(self, rows: List[Mapping[str, object]]) -> List[GenericRow]:
         return [
@@ -486,6 +442,9 @@ class BlobStore:
             raise ValueError("Column %r is not a BLOB column." % self.column)
         if self.key_column == self.column:
             raise ValueError("key_column and blob column must be different.")
+
+    def _stores_blob_descriptor(self) -> bool:
+        return self.column in CoreOptions.blob_descriptor_fields(self._raw_table.options)
 
     def _object_to_blob(self, obj: Mapping[str, object]) -> Blob:
         has_body = "body" in obj and obj.get("body") is not None
@@ -653,6 +612,24 @@ def _parse_range(range_header: str, total_length: int):
         start = total_length - length
 
     return start, length
+
+
+def _blob_descriptor(blob) -> Optional[BlobDescriptor]:
+    if blob is None:
+        return None
+    try:
+        return blob.to_descriptor()
+    except RuntimeError:
+        return None
+
+
+def _blob_size(blob) -> Optional[int]:
+    descriptor = _blob_descriptor(blob)
+    if descriptor is not None:
+        return descriptor.length if descriptor.length >= 0 else None
+    if isinstance(blob, BlobData):
+        return len(blob.data)
+    return None
 
 
 def _bytes_value(value) -> bytes:
