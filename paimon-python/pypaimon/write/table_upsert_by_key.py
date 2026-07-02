@@ -448,6 +448,17 @@ class TableUpsertByKey:
                     f"upsert_key '{key}' is not in table schema fields: {self.table.field_names}"
                 )
 
+        unknown_fields = [
+            field_name
+            for field_name in values_by_name
+            if field_name not in self.table.field_names
+        ]
+        if unknown_fields:
+            raise ValueError(
+                f"upsert_by_key got row field(s) {unknown_fields} "
+                f"that are not in table schema fields: {self.table.field_names}"
+            )
+
         require_columns(values_by_name, upsert_keys, "upsert_by_key")
         require_columns(values_by_name, self.table.partition_keys, "upsert_by_key")
 
@@ -578,12 +589,7 @@ class TableUpsertByKey:
             self,
             row_items: List[Tuple[Any, Dict[str, Any]]],
     ) -> List[CommitMessage]:
-        values_by_name = row_items[0][1]
-        all_ordered_cols = [
-            c for c in self.table.field_names if c in values_by_name
-        ]
-        for _, row_values in row_items:
-            require_columns(row_values, all_ordered_cols, "upsert_by_key")
+        all_ordered_cols = self._append_row_column_names(row_items)
 
         table_write = StreamTableWrite(self.table, self.commit_user)
         try:
@@ -593,3 +599,31 @@ class TableUpsertByKey:
             return table_write.prepare_commit(self.commit_identifier)
         finally:
             table_write.close()
+
+    def _append_row_column_names(
+            self,
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+    ) -> List[str]:
+        first_field_names = set(row_items[0][1])
+        for _, values_by_name in row_items[1:]:
+            field_names = set(values_by_name)
+            if field_names == first_field_names:
+                continue
+
+            missing_fields = [
+                name for name in self.table.field_names
+                if name in first_field_names and name not in field_names
+            ]
+            extra_fields = [
+                name for name in self.table.field_names
+                if name in field_names and name not in first_field_names
+            ]
+            raise ValueError(
+                "upsert_by_key requires appended rows in the same batch to "
+                "have the same field set. Compared with the first appended "
+                f"row, missing fields: {missing_fields}; "
+                f"extra fields: {extra_fields}."
+            )
+        return [
+            name for name in self.table.field_names if name in first_field_names
+        ]

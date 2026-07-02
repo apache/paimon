@@ -1167,6 +1167,38 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             ],
         )
 
+    def test_upsert_by_key_rejects_heterogeneous_append_row_fields(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.generic_row import GenericRow
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_upsert_row_heterogeneous_fields', schema, False)
+        table = self.catalog.get_table(
+            'test_db.blob_upsert_row_heterogeneous_fields')
+
+        partial_fields = [
+            table.field_dict['id'],
+            table.field_dict['blob_data'],
+        ]
+        partial_row = GenericRow([1, b'a'], partial_fields)
+        full_row = GenericRow([2, 'bob', b'b'], table.fields)
+
+        with self.assertRaisesRegex(ValueError, 'same field set'):
+            table.new_batch_write_builder().new_update().upsert_by_key(
+                [partial_row, full_row], ['id'])
+
     def test_update_blob_column(self):
         from pypaimon import Schema
         from pypaimon.read.reader.format_blob_reader import FormatBlobReader
