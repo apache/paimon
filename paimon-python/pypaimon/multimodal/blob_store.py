@@ -500,10 +500,14 @@ def _parse_range(range_header: str, total_length: int):
 
     if start_text:
         start = int(start_text)
+        if total_length >= 0 and start >= total_length:
+            raise ValueError("Range start is past the end of the object.")
         if end_text:
             end = int(end_text)
             if end < start:
                 raise ValueError("Range end must be greater than or equal to start.")
+            if total_length >= 0:
+                end = min(end, total_length - 1)
             length = end - start + 1
         else:
             if total_length < 0:
@@ -519,8 +523,6 @@ def _parse_range(range_header: str, total_length: int):
         length = min(suffix_length, total_length)
         start = total_length - length
 
-    if total_length >= 0 and start > total_length:
-        raise ValueError("Range start is past the end of the object.")
     return start, length
 
 

@@ -218,6 +218,11 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(b"cat-image-v1", cat.read())
         self.assertEqual(b"at-i", store.get_object(
             "images/cat.jpg", range="bytes=1-4").read())
+        clipped = store.get_object("images/cat.jpg", range="bytes=10-999")
+        self.assertEqual(2, clipped.content_length)
+        self.assertEqual(b"v1", clipped.read())
+        with self.assertRaisesRegex(ValueError, "Range start"):
+            store.get_object("images/cat.jpg", range="bytes=12-13")
         self.assertEqual("image/jpeg", cat.columns["content_type"])
         self.assertEqual("alice", cat.columns["owner"])
         owner_only = store.get_object(
