@@ -82,21 +82,12 @@ class ScanQuery:
 
     def read_blobs(self, columns=None, *, max_workers: int = 64):
         """Materialise BLOB column(s) for the filtered rows with concurrent,
-        coalesced ranged reads.
+        coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
+        row-by-row blob resolution on multi-group data-evolution splits.
 
-        Reads through ``blob-as-descriptor`` so the record reader returns
-        lightweight descriptors -- this avoids the slow row-by-row blob
-        resolution on data-evolution splits that span multiple sequence groups
-        (where the in-reader blob concurrency does not engage). Payloads are then
-        fetched with same-file coalesced concurrent ranged reads.
-
-        ``columns`` selects which BLOB column(s) to read (default: every BLOB
-        column, intersected with ``select(...)`` when set).
-
-        Returns ``(scalar_arrow_table, {blob_column: [bytes | None, ...]})``; the
-        scalar table holds the non-BLOB projected columns, row-aligned with each
-        blob list. This reads the whole result into memory; for a memory-bounded
-        read use :meth:`stream_blobs`.
+        ``columns`` picks the BLOB column(s) (default: all, intersected with
+        ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
+        row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
         """
         blob_cols = self._resolve_blob_columns(columns)
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
@@ -111,12 +102,9 @@ class ScanQuery:
         return scalar, bodies
 
     def stream_blobs(self, columns=None, *, max_workers: int = 64):
-        """Streaming variant of :meth:`read_blobs` with bounded memory: yield
-        ``(scalar_batch, {blob_column: [bytes | None, ...]})`` per Arrow batch.
-
-        Each batch's blobs are fetched with coalesced concurrent ranged reads;
-        consume a batch (e.g. feed a trainer) and drop it before the next arrives,
-        so peak memory is one batch rather than the whole result.
+        """Memory-bounded streaming variant of :meth:`read_blobs`: yield
+        ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
+        is one batch rather than the whole result.
         """
         blob_cols = self._resolve_blob_columns(columns)
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
@@ -132,8 +120,8 @@ class ScanQuery:
             yield scalar, bodies
 
     def _blob_descriptor_read_builder(self, blob_cols: List[str]):
-        """Read builder over a blob-as-descriptor view, with this query's filter,
-        projection and limit applied. Returns ``(read_builder, file_io)``."""
+        """Blob-as-descriptor read builder with this query's filter/projection/limit;
+        returns ``(read_builder, file_io)``."""
         from pypaimon.common.options.core_options import CoreOptions
         read_table = self._table.copy({
             CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
@@ -150,18 +138,24 @@ class ScanQuery:
 
     @staticmethod
     def _fetch_bodies(file_io, data, blob_cols, max_workers):
+        # Flatten every column's ranges into one coalesced read so multiple BLOB
+        # columns are fetched together, not column-by-column serially.
         from pypaimon.table.row.blob import BlobDescriptor
-        bodies = {}
+        flat = []
         for col in blob_cols:
-            ranges = []
             for value in data[col]:
                 if value is None:
-                    ranges.append(None)
-                    continue
-                descriptor = BlobDescriptor.deserialize(bytes(value))
-                ranges.append(
-                    (descriptor.uri, descriptor.offset, descriptor.length))
-            bodies[col] = file_io.read_ranges_coalesced(ranges, max_workers)
+                    flat.append(None)
+                else:
+                    d = BlobDescriptor.deserialize(bytes(value))
+                    flat.append((d.uri, d.offset, d.length))
+        fetched = file_io.read_ranges_coalesced(flat, max_workers)
+        bodies = {}
+        offset = 0
+        for col in blob_cols:
+            n = len(data[col])
+            bodies[col] = fetched[offset:offset + n]
+            offset += n
         return bodies
 
     def _resolve_blob_columns(self, columns) -> List[str]:

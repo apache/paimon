@@ -534,8 +534,7 @@ class MultimodalTableTest(unittest.TestCase):
             {"clip": "c3", "idx": 0, "image": None},
         ])
 
-        # filter by partition, read the blob column concurrently; scalar table is
-        # row-aligned with the blob list and drops the blob column
+        # scalar table is row-aligned with the blob list and drops the blob column
         scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs("image")
         images = blobs["image"]
         self.assertEqual(3, len(images))
@@ -555,6 +554,35 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not a BLOB column"):
             obs.scan().read_blobs("idx")
 
+    def test_scan_read_blobs_multi_column(self):
+        obs = self.conn.create_table(
+            "multi",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "img": pa.large_binary(),
+                "aud": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i,
+             "img": ("img-%d" % i).encode(), "aud": ("aud-%d" % i).encode()}
+            for i in range(4)
+        ])
+
+        # both BLOB columns fetched in one call, each row-aligned with the scalars
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs(["img", "aud"])
+        self.assertEqual({"img", "aud"}, set(blobs))
+        self.assertNotIn("img", scalar.column_names)
+        self.assertNotIn("aud", scalar.column_names)
+        idx = scalar.column("idx").to_pylist()
+        self.assertEqual({i: ("img-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["img"])))
+        self.assertEqual({i: ("aud-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["aud"])))
+
     def test_scan_stream_blobs(self):
         obs = self.conn.create_table(
             "obs",
@@ -571,8 +599,7 @@ class MultimodalTableTest(unittest.TestCase):
             {"clip": "c1", "idx": i, "image": payloads[i]} for i in range(5)
         ])
 
-        # streaming yields per-batch (scalar_batch, {col: [bytes]}); collecting
-        # every batch must reproduce the full, row-aligned result
+        # collecting every streamed batch must reproduce the full, row-aligned result
         got = {}
         batches = 0
         for scalar, blobs in obs.scan().where("clip = 'c1'").stream_blobs("image"):
