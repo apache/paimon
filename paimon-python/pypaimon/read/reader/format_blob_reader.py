@@ -23,7 +23,7 @@ import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
-from pypaimon.common.file_io import FileIO, read_blobs_concurrent
+from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser, AtomicType
 from pypaimon.table.row.blob import Blob
@@ -158,7 +158,7 @@ class FormatBlobReader(RecordBatchReader):
 
     def _resolve_blobs_concurrent(self, pydict_data, blobs_to_resolve):
         blobs = [item[2] for item in blobs_to_resolve]
-        results = read_blobs_concurrent(self._file_io, blobs, self._blob_parallelism)
+        results = self._file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
         for (field_name, idx, _), data in zip(blobs_to_resolve, results):
             pydict_data[field_name][idx] = data
 

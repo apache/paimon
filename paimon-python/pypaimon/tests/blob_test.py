@@ -1578,7 +1578,7 @@ class CoalesceRangesTest(unittest.TestCase):
             [(0, "a", 0, 10), (1, "a", 10, 10)], max_gap=100, max_span=15)), 2)
 
     def test_read_ranges_coalesced(self):
-        from pypaimon.common.file_io import FileIO, read_ranges_coalesced
+        from pypaimon.common.file_io import FileIO
         data = bytes(range(256)) * 4  # 1024 bytes
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = os.path.join(tmp_dir, "f.bin")
@@ -1587,7 +1587,7 @@ class CoalesceRangesTest(unittest.TestCase):
             fio = FileIO.get(f"file://{tmp_dir}", {})
             ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
                       (path, 100, -1), (path, None, None)]
-            got = read_ranges_coalesced(fio, ranges, parallelism=4)
+            got = fio.read_ranges_coalesced(ranges, parallelism=4)
             self.assertEqual(got[0], data[0:10])
             self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
             self.assertIsNone(got[2])
@@ -1601,7 +1601,7 @@ class ReadFileRangeTest(unittest.TestCase):
     unknown-length BlobDescriptor case -- not pass -1 into pread."""
 
     def test_negative_length_reads_to_eof(self):
-        from pypaimon.common.file_io import FileIO, read_file_range
+        from pypaimon.common.file_io import FileIO
         data = bytes(range(64))
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = os.path.join(tmp_dir, "blob.bin")
@@ -1609,9 +1609,9 @@ class ReadFileRangeTest(unittest.TestCase):
                 f.write(data)
             file_io = FileIO.get(f"file://{tmp_dir}", {})
             # -1: offset to EOF; positive: exact range (pread)
-            self.assertEqual(read_file_range(file_io, path, 0, -1), data)
-            self.assertEqual(read_file_range(file_io, path, 10, -1), data[10:])
-            self.assertEqual(read_file_range(file_io, path, 10, 8), data[10:18])
+            self.assertEqual(file_io.read_file_range(path, 0, -1), data)
+            self.assertEqual(file_io.read_file_range(path, 10, -1), data[10:])
+            self.assertEqual(file_io.read_file_range(path, 10, 8), data[10:18])
 
     def test_descriptor_negative_length_roundtrip(self):
         from pypaimon.common.file_io import FileIO

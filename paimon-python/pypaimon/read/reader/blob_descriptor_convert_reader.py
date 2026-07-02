@@ -20,7 +20,6 @@ from typing import Callable, Optional, Set
 import pyarrow
 from pyarrow import RecordBatch
 
-from pypaimon.common.file_io import read_blobs_concurrent
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.table.row.blob import Blob, BlobViewStruct
@@ -177,8 +176,8 @@ class BlobInlineConvertReader(RecordBatchReader):
             blobs = [Blob.from_bytes(v, self._table.file_io) for v in values]
 
             if self._blob_parallelism > 1:
-                converted_values = read_blobs_concurrent(
-                    self._table.file_io, blobs, self._blob_parallelism)
+                converted_values = self._table.file_io.read_blobs_concurrent(
+                    blobs, self._blob_parallelism)
             else:
                 converted_values = [b.to_data() if b else None for b in blobs]
 
