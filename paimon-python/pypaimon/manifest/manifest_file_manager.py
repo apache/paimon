@@ -55,13 +55,15 @@ class ManifestFileManager:
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
                               drop_stats=True, max_workers=8,
                               early_entry_filter: Optional[Callable[[int, int], bool]] = None,
-                              early_record_filter: Optional[Callable[[dict], bool]] = None
+                              early_record_filter: Optional[Callable[[dict], bool]] = None,
+                              partition_filter=None,
                               ) -> List[ManifestEntry]:
 
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
             return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats,
                              early_entry_filter=early_entry_filter,
-                             early_record_filter=early_record_filter)
+                             early_record_filter=early_record_filter,
+                             partition_filter=partition_filter)
 
         def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
@@ -93,13 +95,17 @@ class ManifestFileManager:
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True,
              early_entry_filter: Optional[Callable[[int, int], bool]] = None,
-             early_record_filter: Optional[Callable[[dict], bool]] = None
+             early_record_filter: Optional[Callable[[dict], bool]] = None,
+             partition_filter=None,
              ) -> List[ManifestEntry]:
         """
         early_entry_filter: ``(bucket, total_buckets) -> bool``, skip before deserializing _FILE.
         early_record_filter: ``(fastavro record dict) -> bool``, skip before constructing
             DataFileMeta. Separate from early_entry_filter because it operates on the full
             record (can inspect _FILE sub-fields) rather than just bucket/total_buckets.
+        partition_filter: optional Predicate tested against the entry partition
+            (deserialized before the _FILE block); non-matching entries skip full
+            _FILE deserialization.
         """
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
@@ -121,6 +127,12 @@ class ManifestFileManager:
                         continue
             if early_record_filter is not None and not early_record_filter(record):
                 continue
+            partition = None
+            if partition_filter is not None:
+                partition = GenericRowDeserializer.from_bytes(
+                    record['_PARTITION'], self.partition_keys_fields)
+                if not partition_filter.test(partition):
+                    continue
             file_dict = dict(record['_FILE'])
             key_dict = dict(file_dict['_KEY_STATS'])
             key_stats = SimpleStats(
@@ -179,9 +191,12 @@ class ManifestFileManager:
                 first_row_id=file_dict['_FIRST_ROW_ID'] if '_FIRST_ROW_ID' in file_dict else None,
                 write_cols=file_dict['_WRITE_COLS'] if '_WRITE_COLS' in file_dict else None,
             )
+            if partition is None:
+                partition = GenericRowDeserializer.from_bytes(
+                    record['_PARTITION'], self.partition_keys_fields)
             entry = ManifestEntry(
                 kind=record['_KIND'],
-                partition=GenericRowDeserializer.from_bytes(record['_PARTITION'], self.partition_keys_fields),
+                partition=partition,
                 bucket=record['_BUCKET'],
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
