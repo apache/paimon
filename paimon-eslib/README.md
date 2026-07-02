@@ -1,11 +1,3 @@
----
-title: "ES Index (Multi-Column)"
-sidebar_position: 6
----
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -25,24 +17,25 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# ES Index (Multi-Column)
+# paimon-eslib: ES Index (Multi-Column Global Index)
 
-The `es-index` global index is a **multi-column, multi-modal** index backed by Lucene. A single
-`es-index` file can index a vector column together with several companion columns (full-text,
-keyword, scalar, date) at once. This lets you serve vector search and full-text search from the
-same index, and keeps companion columns available for scoring and filtering inside one index
-definition.
+`paimon-eslib` provides the `es-index` global index: a **Lucene-backed, multi-column, multi-modal**
+index. A single `es-index` file indexes a **primary column** (typically a vector) together with
+optional **companion columns** — full-text, keyword, scalar, and date — so vector search and
+full-text search can be served from the same index, and companion columns stay available for scoring
+and filtering inside one index definition.
 
-Unlike the single-purpose [Vector Index](./vector) and [Full-Text Index](./full-text) — each of
-which indexes one column with one dedicated engine — `es-index` groups a **primary column** plus
-optional **companion columns** into one index. The primary column determines the main modality
-(usually a vector); companion columns are indexed according to their data type and per-field
-options.
+Unlike the single-purpose vector and full-text global indexes — each of which indexes one column with
+one dedicated engine — `es-index` groups a primary column plus optional companion columns into one
+index. The primary column determines the main modality (usually a vector); companion columns are
+indexed according to their data type and per-field options.
 
-:::info Plugin required
-`es-index` is provided by the `paimon-eslib` module. Make sure `paimon-eslib` is on the classpath
-of your Spark or Flink job (and of any reader) before building or querying an `es-index`.
-:::
+> **Plugin required.** `es-index` is provided by this `paimon-eslib` module. Make sure `paimon-eslib`
+> is on the classpath of your Spark or Flink job (and of any reader) before building or querying an
+> `es-index`.
+
+See the general [Global Index](../docs/docs/multimodal-table/global-index.mdx) documentation for the
+required Data Evolution table properties, coverage/freshness behavior, and shared build options.
 
 ## How columns map to index types
 
@@ -62,7 +55,7 @@ alongside full-text match. Disable it with `fields.<column>.keyword_subfield=fal
 
 ## Prerequisites
 
-Create a Data Evolution table with the required properties (see [Global Index](../global-index)):
+Create a Data Evolution table with the required properties:
 
 ```sql
 CREATE TABLE my_table (
@@ -83,12 +76,10 @@ CREATE TABLE my_table (
 
 Build the index with `sys.create_global_index` and `index_type => 'es-index'`. To index several
 columns in one `es-index`, pass a **comma-separated** `index_column` list: the **first** column is
-the primary column, the rest are companion columns. Per-column behavior is configured through
-options under the `global-index.es-index.` prefix.
+the primary column, the rest are companion columns. Per-column behavior is configured through options
+under the `global-index.es-index.` prefix.
 
-<Tabs groupId="es-index-build">
-
-<TabItem value="spark-sql" label="Spark SQL">
+### Spark SQL
 
 ```sql
 -- Single vector column with an HNSW index
@@ -109,9 +100,7 @@ CALL sys.create_global_index(
 );
 ```
 
-</TabItem>
-
-<TabItem value="flink-sql" label="Flink SQL">
+### Flink SQL
 
 ```sql
 -- Single vector column with an HNSW index
@@ -130,10 +119,6 @@ CALL sys.create_global_index(
     options => 'global-index.es-index.fields.embedding.algorithm=diskbbq,global-index.es-index.fields.embedding.dimension=768,global-index.es-index.fields.embedding.metric=cosine,global-index.es-index.fields.content.analyzer=standard'
 );
 ```
-
-</TabItem>
-
-</Tabs>
 
 You can also set the same options in `TBLPROPERTIES` at table-creation time instead of passing them
 per build. Options are resolved with field-level keys taking precedence over index-type-level keys:
@@ -160,14 +145,10 @@ column.
 
 ## Query
 
-`es-index` implements the same search API as the other global indexes, so querying does not depend
-on which engine built the index — only the build step differs. See [Vector Index](./vector#vector-search)
-and [Full-Text Index](./full-text#full-text-search) for the full search-option and query-DSL
-reference.
+`es-index` implements the same search API as the other global indexes, so querying does not depend on
+which engine built the index — only the build step differs.
 
-<Tabs groupId="es-index-search">
-
-<TabItem value="spark-sql" label="Spark SQL">
+### Spark SQL
 
 ```sql
 -- Vector search: top-5 nearest neighbors on the primary vector column
@@ -181,12 +162,10 @@ SELECT * FROM full_text_search(
 );
 ```
 
-Vector routes and full-text routes over an `es-index` can also be combined with
-[Hybrid Search](./hybrid-search) via the `hybrid_search(...)` table-valued function.
+Vector routes and full-text routes over an `es-index` can also be combined with the
+`hybrid_search(...)` table-valued function.
 
-</TabItem>
-
-<TabItem value="flink-sql" label="Flink SQL">
+### Flink SQL
 
 Flink exposes vector search as a `CALL` procedure. The procedure returns JSON-serialized rows as
 strings.
@@ -210,21 +189,13 @@ CALL sys.vector_search(
 );
 ```
 
-:::note
-Flink SQL currently exposes vector search only. For full-text search and hybrid search over an
-`es-index`, use Spark SQL (the `full_text_search` / `hybrid_search` table-valued functions) or the
-Java API (`Table.newFullTextSearchBuilder()` / `Table.newHybridSearchBuilder()`).
-:::
-
-</TabItem>
-
-</Tabs>
+> **Note.** Flink SQL currently exposes vector search only. For full-text search and hybrid search
+> over an `es-index`, use Spark SQL (the `full_text_search` / `hybrid_search` table-valued functions)
+> or the Java API (`Table.newFullTextSearchBuilder()` / `Table.newHybridSearchBuilder()`).
 
 ## Drop ES Index
 
-<Tabs groupId="es-index-drop">
-
-<TabItem value="spark-sql" label="Spark SQL">
+### Spark SQL
 
 ```sql
 CALL sys.drop_global_index(
@@ -234,9 +205,7 @@ CALL sys.drop_global_index(
 );
 ```
 
-</TabItem>
-
-<TabItem value="flink-sql" label="Flink SQL">
+### Flink SQL
 
 ```sql
 CALL sys.drop_global_index(
@@ -245,7 +214,3 @@ CALL sys.drop_global_index(
     index_type => 'es-index'
 );
 ```
-
-</TabItem>
-
-</Tabs>
