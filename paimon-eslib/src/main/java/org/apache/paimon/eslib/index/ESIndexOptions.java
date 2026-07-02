@@ -54,9 +54,9 @@ public class ESIndexOptions {
 
     /**
      * Index-type-level key prefix (e.g. {@code global-index.es-index.metric}); overridden by
-     * field-level keys. Aligned with the persisted table-property / ES-mount convention
-     * ({@code global-index.<indexType>.*}) so build, read and mount all read the same keys. The
-     * {@code es-index} part still comes from {@link ESIndexGlobalIndexerFactory#IDENTIFIER}.
+     * field-level keys. Aligned with the persisted table-property / ES-mount convention ({@code
+     * global-index.<indexType>.*}) so build, read and mount all read the same keys. The {@code
+     * es-index} part still comes from {@link ESIndexGlobalIndexerFactory#IDENTIFIER}.
      */
     private static final String INDEX_TYPE_PREFIX =
             "global-index." + ESIndexGlobalIndexerFactory.IDENTIFIER + ".";
