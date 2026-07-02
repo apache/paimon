@@ -47,6 +47,7 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -65,6 +66,29 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * have a partition, it will fall back to chain read.
  */
 public class ChainGroupReadTable extends FallbackReadFileStoreTable {
+
+    /**
+     * Options that cannot be safely passed to branch tables during copy because they would
+     * interfere with branch-specific configurations. If dynamic options contain any of these, an
+     * error is thrown since we cannot fulfill the copy contract (which expects all options to be
+     * passed through).
+     */
+    private static final Set<String> UNSAFE_COPY_OPTIONS =
+            Collections.unmodifiableSet(
+                    new HashSet<>(
+                            Arrays.asList(
+                                    CoreOptions.MERGE_ENGINE.key(),
+                                    CoreOptions.BUCKET.key(),
+                                    CoreOptions.BUCKET_KEY.key(),
+                                    CoreOptions.SEQUENCE_FIELD.key(),
+                                    CoreOptions.SCAN_MODE.key(),
+                                    CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                    CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                                    CoreOptions.SCAN_TIMESTAMP.key(),
+                                    CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(),
+                                    CoreOptions.SCAN_TAG_NAME.key(),
+                                    CoreOptions.SCAN_VERSION.key(),
+                                    CoreOptions.SCAN_WATERMARK.key())));
 
     public ChainGroupReadTable(FileStoreTable snapshotStoreTable, FileStoreTable deltaStoreTable) {
         super(snapshotStoreTable, deltaStoreTable, true);
@@ -139,25 +163,27 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 wrapped.copyWithLatestSchema(), other().copyWithLatestSchema());
     }
 
-    /** Prepares options for a specific branch in chain table. */
+    /**
+     * Prepares options for a branch table. Starts from the new schema's options, but overrides
+     * branch-owned options (like merge-engine, bucket) with the branch's own values to preserve
+     * branch-specific configurations.
+     */
     private static Map<String, String> prepareBranchOptions(
-            Map<String, String> options, String branch, FileStoreTable sourceTable) {
-        Map<String, String> result = new HashMap<>(options);
+            Map<String, String> newOptions, String branch, FileStoreTable sourceTable) {
+        Map<String, String> result = new HashMap<>(newOptions);
 
-        // Setting the branch name (each sub-table has its own branch identity)
-        result.put(CoreOptions.BRANCH.key(), branch);
-
-        // Parent's rewriteOtherOptions() removes bucket from options (since main and fallback
-        // branches may have different bucket numbers). Each sub-table must preserve its own
-        // bucket value from its original schema.
-        String bucket = sourceTable.options().get(CoreOptions.BUCKET.key());
-        if (bucket != null) {
-            result.put(CoreOptions.BUCKET.key(), bucket);
+        // Override branch-owned options with sourceTable's values to preserve
+        // branch-specific configurations
+        for (String key : UNSAFE_COPY_OPTIONS) {
+            String sourceValue = sourceTable.schema().options().get(key);
+            if (sourceValue != null) {
+                result.put(key, sourceValue);
+            }
         }
 
-        // Stripping chain-table-level directives like {@code scan.mode} (branch tables manage their
-        // own snapshots independently and should not inherit chain-table-level scan modes)
-        result.remove(CoreOptions.SCAN_MODE.key());
+        // Set branch name (each sub-table has its own branch identity)
+        result.put(CoreOptions.BRANCH.key(), branch);
+
         return result;
     }
 

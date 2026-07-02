@@ -49,6 +49,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -3209,6 +3211,36 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                                         table, Collections.singletonList("k")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("merge engine");
+
+        // Also verify through SQL lookup join path
+        sql(
+                "INSERT OVERWRITE `chain_dim_agg_cfg$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 10)");
+        sql(
+                "INSERT OVERWRITE `chain_dim_agg_cfg$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (2, 2, 20)");
+
+        sql(
+                "CREATE TABLE source_agg_cfg ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_agg_cfg VALUES (1), (2)");
+
+        String query =
+                "SELECT S.id, D.k, D.v "
+                        + "FROM source_agg_cfg AS S "
+                        + "LEFT JOIN chain_dim_agg_cfg "
+                        + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                        + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                        + "ON S.id = D.k";
+
+        assertThatThrownBy(() -> collectResult(query))
+                .rootCause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("merge engine");
     }
 
     /**
@@ -3309,5 +3341,97 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
             }
         }
         return buckets;
+    }
+
+    /**
+     * Tests that chain table lookup join refresh works correctly for both async and non-async
+     * modes. This test verifies the refresh logic in {@code FullCacheLookupTable.refresh()} which
+     * has different code paths for async vs non-async refresh. For chain tables, the async path
+     * skips the backlog calculation (since outer table and delta branch use different snapshot
+     * sequences).
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLookupJoinRefresh(boolean asyncRefresh) throws Exception {
+        sql(
+                "CREATE TABLE chain_refresh ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_refresh");
+
+        // Write initial data to snapshot branch
+        sql(
+                "INSERT OVERWRITE `chain_refresh$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_1'), (2, 1, 'snap_2')");
+
+        // Write initial data to delta branch
+        sql(
+                "INSERT OVERWRITE `chain_refresh$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (3, 1, 'delta_3')");
+
+        // Create source table
+        sql(
+                "CREATE TABLE source_refresh ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ("
+                        + "  'connector' = 'paimon'"
+                        + ")");
+        sql("INSERT INTO source_refresh VALUES (1), (2), (3)");
+
+        // Execute lookup join with configured refresh mode
+        String query =
+                String.format(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_refresh AS S "
+                                + "LEFT JOIN chain_refresh "
+                                + "/*+ OPTIONS('lookup.cache' = 'full', 'lookup.refresh-async' = '%s') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k",
+                        asyncRefresh);
+
+        // Verify initial lookup results
+        List<String> initialResults = collectResult(query);
+        assertThat(initialResults)
+                .as("Initial lookup should find all 3 keys")
+                .hasSize(3)
+                .anyMatch(r -> r.contains("snap_1"))
+                .anyMatch(r -> r.contains("snap_2"))
+                .anyMatch(r -> r.contains("delta_3"));
+
+        // Add new data to delta branch
+        sql(
+                "INSERT INTO `chain_refresh$branch_delta` PARTITION (dt = '20250810')"
+                        + " VALUES (4, 1, 'delta_4')");
+
+        // Add new source data
+        sql("INSERT INTO source_refresh VALUES (4)");
+
+        // For async refresh, wait a bit for the refresh to happen
+        if (asyncRefresh) {
+            Thread.sleep(2000);
+        }
+
+        // Verify new data is visible after refresh
+        List<String> refreshedResults = collectResult(query);
+        assertThat(refreshedResults)
+                .as("Refreshed lookup should find all 4 keys")
+                .hasSize(4)
+                .anyMatch(r -> r.contains("snap_1"))
+                .anyMatch(r -> r.contains("snap_2"))
+                .anyMatch(r -> r.contains("delta_3"))
+                .anyMatch(r -> r.contains("delta_4"));
     }
 }
