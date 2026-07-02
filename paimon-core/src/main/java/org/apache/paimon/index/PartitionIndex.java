@@ -20,30 +20,43 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.ListUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntPredicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
 /** Bucket Index Per Partition. */
 public class PartitionIndex {
 
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionIndex.class);
+
     public final Int2ShortHashMap hash2Bucket;
 
-    public final Map<Integer, Long> nonFullBucketInformation;
+    public final ConcurrentHashMap<Integer, Long> nonFullBucketInformation;
+
+    // Disk row count per bucket at the last reconciliation; sessionDelta = inMemory - this.
+    private final ConcurrentHashMap<Integer, Long> diskRowCountAtLastRefresh;
 
     public final Set<Integer> totalBucketSet;
     public final List<Integer> totalBucketArray;
@@ -54,20 +67,41 @@ public class PartitionIndex {
 
     public long lastAccessedCommitIdentifier;
 
+    private final IndexFileHandler indexFileHandler;
+
+    private final BinaryRow partition;
+
+    private volatile CompletableFuture<Void> refreshFuture;
+
+    // null = never refreshed; the first refresh is not throttled by min-refresh-interval.
+    private Instant lastRefreshTime;
+
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
-            Map<Integer, Long> bucketInformation,
-            long targetBucketRowNumber) {
+            ConcurrentHashMap<Integer, Long> bucketInformation,
+            long targetBucketRowNumber,
+            IndexFileHandler indexFileHandler,
+            BinaryRow partition) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
+        this.diskRowCountAtLastRefresh = new ConcurrentHashMap<>(bucketInformation);
         this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
         this.totalBucketArray = new ArrayList<>(totalBucketSet);
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
         this.accessed = true;
+        this.indexFileHandler = indexFileHandler;
+        this.partition = partition;
+        this.lastRefreshTime = null;
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
+    public int assign(
+            int hash,
+            IntPredicate bucketFilter,
+            int maxBucketsNum,
+            int maxBucketId,
+            int minEmptyBucketsBeforeAsyncCheck,
+            Duration minRefreshInterval) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -82,12 +116,19 @@ public class PartitionIndex {
             Map.Entry<Integer, Long> entry = iterator.next();
             Integer bucket = entry.getKey();
             Long number = entry.getValue();
+            // Non-blocking: lets later assignments see buckets freed by compaction.
+            if (shouldRefreshWhenBucketNearFull(
+                            number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)
+                    && isReachedTheMinRefreshInterval(minRefreshInterval)) {
+                refreshBucketsFromDisk(bucketFilter);
+            }
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
                 hash2Bucket.put(hash, (short) bucket.intValue());
                 return bucket;
             } else {
                 iterator.remove();
+                diskRowCountAtLastRefresh.remove(bucket);
             }
         }
 
@@ -125,7 +166,7 @@ public class PartitionIndex {
             IntPredicate bucketFilter) {
         List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
-        Map<Integer, Long> buckets = new HashMap<>();
+        ConcurrentHashMap<Integer, Long> buckets = new ConcurrentHashMap<>();
         for (IndexManifestEntry file : files) {
             try (IntIterator iterator =
                     indexFileHandler
@@ -150,6 +191,97 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
+        return new PartitionIndex(
+                mapBuilder.build(), buckets, targetBucketRowNumber, indexFileHandler, partition);
+    }
+
+    private boolean shouldRefreshWhenBucketNearFull(
+            long currentBucketRowCount,
+            long targetBucketRowNumber,
+            int minEmptyBucketsBeforeAsyncCheck) {
+        if (minEmptyBucketsBeforeAsyncCheck == -1) {
+            return false;
+        }
+
+        long threshold = targetBucketRowNumber - minEmptyBucketsBeforeAsyncCheck;
+        return currentBucketRowCount >= threshold;
+    }
+
+    private boolean isReachedTheMinRefreshInterval(final Duration duration) {
+        return lastRefreshTime == null || Instant.now().isAfter(lastRefreshTime.plus(duration));
+    }
+
+    /** Called when this PartitionIndex is dropped (e.g. cleanup in prepareCommit). */
+    public void cancelOngoingRefresh() {
+        if (refreshFuture != null && !refreshFuture.isDone()) {
+            refreshFuture.cancel(false);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Cancelled ongoing refresh for partition {}", partition);
+            }
+        }
+    }
+
+    // Merges disk row count into nonFullBucketInformation, keeping uncommitted increments.
+    private void reconcileBucketWithDisk(int bucket, long diskNow) {
+        if (!totalBucketSet.contains(bucket)) {
+            return;
+        }
+        nonFullBucketInformation.compute(
+                bucket,
+                (b, inMemory) ->
+                        inMemory == null
+                                ? diskNow
+                                : diskNow
+                                        + (inMemory
+                                                - diskRowCountAtLastRefresh.getOrDefault(
+                                                        b, inMemory)));
+        diskRowCountAtLastRefresh.put(bucket, diskNow);
+    }
+
+    private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
+        if (refreshFuture == null || refreshFuture.isDone()) {
+            // Reuse the shared FileOperationThreadPool (I/O-bound scan) rather than a dedicated
+            // executor, to avoid extra thread-pool resources and fan-out.
+            refreshFuture =
+                    CompletableFuture.runAsync(
+                                    () -> scanAndReconcile(bucketFilter),
+                                    FileOperationThreadPool.getExecutorService(
+                                            Runtime.getRuntime().availableProcessors()))
+                            .exceptionally(
+                                    t -> {
+                                        LOG.warn(
+                                                "Bucket refresh failed for partition {}",
+                                                partition,
+                                                t);
+                                        return null;
+                                    });
+        }
+    }
+
+    private void scanAndReconcile(IntPredicate bucketFilter) {
+        try {
+            List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
+            // bucketFilter keeps only buckets owned by this assigner, so assigners never race.
+            Map<Integer, Long> tempBucketInfo =
+                    files.parallelStream()
+                            .filter(f -> bucketFilter.test(f.bucket()))
+                            .filter(f -> f.indexFile().rowCount() < targetBucketRowNumber)
+                            .collect(
+                                    Collectors.toMap(
+                                            IndexManifestEntry::bucket,
+                                            f -> f.indexFile().rowCount(),
+                                            (existing, replacement) -> existing));
+            tempBucketInfo.forEach(this::reconcileBucketWithDisk);
+            lastRefreshTime = Instant.now();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Refreshed partition {}: scanned {} files, {} non-full buckets.",
+                        partition,
+                        files.size(),
+                        tempBucketInfo.size());
+            }
+        } catch (Exception e) {
+            LOG.warn("Error refreshing buckets from disk for partition {}", partition, e);
+        }
     }
 }
