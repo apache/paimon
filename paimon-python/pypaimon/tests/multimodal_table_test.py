@@ -513,6 +513,76 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_scan_read_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = [("blob-%d-" % i).encode() * (i + 1) for i in range(6)]
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": payloads[0]},
+            {"clip": "c1", "idx": 1, "image": payloads[1]},
+            {"clip": "c1", "idx": 2, "image": payloads[2]},
+            {"clip": "c2", "idx": 0, "image": payloads[3]},
+            {"clip": "c2", "idx": 1, "image": payloads[4]},
+            {"clip": "c3", "idx": 0, "image": None},
+        ])
+
+        # filter by partition, read the blob column concurrently; scalar table is
+        # row-aligned with the blob list and drops the blob column
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs("image")
+        images = blobs["image"]
+        self.assertEqual(3, len(images))
+        self.assertNotIn("image", scalar.column_names)
+        got = dict(zip(scalar.column("idx").to_pylist(), images))
+        self.assertEqual({0: payloads[0], 1: payloads[1], 2: payloads[2]}, got)
+
+        # blob column auto-detected when columns=None
+        _, blobs2 = obs.scan().where("clip = 'c2'").read_blobs()
+        self.assertEqual({payloads[3], payloads[4]}, set(blobs2["image"]))
+
+        # null blob -> None
+        _, blobs3 = obs.scan().where("clip = 'c3'").read_blobs("image")
+        self.assertEqual([None], blobs3["image"])
+
+        # non-BLOB column is rejected
+        with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+            obs.scan().read_blobs("idx")
+
+    def test_scan_stream_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = {i: ("s-%d-" % i).encode() * (i + 1) for i in range(5)}
+        obs.add([
+            {"clip": "c1", "idx": i, "image": payloads[i]} for i in range(5)
+        ])
+
+        # streaming yields per-batch (scalar_batch, {col: [bytes]}); collecting
+        # every batch must reproduce the full, row-aligned result
+        got = {}
+        batches = 0
+        for scalar, blobs in obs.scan().where("clip = 'c1'").stream_blobs("image"):
+            batches += 1
+            self.assertNotIn("image", scalar.schema.names)
+            for idx, img in zip(scalar.column("idx").to_pylist(), blobs["image"]):
+                got[idx] = img
+        self.assertGreaterEqual(batches, 1)
+        self.assertEqual({i: payloads[i] for i in range(5)}, got)
+
     def test_scan_does_not_expose_pre_filter(self):
         users = self.conn.create_table(
             "users",
