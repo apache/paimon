@@ -851,7 +851,10 @@ class PaimonDataSource(DataSource):
         if partition_filters is None:
             return None
         py_expr = getattr(partition_filters, "_expr", partition_filters)
-        _, _, paimon_predicate = convert_filters_to_paimon(self._table, [py_expr])
+        _, remaining, paimon_predicate = convert_filters_to_paimon(self._table, [py_expr])
+        if remaining:
+            # Unconverted parts still apply via _partition_filter_skips_split.
+            logger.debug("Partition filter not pushed to plan: %s", remaining)
         return paimon_predicate
 
     @staticmethod

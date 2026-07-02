@@ -805,6 +805,41 @@ def test_partition_filter_prunes_at_plan_level(append_only_table):
     assert all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
 
 
+def test_row_and_partition_filters_both_reach_planning_predicate(append_only_table):
+    """filters and partition_filters arrive on separate Daft channels; both must
+    fold into the planning predicate (via _and_predicates)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-02"], pa.string()),
+        }
+    ))
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+    source.push_filters([(col("id") > 1)._expr])
+    pushdowns = Pushdowns(filters=(col("id") > 1),
+                          partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # both channels combined into one AND planning predicate
+    assert state.planning_predicate is not None
+    assert state.planning_predicate.method == "and"
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    assert pruned and all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
 def test_read_paimon_row_filter(append_only_table):
     """Row-level filter should be applied after reading data."""
     table, _ = append_only_table
