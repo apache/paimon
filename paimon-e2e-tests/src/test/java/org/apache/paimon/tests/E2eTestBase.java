@@ -58,6 +58,8 @@ public abstract class E2eTestBase {
     private final boolean withKafka;
     private final boolean withHive;
     private final boolean withSpark;
+    private final int taskManagerReplicas;
+    private final boolean exposeFlinkRest;
 
     protected E2eTestBase() {
         this(false, false);
@@ -71,6 +73,21 @@ public abstract class E2eTestBase {
         this.withKafka = withKafka;
         this.withHive = withHive;
         this.withSpark = withSpark;
+        this.taskManagerReplicas = 1;
+        this.exposeFlinkRest = false;
+    }
+
+    protected E2eTestBase(
+            boolean withKafka,
+            boolean withHive,
+            boolean withSpark,
+            int taskManagerReplicas,
+            boolean exposeFlinkRest) {
+        this.withKafka = withKafka;
+        this.withHive = withHive;
+        this.withSpark = withSpark;
+        this.taskManagerReplicas = taskManagerReplicas;
+        this.exposeFlinkRest = exposeFlinkRest;
     }
 
     protected static final String TEST_DATA_DIR = "/test-data";
@@ -104,10 +121,13 @@ public abstract class E2eTestBase {
                                                 .getResource("docker-compose.yaml")
                                                 .toURI()))
                         .withEnv("NETWORK_ID", ((Network.NetworkImpl) network).getName())
+                        .withEnv("FLINK_ENV_FILE", flinkEnvFile())
                         .withLogConsumer("jobmanager-1", new LogConsumer(LOG))
-                        .withLogConsumer("taskmanager-1", new LogConsumer(LOG))
                         .withStartupTimeout(Duration.ofMinutes(3))
                         .withLocalCompose(true);
+        for (int i = 1; i <= taskManagerReplicas; i++) {
+            environment.withLogConsumer("taskmanager-" + i, new LogConsumer(LOG));
+        }
         if (withKafka) {
             services.add("kafka");
             environment.withLogConsumer("kafka-1", new Slf4jLogConsumer(LOG));
@@ -140,11 +160,19 @@ public abstract class E2eTestBase {
                             ".*Master: I have been elected leader! New state: ALIVE.*", 1));
         }
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
+        if (taskManagerReplicas > 1) {
+            environment.withScaledService("taskmanager", taskManagerReplicas);
+        }
+        if (exposeFlinkRest) {
+            environment.withExposedService("jobmanager-1", 8081);
+        }
 
         environment.waitingFor("jobmanager-1", buildWaitStrategy(".*Registering TaskManager.*", 1));
-        environment.waitingFor(
-                "taskmanager-1",
-                buildWaitStrategy(".*Successful registration at resource manager.*", 1));
+        for (int i = 1; i <= taskManagerReplicas; i++) {
+            environment.waitingFor(
+                    "taskmanager-" + i,
+                    buildWaitStrategy(".*Successful registration at resource manager.*", 1));
+        }
         environment.start();
 
         jobManager = environment.getContainerByServiceName("jobmanager-1").get();
@@ -154,6 +182,20 @@ public abstract class E2eTestBase {
                 jobManager.execInContainer("bash", "-c", "flink --version").getStdout();
         Matcher flinkVersionMatcher = FLINK_VERSION_PATTERN.matcher(flinkVersionCliOut);
         flinkVersion = flinkVersionMatcher.find() ? flinkVersionMatcher.group(1) : null;
+    }
+
+    protected String flinkEnvFile() {
+        return "flink.env";
+    }
+
+    protected String flinkRestUrl() {
+        if (!exposeFlinkRest) {
+            throw new IllegalStateException("Flink REST is not exposed for this test.");
+        }
+        return String.format(
+                "http://%s:%d",
+                environment.getServiceHost("jobmanager-1", 8081),
+                environment.getServicePort("jobmanager-1", 8081));
     }
 
     private WaitStrategy buildWaitStrategy(String regex, int times) {

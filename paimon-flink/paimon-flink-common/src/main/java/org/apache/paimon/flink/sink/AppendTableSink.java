@@ -32,12 +32,16 @@ import org.apache.flink.api.java.typeutils.EitherTypeInfo;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
@@ -131,5 +135,18 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         }
 
         return written;
+    }
+
+    @Override
+    public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
+        Options options = Options.fromMap(table.options());
+        if (options.get(SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED)
+                && !options.get(PRECOMMIT_COMPACT)) {
+            return written.sinkTo(new DiscardingSink<>())
+                    .name("end")
+                    .setParallelism(written.getParallelism());
+        } else {
+            return super.doCommit(written, commitUser);
+        }
     }
 }

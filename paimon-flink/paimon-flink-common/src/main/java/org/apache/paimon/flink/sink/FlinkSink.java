@@ -125,27 +125,29 @@ public abstract class FlinkSink<T> implements Serializable {
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming = isStreaming(input);
+        Options options = Options.fromMap(table.options());
+        boolean streamingCheckpointEnabled =
+                isStreaming && env.getCheckpointConfig().isCheckpointingEnabled();
 
         boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                         (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME) + " : " + table.name(),
                         new CommittableTypeInfo(),
-                        createWriteOperatorFactory(
+                        createWriteCoordinatorFactory(
                                 StoreSinkWrite.createWriteProvider(
                                         table,
                                         env.getCheckpointConfig(),
                                         isStreaming,
                                         ignorePreviousFiles,
                                         hasSinkMaterializer(input)),
-                                commitUser));
+                                commitUser,
+                                streamingCheckpointEnabled));
         if (parallelism == null) {
             forwardParallelism(written, input);
         } else {
             written.setParallelism(parallelism);
         }
-
-        Options options = Options.fromMap(table.options());
 
         String uidSuffix = options.get(SINK_OPERATOR_UID_SUFFIX);
         if (options.get(SINK_OPERATOR_UID_SUFFIX) != null) {
@@ -305,6 +307,11 @@ public abstract class FlinkSink<T> implements Serializable {
 
     protected abstract OneInputStreamOperatorFactory<T, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser);
+
+    protected OneInputStreamOperatorFactory<T, Committable> createWriteCoordinatorFactory(
+            StoreSinkWrite.Provider writeProvider, String commitUser, boolean isStreaming) {
+        return createWriteOperatorFactory(writeProvider, commitUser);
+    }
 
     protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory();
 

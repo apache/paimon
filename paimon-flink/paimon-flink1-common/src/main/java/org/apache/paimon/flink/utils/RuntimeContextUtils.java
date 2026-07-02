@@ -34,6 +34,10 @@ public class RuntimeContextUtils {
         return context.getIndexOfThisSubtask();
     }
 
+    public static int getAttemptNumber(RuntimeContext context) {
+        return context.getAttemptNumber();
+    }
+
     public static @Nullable Integer getNumberOfParallelSubtasks(FunctionContext context) {
         return null;
     }
