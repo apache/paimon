@@ -339,6 +339,54 @@ table_write = (
 table_write.write_ray(ray_dataset)
 ```
 
+## Bucket Join
+
+`bucket_join` joins two **co-bucketed** tables (same bucket count and the same
+bucket-key) on the bucket-key, with **no global shuffle**: the same key lands in
+the same bucket on both sides, so each bucket is read and joined in its own Ray
+task. It returns a `ray.data.Dataset` whose results stay distributed (never
+pulled into the driver).
+
+A common use is looking up a global `_ROW_ID` for a batch of keys without a
+shuffle join against a large table: keep a small co-bucketed `(key, _ROW_ID)`
+side table, `bucket_join` the incoming keys against it, then feed the resulting
+row ids into a row-id update.
+
+```python
+from pypaimon.ray import bucket_join
+
+ds = bucket_join(
+    left="database_name.incoming_keys",   # co-bucketed table identifier
+    right="database_name.key_rowid",       # co-bucketed table identifier
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    on="url",                              # must equal the bucket-key
+    left_projection=["url"],               # optional; must keep the join key
+    right_projection=["url", "row_id"],    # optional; must keep the join key
+)
+# ds: ray.data.Dataset of the joined rows, e.g. {"url": ..., "row_id": ...}
+```
+
+**Parameters:**
+- `left` / `right`: identifiers of the two co-bucketed tables to join.
+- `on`: the join key(s). Must be exactly the bucket-key — equal keys only
+  co-locate by bucket when joining on the bucket-key.
+- `left_projection` / `right_projection`: optional column projections applied on
+  read. If given, each must include the join key.
+- `join_type`: only `"inner"` is supported (an outer join would need the union
+  of buckets, which per-bucket intersection cannot produce).
+- `ray_remote_args`: Ray remote options applied to each per-bucket join task.
+
+**Returns:** a `ray.data.Dataset` of the joined rows.
+
+**Notes:**
+- Both tables must be fixed-bucket (`bucket > 0`) with the same bucket count and
+  the same bucket-key; otherwise `bucket_join` raises. For primary-key tables
+  that do not set `bucket-key` explicitly, the bucket-key resolves to the
+  (partition-trimmed) primary key.
+- The two sides must not share columns other than the join key, or the
+  underlying pyarrow join would collide; project or rename them away first.
+- Partitioned tables are not supported yet (bucket ids are per-partition).
+
 ## Merge Into
 
 `merge_into` updates (and optionally inserts) rows of a **data-evolution** table
