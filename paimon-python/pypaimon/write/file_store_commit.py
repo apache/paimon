@@ -404,7 +404,12 @@ class FileStoreCommit:
                     latest_snapshot, commit_entries)
 
             conflict_exception = self.conflict_detection.check_conflicts(
-                latest_snapshot, base_data_files, commit_entries, commit_kind)
+                latest_snapshot,
+                base_data_files,
+                commit_entries,
+                commit_kind,
+                (index_deletes or []) + (index_adds or []),
+            )
 
             if conflict_exception is not None:
                 if allow_rollback and self.rollback is not None:

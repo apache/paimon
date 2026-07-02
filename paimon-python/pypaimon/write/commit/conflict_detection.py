@@ -173,7 +173,13 @@ class ConflictDetection:
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
 
-    def check_conflicts(self, latest_snapshot, base_entries, delta_entries, commit_kind):
+    def check_conflicts(
+            self,
+            latest_snapshot,
+            base_entries,
+            delta_entries,
+            commit_kind,
+            delta_index_entries=None):
         try:
             FileEntry.merge_entries(delta_entries)
         except Exception as e:
@@ -199,6 +205,11 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
+        conflict = self.check_deletion_vector_index_conflicts(
+            latest_snapshot, delta_index_entries)
+        if conflict is not None:
+            return conflict
+
         if commit_kind != "COMPACT":
             next_row_id = latest_snapshot.next_row_id if latest_snapshot else None
             conflict = self.check_row_id_existence(
@@ -211,6 +222,54 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
+
+    def check_deletion_vector_index_conflicts(self, latest_snapshot, delta_index_entries=None):
+        dv_entries = [
+            entry for entry in (delta_index_entries or [])
+            if entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX
+        ]
+        if not dv_entries:
+            return None
+
+        delete_entries = [entry for entry in dv_entries if entry.kind == 1]
+        add_entries = [entry for entry in dv_entries if entry.kind == 0]
+        delete_names = {entry.index_file.file_name for entry in delete_entries}
+
+        current_entries = []
+        if latest_snapshot is not None and latest_snapshot.index_manifest is not None:
+            current_entries = [
+                entry for entry in IndexManifestFile(self.table).read(
+                    latest_snapshot.index_manifest)
+                if entry.kind == 0
+                and entry.index_file.index_type == IndexManifestFile.DELETION_VECTORS_INDEX
+            ]
+
+        current_names = {entry.index_file.file_name for entry in current_entries}
+        for delete in delete_entries:
+            if delete.index_file.file_name not in current_names:
+                return RuntimeError(
+                    "Deletion vector index conflict detected: index file {} "
+                    "is not present in the latest snapshot.".format(
+                        delete.index_file.file_name))
+
+        affected_files = []
+        for add in add_entries:
+            for data_file_name in (add.index_file.dv_ranges or {}):
+                affected_files.append((add.partition, add.bucket, data_file_name))
+
+        for partition, bucket, data_file_name in affected_files:
+            for current in current_entries:
+                if current.index_file.file_name in delete_names:
+                    continue
+                if current.partition != partition or current.bucket != bucket:
+                    continue
+                if data_file_name in (current.index_file.dv_ranges or {}):
+                    return RuntimeError(
+                        "Deletion vector index conflict detected: data file {} "
+                        "already has a newer deletion vector index file {}.".format(
+                            data_file_name, current.index_file.file_name))
+
+        return None
 
     def check_overwrite_from_snapshot(self, latest_snapshot, delta_entries, commit_kind):
         if commit_kind != "OVERWRITE":

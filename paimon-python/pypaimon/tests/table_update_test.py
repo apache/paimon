@@ -560,6 +560,32 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
 
         self.assertIn('deletion-vectors.enabled', str(ctx.exception))
 
+    def test_concurrent_row_level_deletes_conflict_on_same_dv_file(self):
+        table = self._create_seeded_deletion_vector_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        first_wb = self._make_write_builder(table)
+        first_update = first_wb.new_update()
+        first_cid = self._next_commit_id()
+        first_msgs = self._apply_delete_by_predicate(
+            first_update,
+            pb.equal('id', 1),
+            first_cid,
+        )
+
+        self._do_delete_by_predicate(table, pb.equal('id', 2))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+
+        first_commit = first_wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(first_commit, first_msgs, first_cid)
+        first_commit.close()
+        self.assertIn('Deletion vector index conflict', str(ctx.exception))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+
     def test_delete_by_partition_predicate_drops_partition_without_dv(self):
         table = self._create_seeded_table(partition_keys=['city'])
         pb = table.new_read_builder().new_predicate_builder()
