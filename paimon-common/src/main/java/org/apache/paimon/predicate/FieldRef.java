@@ -91,6 +91,16 @@ public class FieldRef implements Serializable {
         return nestedArities;
     }
 
+    /**
+     * Returns a copy of this {@link FieldRef} with the given top-level index, preserving name,
+     * type, and any nested path metadata. Use this instead of the constructor when remapping a
+     * {@link FieldRef} to a new schema (e.g. projection, partition, or auth remapping), so that
+     * nested field predicates keep working after the rewrite.
+     */
+    public FieldRef withIndex(int newIndex) {
+        return new FieldRef(newIndex, name, type, nestedIndexes, nestedArities);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

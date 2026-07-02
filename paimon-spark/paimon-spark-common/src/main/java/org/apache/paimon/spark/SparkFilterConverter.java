@@ -231,35 +231,43 @@ public class SparkFilterConverter {
     }
 
     private FieldInfo resolveField(String field) {
+        // Paimon schema does not forbid top-level column names containing '.', so always try an
+        // exact top-level lookup first and only fall back to nested path resolution when no such
+        // field exists.
+        int exactIndex = rowType.getFieldIndex(field);
+        if (exactIndex != -1) {
+            DataType fieldType = rowType.getTypeAt(exactIndex);
+            Transform transform = new FieldTransform(new FieldRef(exactIndex, field, fieldType));
+            return new FieldInfo(transform, fieldType);
+        }
+
         String[] parts = field.split("\\.");
+        if (parts.length == 1) {
+            throw new UnsupportedOperationException(
+                    String.format("Field '%s' is not found in table schema.", field));
+        }
+
         int topLevelIndex = rowType.getFieldIndex(parts[0]);
         if (topLevelIndex == -1) {
             throw new UnsupportedOperationException(
-                    String.format("Field '%s' is not found in table schema.", parts[0]));
+                    String.format("Field '%s' is not found in table schema.", field));
         }
 
-        DataType fieldType;
-        int[] nestedIndexes = null;
-        int[] nestedArities = null;
-        if (parts.length == 1) {
-            fieldType = rowType.getTypeAt(topLevelIndex);
-        } else {
-            fieldType = getNestedFieldType(rowType, parts);
-            if (fieldType == null) {
-                throw new UnsupportedOperationException(
-                        String.format("Nested field '%s' is unsupported.", field));
-            }
-            nestedIndexes = new int[parts.length - 1];
-            nestedArities = new int[parts.length - 1];
-            DataType currentType = rowType.getTypeAt(topLevelIndex);
-            for (int i = 0; i < parts.length - 1; i++) {
-                RowType currentSelection = (RowType) currentType;
-                nestedArities[i] = currentSelection.getFieldCount();
-                String nextPart = parts[i + 1];
-                int nextIndex = currentSelection.getFieldIndex(nextPart);
-                nestedIndexes[i] = nextIndex;
-                currentType = currentSelection.getTypeAt(nextIndex);
-            }
+        DataType fieldType = getNestedFieldType(rowType, parts);
+        if (fieldType == null) {
+            throw new UnsupportedOperationException(
+                    String.format("Nested field '%s' is unsupported.", field));
+        }
+        int[] nestedIndexes = new int[parts.length - 1];
+        int[] nestedArities = new int[parts.length - 1];
+        DataType currentType = rowType.getTypeAt(topLevelIndex);
+        for (int i = 0; i < parts.length - 1; i++) {
+            RowType currentSelection = (RowType) currentType;
+            nestedArities[i] = currentSelection.getFieldCount();
+            String nextPart = parts[i + 1];
+            int nextIndex = currentSelection.getFieldIndex(nextPart);
+            nestedIndexes[i] = nextIndex;
+            currentType = currentSelection.getTypeAt(nextIndex);
         }
 
         Transform transform =
