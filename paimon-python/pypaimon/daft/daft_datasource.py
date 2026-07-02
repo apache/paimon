@@ -844,10 +844,10 @@ class PaimonDataSource(DataSource):
         return None
 
     def _partition_planning_predicate(self, pushdowns: Pushdowns) -> Predicate | None:
-        """Convert Daft's partition_filters channel to a Paimon predicate for
-        plan-time pruning. Gated by _can_plan_predicate (excludes isNull): plan
-        pruning can only over-prune, and the Python post-filter cannot restore a
-        null partition it drops, so isNull is left to the post-filter."""
+        """partition_filters -> Paimon predicate for plan-time pruning. Excludes
+        isNull (_predicate_contains_is_null): pruning drops the whole null
+        partition, which the post-filter can't restore -- so exclude it even for
+        PK tables (stricter than the row path's _can_plan_predicate)."""
         partition_filters = getattr(pushdowns, "partition_filters", None)
         if partition_filters is None:
             return None
@@ -857,9 +857,7 @@ class PaimonDataSource(DataSource):
             # Unconverted parts still apply via _partition_filter_skips_split.
             logger.debug("Partition filter not pushed to plan: %s", remaining)
         if paimon_predicate is None or self._predicate_contains_is_null(paimon_predicate):
-            # isNull can over-prune the null partition at plan time and the
-            # post-filter can't restore it; leave it to _partition_filter_skips_split.
-            return None
+            return None  # isNull -> post-filter only (see docstring)
         return paimon_predicate
 
     @staticmethod
