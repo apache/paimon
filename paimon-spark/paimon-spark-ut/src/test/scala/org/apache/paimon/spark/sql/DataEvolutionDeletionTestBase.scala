@@ -131,4 +131,30 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
         Seq(Row(5, 5, 5, 5L), Row(7, 700, 7, 7L), Row(8, 8, 8, 8L)))
     }
   }
+
+  test("Data Evolution deletion: self merge skips deleted rows") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, b INT, c INT)
+            |TBLPROPERTIES (
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(0, 5)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(5, 10)")
+      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9)")
+
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED AND source.id IN (2, 6, 7, 9) THEN UPDATE SET t.b = source.b + 100
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
+        Seq(Row(5, 5, 5, 5L), Row(7, 107, 7, 7L), Row(8, 8, 8, 8L)))
+    }
+  }
 }
