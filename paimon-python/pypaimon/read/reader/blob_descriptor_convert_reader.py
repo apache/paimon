@@ -41,7 +41,8 @@ class BlobInlineConvertReader(RecordBatchReader):
     """
 
     def __init__(self, inner: RecordBatchReader, table,
-                 prescan_reader_factory: Optional[Callable[[Set[str]], RecordBatchReader]] = None):
+                 prescan_reader_factory: Optional[Callable[[Set[str]], RecordBatchReader]] = None,
+                 blob_parallelism: int = 1):
         """
         Args:
             inner: The main data reader (reads all columns).
@@ -50,10 +51,12 @@ class BlobInlineConvertReader(RecordBatchReader):
                 reader projecting only the specified field names. Used for
                 prescan to collect BlobViewStructs without reading all columns.
                 Signature: (field_names: Set[str]) -> RecordBatchReader
+            blob_parallelism: number of threads for concurrent blob reads.
         """
         self._inner = inner
         self._table = table
         self._prescan_reader_factory = prescan_reader_factory
+        self._blob_parallelism = blob_parallelism
         self.file_io = inner.file_io
         self.blob_field_indices = inner.blob_field_indices
         # Preserve original BlobViewStruct bytes when resolve disabled: skip both
@@ -170,10 +173,13 @@ class BlobInlineConvertReader(RecordBatchReader):
             if field_name not in batch.schema.names:
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
-            converted_values = []
-            for value in values:
-                blob = Blob.from_bytes(value, self._table.file_io)
-                converted_values.append(blob.to_data() if blob else None)
+            blobs = [Blob.from_bytes(v, self._table.file_io) for v in values]
+
+            if self._blob_parallelism > 1:
+                converted_values = self._table.file_io.read_blobs_concurrent(
+                    blobs, self._blob_parallelism)
+            else:
+                converted_values = [b.to_data() if b else None for b in blobs]
 
             column_idx = batch.schema.names.index(field_name)
             batch = batch.set_column(

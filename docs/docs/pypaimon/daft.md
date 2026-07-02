@@ -268,69 +268,58 @@ result = df.with_column("size", file_length(col("image")))
 result.show()
 ```
 
-To read actual blob content (e.g., decode an image), use `file.open()`.
-Only filtered rows trigger I/O:
+### Reading blob content
+
+Use `read_blob` to read a blob `File` column to `binary` bytes. It reads blobs
+concurrently, so it is much faster than a per-row `file.open()` loop:
 
 ```python
-@daft.func
-def decode_image(file: daft.File) -> str:
-    with file.open() as f:
-        data = f.read()
-    return f"decoded {len(data)} bytes"
+from daft import col
+from pypaimon.daft import read_paimon, read_blob
 
-result = df.with_column("info", decode_image(col("image")))
+catalog_options = {"warehouse": "oss://my-bucket/warehouse"}
+table = "my_db.image_table"
+
+df = read_paimon(table, catalog_options)
+df = df.where(col("id") < 100)  # filter before reading bytes
+
+result = df.select(
+    col("id"),
+    read_blob(col("image"), catalog_options, table).alias("image_bytes"),
+)
 result.show()
 ```
 
-### Parallel blob reading
+Tune concurrency with `max_concurrency` (default 64).
 
-By default, `@daft.func` processes rows sequentially. To read blobs
-concurrently within a single worker, use an async UDF with
-`max_concurrency` and `asyncio.to_thread` (because `file.open().read()`
-is synchronous blocking I/O):
+### Streaming / partial reads with `open_blob`
 
-```python
-import asyncio
-
-def _read_blob(file: daft.File | None) -> str | None:
-    if file is None:
-        return None
-    with file.open() as f:
-        data = f.read()
-    return f"decoded {len(data)} bytes"
-
-@daft.func(max_concurrency=8)
-async def decode_image(file: daft.File | None) -> str | None:
-    return await asyncio.to_thread(_read_blob, file)
-
-result = df.with_column("info", decode_image(col("image")))
-result.show()
-```
-
-When running on Ray, the UDF calls are distributed across Ray workers
-automatically — each worker processes its partition in parallel, giving you
-batch-level concurrency without any extra code.
-
-### Streaming (chunk) reads
-
-`file.open()` returns a seekable stream that supports `read(size)`, so you can
-process large blobs in chunks without loading everything into memory:
+For large blobs (videos, model weights) where you don't want to load
+everything into memory, use `open_blob` to get a seekable stream:
 
 ```python
+import daft
+from daft import col
+from pypaimon.daft import read_paimon, open_blob
+
+catalog_options = {"warehouse": "oss://my-bucket/warehouse"}
+table = "my_db.image_table"
+
+df = read_paimon(table, catalog_options)
+
 @daft.func(return_dtype=daft.DataType.binary())
 def first_4k(file: daft.File) -> bytes | None:
     if file is None:
         return None
-    with file.open() as f:
+    with open_blob(file, catalog_options, table) as f:
         return f.read(4096)
 
 result = df.with_column("header", first_4k(col("image")))
-result.show()
 ```
 
-See [Blob Storage — Streaming for Large Blobs](./blob#streaming-for-large-blobs)
-for more details on the underlying `OffsetInputStream` API (`read(size)` /
-`seek()` / `tell()`).
+`open_blob` is a drop-in replacement for `file.open()` for streaming an
+individual large blob. It reads one blob per call, so for bulk reads of a
+whole column prefer `read_blob`.
 
 ## Catalog Abstraction
 
