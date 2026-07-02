@@ -127,7 +127,6 @@ class GlobalIndexDropper:
             CommitMessage(
                 partition=partition,
                 bucket=0,
-                new_files=[],
                 index_deletes=deletes,
             )
             for partition, deletes in by_partition.items()

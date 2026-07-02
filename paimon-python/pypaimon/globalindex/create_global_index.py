@@ -258,7 +258,6 @@ class GlobalIndexBuilder:
                     CommitMessage(
                         partition=tuple(split.partition.values),
                         bucket=0,
-                        new_files=[],
                         index_adds=index_adds,
                     )
                 )
@@ -325,7 +324,6 @@ class GlobalIndexBuilder:
                     CommitMessage(
                         partition=tuple(index_split.partition.values),
                         bucket=0,
-                        new_files=[],
                         index_adds=index_adds,
                     )
                 )

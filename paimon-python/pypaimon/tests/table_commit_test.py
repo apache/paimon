@@ -22,6 +22,7 @@ from parameterized import parameterized
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.data_increment import DataIncrement
 from pypaimon.write.table_commit import BatchTableCommit, StreamTableCommit
 
 
@@ -51,7 +52,11 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
         commit, mock_fsc = self._create_commit(BatchTableCommit, overwrite_partition={'f0': 1})
 
         messages = [
-            CommitMessage(partition=(1,), bucket=0, new_files=[Mock()] if has_files else [])
+            CommitMessage(
+                partition=(1,),
+                bucket=0,
+                data_increment=DataIncrement(new_files=[Mock()] if has_files else []),
+            )
             for has_files in msg_flags
         ]
         commit.commit(messages)
@@ -74,7 +79,11 @@ class TestTableCommitEmptyOverwrite(unittest.TestCase):
         commit, mock_fsc = self._create_commit(BatchTableCommit, overwrite_partition=None)
 
         messages = [
-            CommitMessage(partition=(), bucket=0, new_files=[Mock()] if has_files else [])
+            CommitMessage(
+                partition=(),
+                bucket=0,
+                data_increment=DataIncrement(new_files=[Mock()] if has_files else []),
+            )
             for has_files in msg_flags
         ]
         commit.commit(messages)

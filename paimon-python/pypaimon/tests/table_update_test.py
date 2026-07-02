@@ -194,6 +194,20 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             self._read_all(table)['age'].to_pylist(),
         )
 
+    def test_update_commit_message_carries_total_buckets(self):
+        """Row-id updates must stamp the planned bucket count onto their
+        CommitMessage like the other write paths, so a later commit does not
+        rewrite a stale plan with the table's current bucket count."""
+        table = self._create_seeded_table()
+        msgs = self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0],
+            'age': [99],
+        }), ['age'])
+        self.assertTrue(msgs)
+        for m in msgs:
+            self.assertIsNotNone(m.total_buckets)
+            self.assertEqual(table.total_buckets, m.total_buckets)
+
     def test_update_by_predicate(self):
         table = self._create_seeded_table()
         wb = self._make_write_builder(table)
