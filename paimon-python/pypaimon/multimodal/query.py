@@ -217,6 +217,9 @@ class ScanQuery:
             for name in self._predicate_fields():
                 if name not in base and name not in blob_set:
                     base.append(name)
+        # with_row_id() adds _ROW_ID, mirroring to_arrow()'s _effective_projection.
+        if self._include_row_id and SpecialFields.ROW_ID.name not in base:
+            base.append(SpecialFields.ROW_ID.name)
         # base already excludes every BLOB, so append the requested ones as-is.
         return base + list(blob_cols)
 
@@ -228,8 +231,12 @@ class ScanQuery:
             return [name for name in available if name not in blob_set]
         # Skip unknown projected names, matching to_arrow()'s silent drop.
         available = set(available)
-        return [name for name in self._projection
+        cols = [name for name in self._projection
                 if name in available and name not in blob_set]
+        row_id = SpecialFields.ROW_ID.name
+        if self._include_row_id and row_id in available and row_id not in cols:
+            cols.append(row_id)
+        return cols
 
     def _predicate_fields(self):
         if self._predicate is None:

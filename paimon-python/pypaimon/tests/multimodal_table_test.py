@@ -874,6 +874,33 @@ class MultimodalTableTest(unittest.TestCase):
         scalar3, _ = obs.scan().select(["missing", "image"]).read_blobs("image")
         self.assertNotIn("missing", scalar3.schema.names)
 
+    def test_scan_read_blobs_with_row_id(self):
+        # with_row_id() must expose _ROW_ID in the scalar table, like to_arrow().
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i, "image": ("v-%d" % i).encode()}
+            for i in range(3)
+        ])
+        row_id = "_ROW_ID"
+
+        scalar, blobs = (
+            obs.scan().with_row_id().select(["idx", "image"]).read_blobs("image"))
+        self.assertIn(row_id, scalar.schema.names)
+        expected = {r["idx"]: r[row_id]
+                    for r in obs.scan().with_row_id().to_arrow().to_pylist()}
+        got = dict(zip(scalar.column("idx").to_pylist(),
+                       scalar.column(row_id).to_pylist()))
+        self.assertEqual(expected, got)
+
     def test_search_query_rejects_blob_reads(self):
         t = self.conn.create_table(
             "srch",
