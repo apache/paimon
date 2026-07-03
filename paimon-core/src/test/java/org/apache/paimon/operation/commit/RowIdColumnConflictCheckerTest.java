@@ -114,6 +114,43 @@ class RowIdColumnConflictCheckerTest {
                 .hasMessageContaining("Cannot find write column 'missing'");
     }
 
+    @Test
+    void testSubFieldDisjointLeavesDoNotConflict() {
+        // schema 2: id INT, nest ROW<a INT, b INT>
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.b"))))
+                .isFalse();
+    }
+
+    @Test
+    void testSubFieldSameLeafConflicts() {
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest.a")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
+    @Test
+    void testWholeStructConflictsWithSubField() {
+        // a whole-struct write expands to all of its leaves, so it conflicts with a sub-field write
+        RowIdColumnConflictChecker checker =
+                checker(file("current", 0L, 10L, 2L, Arrays.asList("nest")));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
+    @Test
+    void testFullSchemaWriteConflictsWithSubField() {
+        RowIdColumnConflictChecker checker = checker(file("current", 0L, 10L, 2L, null));
+
+        assertThat(checker.conflictsWith(file("historical", 0L, 10L, 2L, Arrays.asList("nest.a"))))
+                .isTrue();
+    }
+
     private RowIdColumnConflictChecker checker(DataFileMeta... files) {
         return RowIdColumnConflictChecker.fromDataFiles(
                 createSchemaManager(), Arrays.asList(files));
@@ -166,6 +203,23 @@ class RowIdColumnConflictCheckerTest {
                                         new DataField(0, "id", DataTypes.INT()),
                                         new DataField(1, "b_renamed", DataTypes.INT()),
                                         new DataField(2, "c", DataTypes.INT())),
+                                Collections.emptyList(),
+                                Collections.singletonList("id"),
+                                Collections.emptyMap(),
+                                "")));
+        schemas.put(
+                2L,
+                org.apache.paimon.schema.TableSchema.create(
+                        2L,
+                        new Schema(
+                                Arrays.asList(
+                                        new DataField(0, "id", DataTypes.INT()),
+                                        new DataField(
+                                                1,
+                                                "nest",
+                                                DataTypes.ROW(
+                                                        new DataField(2, "a", DataTypes.INT()),
+                                                        new DataField(3, "b", DataTypes.INT())))),
                                 Collections.emptyList(),
                                 Collections.singletonList("id"),
                                 Collections.emptyMap(),

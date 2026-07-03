@@ -66,8 +66,10 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -128,6 +130,10 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
     // the snapshot id this action based on
     private long baseSnapshotId;
+
+    // columns written by this merge, as (possibly nested) dotted paths, e.g. ["id", "nest.a"];
+    // derived in buildSource() and consumed by writePartialColumns().
+    private List<String> writePaths;
 
     public DataEvolutionMergeIntoAction(
             String databaseName, String tableName, Map<String, String> catalogConfig) {
@@ -250,32 +256,15 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         handleSqls();
 
         // assign row id for each source row
+        boolean updateAll = matchedUpdateSet.equals("*");
         List<String> project;
-        if (matchedUpdateSet.equals("*")) {
+        if (updateAll) {
             // if sourceName is qualified like 'default.S', we should build a project like S.*
             project = Collections.singletonList(sourceTableName() + ".*");
         } else {
-            // validate upsert changes
-            Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
-            for (String targetField : changes.keySet()) {
-                if (!targetFieldNames.contains(extractFieldName(targetField))) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "Invalid column reference '%s' of table '%s' at matched-upsert action.",
-                                    targetField, identifier.getFullName()));
-                }
-            }
-
-            // rename source table's selected columns according to SET statement
-            project =
-                    changes.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "%s AS `%s`",
-                                                    entry.getValue(),
-                                                    extractFieldName(entry.getKey())))
-                            .collect(Collectors.toList());
+            // validate upsert changes and build the projection (top-level columns and, for
+            // sub-field-level data evolution, partial nested structs via dotted paths)
+            project = buildExplicitProject();
         }
 
         String query;
@@ -316,11 +305,167 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         Table source = batchTEnv.sqlQuery(query);
 
         checkSchema(source);
-        RowType sourceType =
-                SpecialFields.rowTypeWithRowId(table.rowType())
-                        .project(source.getResolvedSchema().getColumnNames());
+
+        RowType sourceType;
+        if (updateAll) {
+            List<String> columnNames = source.getResolvedSchema().getColumnNames();
+            sourceType = SpecialFields.rowTypeWithRowId(table.rowType()).project(columnNames);
+            writePaths =
+                    columnNames.stream()
+                            .filter(name -> !SpecialFields.ROW_ID.name().equals(name))
+                            .collect(Collectors.toList());
+        } else {
+            // build the source type manually so _ROW_ID is first and the column order matches the
+            // SQL projection order; for nested columns the field is the partial (pruned) struct.
+            RowType pruned = table.rowType().projectByPaths(writePaths);
+            List<DataField> srcFields = new ArrayList<>();
+            srcFields.add(SpecialFields.ROW_ID);
+            for (String topCol : explicitTopColumnOrder(writePaths)) {
+                srcFields.add(pruned.getField(table.rowType().getField(topCol).id()));
+            }
+            sourceType = new RowType(srcFields);
+        }
 
         return Tuple2.of(toDataStream(source), sourceType);
+    }
+
+    /**
+     * Validate the SET targets and build the SQL projection list. A target may address a top-level
+     * column ({@code col} / {@code T.col}) or, for sub-field-level data evolution, a nested
+     * sub-field ({@code nest.a} / {@code T.nest.a}). A partially-updated struct column is rebuilt
+     * as a partial {@code CAST(ROW(...) AS ROW<...>)} so only the touched sub-fields are written.
+     * Also sets {@link #writePaths}.
+     */
+    private List<String> buildExplicitProject() {
+        Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
+
+        // group by top-level column, preserving first-seen order
+        Map<String, String> wholeCols = new LinkedHashMap<>();
+        Map<String, LinkedHashMap<String, String>> nestedCols = new LinkedHashMap<>();
+        List<String> order = new ArrayList<>();
+
+        for (Map.Entry<String, String> entry : changes.entrySet()) {
+            List<String> path = parseTargetPath(entry.getKey());
+            String topCol = path.get(0);
+            if (!targetFieldNames.contains(topCol)) {
+                throw new RuntimeException(
+                        String.format(
+                                "Invalid column reference '%s' of table '%s' at matched-upsert action.",
+                                entry.getKey(), identifier.getFullName()));
+            }
+            if (!order.contains(topCol)) {
+                order.add(topCol);
+            }
+            if (path.size() == 1) {
+                // whole top-level column
+                if (nestedCols.containsKey(topCol) || wholeCols.containsKey(topCol)) {
+                    throw new RuntimeException(
+                            "Conflicting updates for column '" + topCol + "' in SET clause.");
+                }
+                wholeCols.put(topCol, entry.getValue());
+            } else {
+                // nested sub-field update
+                if (!coreOptions.dataEvolutionNestedFieldEnabled()) {
+                    throw new UnsupportedOperationException(
+                            "Updating a nested sub-field ('"
+                                    + entry.getKey()
+                                    + "') requires '"
+                                    + CoreOptions.DATA_EVOLUTION_NESTED_FIELD_ENABLED.key()
+                                    + "=true'.");
+                }
+                if (path.size() > 2) {
+                    throw new UnsupportedOperationException(
+                            "Sub-field-level data evolution only supports one level of nesting, "
+                                    + "but got '"
+                                    + entry.getKey()
+                                    + "'.");
+                }
+                if (wholeCols.containsKey(topCol)) {
+                    throw new RuntimeException(
+                            "Conflicting updates for column '" + topCol + "' in SET clause.");
+                }
+                String subName = path.get(1);
+                LinkedHashMap<String, String> subs =
+                        nestedCols.computeIfAbsent(topCol, k -> new LinkedHashMap<>());
+                if (subs.containsKey(subName)) {
+                    throw new RuntimeException(
+                            "Duplicated update for sub-field '"
+                                    + topCol
+                                    + "."
+                                    + subName
+                                    + "' in SET clause.");
+                }
+                subs.put(subName, entry.getValue());
+            }
+        }
+
+        // first pass: writePaths (so projectByPaths can build the pruned nested types)
+        writePaths = new ArrayList<>();
+        for (String topCol : order) {
+            if (wholeCols.containsKey(topCol)) {
+                writePaths.add(topCol);
+            } else {
+                for (String subName : nestedCols.get(topCol).keySet()) {
+                    writePaths.add(topCol + "." + subName);
+                }
+            }
+        }
+
+        // second pass: build projection expressions
+        RowType pruned = table.rowType().projectByPaths(writePaths);
+        List<String> project = new ArrayList<>();
+        for (String topCol : order) {
+            if (wholeCols.containsKey(topCol)) {
+                project.add(String.format("%s AS `%s`", wholeCols.get(topCol), topCol));
+            } else {
+                LinkedHashMap<String, String> subs = nestedCols.get(topCol);
+                DataType prunedColType =
+                        pruned.getField(table.rowType().getField(topCol).id()).type();
+                // value order must match the pruned struct's schema field order
+                List<String> values = new ArrayList<>();
+                for (DataField subField : ((RowType) prunedColType).getFields()) {
+                    String value = subs.get(subField.name());
+                    Preconditions.checkState(
+                            value != null,
+                            "Missing value for sub-field '%s.%s', it's a bug.",
+                            topCol,
+                            subField.name());
+                    values.add(value);
+                }
+                String typeStr =
+                        LogicalTypeConversion.toLogicalType(prunedColType).asSerializableString();
+                project.add(
+                        String.format(
+                                "CAST(ROW(%s) AS %s) AS `%s`",
+                                String.join(", ", values), typeStr, topCol));
+            }
+        }
+        return project;
+    }
+
+    /** The first-seen order of top-level columns present in the (dotted) write paths. */
+    private List<String> explicitTopColumnOrder(List<String> paths) {
+        List<String> order = new ArrayList<>();
+        for (String path : paths) {
+            int dot = path.indexOf('.');
+            String topCol = dot < 0 ? path : path.substring(0, dot);
+            if (!order.contains(topCol)) {
+                order.add(topCol);
+            }
+        }
+        return order;
+    }
+
+    /**
+     * Parse a SET target into a path relative to the target table: strip an optional leading
+     * table-qualifier segment (the target table name/alias), leaving {@code [topColumn, sub...]}.
+     */
+    private List<String> parseTargetPath(String target) {
+        List<String> segs = new ArrayList<>(Arrays.asList(target.split("\\.")));
+        if (segs.size() > 1 && segs.get(0).equals(targetTableName())) {
+            segs.remove(0);
+        }
+        return segs;
     }
 
     public DataStream<Tuple2<Long, RowData>> shuffleByFirstRowId(
@@ -389,7 +534,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         "PARTIAL WRITE COLUMNS",
                         new CommittableTypeInfo(),
                         new DataEvolutionPartialWriteOperator(
-                                (FileStoreTable) table, rowType, baseSnapshotId))
+                                (FileStoreTable) table, rowType, writePaths, baseSnapshotId))
                 .setParallelism(sinkParallelism);
     }
 
@@ -524,7 +669,23 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         .getTypeRoot()
                                         .getFamilies()
                                         .contains(DataTypeFamily.BINARY_STRING);
+                // Struct columns need a structural compatibility check: DataTypeCasts does not
+                // support ROW-to-ROW casts. For a sub-field write (dotted paths like nest.a) the
+                // source is a partial (subset) struct carrying only the updated sub-fields, so a
+                // subset check is correct. For a whole-column assignment (e.g. T.nest=S.nest) the
+                // source must fully cover the target struct, so a narrower source is rejected
+                // instead of being written as an incomplete whole-struct file.
+                boolean structCompatible = false;
+                if (paimonType instanceof RowType && targetField.type() instanceof RowType) {
+                    RowType sourceStruct = (RowType) paimonType;
+                    RowType targetStruct = (RowType) targetField.type();
+                    structCompatible =
+                            isSubFieldWrite(flinkColumn.getName())
+                                    ? isCompatiblePartialStruct(sourceStruct, targetStruct)
+                                    : isFullyCompatibleStruct(sourceStruct, targetStruct);
+                }
                 if (!blobCompatible
+                        && !structCompatible
                         && !DataTypeCasts.supportsCompatibleCast(paimonType, targetField.type())) {
                     throw new IllegalStateException(
                             String.format(
@@ -536,6 +697,61 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         if (!foundRowIdColumn) {
             throw new IllegalStateException("_ROW_ID column not found in generated source.");
         }
+    }
+
+    /**
+     * Whether {@code part} is a valid partial (subset) of the full struct {@code full}: every
+     * sub-field of {@code part} must exist in {@code full} (by name) with a compatible cast.
+     */
+    private boolean isCompatiblePartialStruct(RowType part, RowType full) {
+        for (DataField partField : part.getFields()) {
+            if (!full.containsField(partField.name())) {
+                return false;
+            }
+            DataType fullSubType = full.getField(partField.name()).type();
+            if (partField.type() instanceof RowType && fullSubType instanceof RowType) {
+                if (!isCompatiblePartialStruct((RowType) partField.type(), (RowType) fullSubType)) {
+                    return false;
+                }
+            } else if (!DataTypeCasts.supportsCompatibleCast(partField.type(), fullSubType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether {@code source} fully covers the target struct {@code target} for a whole-column
+     * assignment: every target sub-field must exist in {@code source} (by name) with a compatible
+     * cast. A source missing a target sub-field (a narrower struct) is rejected.
+     */
+    private boolean isFullyCompatibleStruct(RowType source, RowType target) {
+        for (DataField targetField : target.getFields()) {
+            if (!source.containsField(targetField.name())) {
+                return false;
+            }
+            DataType sourceSubType = source.getField(targetField.name()).type();
+            DataType targetSubType = targetField.type();
+            if (sourceSubType instanceof RowType && targetSubType instanceof RowType) {
+                if (!isFullyCompatibleStruct((RowType) sourceSubType, (RowType) targetSubType)) {
+                    return false;
+                }
+            } else if (!DataTypeCasts.supportsCompatibleCast(sourceSubType, targetSubType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether the given top-level column is written through dotted sub-field paths (e.g. nest.a).
+     */
+    private boolean isSubFieldWrite(String topColumn) {
+        if (writePaths == null) {
+            return false;
+        }
+        String prefix = topColumn + ".";
+        return writePaths.stream().anyMatch(p -> p.startsWith(prefix));
     }
 
     private void handleSqls() {
@@ -566,11 +782,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         return Arrays.stream(sourceTable.split("\\."))
                 .map(s -> String.format("`%s`", s))
                 .collect(Collectors.joining("."));
-    }
-
-    private String extractFieldName(String sourceField) {
-        String[] fieldPath = sourceField.split("\\.");
-        return fieldPath[fieldPath.length - 1];
     }
 
     private String escapedRowTrackingTargetName() {

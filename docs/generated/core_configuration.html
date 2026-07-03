@@ -477,6 +477,12 @@ under the License.
             <td>Whether to persist source when process merge into action on data evolution table.</td>
         </tr>
         <tr>
+            <td><h5>data-evolution.nested-field.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable sub-field-level data evolution for nested (struct) columns. When enabled, an update that only touches some sub-fields of a nested column writes an incremental file containing just those sub-fields (aligned by row id); when disabled, the whole top-level column is rewritten. Requires data-evolution.enabled=true.</td>
+        </tr>
+        <tr>
             <td><h5>data-evolution.row-sidecar.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
