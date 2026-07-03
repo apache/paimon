@@ -37,26 +37,23 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
-    @Nullable private String partitionString;
-    private int bucket = -1;
+    private String logInfo = "";
 
     public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
         this.metricsReporter = metricsReporter;
     }
 
-    /** Set partition and bucket info for logging purposes. */
-    public void setPartitionBucketInfo(@Nullable String partitionString, int bucket) {
-        this.partitionString = partitionString;
-        this.bucket = bucket;
+    /** Set additional compact task information for logging purposes. */
+    public void setLogInfo(String logInfo) {
+        this.logInfo = logInfo;
     }
 
     @Override
     public CompactResult call() throws Exception {
         MetricUtils.safeCall(this::startTimer, LOG);
         LOG.info(
-                "Paimon compact task started: partition={}, bucket={}, taskType={}",
-                partitionString,
-                bucket,
+                "Paimon compact task started: {}, taskType={}",
+                logInfo,
                 getClass().getSimpleName());
         try {
             long startMillis = System.currentTimeMillis();
@@ -83,10 +80,9 @@ public abstract class CompactTask implements Callable<CompactResult> {
                     LOG);
 
             LOG.info(
-                    "Paimon compact task finished: partition={}, bucket={}, taskType={}, "
+                    "Paimon compact task finished: {}, taskType={}, "
                             + "inputFiles={}, inputBytes={}, outputFiles={}, outputBytes={}, durationMs={}",
-                    partitionString,
-                    bucket,
+                    logInfo,
                     getClass().getSimpleName(),
                     result.before().size(),
                     result.before().stream().mapToLong(DataFileMeta::fileSize).sum(),
@@ -100,9 +96,8 @@ public abstract class CompactTask implements Callable<CompactResult> {
             return result;
         } catch (Exception e) {
             LOG.warn(
-                    "Paimon compact task failed: partition={}, bucket={}, taskType={}",
-                    partitionString,
-                    bucket,
+                    "Paimon compact task failed: {}, taskType={}",
+                    logInfo,
                     getClass().getSimpleName(),
                     e);
             throw e;

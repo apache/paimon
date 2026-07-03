@@ -25,7 +25,6 @@ import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
@@ -34,7 +33,6 @@ import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -74,8 +72,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
-    @Nullable private String partitionString;
-    private int partitionBucket = -1;
+    private String logInfo = "";
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -110,17 +107,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
-    /**
-     * Set partition and bucket info so compact tasks can log readable partition/bucket identifiers.
-     */
-    public void setPartitionBucketInfo(
-            BinaryRow partition, int bucket, FileStorePathFactory pathFactory) {
-        try {
-            this.partitionString = pathFactory.getPartitionString(partition);
-        } catch (Exception e) {
-            this.partitionString = partition.toString();
-        }
-        this.partitionBucket = bucket;
+    /** Set additional compact task information for logging purposes. */
+    public void setLogInfo(String logInfo) {
+        this.logInfo = logInfo;
     }
 
     @Override
@@ -262,7 +251,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
-        task.setPartitionBucketInfo(partitionString, partitionBucket);
+        task.setLogInfo(logInfo);
         taskFuture = executor.submit(task);
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();
