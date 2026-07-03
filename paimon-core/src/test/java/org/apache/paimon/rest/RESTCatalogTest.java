@@ -3941,6 +3941,42 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testRowFilterReadLimitReadsPastUnauthorizedRows() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "secret", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // One file: the authorized row (secret=1) comes after unauthorized rows (secret=0).
+        commitRows(table, GenericRow.of(1, 0), GenericRow.of(2, 0), GenericRow.of(3, 1));
+
+        LeafPredicate secretFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "secret", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        setRowFilter(identifier, Collections.singletonList(secretFilter));
+
+        // The read-side limit must be disabled under auth, else it stops at the first
+        // (unauthorized) rows and misses the authorized one.
+        List<String> result = batchReadWithReadLimit(table, 1);
+        assertThat(result).contains("+I[3, 1]");
+    }
+
+    @Test
     void testRowFilterWithTopNKeepsAuthorizedSplits() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_table_topn");
         catalog.createDatabase(identifier.getDatabaseName(), true);
@@ -4166,8 +4202,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     protected List<String> batchReadWithLimit(Table table, int limit) throws IOException {
-        // Apply the limit only on the scan (plan-time file pruning), not on the read side, so the
-        // result is not truncated and reflects exactly which files the plan kept.
+        // Limit only the scan (file pruning), not the read, so the result reflects the kept files.
         InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
         return batchRead(table, scan.withLimit(limit).plan().splits());
     }
@@ -4178,8 +4213,19 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         return batchRead(table, scan.withTopN(topN).plan().splits());
     }
 
+    protected List<String> batchReadWithReadLimit(Table table, int limit) throws IOException {
+        // Exercises the ReadBuilder.withLimit path, which limits both the scan and the read side.
+        ReadBuilder readBuilder = table.newReadBuilder().withLimit(limit);
+        return batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+    }
+
     private List<String> batchRead(Table table, List<Split> splits) throws IOException {
-        TableRead read = table.newReadBuilder().newRead();
+        return batchRead(table, splits, table.newReadBuilder());
+    }
+
+    private List<String> batchRead(Table table, List<Split> splits, ReadBuilder readBuilder)
+            throws IOException {
+        TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         List<String> result = new ArrayList<>();
 

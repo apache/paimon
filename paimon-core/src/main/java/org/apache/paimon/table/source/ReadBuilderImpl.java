@@ -47,6 +47,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private final InnerTable table;
     private final RowType partitionType;
     private final String defaultPartitionName;
+    private final boolean queryAuthEnabled;
 
     private Predicate filter;
 
@@ -69,7 +70,9 @@ public class ReadBuilderImpl implements ReadBuilder {
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
         this.partitionType = table.rowType().project(table.partitionKeys());
-        this.defaultPartitionName = new CoreOptions(table.options()).partitionDefaultName();
+        CoreOptions options = new CoreOptions(table.options());
+        this.defaultPartitionName = options.partitionDefaultName();
+        this.queryAuthEnabled = options.queryAuthEnabled();
     }
 
     @Override
@@ -234,11 +237,15 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (readType != null) {
             read.withReadType(readType);
         }
-        if (topN != null) {
-            read.withTopN(topN);
-        }
-        if (limit != null) {
-            read.withLimit(limit);
+        // Query auth filters rows at read time; skip limit/TopN pushdown so they aren't applied
+        // before auth. The engine still enforces LIMIT.
+        if (!queryAuthEnabled) {
+            if (topN != null) {
+                read.withTopN(topN);
+            }
+            if (limit != null) {
+                read.withLimit(limit);
+            }
         }
         return read;
     }

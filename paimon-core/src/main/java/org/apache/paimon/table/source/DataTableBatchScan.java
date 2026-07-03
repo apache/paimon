@@ -91,8 +91,8 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        // Record it; applyPushDownLimit pushes the file-store limit only when safe.
         this.pushDownLimit = limit;
-        snapshotReader.withLimit(limit);
         return this;
     }
 
@@ -138,16 +138,14 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (authHasNonPartitionFilter) {
-            // Auth drops rows at read time but isn't pushed to FileStoreScan, so clear the
-            // file-level limit too, else the scan may stop before authorized rows.
-            snapshotReader.withLimit(0);
-        }
+        // A read-time filter (WHERE or auth) drops rows after scanning, so only push the limit down
+        // when neither is present.
         if (pushDownLimit == null
                 || snapshotReader.hasNonPartitionFilter()
                 || authHasNonPartitionFilter) {
             return Optional.empty();
         }
+        snapshotReader.withLimit(pushDownLimit);
 
         StartingScanner.Result result = startingScanner.scan(snapshotReader);
         if (!(result instanceof ScannedResult)) {
