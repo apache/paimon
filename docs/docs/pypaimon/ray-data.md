@@ -463,7 +463,7 @@ from pypaimon.ray import update_by_row_id
 
 metrics = update_by_row_id(
     target="database_name.table_name",
-    source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas / table-name str
+    source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas, carrying _ROW_ID
     catalog_options={"warehouse": "/path/to/warehouse"},
     update_cols=["feature"],     # non-blob columns to overwrite
 )
@@ -471,9 +471,10 @@ print(metrics)   # {"num_updated": 50}
 ```
 
 **Parameters:**
-- `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a Paimon
-  table identifier string. It must carry `_ROW_ID` and every column in `update_cols`;
-  extra columns are ignored. Values are cast to the target column types.
+- `source`: a `ray.data.Dataset`, `pyarrow.Table`, or `pandas.DataFrame` carrying the
+  target `_ROW_ID` and every column in `update_cols`; extra columns are ignored, and
+  values are cast to the target column types. A table-name source is not accepted: a
+  table's system `_ROW_ID` is its own and cannot address the target's rows.
 - `update_cols`: the non-blob columns to overwrite. Must be non-empty.
 - `num_partitions`: parallelism for grouping the update rows by target file;
   defaults to `max(1, cluster_cpus * 2)`.

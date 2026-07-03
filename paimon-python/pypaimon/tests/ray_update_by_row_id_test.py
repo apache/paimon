@@ -160,17 +160,15 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(back["age"], [77, 88])
         self.assertEqual(back["name"], ["a", "z"])
 
-    def test_accepts_table_name_source(self):
+    def test_rejects_table_name_source(self):
+        # A source table's system _ROW_ID is its own, not the target's row ids, so a
+        # table-name source is rejected rather than silently updating wrong rows.
         target = self._create()
         self._write(target, pa.Table.from_pydict(
-            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
-        # a fresh source table's _ROW_ID (0, 1) lines up with the target's
-        source = self._create()
-        self._write(source, pa.Table.from_pydict(
-            {"id": [1, 2], "name": ["a", "b"], "age": [55, 66]}, schema=self.pa_schema))
-        stats = update_by_row_id(target, source, self.catalog_options, update_cols=["age"])
-        self.assertEqual(stats, {"num_updated": 2})
-        self.assertEqual(self._read(target).sort_by("id").to_pydict()["age"], [55, 66])
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        with self.assertRaises(ValueError):
+            update_by_row_id(target, "default.some_source", self.catalog_options,
+                             update_cols=["age"])
 
     def test_rejects_non_data_evolution_table(self):
         target = self._create(options={})  # plain append table

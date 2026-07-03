@@ -55,8 +55,8 @@ def update_by_row_id(
 ) -> Dict[str, int]:
     """Update ``update_cols`` of a data-evolution table by ``_ROW_ID``.
 
-    ``source`` (a ``ray.data.Dataset`` / ``pyarrow.Table`` / ``pandas.DataFrame`` /
-    table-name str) must already carry ``_ROW_ID`` and the new values. Each row is
+    ``source`` (a ``ray.data.Dataset`` / ``pyarrow.Table`` / ``pandas.DataFrame``)
+    must already carry the target ``_ROW_ID`` and the new values. Each row is
     routed to the data file owning its row id and only those files are rewritten --
     the target is never fully read and there is no join against it. Requires
     ``ray >= 2.50`` and a target with ``data-evolution.enabled`` + ``row-tracking.enabled``.
@@ -103,16 +103,13 @@ def update_by_row_id(
                 "cross-partition row movement is not supported.")
 
     if isinstance(source, str):
-        # read_paimon's default schema omits row-tracking system fields, so a
-        # table-name source must project _ROW_ID; pin its snapshot for consistency.
-        from pypaimon.ray.ray_paimon import read_paimon
-        src_snap = (CatalogFactory.create(catalog_options).get_table(source)
-                    .snapshot_manager().get_latest_snapshot())
-        source_ds = read_paimon(
-            source, catalog_options, projection=[rid] + update_cols,
-            snapshot_id=src_snap.id if src_snap is not None else None)
-    else:
-        source_ds = _normalize_source(source, catalog_options)
+        # A table's system _ROW_ID is its own, independent of the target's, so a
+        # table-name source can't address target rows. Require in-memory data that
+        # already carries the target row ids (e.g. produced by bucket_join).
+        raise ValueError(
+            "update_by_row_id does not accept a table-name source; pass a ray.data."
+            f"Dataset / pyarrow.Table / pandas.DataFrame carrying the target {rid}.")
+    source_ds = _normalize_source(source, catalog_options)
     src_cols = set(source_ds.schema().names)
     missing = [c for c in [rid] + update_cols if c not in src_cols]
     if missing:
