@@ -38,7 +38,6 @@ public class FileRewriteCompactTask extends CompactTask {
     private final int outputLevel;
     private final List<DataFileMeta> files;
     private final boolean dropDelete;
-    private final String bucketInfo;
 
     public FileRewriteCompactTask(
             CompactRewriter rewriter,
@@ -46,12 +45,11 @@ public class FileRewriteCompactTask extends CompactTask {
             boolean dropDelete,
             @Nullable CompactionMetrics.Reporter metricsReporter,
             String bucketInfo) {
-        super(metricsReporter);
+        super(metricsReporter, bucketInfo);
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();
         this.files = unit.files();
         this.dropDelete = dropDelete;
-        this.bucketInfo = bucketInfo;
     }
 
     @Override
