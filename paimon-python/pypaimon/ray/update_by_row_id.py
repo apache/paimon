@@ -70,7 +70,7 @@ def update_by_row_id(
     _require_ray_join()
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
-    update_cols = list(update_cols)
+    update_cols = list(dict.fromkeys(update_cols))  # de-dup, keep order
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
@@ -114,8 +114,9 @@ def update_by_row_id(
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
     base = table.snapshot_manager().get_latest_snapshot()
-    if base is None:
-        # No files -> every source row id is foreign; don't silently no-op non-empty input.
+    if base is None or base.total_record_count == 0:
+        # No live rows (never written, or emptied by overwrite) -> every source row id
+        # is foreign; don't silently no-op non-empty input.
         if update_ds.limit(1).count() > 0:
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
@@ -125,7 +126,7 @@ def update_by_row_id(
             update_ds, table, update_cols,
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
-            base_snapshot_id=base.id if base is not None else None,
+            base_snapshot_id=base.id,
         )
     except Exception as e:
         _reraise_inner(e)

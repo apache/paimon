@@ -124,6 +124,17 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             self.catalog_options, update_cols=["age"])
         self.assertEqual(self._read(target).sort_by("id").to_pydict()["age"], [77, 2])
 
+        # pandas.DataFrame source, updating multiple columns at once
+        import pandas as pd
+        update_by_row_id(
+            target,
+            pd.DataFrame({"_ROW_ID": pd.array([rid[2]], dtype="int64"),
+                          "name": ["z"], "age": pd.array([88], dtype="int32")}),
+            self.catalog_options, update_cols=["name", "age"])
+        back = self._read(target).sort_by("id").to_pydict()
+        self.assertEqual(back["age"], [77, 88])
+        self.assertEqual(back["name"], ["a", "z"])
+
     def test_rejects_non_data_evolution_table(self):
         target = self._create(options={})  # plain append table
         self._write(target, pa.Table.from_pydict(
@@ -153,18 +164,46 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(name, src, self.catalog_options, update_cols=["name"])
 
+    def test_rejects_blob_column_update(self):
+        blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
+        name = f"default.u_{uuid.uuid4().hex[:8]}"
+        self.catalog.create_table(
+            name, Schema.from_pyarrow_schema(blob_schema, options=self.de_options), False)
+        self._write(name, pa.Table.from_pydict(
+            {"id": [1], "payload": pa.array([b"x"], pa.large_binary())}, schema=blob_schema))
+        src = pa.table({"_ROW_ID": [0], "payload": pa.array([b"y"], pa.large_binary())},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("payload", pa.large_binary())]))
+        with self.assertRaises(ValueError):
+            update_by_row_id(name, src, self.catalog_options, update_cols=["payload"])
+
     def test_empty_target_foreign_row_id_raises(self):
-        target = self._create()  # created, never written -> no snapshot
         src = pa.table({"_ROW_ID": [0], "age": [9]},
                        schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
+        empty_src = pa.table({"_ROW_ID": pa.array([], pa.int64()),
+                              "age": pa.array([], pa.int32())})
+
+        # (a) never written -> no snapshot
+        target = self._create()
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         # empty source against an empty target is a no-op, not an error
-        empty_src = pa.table({"_ROW_ID": pa.array([], pa.int64()),
-                              "age": pa.array([], pa.int32())})
         self.assertEqual(
             update_by_row_id(target, empty_src, self.catalog_options, update_cols=["age"]),
             {"num_updated": 0})
+
+        # (b) written then emptied by overwrite -> snapshot exists but 0 live rows
+        target2 = self._create()
+        self._write(target2, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        wb = self.catalog.get_table(target2).new_batch_write_builder().overwrite()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {"id": pa.array([], pa.int32()), "name": pa.array([], pa.string()),
+             "age": pa.array([], pa.int32())}, schema=self.pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        with self.assertRaises(ValueError):
+            update_by_row_id(target2, src, self.catalog_options, update_cols=["age"])
 
     def test_rejects_unknown_and_empty_update_cols(self):
         target = self._create()
