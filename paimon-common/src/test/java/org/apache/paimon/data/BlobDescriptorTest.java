@@ -23,6 +23,9 @@ import org.apache.paimon.utils.IOUtils;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -132,6 +135,32 @@ public class BlobDescriptorTest {
                 .isEqualTo(new BlobDescriptor("/test/path", 100L, 200L));
     }
 
+    @Test
+    public void testRejectMalformedPayloads() {
+        byte[] serialized = new BlobDescriptor("/test/path", 1, 1).serialize();
+
+        byte[] headerOnly = Arrays.copyOf(serialized, Byte.BYTES + Long.BYTES);
+        assertThat(BlobDescriptor.isBlobDescriptor(headerOnly)).isTrue();
+        assertInvalidPayload(headerOnly, "too short");
+
+        byte[] negativeUriLength = new BlobDescriptor("", 1, 1).serialize();
+        putInt(negativeUriLength, Byte.BYTES + Long.BYTES, -1);
+        assertInvalidPayload(negativeUriLength, "negative URI length");
+
+        byte[] oversizedUriLength = new BlobDescriptor("", 1, 1).serialize();
+        putInt(oversizedUriLength, Byte.BYTES + Long.BYTES, 100);
+        assertInvalidPayload(oversizedUriLength, "URI length exceeds data size");
+
+        byte[] missingOffsetLength = Arrays.copyOf(serialized, serialized.length - Long.BYTES);
+        assertInvalidPayload(missingOffsetLength, "missing offset/length");
+
+        ByteBuffer v1OversizedUriLength =
+                ByteBuffer.allocate(Byte.BYTES + Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        v1OversizedUriLength.put((byte) 1);
+        v1OversizedUriLength.putInt(16);
+        assertInvalidPayload(v1OversizedUriLength.array(), "URI length exceeds data size");
+    }
+
     private BlobDescriptor createDescriptorWithVersion(
             byte version, String uri, long offset, long length) throws Exception {
         Constructor<BlobDescriptor> constructor =
@@ -139,5 +168,16 @@ public class BlobDescriptorTest {
                         byte.class, String.class, long.class, long.class);
         constructor.setAccessible(true);
         return constructor.newInstance(version, uri, offset, length);
+    }
+
+    private static void putInt(byte[] bytes, int offset, int value) {
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putInt(offset, value);
+    }
+
+    private static void assertInvalidPayload(byte[] bytes, String message) {
+        assertThatThrownBy(() -> BlobDescriptor.deserialize(bytes))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid BlobDescriptor data:")
+                .hasMessageContaining(message);
     }
 }
