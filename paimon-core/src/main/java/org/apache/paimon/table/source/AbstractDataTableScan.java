@@ -31,6 +31,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
@@ -121,6 +122,43 @@ abstract class AbstractDataTableScan implements DataTableScan {
     public AbstractDataTableScan withBucket(int bucket) {
         snapshotReader.withBucket(bucket);
         return this;
+    }
+
+    /** Validates {@link CoreOptions#SCAN_BUCKET} for primary-key fixed-bucket tables. */
+    static void validateScanBucketOption(TableSchema schema, CoreOptions coreOptions, int bucket) {
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Bucket scan is only supported for primary key tables.");
+        checkArgument(
+                bucketModeFromOption(coreOptions.bucket()) == BucketMode.HASH_FIXED,
+                "Bucket scan is only supported for fixed-bucket tables, but got bucket mode %s.",
+                bucketModeFromOption(coreOptions.bucket()));
+        validateFixedBucketRange(coreOptions, bucket);
+    }
+
+    private static void validateFixedBucketRange(CoreOptions coreOptions, int bucket) {
+        checkArgument(bucket >= 0, "Bucket id must be non-negative, but is %s.", bucket);
+        int numBuckets = coreOptions.bucket();
+        checkArgument(
+                numBuckets > 0,
+                "Bucket scan is only supported for tables with bucket > 0, but got bucket %s.",
+                numBuckets);
+        checkArgument(
+                bucket < numBuckets,
+                "Bucket id %s must be less than table bucket number %s.",
+                bucket,
+                numBuckets);
+    }
+
+    private static BucketMode bucketModeFromOption(int bucketOption) {
+        switch (bucketOption) {
+            case -2:
+                return BucketMode.POSTPONE_MODE;
+            case -1:
+                return BucketMode.HASH_DYNAMIC;
+            default:
+                return BucketMode.HASH_FIXED;
+        }
     }
 
     @Override

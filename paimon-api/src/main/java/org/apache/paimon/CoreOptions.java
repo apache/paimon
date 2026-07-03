@@ -635,6 +635,16 @@ public class CoreOptions implements Serializable {
                             "Max split size should be cached for one task while scanning. "
                                     + "If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.");
 
+    public static final ConfigOption<Integer> SCAN_BUCKET =
+            key("scan.bucket")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify a single bucket to scan. This option filters manifest entries "
+                                    + "and only plans splits for the given bucket. It is only supported "
+                                    + "for fixed-bucket primary key tables (bucket > 0). It cannot be used "
+                                    + "with postpone bucket tables.");
+
     @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
             key("merge-engine")
@@ -3544,6 +3554,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public Integer scanBucket() {
+        return options.get(SCAN_BUCKET);
     }
 
     public Duration streamingReadDelay() {

@@ -52,6 +52,12 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
 
+    /** Validates {@link CoreOptions#SCAN_BUCKET} for primary-key fixed-bucket tables. */
+    public static void validateScanBucketOption(
+            TableSchema schema, CoreOptions coreOptions, int bucket) {
+        AbstractDataTableScan.validateScanBucketOption(schema, coreOptions, bucket);
+    }
+
     private StartingScanner startingScanner;
     private boolean hasNext;
 
