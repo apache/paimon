@@ -26,11 +26,13 @@ from pypaimon.ray.data_evolution_merge_transform import (
     target_col,
     lit,
 )
+from pypaimon.ray.update_by_row_id import update_by_row_id
 
 __all__ = [
     "read_paimon",
     "write_paimon",
     "merge_into",
+    "update_by_row_id",
     "WhenMatched",
     "WhenNotMatched",
     "source_col",
