@@ -16,6 +16,7 @@
 # under the License.
 
 from pypaimon.ray.ray_paimon import read_paimon, write_paimon
+from pypaimon.ray.bucket_join import bucket_join
 from pypaimon.ray.data_evolution_merge_into import (
     WhenMatched,
     WhenNotMatched,
@@ -30,6 +31,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
 __all__ = [
     "read_paimon",
     "write_paimon",
+    "bucket_join",
     "merge_into",
     "WhenMatched",
     "WhenNotMatched",
