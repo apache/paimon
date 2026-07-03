@@ -202,7 +202,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                         5.5f,
                         6.25d,
                         "str",
+                        "char",
                         new byte[] {1, 2, 3},
+                        new byte[] {4, 5},
                         Decimal.fromBigDecimal(new BigDecimal("12345678.90"), 10, 2),
                         Decimal.fromBigDecimal(new BigDecimal("123456789012345678.12345"), 23, 5),
                         19500,
@@ -215,7 +217,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         WideValue sparseValue =
                 new WideValue(
                         null, null, null, null, null, null, null, null, null, null, null, null,
-                        null, null, null, null, null, null);
+                        null, null, null, null, null, null, null, null);
         WideValue overflowValue =
                 new WideValue(
                         false,
@@ -226,7 +228,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                         13.5f,
                         14.25d,
                         "overflow",
+                        "over",
                         new byte[] {9, 8, 7},
+                        new byte[] {6, 5, 4, 3},
                         Decimal.fromBigDecimal(new BigDecimal("-1.23"), 10, 2),
                         Decimal.fromBigDecimal(new BigDecimal("-123456789012345678.12345"), 23, 5),
                         19600,
@@ -550,35 +554,38 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                                                 DataTypes.FIELD(5, "f", DataTypes.FLOAT()),
                                                 DataTypes.FIELD(6, "d", DataTypes.DOUBLE()),
                                                 DataTypes.FIELD(7, "s", DataTypes.STRING()),
-                                                DataTypes.FIELD(8, "bin", DataTypes.BINARY(3)),
+                                                DataTypes.FIELD(8, "char_value", DataTypes.CHAR(6)),
+                                                DataTypes.FIELD(9, "bin", DataTypes.BINARY(3)),
                                                 DataTypes.FIELD(
-                                                        9,
+                                                        10, "var_bin", DataTypes.VARBINARY(8)),
+                                                DataTypes.FIELD(
+                                                        11,
                                                         "compact_decimal",
                                                         DataTypes.DECIMAL(10, 2)),
                                                 DataTypes.FIELD(
-                                                        10,
+                                                        12,
                                                         "large_decimal",
                                                         DataTypes.DECIMAL(23, 5)),
-                                                DataTypes.FIELD(11, "date", DataTypes.DATE()),
-                                                DataTypes.FIELD(12, "time", DataTypes.TIME()),
-                                                DataTypes.FIELD(13, "ts3", DataTypes.TIMESTAMP(3)),
+                                                DataTypes.FIELD(13, "date", DataTypes.DATE()),
+                                                DataTypes.FIELD(14, "time", DataTypes.TIME()),
+                                                DataTypes.FIELD(15, "ts3", DataTypes.TIMESTAMP(3)),
                                                 DataTypes.FIELD(
-                                                        14,
+                                                        16,
                                                         "ts_ltz6",
                                                         DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(
                                                                 6)),
                                                 DataTypes.FIELD(
-                                                        15,
+                                                        17,
                                                         "ints",
                                                         DataTypes.ARRAY(DataTypes.INT())),
                                                 DataTypes.FIELD(
-                                                        16,
+                                                        18,
                                                         "attrs",
                                                         DataTypes.MAP(
                                                                 DataTypes.STRING(),
                                                                 DataTypes.BIGINT())),
                                                 DataTypes.FIELD(
-                                                        17,
+                                                        19,
                                                         "nested",
                                                         DataTypes.ROW(
                                                                 DataTypes.FIELD(
@@ -743,7 +750,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 value.f,
                 value.d,
                 value.s == null ? null : BinaryString.fromString(value.s),
+                value.charValue == null ? null : BinaryString.fromString(value.charValue),
                 value.bin,
+                value.varBin,
                 value.compactDecimal,
                 value.largeDecimal,
                 value.date,
@@ -852,7 +861,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         for (int i = 0; i < map.size(); i++) {
             result.put(
                     keys.getString(i).toString(),
-                    values.isNullAt(i) ? null : toJavaWideValue(values.getRow(i, 18)));
+                    values.isNullAt(i) ? null : toJavaWideValue(values.getRow(i, 20)));
         }
         return result;
     }
@@ -867,16 +876,18 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 row.isNullAt(5) ? null : row.getFloat(5),
                 row.isNullAt(6) ? null : row.getDouble(6),
                 row.isNullAt(7) ? null : row.getString(7).toString(),
-                row.isNullAt(8) ? null : row.getBinary(8),
-                row.isNullAt(9) ? null : row.getDecimal(9, 10, 2),
-                row.isNullAt(10) ? null : row.getDecimal(10, 23, 5),
-                row.isNullAt(11) ? null : row.getInt(11),
-                row.isNullAt(12) ? null : row.getInt(12),
-                row.isNullAt(13) ? null : row.getTimestamp(13, 3),
-                row.isNullAt(14) ? null : row.getTimestamp(14, 6),
-                row.isNullAt(15) ? null : toJavaIntList(row.getArray(15)),
-                row.isNullAt(16) ? null : toJavaLongMap(row.getMap(16)),
-                row.isNullAt(17) ? null : toJavaNestedValue(row.getRow(17, 2)));
+                row.isNullAt(8) ? null : row.getString(8).toString(),
+                row.isNullAt(9) ? null : row.getBinary(9),
+                row.isNullAt(10) ? null : row.getBinary(10),
+                row.isNullAt(11) ? null : row.getDecimal(11, 10, 2),
+                row.isNullAt(12) ? null : row.getDecimal(12, 23, 5),
+                row.isNullAt(13) ? null : row.getInt(13),
+                row.isNullAt(14) ? null : row.getInt(14),
+                row.isNullAt(15) ? null : row.getTimestamp(15, 3),
+                row.isNullAt(16) ? null : row.getTimestamp(16, 6),
+                row.isNullAt(17) ? null : toJavaIntList(row.getArray(17)),
+                row.isNullAt(18) ? null : toJavaLongMap(row.getMap(18)),
+                row.isNullAt(19) ? null : toJavaNestedValue(row.getRow(19, 2)));
     }
 
     private List<Integer> toJavaIntList(InternalArray array) {
@@ -1000,7 +1011,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
         private final Float f;
         private final Double d;
         private final String s;
+        private final String charValue;
         private final byte[] bin;
+        private final byte[] varBin;
         private final Decimal compactDecimal;
         private final Decimal largeDecimal;
         private final Integer date;
@@ -1020,7 +1033,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                 Float f,
                 Double d,
                 String s,
+                String charValue,
                 byte[] bin,
+                byte[] varBin,
                 Decimal compactDecimal,
                 Decimal largeDecimal,
                 Integer date,
@@ -1038,7 +1053,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
             this.f = f;
             this.d = d;
             this.s = s;
+            this.charValue = charValue;
             this.bin = bin;
+            this.varBin = varBin;
             this.compactDecimal = compactDecimal;
             this.largeDecimal = largeDecimal;
             this.date = date;
@@ -1067,7 +1084,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                     && java.util.Objects.equals(f, wideValue.f)
                     && java.util.Objects.equals(d, wideValue.d)
                     && java.util.Objects.equals(s, wideValue.s)
+                    && java.util.Objects.equals(charValue, wideValue.charValue)
                     && Arrays.equals(bin, wideValue.bin)
+                    && Arrays.equals(varBin, wideValue.varBin)
                     && java.util.Objects.equals(compactDecimal, wideValue.compactDecimal)
                     && java.util.Objects.equals(largeDecimal, wideValue.largeDecimal)
                     && java.util.Objects.equals(date, wideValue.date)
@@ -1091,6 +1110,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                             f,
                             d,
                             s,
+                            charValue,
                             compactDecimal,
                             largeDecimal,
                             date,
@@ -1101,6 +1121,7 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                             attrs,
                             nested);
             result = 31 * result + Arrays.hashCode(bin);
+            result = 31 * result + Arrays.hashCode(varBin);
             return result;
         }
 
@@ -1124,8 +1145,13 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                     + ", s='"
                     + s
                     + '\''
+                    + ", charValue='"
+                    + charValue
+                    + '\''
                     + ", bin="
                     + Arrays.toString(bin)
+                    + ", varBin="
+                    + Arrays.toString(varBin)
                     + ", compactDecimal="
                     + compactDecimal
                     + ", largeDecimal="

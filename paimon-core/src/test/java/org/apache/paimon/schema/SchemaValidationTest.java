@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.ThrowableAssert;
@@ -314,131 +315,59 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testMapSharedShreddingCannotCombineWithVariant() {
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(
-                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
-                        new DataField(2, "payload", DataTypes.VARIANT()));
+    public void testMapSharedShreddingCannotCombineWithUnsupportedTypes() {
+        List<DataField> variantFields = topLevelPayloadFields(DataTypes.VARIANT());
+        String variantMessage =
+                "MAP shared-shredding currently cannot be used with Variant fields.";
+        assertMapSharedShreddingValidationFailed(
+                variantFields, mapSharedShreddingOptions(), variantMessage);
 
-        Map<String, String> options = new HashMap<>();
-        options.put(BUCKET.key(), "-1");
-        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
-        options.put("fields.metrics.map.storage-layout", "shared-shredding");
+        Map<String, String> inferVariantOptions = mapSharedShreddingOptions();
+        inferVariantOptions.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
+        assertMapSharedShreddingValidationFailed(
+                variantFields, inferVariantOptions, variantMessage);
 
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with Variant fields.");
+        Map<String, String> explicitVariantOptions = mapSharedShreddingOptions();
+        explicitVariantOptions.put(CoreOptions.VARIANT_SHREDDING_SCHEMA.key(), "{}");
+        assertMapSharedShreddingValidationFailed(
+                variantFields, explicitVariantOptions, variantMessage);
 
-        options.put(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), "true");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with Variant fields.");
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
+        assertMapSharedShreddingValidationFailed(
+                nestedMapValueFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(DataTypes.BLOB()),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with BLOB fields.");
 
-        options.remove(CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key());
-        options.put(CoreOptions.VARIANT_SHREDDING_SCHEMA.key(), "{}");
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with Variant fields.");
+        DataType multisetType = DataTypes.MULTISET(DataTypes.INT());
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        assertMapSharedShreddingValidationFailed(
+                nestedMapValueFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(multisetType),
+                mapSharedShreddingOptions(),
+                "MAP shared-shredding currently cannot be used with MULTISET fields.");
     }
 
     @Test
-    public void testMapSharedShreddingCannotCombineWithBlob() {
-        Map<String, String> options = mapSharedShreddingOptions();
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(
-                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
-
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with BLOB fields.");
-
-        List<DataField> nestedFields =
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(
-                                1,
-                                "metrics",
-                                DataTypes.MAP(
-                                        DataTypes.STRING(),
-                                        DataTypes.ROW(
-                                                DataTypes.FIELD(0, "payload", DataTypes.BLOB())))));
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                nestedFields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with BLOB fields.");
-
-        List<DataField> topLevelBlobFields =
-                Arrays.asList(
-                        new DataField(0, "id", DataTypes.INT()),
-                        new DataField(
-                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
-                        new DataField(2, "payload", DataTypes.BLOB()));
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                topLevelBlobFields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessageContaining(
-                        "MAP shared-shredding currently cannot be used with BLOB fields.");
+    public void testMapSharedShreddingCannotCombineWithVector() {
+        DataType vectorType = DataTypes.VECTOR(3, DataTypes.FLOAT());
+        String message = "MAP shared-shredding currently cannot be used with VECTOR fields.";
+        assertMapSharedShreddingValidationFailed(
+                mapValueFields(vectorType), mapSharedShreddingOptions(), message);
+        assertMapSharedShreddingValidationFailed(
+                topLevelPayloadFields(vectorType), mapSharedShreddingOptions(), message);
     }
 
     @Test
@@ -1294,6 +1223,46 @@ class SchemaValidationTest {
         options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
         options.put("fields.metrics.map.storage-layout", "shared-shredding");
         return options;
+    }
+
+    private void assertMapSharedShreddingValidationFailed(
+            List<DataField> fields, Map<String, String> options, String message) {
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(message);
+    }
+
+    private List<DataField> mapValueFields(DataType valueType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), valueType)));
+    }
+
+    private List<DataField> nestedMapValueFields(DataType valueType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(
+                        1,
+                        "metrics",
+                        DataTypes.MAP(
+                                DataTypes.STRING(),
+                                DataTypes.ROW(DataTypes.FIELD(0, "payload", valueType)))));
+    }
+
+    private List<DataField> topLevelPayloadFields(DataType payloadType) {
+        return Arrays.asList(
+                new DataField(0, "id", DataTypes.INT()),
+                new DataField(1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                new DataField(2, "payload", payloadType));
     }
 
     private TableSchema mapSharedShreddingSchema(

@@ -667,7 +667,7 @@ public class SchemaValidation {
         if (hasSharedShredding) {
             validateMapSharedShreddingFileFormats(options);
             validateMapSharedShreddingCompressions(options);
-            validateNoVariantOrBlobWithMapSharedShredding(schema);
+            validateUnsupportedTypesWithMapSharedShredding(schema);
             if (!schema.primaryKeys().isEmpty()) {
                 throw new IllegalArgumentException(
                         "MAP shared-shredding currently only supports append-only tables.");
@@ -679,7 +679,7 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateNoVariantOrBlobWithMapSharedShredding(TableSchema schema) {
+    private static void validateUnsupportedTypesWithMapSharedShredding(TableSchema schema) {
         RowType rowType = new RowType(schema.fields());
         if (containsType(rowType, type -> type instanceof VariantType)) {
             throw new IllegalArgumentException(
@@ -688,6 +688,14 @@ public class SchemaValidation {
         if (containsType(rowType, type -> type.is(DataTypeRoot.BLOB))) {
             throw new IllegalArgumentException(
                     "MAP shared-shredding currently cannot be used with BLOB fields.");
+        }
+        if (containsType(rowType, type -> type instanceof MultisetType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with MULTISET fields.");
+        }
+        if (containsType(rowType, type -> type instanceof VectorType)) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with VECTOR fields.");
         }
     }
 

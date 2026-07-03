@@ -341,20 +341,12 @@ public class RowToColumnConverter {
 
             @Override
             public TypeConverter visit(CharType charType) {
-                return createConverter(
-                        charType.isNullable(),
-                        (row, column, cv) ->
-                                ((WritableByteVector) cv).appendByte(row.getByte(column)));
+                return stringConverter(charType.isNullable());
             }
 
             @Override
             public TypeConverter visit(VarCharType varCharType) {
-                return createConverter(
-                        varCharType.isNullable(),
-                        (row, column, cv) -> {
-                            byte[] bytes = row.getString(column).toBytes();
-                            ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
-                        });
+                return stringConverter(varCharType.isNullable());
             }
 
             @Override
@@ -480,6 +472,7 @@ public class RowToColumnConverter {
                 return createConverter(
                         variantType.isNullable(),
                         (row, column, cv) -> {
+                            ((HeapRowVector) cv).appendRow();
                             WritableBytesVector valueVector =
                                     (WritableBytesVector) cv.getChildren()[0];
                             WritableBytesVector metaDataVector =
@@ -613,6 +606,15 @@ public class RowToColumnConverter {
                         nullable,
                         (row, column, cv) -> {
                             byte[] bytes = row.getBinary(column);
+                            ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
+                        });
+            }
+
+            private static TypeConverter stringConverter(boolean nullable) {
+                return createConverter(
+                        nullable,
+                        (row, column, cv) -> {
+                            byte[] bytes = row.getString(column).toBytes();
                             ((WritableBytesVector) cv).appendByteArray(bytes, 0, bytes.length);
                         });
             }
