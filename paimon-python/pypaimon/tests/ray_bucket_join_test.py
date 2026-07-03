@@ -61,10 +61,12 @@ class RayBucketJoinTest(unittest.TestCase):
             pass
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
-    def _bucketed_table(self, name, schema, key, data, primary_keys=None):
+    def _bucketed_table(self, name, schema, key, data, primary_keys=None, extra_opts=None):
         opts = {"bucket": str(self.NUM_BUCKETS)}
         if primary_keys is None:  # append table: bucket-key must be explicit
             opts["bucket-key"] = key
+        if extra_opts:
+            opts.update(extra_opts)
         # PK table: leave bucket-key unset so it defaults to the primary key.
         self.catalog.create_table(
             name,
@@ -126,6 +128,27 @@ class RayBucketJoinTest(unittest.TestCase):
             "default.in_fan", "default.loc_fan", self.catalog_options,
             on="url", left_projection=["url"], right_projection=["url", "row_id"])
         self.assertEqual(sorted(r["row_id"] for r in ds.take_all()), [0, 1])
+
+    def test_join_with_explicit_scan_mode(self):
+        # An explicit scan.mode on the tables must not clash with the internal
+        # snapshot pin during planning.
+        loc = pa.schema([("url", pa.string()), ("row_id", pa.int64())])
+        ins = pa.schema([("url", pa.string())])
+        mode = {"scan.mode": "latest-full"}
+        self._bucketed_table(
+            "default.sm_loc", loc, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(50)],
+                                  "row_id": list(range(50))}, schema=loc),
+            extra_opts=mode)
+        self._bucketed_table(
+            "default.sm_in", ins, "url",
+            pa.Table.from_pydict({"url": [f"u{i}" for i in range(20)]}, schema=ins),
+            extra_opts=mode)
+        ds = bucket_join(
+            "default.sm_in", "default.sm_loc", self.catalog_options,
+            on="url", left_projection=["url"], right_projection=["url", "row_id"])
+        got = {r["url"]: r["row_id"] for r in ds.take_all()}
+        self.assertEqual(got, {f"u{i}": i for i in range(20)})
 
     def test_dispatches_one_task_per_shared_bucket(self):
         # No cross-bucket shuffle: exactly one Ray task (object ref) per shared bucket.

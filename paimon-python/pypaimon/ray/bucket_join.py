@@ -90,8 +90,17 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
     if snapshot is None:
         return {}, schema_id
     # Pin the guard and the split plan to one snapshot, else a commit between the two
-    # manifest reads could slip stale-bucket files past the guard.
-    table.options.options.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
+    # manifest reads could slip stale-bucket files past the guard. Drop any existing
+    # scan.mode / point-in-time options first so snapshot-id doesn't clash with them.
+    opts = table.options.options
+    for key in (CoreOptions.SCAN_MODE, CoreOptions.SCAN_SNAPSHOT_ID,
+                CoreOptions.SCAN_TAG_NAME, CoreOptions.SCAN_WATERMARK,
+                CoreOptions.SCAN_TIMESTAMP, CoreOptions.SCAN_TIMESTAMP_MILLIS,
+                CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP,
+                CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS,
+                CoreOptions.SCAN_CREATION_TIME_MILLIS):
+        opts.data.pop(key.key(), None)
+    opts.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
     # Splits carry only ``bucket``; a rescaled table (old files under a different
