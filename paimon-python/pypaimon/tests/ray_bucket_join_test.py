@@ -138,9 +138,9 @@ class RayBucketJoinTest(unittest.TestCase):
         self._bucketed_table(
             "default.disp_in", ins, "url",
             pa.Table.from_pydict({"url": [f"u{i}" for i in range(100)]}, schema=ins))
-        lbb = bjmod._plan_splits_by_bucket(
+        lbb, _ = bjmod._plan_splits_by_bucket(
             "default.disp_in", self.catalog_options, ["url"], self.NUM_BUCKETS)
-        rbb = bjmod._plan_splits_by_bucket(
+        rbb, _ = bjmod._plan_splits_by_bucket(
             "default.disp_loc", self.catalog_options, ["url", "row_id"], self.NUM_BUCKETS)
         shared = set(lbb) & set(rbb)
         self.assertGreater(len(shared), 1)  # genuinely spread across buckets

@@ -77,12 +77,18 @@ def _read_builder(table_id, catalog_options, projection, schema_id=None):
 
 
 def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total_buckets):
-    """Plan the manifest and group splits by bucket (driver-side)."""
+    """Plan the manifest and group splits by bucket (driver-side).
+
+    Returns ``(by_bucket, schema_id)``: the schema id of the table instance that
+    built this plan, so workers validate against the schema the plan was made with
+    (not a possibly-newer one loaded earlier by the caller).
+    """
     from pypaimon.common.options.core_options import CoreOptions
     table = _get_table(table_id, catalog_options)  # fresh, latest schema
+    schema_id = table.table_schema.id
     snapshot = table.snapshot_manager().get_latest_snapshot()
     if snapshot is None:
-        return {}
+        return {}, schema_id
     # Pin the guard and the split plan to one snapshot, else a commit between the two
     # manifest reads could slip stale-bucket files past the guard.
     table.options.options.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
@@ -99,7 +105,7 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
     by_bucket = {}
     for s in scan.plan().splits():
         by_bucket.setdefault(s.bucket, []).append(s)
-    return by_bucket
+    return by_bucket, schema_id
 
 
 def _read_splits(table_id, catalog_options, projection, splits, schema_id):
@@ -193,10 +199,10 @@ def bucket_join(
 
     # Plan each side's manifest once (driver-side, split metadata only -- the join
     # results stay distributed below), then dispatch per-bucket splits to the tasks.
-    left_by_bucket = _plan_splits_by_bucket(left, catalog_options, left_projection, lcount)
-    right_by_bucket = _plan_splits_by_bucket(right, catalog_options, right_projection, rcount)
-
-    l_schema_id, r_schema_id = ltable.table_schema.id, rtable.table_schema.id
+    left_by_bucket, l_schema_id = _plan_splits_by_bucket(
+        left, catalog_options, left_projection, lcount)
+    right_by_bucket, r_schema_id = _plan_splits_by_bucket(
+        right, catalog_options, right_projection, rcount)
 
     def _join_bucket(left_splits, right_splits):
         left_t = _read_splits(left, catalog_options, left_projection, left_splits, l_schema_id)
