@@ -1005,6 +1005,25 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(
             [data, data[10:18], b"raw-inline-bytes", None], bodies["image"])
 
+    def test_fetch_bodies_reads_via_file_io_not_uri_reader(self):
+        # Blobs must be read through file_io.read_ranges_coalesced (which carries the
+        # resolved DLF/OSS token), never via uri_reader_factory -- that would rebuild a
+        # FileIO from the raw catalog options and fail in DLF data-token mode.
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        class _FakeIO:
+            @property
+            def uri_reader_factory(self):
+                raise AssertionError("_fetch_bodies must not use uri_reader_factory")
+
+            def read_ranges_coalesced(self, ranges, parallelism):
+                return [None if r is None else b"BODY:" + r[0].encode() for r in ranges]
+
+        cells = [BlobDescriptor("oss://bucket/x", 4, 10).serialize(), b"inline-blob", None]
+        bodies = ScanQuery._fetch_bodies(_FakeIO(), {"img": cells}, ["img"], 8)
+        self.assertEqual([b"BODY:oss://bucket/x", b"inline-blob", None], bodies["img"])
+
     def test_fetch_bodies_rejects_unresolved_blob_view(self):
         from pypaimon.multimodal.query import ScanQuery
         from pypaimon.table.row.blob import BlobViewStruct

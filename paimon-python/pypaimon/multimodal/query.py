@@ -165,24 +165,37 @@ class ScanQuery:
 
     @staticmethod
     def _fetch_bodies(file_io, data, blob_cols, parallelism):
-        # Decode each cell (descriptor / inline) via Blob.from_bytes, then read all
-        # columns in one coalesced pass.
-        from pypaimon.table.row.blob import Blob, BlobView
-        flat = []
+        # Decode each descriptor to a (uri, offset, length) range and read them all in
+        # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
+        # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
+        # build a BlobRef whose uri_reader re-resolves the URI via
+        # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
+        # failing with "endpoint should be non-empty" / "Init credential failed" unless
+        # the caller also passes fs.oss.* -- which users should not have to.
+        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
+        ranges = []
+        inline = {}  # cell index -> blob stored inline (returned as-is, no ranged read)
+        i = 0
         for col in blob_cols:
             for value in data[col]:
                 if value is None:
-                    flat.append(None)
-                    continue
-                blob = Blob.from_bytes(value, file_io)
-                if isinstance(blob, BlobView) and not blob.is_resolved():
-                    # read_blobs_concurrent would call to_data() on this and raise an
-                    # opaque error; reject it clearly instead.
-                    raise ValueError(
-                        "read_blobs does not support unresolved blob-view columns; "
-                        "read such a column on its own, or enable blob-view resolution.")
-                flat.append(blob)
-        fetched = file_io.read_blobs_concurrent(flat, parallelism)
+                    ranges.append(None)
+                else:
+                    raw = bytes(value)
+                    if BlobViewStruct.is_blob_view_struct(raw):
+                        raise ValueError(
+                            "read_blobs does not support unresolved blob-view columns; "
+                            "read such a column on its own, or enable blob-view resolution.")
+                    if BlobDescriptor.is_blob_descriptor(raw):
+                        d = BlobDescriptor.deserialize(raw)
+                        ranges.append((d.uri, d.offset, d.length))
+                    else:  # blob stored inline: the bytes are the payload
+                        ranges.append(None)
+                        inline[i] = raw
+                i += 1
+        fetched = file_io.read_ranges_coalesced(ranges, parallelism)
+        for idx, raw in inline.items():
+            fetched[idx] = raw
         bodies = {}
         offset = 0
         for col in blob_cols:
