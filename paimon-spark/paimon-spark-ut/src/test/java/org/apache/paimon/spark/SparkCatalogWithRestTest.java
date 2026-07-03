@@ -743,8 +743,9 @@ public class SparkCatalogWithRestTest {
         spark.sql(
                 "INSERT INTO t_dv_row_filter VALUES (1, 'Alice', 25), (2, 'Bob', 30),"
                         + " (3, 'Charlie', 35), (4, 'David', 45)");
-        // Delete id=1 (writes a deletion vector).
-        spark.sql("DELETE FROM t_dv_row_filter WHERE id = 1");
+        // Delete id=4 (writes a deletion vector). id=4 passes the age>=35 filter, so if the
+        // deletion vector were ignored it would resurface in the result and fail the test.
+        spark.sql("DELETE FROM t_dv_row_filter WHERE id = 4");
         Predicate ageGe35Predicate =
                 LeafPredicate.of(
                         new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
@@ -757,7 +758,7 @@ public class SparkCatalogWithRestTest {
                         spark.sql("SELECT * FROM t_dv_row_filter ORDER BY id")
                                 .collectAsList()
                                 .toString())
-                .isEqualTo("[[3,Charlie,35], [4,David,45]]");
+                .isEqualTo("[[3,Charlie,35]]");
     }
 
     @Test

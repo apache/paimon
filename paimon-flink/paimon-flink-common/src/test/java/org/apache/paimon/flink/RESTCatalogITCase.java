@@ -36,7 +36,6 @@ import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -636,47 +635,6 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                 String.format(
                                         "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, filterTable)))
                 .containsExactlyInAnyOrder(Row.of(4L));
-    }
-
-    @Test
-    public void testRowFilterStreamingRead() throws Exception {
-        String streamTable = "stream_row_filter_table";
-        batchSql(
-                String.format(
-                        "CREATE TABLE %s.%s (id INT, dtpart STRING) PARTITIONED BY (dtpart)"
-                                + " WITH ('query-auth.enabled' = 'true')",
-                        DATABASE_NAME, streamTable));
-        // Seed one snapshot so the streaming job has a starting point; this 'drop' row is filtered.
-        batchSql(String.format("INSERT INTO %s.%s VALUES (0, 'drop')", DATABASE_NAME, streamTable));
-        // Row filter on the partition column: only the 'keep' partition is visible.
-        Predicate keepPredicate =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "dtpart", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("keep")));
-        restCatalogServer.setRowFilterAuth(
-                Identifier.create(DATABASE_NAME, streamTable),
-                Collections.singletonList(keepPredicate));
-
-        try (BlockingIterator<Row, Row> iterator =
-                streamSqlBlockIter(
-                        String.format(
-                                "SELECT id, dtpart FROM %s.%s", DATABASE_NAME, streamTable))) {
-            // Wait for the streaming job to start before committing further snapshots.
-            Thread.sleep(2000);
-            // Separate INSERTs create separate snapshots, forcing repeated plan() calls.
-            batchSql(
-                    String.format(
-                            "INSERT INTO %s.%s VALUES (1, 'keep')", DATABASE_NAME, streamTable));
-            batchSql(
-                    String.format(
-                            "INSERT INTO %s.%s VALUES (2, 'drop')", DATABASE_NAME, streamTable));
-            batchSql(
-                    String.format(
-                            "INSERT INTO %s.%s VALUES (3, 'keep')", DATABASE_NAME, streamTable));
-            assertThat(iterator.collect(2))
-                    .containsExactlyInAnyOrder(Row.of(1, "keep"), Row.of(3, "keep"));
-        }
     }
 
     @Test

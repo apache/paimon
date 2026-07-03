@@ -346,6 +346,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public void markHasNonPartitionFilter() {
+        this.hasNonPartitionFilter = true;
+    }
+
+    @Override
     public SnapshotReader dropStats() {
         scan.dropStats();
         return this;
