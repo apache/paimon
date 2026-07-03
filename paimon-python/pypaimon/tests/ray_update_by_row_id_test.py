@@ -141,6 +141,31 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
 
+    def test_rejects_partition_column_update(self):
+        name = f"default.u_{uuid.uuid4().hex[:8]}"
+        s = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=["name"],
+                                       options=self.de_options)
+        self.catalog.create_table(name, s, False)
+        self._write(name, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0], "name": ["b"]},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("name", pa.string())]))
+        with self.assertRaises(ValueError):
+            update_by_row_id(name, src, self.catalog_options, update_cols=["name"])
+
+    def test_empty_target_foreign_row_id_raises(self):
+        target = self._create()  # created, never written -> no snapshot
+        src = pa.table({"_ROW_ID": [0], "age": [9]},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
+        with self.assertRaises(ValueError):
+            update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
+        # empty source against an empty target is a no-op, not an error
+        empty_src = pa.table({"_ROW_ID": pa.array([], pa.int64()),
+                              "age": pa.array([], pa.int32())})
+        self.assertEqual(
+            update_by_row_id(target, empty_src, self.catalog_options, update_cols=["age"]),
+            {"num_updated": 0})
+
     def test_rejects_unknown_and_empty_update_cols(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(

@@ -83,12 +83,18 @@ def update_by_row_id(
 
     rid = SpecialFields.ROW_ID.name
     blob_cols = _blob_col_names(table)
+    partition_keys = set(table.partition_keys or [])
     for col in update_cols:
         if col not in table.field_names:
             raise ValueError(f"update column {col!r} is not in target '{target}'.")
         if col in blob_cols:
             # Update writes plain data files; blob deltas are a separate path.
             raise ValueError(f"update_by_row_id cannot update blob column {col!r}.")
+        if col in partition_keys:
+            # In-place rewrite can't move a row across partitions.
+            raise ValueError(
+                f"update_by_row_id cannot update partition column {col!r}; "
+                "cross-partition row movement is not supported.")
 
     source_ds = _normalize_source(source, catalog_options)
     src_cols = set(source_ds.schema().names)
@@ -108,6 +114,12 @@ def update_by_row_id(
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
     base = table.snapshot_manager().get_latest_snapshot()
+    if base is None:
+        # No files -> every source row id is foreign; don't silently no-op non-empty input.
+        if update_ds.limit(1).count() > 0:
+            raise ValueError(
+                f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
+        return {"num_updated": 0}
     try:
         msgs, num_updated, _ = distributed_update_apply(
             update_ds, table, update_cols,
