@@ -190,6 +190,42 @@ docs.add([
 ])
 ```
 
+## Overwrite
+
+`overwrite` accepts the same input formats as `add` and replaces existing data
+using Paimon's batch overwrite semantics. On an unpartitioned table it replaces
+the whole table. On a partitioned table it follows the table's
+`dynamic-partition-overwrite` option; with the default dynamic mode, only
+partitions present in the input data are replaced.
+
+```python
+docs.overwrite([
+    {
+        "id": 3,
+        "content": "Fresh replacement text",
+        "embedding": [0.7, 0.8, 0.9],
+        "category": "docs",
+    }
+])
+```
+
+For static partition overwrite, disable dynamic partition overwrite on the
+table and pass the target partition:
+
+```python
+docs.overwrite(
+    [
+        {
+            "id": 4,
+            "content": "Only this day is replaced.",
+            "category": "docs",
+            "dt": "2024-01-01",
+        }
+    ],
+    partition={"dt": "2024-01-01"},
+)
+```
+
 ## Update
 
 `update` modifies rows matched by a SQL-like predicate.

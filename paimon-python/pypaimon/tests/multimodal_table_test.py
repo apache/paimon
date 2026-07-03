@@ -513,6 +513,111 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_overwrite_replaces_unpartitioned_table(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        result = users.overwrite([
+            {"id": 3, "name": "Carol", "age": 40},
+        ])
+
+        self.assertIs(users, result)
+        self.assertEqual(
+            [
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            users.scan().to_list(),
+        )
+
+    def test_empty_overwrite_clears_unpartitioned_table(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.overwrite([])
+
+        self.assertEqual([], users.scan().to_list())
+
+    def test_overwrite_replaces_dynamic_partitions(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "dt": "2024-01-01"},
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "dt": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["dt"],
+        )
+
+        users.overwrite([
+            {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+        ])
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+                {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+            ],
+            rows,
+        )
+
+    def test_overwrite_replaces_static_partition(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "dt": "2024-01-01"},
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "dt": pa.string(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "dynamic-partition-overwrite": "false",
+            }),
+            partitioned=["dt"],
+        )
+
+        users.overwrite([
+            {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+        ], partition={"dt": "2024-01-01"})
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+                {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+            ],
+            rows,
+        )
+
     def test_scan_does_not_expose_pre_filter(self):
         users = self.conn.create_table(
             "users",
