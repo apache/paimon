@@ -646,7 +646,7 @@ public class SparkWriteITCase {
     @Test
     public void testInsertOverwriteDoesNotProduceLookupChangelogFiles() throws Exception {
         spark.sql(
-                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup', 'compaction.force-up-level-0' = 'true', 'file.format' = 'avro', 'file.compression' = 'null', 'manifest.compression' = 'null')");
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup', 'file.format' = 'avro', 'file.compression' = 'null', 'manifest.compression' = 'null')");
 
         FileStoreTable table = getTable("T");
         Path bucketPath = new Path(table.location(), "bucket-0");
