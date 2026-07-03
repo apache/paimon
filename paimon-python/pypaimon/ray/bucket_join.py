@@ -33,6 +33,11 @@ def _norm(on: OnSpec) -> List[str]:
     return [on] if isinstance(on, str) else list(on)
 
 
+def _key_type(table, col):
+    # Logical type without nullability -- a present key hashes the same either way.
+    return str(table.field_dict[col].type).replace(" NOT NULL", "")
+
+
 def _bucketing(table):
     # Resolved bucket keys (a PK table without an explicit bucket-key buckets by its
     # trimmed primary key) plus the bucket function: same key co-locates only under both.
@@ -154,10 +159,7 @@ def bucket_join(
             "Equal keys only co-locate by bucket when joining on the bucket-key "
             "(the comparison is order-sensitive for composite keys).")
     # Same name isn't enough: differing key types (INT vs BIGINT) can hash apart and
-    # silently drop matches. Compare logical types, ignoring nullability (it doesn't
-    # affect the hash of a present key).
-    def _key_type(table, col):
-        return str(table.field_dict[col].type).replace(" NOT NULL", "")
+    # silently drop matches (types compared without nullability).
     key_type_mismatch = [
         (c, _key_type(ltable, c), _key_type(rtable, c))
         for c in on_cols
