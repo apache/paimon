@@ -40,6 +40,8 @@ Data Evolution mode offers the following advantages:
   I/O cost of rewriting untouched columns.
 - **Reduced file rewrites**: append new column data to dedicated files when
   backfilling or evolving data.
+- **Delete support**: record row deletions with deletion vectors without
+  rewriting existing column files.
 - **Optimized reads**: merge original and updated column files at read time.
 
 To enable Data Evolution, create an append table with both
@@ -204,17 +206,61 @@ commit.close()
 Notes:
 
 - Spark SQL supports standalone `UPDATE` statements for Data Evolution tables.
-  SQL `DELETE` statements are not supported for Data Evolution tables yet. Use
-  Spark `UPDATE` or `MERGE INTO`, the Flink procedure, or PyPaimon APIs.
 - Concurrent Spark SQL `UPDATE` statements that update the same data file and
   columns may be retried automatically. Configure retry attempts with
   `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
   retry wait time with
   `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
-- `MERGE INTO` for Data Evolution tables does not support the
-  `WHEN NOT MATCHED BY SOURCE` clause.
+- In Spark SQL, `MERGE INTO` supports `WHEN NOT MATCHED BY SOURCE` for delete
+  actions on Data Evolution tables.
 - The Flink `data_evolution_merge_into` procedure currently supports updating
   or inserting columns, but not inserting new rows.
+
+## Deletes
+
+Data Evolution tables can use deletion vectors to record deleted rows without
+rewriting existing column files. To write deletes, enable deletion vectors
+together with row tracking and Data Evolution:
+
+:::warning
+
+Deleting rows with deletion vectors does not physically remove the original
+data immediately. If a table has many deleted rows, run compaction to
+materialize the deletions; otherwise, the deleted data still consumes storage
+space and may reduce read efficiency.
+
+:::
+
+```sql
+CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'deletion-vectors.enabled' = 'true'
+);
+```
+
+Spark SQL supports `DELETE FROM` for Data Evolution tables:
+
+```sql
+DELETE FROM target_table WHERE id = 1;
+```
+
+Spark SQL also supports delete actions in `MERGE INTO`:
+
+```sql
+CREATE TABLE source_table (id INT, op STRING);
+INSERT INTO source_table VALUES (2, 'delete'), (3, 'update');
+
+MERGE INTO target_table AS t
+USING source_table AS s
+ON t.id = s.id
+WHEN MATCHED AND s.op = 'delete' THEN DELETE
+WHEN MATCHED AND s.op = 'update' THEN UPDATE SET t.b = t.b + 10
+WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
+```
+
+The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later. Currently,
+only Spark supports writing deletes for Data Evolution tables.
 
 ## Self Updates
 
