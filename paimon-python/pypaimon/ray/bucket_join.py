@@ -103,14 +103,17 @@ def _plan_splits_by_bucket(table_id, catalog_options, projection, expected_total
     opts.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshot.id)
     rb = table.new_read_builder()
     scan = (rb.with_projection(projection) if projection is not None else rb).new_scan()
-    # Splits carry only ``bucket``; a rescaled table (old files under a different
-    # total_buckets) would falsely co-locate. Reject files outside the current space.
-    stale = {e.total_buckets for e in scan.file_scanner.plan_files()
-             if e.total_buckets != expected_total_buckets}
+    # Guard against a rescaled table (old files under a different total_buckets, which
+    # splits -- bucket only -- can't tell apart); read the entries once for it.
+    fs = scan.file_scanner
+    entries = fs.plan_files()
+    stale = {e.total_buckets for e in entries if e.total_buckets != expected_total_buckets}
     if stale:
         raise ValueError(
             f"bucket_join needs {table_id} fully in bucket count {expected_total_buckets}, "
             f"but files exist under {sorted(stale)} (rescale in progress); rewrite first.")
+    # Reuse those entries: scan.plan() re-reads plan_files() (append/pk) otherwise.
+    fs.plan_files = lambda *a, **k: entries
     by_bucket = {}
     for s in scan.plan().splits():
         by_bucket.setdefault(s.bucket, []).append(s)
@@ -140,6 +143,11 @@ def bucket_join(
     would otherwise collide). Returns a ``ray.data.Dataset``."""
     import ray
     from pypaimon.catalog.catalog_factory import CatalogFactory
+
+    if not hasattr(ray.data, "from_arrow_refs"):
+        raise RuntimeError(
+            "bucket_join needs a Ray version with ray.data.from_arrow_refs; "
+            f"installed ray is {ray.__version__}.")
 
     on_cols = _norm(on)
     cat = CatalogFactory.create(catalog_options)
