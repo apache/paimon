@@ -59,7 +59,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                         "join-key-index",
                         InternalSerializers.create(
                                 TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
-                        InternalSerializers.create(projectedType),
+                        InternalSerializers.create(cacheValueRowType()),
                         lruCacheSize);
         bootstrap();
     }
@@ -83,7 +83,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
         joinKeyRow.replaceRow(row);
         if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
             if (predicate == null || predicate.test(row)) {
-                state.add(joinKeyRow, row);
+                state.add(joinKeyRow, wrapForCache(row));
             }
         } else {
             throw new RuntimeException(
