@@ -92,13 +92,23 @@ public class FieldRef implements Serializable {
     }
 
     /**
-     * Returns a copy of this {@link FieldRef} with the given top-level index, preserving name,
-     * type, and any nested path metadata. Use this instead of the constructor when remapping a
-     * {@link FieldRef} to a new schema (e.g. projection, partition, or auth remapping), so that
-     * nested field predicates keep working after the rewrite.
+     * Returns a copy of this ref with the given top-level index, preserving name, type and nested
+     * path metadata.
      */
     public FieldRef withIndex(int newIndex) {
         return new FieldRef(newIndex, name, type, nestedIndexes, nestedArities);
+    }
+
+    /**
+     * Returns the name of the top-level field this ref points at: {@link #name()} for a top-level
+     * ref, the first path segment for a nested ref (whose name is the full dotted path).
+     */
+    public String topLevelName() {
+        if (nestedIndexes == null || nestedIndexes.length == 0) {
+            return name;
+        }
+        int firstDot = name.indexOf('.');
+        return firstDot < 0 ? name : name.substring(0, firstDot);
     }
 
     @Override

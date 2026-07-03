@@ -187,7 +187,7 @@ public class TableQueryAuthResult implements Serializable {
             for (Object input : transform.inputs()) {
                 if (input instanceof FieldRef) {
                     FieldRef ref = (FieldRef) input;
-                    int newIndex = outputRowType.getFieldIndex(ref.name());
+                    int newIndex = outputRowType.getFieldIndex(ref.topLevelName());
                     if (newIndex < 0) {
                         throw new IllegalArgumentException(
                                 "Column masking refers to field '"
@@ -220,13 +220,12 @@ public class TableQueryAuthResult implements Serializable {
             for (Object input : transform.inputs()) {
                 if (input instanceof FieldRef) {
                     FieldRef ref = (FieldRef) input;
-                    String fieldName = ref.name();
-                    int newIndex = outputRowType.getFieldIndex(fieldName);
+                    int newIndex = outputRowType.getFieldIndex(ref.topLevelName());
                     if (newIndex < 0) {
                         throw new RuntimeException(
                                 String.format(
                                         "Unable to read data without column %s when row filter enabled.",
-                                        fieldName));
+                                        ref.name()));
                     }
                     newInputs.add(ref.withIndex(newIndex));
                 } else {
