@@ -21,6 +21,7 @@ from typing import Dict, Mapping, Optional, Sequence
 
 import pyarrow as pa
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
@@ -35,6 +36,7 @@ from pypaimon.table.data_evolution_merge_into import (
     WhenNotMatched,
     source_col as _source_col,
 )
+from pypaimon.table.special_fields import SpecialFields
 
 
 _ALL_SOURCE_COLUMNS = object()
@@ -155,8 +157,32 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
-    def scan(self):
-        return ScanQuery(self.raw_table)
+    def scan(
+            self,
+            *,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        return ScanQuery(_time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name))
+
+    def take_row_ids(
+            self,
+            row_ids,
+            *,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        row_ids = _coerce_row_ids(row_ids)
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        read_builder = read_table.new_read_builder().with_projection(
+            [field.name for field in read_table.fields]
+            + [SpecialFields.ROW_ID.name]
+        )
+        predicate = read_builder.new_predicate_builder().is_in(
+            SpecialFields.ROW_ID.name, row_ids)
+        query = ScanQuery(read_table)
+        query._predicate = predicate
+        return query
 
     def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
         from pypaimon.multimodal.blob_store import BlobStore
@@ -168,11 +194,15 @@ class MultimodalTable:
             *,
             column: Optional[str] = None,
             options: Optional[Dict[str, str]] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         if isinstance(query, str):
             return TextQuery(
-                self.raw_table,
+                read_table,
                 text_query=_coerce_full_text_query(query, "search", schema),
                 pre_filter=pre_filter,
             )
@@ -182,7 +212,7 @@ class MultimodalTable:
                 "search() accepts a single query; use search_vectors() for "
                 "multiple vectors.")
         return VectorQuery(
-            self.raw_table,
+            read_table,
             vector=vector,
             vector_column=column or _infer_vector_column(schema, "column"),
             vector_options=options,
@@ -195,12 +225,16 @@ class MultimodalTable:
             *,
             column: Optional[str] = None,
             options: Optional[Dict[str, str]] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         vectors = _coerce_vectors(vectors)
         vector_column = column or _infer_vector_column(schema, "column")
         return BatchVectorQuery(
-            self.raw_table,
+            read_table,
             vectors=vectors,
             vector_column=vector_column,
             vector_options=options,
@@ -213,8 +247,12 @@ class MultimodalTable:
             *,
             ranker: str = "rrf",
             route_limit: Optional[int] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         vector_routes, text_routes = _normalize_hybrid_routes(
             schema,
             routes=routes,
@@ -224,7 +262,7 @@ class MultimodalTable:
             raise ValueError(
                 "search_hybrid requires at least one route.")
         return HybridQuery(
-            self.raw_table,
+            read_table,
             vector_routes=vector_routes,
             text_routes=text_routes,
             ranker=ranker,
@@ -336,6 +374,37 @@ def _to_arrow_table(data, target_schema=None):
     if target_schema is None:
         return table
     return _align_to_schema(table, target_schema)
+
+
+def _coerce_row_ids(row_ids):
+    if row_ids is None or isinstance(row_ids, (str, bytes)):
+        raise ValueError("row_ids must be an iterable of row id integers.")
+    try:
+        iterator = iter(row_ids)
+    except TypeError:
+        raise ValueError("row_ids must be an iterable of row id integers.")
+
+    coerced = []
+    for row_id in iterator:
+        if hasattr(row_id, "as_py"):
+            row_id = row_id.as_py()
+        coerced.append(int(row_id))
+    return coerced
+
+
+def _time_travel_table(table, snapshot_id=None, tag_name=None):
+    if snapshot_id is not None and tag_name is not None:
+        raise ValueError(
+            "snapshot_id and tag_name cannot be set at the same time")
+    if snapshot_id is not None:
+        return table.copy({
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id),
+        })
+    if tag_name is not None:
+        return table.copy({
+            CoreOptions.SCAN_TAG_NAME.key(): tag_name,
+        })
+    return table
 
 
 def _target_schema(table):

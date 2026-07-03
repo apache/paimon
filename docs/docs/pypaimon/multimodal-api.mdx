@@ -332,6 +332,129 @@ result = (
 )
 ```
 
+## Row IDs
+
+Multimodal tables enable `row-tracking.enabled` by default, so each row has a
+Paimon system column named `_ROW_ID`. Use `_ROW_ID` as an internal coordination
+key for retrieval, reranking, inference, and training jobs. Keep user-visible
+document IDs, object keys, or primary keys in normal columns.
+
+Use `with_row_id()` to include `_ROW_ID` in scan or search results. The method
+appends `_ROW_ID` to the current projection; if no projection is set, it returns
+all table columns plus `_ROW_ID`.
+
+```python
+candidates = (
+    docs.search([0.1, 0.2, 0.3], column="embedding")
+    .where("category = 'lake'")
+    .select(["id", "content"])
+    .limit(100)
+    .with_row_id()
+    .to_pandas()
+)
+
+row_ids = candidates["_ROW_ID"].tolist()
+```
+
+When a row-id manifest is persisted beyond a short-lived latest-snapshot
+workflow, record the source snapshot or tag and pass it back to the read API.
+`scan`, `search`, `search_vectors`, `search_hybrid`, and `take_row_ids` accept
+`snapshot_id` or `tag_name`. These two options are mutually exclusive.
+
+Use `take_row_ids` to fetch rows selected by an earlier scan, vector search,
+full-text search, hybrid search, sampler, or split manifest. Results are not
+guaranteed to follow the input row-id order. Include `_ROW_ID` and reorder on
+the client if order matters.
+
+```python
+payload = (
+    docs.take_row_ids(row_ids, snapshot_id=source_snapshot_id)
+    .select(["id", "content", "image"])
+    .with_row_id()
+    .to_arrow()
+    .to_pylist()
+)
+
+payload_by_row_id = {row["_ROW_ID"]: row for row in payload}
+ordered_payload = [payload_by_row_id[row_id] for row_id in row_ids]
+```
+
+This pattern keeps broad candidate generation cheap: first search or filter to
+produce a compact row-id manifest, then fetch only the columns needed by the
+next stage.
+
+```python
+# Stage 1: broad retrieval with a narrow projection.
+manifest = (
+    docs.search(
+        query_vector,
+        column="embedding",
+        snapshot_id=source_snapshot_id,
+    )
+    .select(["id"])
+    .limit(500)
+    .with_row_id()
+    .to_pandas()
+)
+
+# Stage 2: expensive reranking payload, fetched only for candidates.
+rerank_payload = (
+    docs.take_row_ids(
+        manifest["_ROW_ID"].tolist(),
+        snapshot_id=source_snapshot_id,
+    )
+    .select(["id", "title", "body"])
+    .with_row_id()
+    .to_list()
+)
+
+payload_by_row_id = {row["_ROW_ID"]: row for row in rerank_payload}
+rerank_inputs = [
+    {
+        "row_id": row_id,
+        "candidate_rank": rank,
+        "doc": payload_by_row_id[row_id],
+    }
+    for rank, row_id in enumerate(manifest["_ROW_ID"])
+]
+```
+
+For offline inference, feature backfills, or training splits, store row IDs in a
+work queue or manifest table together with the source table snapshot or tag used
+to produce them. Workers can then read row-id batches and fetch only the columns
+they need:
+
+```python
+def run_inference_worker(docs, row_id_batch, source_snapshot_id):
+    rows = (
+        docs.take_row_ids(row_id_batch, snapshot_id=source_snapshot_id)
+        .select(["id", "content"])
+        .with_row_id()
+        .to_list()
+    )
+
+    outputs = []
+    for row in rows:
+        outputs.append(
+            {
+                "id": row["id"],
+                "source_row_id": row["_ROW_ID"],
+                "prediction": model_predict(row["content"]),
+            }
+        )
+    return outputs
+```
+
+Best practices:
+
+- Treat `_ROW_ID` as an internal row handle, not a business identifier.
+- Store the source snapshot or tag with persisted row-id manifests.
+- Pass the stored `snapshot_id` or `tag_name` when consuming persisted row-id
+  manifests.
+- Use business keys or application columns when writing inference or training
+  outputs back to a table.
+- Reorder `take_row_ids` results client-side when input order matters.
+
 ## Create Index
 
 Use `create_index` to create the global indexes used by search APIs. The
