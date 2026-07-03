@@ -21,6 +21,7 @@ package org.apache.paimon.deletionvectors;
 import org.apache.paimon.utils.OptimizedRoaringBitmap64;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -58,6 +59,17 @@ public class Bitmap64DeletionVector implements DeletionVector {
         RoaringBitmap32 roaringBitmap32 = bitmapDeletionVector.get();
         return new Bitmap64DeletionVector(
                 OptimizedRoaringBitmap64.fromRoaringBitmap32(roaringBitmap32));
+    }
+
+    public static Bitmap64DeletionVector fromDeletionVector(DeletionVector deletionVector) {
+        if (deletionVector instanceof Bitmap64DeletionVector) {
+            return (Bitmap64DeletionVector) deletionVector;
+        }
+        if (deletionVector instanceof BitmapDeletionVector) {
+            return fromBitmapDeletionVector((BitmapDeletionVector) deletionVector);
+        }
+        throw new RuntimeException(
+                "Unsupported deletion vector type: " + deletionVector.getClass());
     }
 
     @Override
@@ -110,6 +122,12 @@ public class Bitmap64DeletionVector implements DeletionVector {
         bitmapData.order(ByteOrder.LITTLE_ENDIAN);
         OptimizedRoaringBitmap64 bitmap = OptimizedRoaringBitmap64.deserialize(bitmapData);
         return new Bitmap64DeletionVector(bitmap);
+    }
+
+    public RoaringNavigableMap64 toRoaringNavigableMap64(long offset) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        roaringBitmap.forEach(position -> result.add(offset + position));
+        return result;
     }
 
     // computes and validates the length of the bitmap data (magic bytes + bitmap)

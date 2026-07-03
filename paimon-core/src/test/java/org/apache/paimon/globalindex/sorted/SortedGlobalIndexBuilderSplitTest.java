@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
@@ -68,6 +69,37 @@ public class SortedGlobalIndexBuilderSplitTest {
                 .isEqualTo(new Range(0, 199));
         assertThat(SortedGlobalIndexBuilder.calcRowRange(rebuilt.get(1)))
                 .isEqualTo(new Range(300, 399));
+    }
+
+    @Test
+    public void testSplitByContiguousRowRangePreservesDeletionFiles() {
+        DataFileMeta file1 = createDataFileMeta(0L, 100L);
+        DataFileMeta file2 = createDataFileMeta(300L, 100L);
+        DataFileMeta file3 = createDataFileMeta(100L, 100L);
+        DeletionFile deletionFile1 = new DeletionFile("dv-1", 0L, 1L, 1L);
+        DeletionFile deletionFile3 = new DeletionFile("dv-3", 1L, 1L, 1L);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Arrays.asList(file1, file2, file3))
+                        .withDataDeletionFiles(Arrays.asList(deletionFile1, null, deletionFile3))
+                        .isStreaming(false)
+                        .rawConvertible(false)
+                        .build();
+
+        List<DataSplit> rebuilt =
+                SortedGlobalIndexBuilder.splitByContiguousRowRange(
+                        Collections.singletonList(split));
+
+        assertThat(rebuilt).hasSize(2);
+        assertThat(rebuilt.get(0).dataFiles()).containsExactly(file1, file3);
+        assertThat(rebuilt.get(0).deletionFiles())
+                .hasValue(Arrays.asList(deletionFile1, deletionFile3));
+        assertThat(rebuilt.get(1).dataFiles()).containsExactly(file2);
+        assertThat(rebuilt.get(1).deletionFiles()).isNotPresent();
     }
 
     @Test

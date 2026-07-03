@@ -26,7 +26,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
@@ -35,6 +37,7 @@ import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FieldRef;
@@ -184,6 +187,94 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Row 0 (1.0, 0.0) should be the closest to query (0.85, 0.15)
         assertThat(ids).contains(0);
+    }
+
+    @Test
+    public void testVectorSearchExcludesDeletionVectorRowsBeforeTopK() throws Exception {
+        catalog.createTable(
+                identifier("vector_deletion_vector_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_deletion_vector_table"));
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.95f, 0.05f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+        DeletionVectorTestUtils.commitDeletionVector(table, new Range(0, 2), 0);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(readIds(table, result)).containsExactly(1);
+
+        List<GlobalIndexResult> batchResults =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {new float[] {1.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+        assertThat(batchResults).hasSize(1);
+        assertThat(batchResults.get(0).results()).containsExactly(1L);
+    }
+
+    @Test
+    public void testGlobalIndexScannerExcludesDeletionVectorRows() throws Exception {
+        catalog.createTable(
+                identifier("global_index_deletion_vector_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("global_index_deletion_vector_table"));
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.95f, 0.05f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1, 2}, new Range(0, 2));
+        DeletionVectorTestUtils.commitDeletionVector(table, new Range(0, 2), 0);
+
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 0);
+        try (GlobalIndexScanner scanner = GlobalIndexScanner.create(table, null, filter).get()) {
+            GlobalIndexResult result = scanner.scan(filter).get();
+
+            assertThat(result.results()).containsExactly(1L, 2L);
+        }
+    }
+
+    @Test
+    public void testShardIndexedSplitsPreserveDeletionFiles() throws Exception {
+        catalog.createTable(
+                identifier("shard_indexed_split_deletion_vector_table"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("shard_indexed_split_deletion_vector_table"));
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.95f, 0.05f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+        DeletionVectorTestUtils.commitDeletionVector(table, new Range(0, 2), 0);
+
+        List<ManifestEntry> entries =
+                table.store().newScan().withSnapshot(table.latestSnapshot().get()).plan().files();
+        List<IndexedSplit> splits =
+                GlobalIndexBuilderUtils.createShardIndexedSplits(
+                        table,
+                        table.latestSnapshot().get(),
+                        null,
+                        entries,
+                        10,
+                        Collections.singletonList(new Range(0, 2)));
+
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).dataSplit().deletionFiles()).isPresent();
+        assertThat(splits.get(0).dataSplit().deletionFiles().get()).anyMatch(file -> file != null);
     }
 
     @Test

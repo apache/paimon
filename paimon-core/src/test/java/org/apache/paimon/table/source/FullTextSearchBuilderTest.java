@@ -126,6 +126,36 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchExcludesDeletionVectorRowsBeforeTopK() throws Exception {
+        catalog.createTable(
+                identifier("full_text_deletion_vector_table"),
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("full_text_deletion_vector_table"));
+
+        String[] documents = {"paimon", "paimon", "paimon"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        DeletionVectorTestUtils.commitDeletionVector(table, new Range(0, 2), 0);
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("paimon", TEXT_FIELD_NAME))
+                        .withLimit(1)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(1L);
+        assertThat(readIds(table, result)).containsExactly(1);
+    }
+
+    @Test
     public void testFullTextSearchNonFastModesScanUnindexedData() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();

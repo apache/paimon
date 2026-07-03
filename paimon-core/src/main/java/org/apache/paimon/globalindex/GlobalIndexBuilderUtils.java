@@ -34,6 +34,8 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Range;
 
@@ -51,6 +53,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BiFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -178,7 +182,30 @@ public class GlobalIndexBuilderUtils {
                 rowsPerShard,
                 (partition, bucket) ->
                         table.store().pathFactory().bucketPath(partition, bucket).toString(),
-                rowRangesToBuild);
+                rowRangesToBuild,
+                Collections.emptyMap());
+    }
+
+    public static List<IndexedSplit> createShardIndexedSplits(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionPredicate,
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            @Nullable List<Range> rowRangesToBuild) {
+        checkRowsPerShard(rowsPerShard);
+        rowRangesToBuild = normalizeRowRanges(rowRangesToBuild);
+        if (rowRangesToBuild != null && rowRangesToBuild.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return createShardIndexedSplits(
+                entries,
+                rowsPerShard,
+                (partition, bucket) ->
+                        table.store().pathFactory().bucketPath(partition, bucket).toString(),
+                rowRangesToBuild,
+                deletionFilesByFile(table, snapshot, partitionPredicate, rowRangesToBuild));
     }
 
     public static List<IndexedSplit> createShardIndexedSplits(
@@ -186,14 +213,20 @@ public class GlobalIndexBuilderUtils {
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, String> bucketPathFactory,
             @Nullable List<Range> rowRangesToBuild) {
-        checkArgument(
-                rowsPerShard > 0,
-                "Option 'global-index.row-count-per-shard' must be greater than 0.");
-        if (rowRangesToBuild != null) {
-            rowRangesToBuild = Range.sortAndMergeOverlap(rowRangesToBuild, true);
-            if (rowRangesToBuild.isEmpty()) {
-                return Collections.emptyList();
-            }
+        return createShardIndexedSplits(
+                entries, rowsPerShard, bucketPathFactory, rowRangesToBuild, Collections.emptyMap());
+    }
+
+    private static List<IndexedSplit> createShardIndexedSplits(
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            BiFunction<BinaryRow, Integer, String> bucketPathFactory,
+            @Nullable List<Range> rowRangesToBuild,
+            Map<FileKey, DeletionFile> deletionFilesByFile) {
+        checkRowsPerShard(rowsPerShard);
+        rowRangesToBuild = normalizeRowRanges(rowRangesToBuild);
+        if (rowRangesToBuild != null && rowRangesToBuild.isEmpty()) {
+            return Collections.emptyList();
         }
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> entriesByPartitionAndBucket =
@@ -218,10 +251,22 @@ public class GlobalIndexBuilderUtils {
                         bucketEntry.getValue(),
                         rowsPerShard,
                         bucketPathFactory,
-                        rowRangesToBuild);
+                        rowRangesToBuild,
+                        deletionFilesByFile);
             }
         }
         return result;
+    }
+
+    private static void checkRowsPerShard(long rowsPerShard) {
+        checkArgument(
+                rowsPerShard > 0,
+                "Option 'global-index.row-count-per-shard' must be greater than 0.");
+    }
+
+    @Nullable
+    private static List<Range> normalizeRowRanges(@Nullable List<Range> rowRangesToBuild) {
+        return rowRangesToBuild == null ? null : Range.sortAndMergeOverlap(rowRangesToBuild, true);
     }
 
     private static void addShardIndexedSplits(
@@ -231,7 +276,8 @@ public class GlobalIndexBuilderUtils {
             List<ManifestEntry> entries,
             long rowsPerShard,
             BiFunction<BinaryRow, Integer, String> bucketPathFactory,
-            @Nullable List<Range> rowRangesToBuild) {
+            @Nullable List<Range> rowRangesToBuild,
+            Map<FileKey, DeletionFile> deletionFilesByFile) {
         Map<Long, List<DataFileMeta>> filesByShard = new LinkedHashMap<>();
         for (ManifestEntry entry : entries) {
             DataFileMeta file = entry.file();
@@ -283,7 +329,8 @@ public class GlobalIndexBuilderUtils {
                             bucket,
                             entries.get(0).totalBuckets(),
                             bucketPathFactory.apply(partition, bucket),
-                            rowRangesToBuild);
+                            rowRangesToBuild,
+                            deletionFilesByFile);
                     currentGroup = new ArrayList<>();
                     currentGroup.add(file);
                     currentGroupEnd = fileEnd;
@@ -299,7 +346,8 @@ public class GlobalIndexBuilderUtils {
                         bucket,
                         entries.get(0).totalBuckets(),
                         bucketPathFactory.apply(partition, bucket),
-                        rowRangesToBuild);
+                        rowRangesToBuild,
+                        deletionFilesByFile);
             }
         }
     }
@@ -313,7 +361,8 @@ public class GlobalIndexBuilderUtils {
             int bucket,
             int totalBuckets,
             String bucketPath,
-            @Nullable List<Range> rowRangesToBuild) {
+            @Nullable List<Range> rowRangesToBuild,
+            Map<FileKey, DeletionFile> deletionFilesByFile) {
         long groupMinRowId = files.get(0).nonNullFirstRowId();
         long groupMaxRowId =
                 files.stream().mapToLong(file -> file.nonNullRowIdRange().to).max().getAsLong();
@@ -327,17 +376,115 @@ public class GlobalIndexBuilderUtils {
             return;
         }
 
-        DataSplit dataSplit =
+        DataSplit.Builder builder =
                 DataSplit.builder()
                         .withPartition(partition)
                         .withBucket(bucket)
                         .withTotalBuckets(totalBuckets)
                         .withDataFiles(files)
                         .withBucketPath(bucketPath)
-                        .rawConvertible(false)
-                        .build();
+                        .rawConvertible(false);
+        List<DeletionFile> dataDeletionFiles =
+                dataDeletionFiles(files, partition, bucket, deletionFilesByFile);
+        if (dataDeletionFiles != null) {
+            builder.withDataDeletionFiles(dataDeletionFiles);
+        }
+        DataSplit dataSplit = builder.build();
         for (Range taskRange : taskRanges) {
             result.add(new IndexedSplit(dataSplit, Collections.singletonList(taskRange), null));
+        }
+    }
+
+    @Nullable
+    private static List<DeletionFile> dataDeletionFiles(
+            List<DataFileMeta> files,
+            BinaryRow partition,
+            int bucket,
+            Map<FileKey, DeletionFile> deletionFilesByFile) {
+        if (deletionFilesByFile.isEmpty()) {
+            return null;
+        }
+
+        List<DeletionFile> result = new ArrayList<>(files.size());
+        boolean hasDeletionFile = false;
+        for (DataFileMeta file : files) {
+            DeletionFile deletionFile =
+                    deletionFilesByFile.get(new FileKey(partition, bucket, file.fileName()));
+            if (deletionFile != null) {
+                hasDeletionFile = true;
+            }
+            result.add(deletionFile);
+        }
+        return hasDeletionFile ? result : null;
+    }
+
+    private static Map<FileKey, DeletionFile> deletionFilesByFile(
+            FileStoreTable table,
+            @Nullable Snapshot snapshot,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable List<Range> rowRangesToBuild) {
+        if (!table.coreOptions().deletionVectorsEnabled() || snapshot == null) {
+            return Collections.emptyMap();
+        }
+
+        SnapshotReader reader = table.newSnapshotReader().withSnapshot(snapshot);
+        if (partitionPredicate != null) {
+            reader = reader.withPartitionFilter(partitionPredicate);
+        }
+        if (rowRangesToBuild != null) {
+            reader = reader.withRowRanges(rowRangesToBuild);
+        }
+
+        Map<FileKey, DeletionFile> result = new HashMap<>();
+        for (DataSplit split : reader.read().dataSplits()) {
+            Optional<List<DeletionFile>> optionalDeletionFiles = split.deletionFiles();
+            if (!optionalDeletionFiles.isPresent()) {
+                continue;
+            }
+
+            List<DataFileMeta> files = split.dataFiles();
+            List<DeletionFile> deletionFiles = optionalDeletionFiles.get();
+            for (int i = 0; i < files.size(); i++) {
+                DeletionFile deletionFile = deletionFiles.get(i);
+                if (deletionFile != null) {
+                    result.put(
+                            new FileKey(split.partition(), split.bucket(), files.get(i).fileName()),
+                            deletionFile);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static class FileKey {
+
+        private final BinaryRow partition;
+        private final int bucket;
+        private final String fileName;
+
+        private FileKey(BinaryRow partition, int bucket, String fileName) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.fileName = fileName;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FileKey fileKey = (FileKey) o;
+            return bucket == fileKey.bucket
+                    && Objects.equals(partition, fileKey.partition)
+                    && Objects.equals(fileName, fileKey.fileName);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket, fileName);
         }
     }
 

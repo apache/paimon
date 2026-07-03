@@ -18,10 +18,12 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.DeletionVectorRowIdFilter;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -65,6 +67,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
+import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base implementation for vector reads. */
@@ -158,6 +161,73 @@ public abstract class AbstractVectorRead implements Serializable {
             includeRowIds.add(include);
         }
         return includeRowIds;
+    }
+
+    protected List<RoaringNavigableMap64> liveRowFilters(List<IndexVectorSearchSplit> splits) {
+        if (!table.coreOptions().deletionVectorsEnabled() || splits.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Snapshot snapshot = tryTravelOrLatest(table);
+        if (snapshot == null) {
+            return Collections.emptyList();
+        }
+
+        List<Range> splitRanges = new ArrayList<>(splits.size());
+        for (IndexVectorSearchSplit split : splits) {
+            splitRanges.add(new Range(split.rowRangeStart(), split.rowRangeEnd()));
+        }
+
+        DeletionVectorRowIdFilter rowIdFilter =
+                new DeletionVectorRowIdFilter(table, snapshot, partitionFilter);
+        RoaringNavigableMap64 deletedRows = rowIdFilter.deletedRows(splitRanges);
+        if (deletedRows.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<RoaringNavigableMap64> liveRows = new ArrayList<>(splits.size());
+        for (Range splitRange : splitRanges) {
+            RoaringNavigableMap64 splitLiveRows = bitmapOf(splitRange);
+            splitLiveRows.andNot(deletedRows);
+            liveRows.add(splitLiveRows);
+        }
+        return liveRows;
+    }
+
+    @Nullable
+    protected RoaringNavigableMap64 includeRowIds(
+            List<RoaringNavigableMap64> preFilters,
+            List<RoaringNavigableMap64> liveRowFilters,
+            int index) {
+        boolean hasPreFilter = !preFilters.isEmpty();
+        boolean hasLiveRowFilter = !liveRowFilters.isEmpty();
+        if (!hasPreFilter && !hasLiveRowFilter) {
+            return null;
+        }
+
+        if (hasLiveRowFilter) {
+            RoaringNavigableMap64 include =
+                    RoaringNavigableMap64.or(
+                            new RoaringNavigableMap64(), liveRowFilters.get(index));
+            if (hasPreFilter) {
+                include.and(preFilters.get(index));
+            }
+            return include;
+        }
+
+        return preFilters.get(index);
+    }
+
+    protected ScoredGlobalIndexResult filterDeletedRows(ScoredGlobalIndexResult result) {
+        if (!table.coreOptions().deletionVectorsEnabled() || result.results().isEmpty()) {
+            return result;
+        }
+
+        Snapshot snapshot = tryTravelOrLatest(table);
+        if (snapshot == null) {
+            return result;
+        }
+        return new DeletionVectorRowIdFilter(table, snapshot, partitionFilter).filter(result);
     }
 
     private List<RoaringNavigableMap64> emptyPreFilters(int size) {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.globalindex.DeletionVectorRowIdFilter;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReadThreadPool;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -51,6 +53,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Implementation for {@link FullTextRead}. */
@@ -123,13 +126,26 @@ public class FullTextReadImpl implements FullTextRead {
                         indexPathFactory,
                         indexFileReader,
                         executor);
+        result = filterDeletedRows(result);
         if (!rawRowRanges.isEmpty()) {
             result =
                     new RawFullTextReadImpl(table, partitionFilter, limit, query, this::evalQuery)
                             .withRawSearch(
                                     result, rawRowRanges, fieldsByName, splitsByColumn, executor);
         }
-        return result.topK(limit);
+        return filterDeletedRows(result).topK(limit);
+    }
+
+    private ScoredGlobalIndexResult filterDeletedRows(ScoredGlobalIndexResult result) {
+        if (!table.coreOptions().deletionVectorsEnabled() || result.results().isEmpty()) {
+            return result;
+        }
+
+        Snapshot snapshot = tryTravelOrLatest(table);
+        if (snapshot == null) {
+            return result;
+        }
+        return new DeletionVectorRowIdFilter(table, snapshot, partitionFilter).filter(result);
     }
 
     ScoredGlobalIndexResult evalQuery(
@@ -229,7 +245,7 @@ public class FullTextReadImpl implements FullTextRead {
                             indexFileReader,
                             executor));
         }
-        return or(results).topK(limit);
+        return filterDeletedRows(or(results)).topK(limit);
     }
 
     private ScoredGlobalIndexResult evalBoolean(
@@ -282,7 +298,7 @@ public class FullTextReadImpl implements FullTextRead {
                             executor);
             result = andNot(result, childResult);
         }
-        return result.topK(limit);
+        return filterDeletedRows(result).topK(limit);
     }
 
     private ScoredGlobalIndexResult evalColumnQuery(

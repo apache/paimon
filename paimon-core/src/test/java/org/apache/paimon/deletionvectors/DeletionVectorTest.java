@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.Test;
 
@@ -185,14 +186,19 @@ public class DeletionVectorTest {
                 Bitmap64DeletionVector.fromBitmapDeletionVector(deletionVector);
 
         assertThat(bitmap64DeletionVector.isEmpty()).isFalse();
+        RoaringNavigableMap64 deletionBitmap =
+                ((Bitmap64DeletionVector) bitmap64DeletionVector).toRoaringNavigableMap64(100);
+        assertThat(deletionBitmap.getLongCardinality()).isEqualTo(toDelete.size());
 
         for (Integer i : toDelete) {
             assertThat(deletionVector.isDeleted(i)).isTrue();
             assertThat(bitmap64DeletionVector.isDeleted(i)).isTrue();
+            assertThat(deletionBitmap.contains(i + 100L)).isTrue();
         }
         for (Integer i : notDelete) {
             assertThat(deletionVector.isDeleted(i)).isFalse();
             assertThat(bitmap64DeletionVector.isDeleted(i)).isFalse();
+            assertThat(deletionBitmap.contains(i + 100L)).isFalse();
         }
     }
 

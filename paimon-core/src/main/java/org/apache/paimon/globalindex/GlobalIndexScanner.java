@@ -70,6 +70,7 @@ public class GlobalIndexScanner implements Closeable {
     private final IndexPathFactory indexPathFactory;
     private final GlobalIndexCoverage coverage;
     private final FileStoreTable table;
+    private final DeletionVectorRowIdFilter rowIdFilter;
 
     private GlobalIndexScanner(
             FileStoreTable table,
@@ -87,6 +88,7 @@ public class GlobalIndexScanner implements Closeable {
                 GlobalIndexReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
         this.coverage = new GlobalIndexCoverage(table, snapshot, partitionFilter, indexFiles);
+        this.rowIdFilter = new DeletionVectorRowIdFilter(table, snapshot, partitionFilter);
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
         Map<Integer, IndexMetaFileGroup> indexMetas = new HashMap<>();
         Map<Integer, List<IndexMetaFileGroup>> extraIndexMetas = new HashMap<>();
@@ -262,7 +264,7 @@ public class GlobalIndexScanner implements Closeable {
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
-        return globalIndexEvaluator.evaluate(predicate);
+        return globalIndexEvaluator.evaluate(predicate).map(rowIdFilter::filter);
     }
 
     public GlobalIndexResult unindexedRows(Predicate predicate) {
@@ -270,7 +272,7 @@ public class GlobalIndexScanner implements Closeable {
         for (Range range : coverage.unindexedRanges(rowType, predicate)) {
             rows.addRange(range);
         }
-        return GlobalIndexResult.create(rows);
+        return rowIdFilter.filter(GlobalIndexResult.create(rows));
     }
 
     private Collection<GlobalIndexReader> createReaders(

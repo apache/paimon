@@ -44,6 +44,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
@@ -417,6 +418,7 @@ public class SortedGlobalIndexBuilder implements Serializable {
         List<DataFileMeta> input = split.dataFiles();
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
+        Map<String, DeletionFile> deletionFiles = deletionFilesByName(split);
 
         Supplier<DataSplit.Builder> builderSupplier =
                 () ->
@@ -428,11 +430,13 @@ public class SortedGlobalIndexBuilder implements Serializable {
                                 .withTotalBuckets(split.totalBuckets())
                                 .isStreaming(split.isStreaming())
                                 .rawConvertible(split.rawConvertible());
-        return packByContiguousRanges(builderSupplier, ranges);
+        return packByContiguousRanges(builderSupplier, ranges, deletionFiles);
     }
 
     private static List<DataSplit> packByContiguousRanges(
-            Supplier<DataSplit.Builder> builderFactory, List<List<DataFileMeta>> ranges) {
+            Supplier<DataSplit.Builder> builderFactory,
+            List<List<DataFileMeta>> ranges,
+            Map<String, DeletionFile> deletionFiles) {
         if (ranges.isEmpty()) {
             return new ArrayList<>();
         }
@@ -449,7 +453,7 @@ public class SortedGlobalIndexBuilder implements Serializable {
                 currentMaxRowId = maxRowId;
             } else {
                 DataSplit.Builder builder = builderFactory.get();
-                builder.withDataFiles(currentSegment);
+                withDataFilesAndDeletionFiles(builder, currentSegment, deletionFiles);
                 result.add(builder.build());
                 currentSegment = new ArrayList<>(rangeFiles);
                 currentMaxRowId = maxRowId;
@@ -457,9 +461,50 @@ public class SortedGlobalIndexBuilder implements Serializable {
         }
 
         DataSplit.Builder builder = builderFactory.get();
-        builder.withDataFiles(currentSegment);
+        withDataFilesAndDeletionFiles(builder, currentSegment, deletionFiles);
         result.add(builder.build());
         return result;
+    }
+
+    private static Map<String, DeletionFile> deletionFilesByName(DataSplit split) {
+        Optional<List<DeletionFile>> optionalDeletionFiles = split.deletionFiles();
+        if (!optionalDeletionFiles.isPresent()) {
+            return Collections.emptyMap();
+        }
+
+        List<DataFileMeta> files = split.dataFiles();
+        List<DeletionFile> deletionFiles = optionalDeletionFiles.get();
+        Map<String, DeletionFile> result = new HashMap<>();
+        for (int i = 0; i < files.size(); i++) {
+            DeletionFile deletionFile = deletionFiles.get(i);
+            if (deletionFile != null) {
+                result.put(files.get(i).fileName(), deletionFile);
+            }
+        }
+        return result;
+    }
+
+    private static void withDataFilesAndDeletionFiles(
+            DataSplit.Builder builder,
+            List<DataFileMeta> files,
+            Map<String, DeletionFile> deletionFiles) {
+        builder.withDataFiles(files);
+        if (deletionFiles.isEmpty()) {
+            return;
+        }
+
+        List<DeletionFile> alignedDeletionFiles = new ArrayList<>(files.size());
+        boolean hasDeletionFile = false;
+        for (DataFileMeta file : files) {
+            DeletionFile deletionFile = deletionFiles.get(file.fileName());
+            if (deletionFile != null) {
+                hasDeletionFile = true;
+            }
+            alignedDeletionFiles.add(deletionFile);
+        }
+        if (hasDeletionFile) {
+            builder.withDataDeletionFiles(alignedDeletionFiles);
+        }
     }
 
     private static long minRowId(List<DataFileMeta> files) {

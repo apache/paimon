@@ -134,7 +134,12 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         // generate splits for each partition && shard
         List<IndexedSplit> splits =
                 GlobalIndexBuilderUtils.createShardIndexedSplits(
-                        table, entries, rowsPerShard, rowRangesToBuild);
+                        table,
+                        snapshot,
+                        partitionPredicate,
+                        entries,
+                        rowsPerShard,
+                        rowRangesToBuild);
 
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
         List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
