@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
@@ -87,6 +88,11 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
+    // Retained only to merge query-auth predicates.
+    @Nullable private Predicate filter;
+    // Last combined filter pushed to the reader; avoids re-pushing every plan(), which would
+    // unboundedly accumulate the partition filter for streaming scans.
+    @Nullable private Predicate appliedAuthFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -102,6 +108,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
+        if (queryAuthResult != null) {
+            applyAuthFilter(queryAuthResult.extractPredicate());
+        }
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
             plan = queryAuthResult.convertPlan(plan);
@@ -111,9 +120,31 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     protected abstract TableScan.Plan planWithoutAuth();
 
+    private void applyAuthFilter(@Nullable Predicate authPredicate) {
+        if (authPredicate == null) {
+            return;
+        }
+
+        // Auth predicate uses field-id-based FieldRefs; remap by name to positional indices so
+        // pruning/file-skipping stays correct across schema evolution (as doAuth does on read).
+        Predicate remappedAuth =
+                TableQueryAuthResult.remapPredicate(authPredicate, schema.logicalRowType());
+        if (remappedAuth == null) {
+            return;
+        }
+
+        Predicate combinedFilter = PredicateBuilder.andNullable(filter, remappedAuth);
+        if (combinedFilter == null || combinedFilter.equals(appliedAuthFilter)) {
+            return;
+        }
+        appliedAuthFilter = combinedFilter;
+        snapshotReader.withFilter(combinedFilter);
+    }
+
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        filter = PredicateBuilder.andNullable(filter, predicate);
+        snapshotReader.withFilter(filter);
         return this;
     }
 

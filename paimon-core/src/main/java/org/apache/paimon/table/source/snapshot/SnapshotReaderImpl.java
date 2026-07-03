@@ -237,7 +237,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 splitPartitionPredicatesAndDataPredicates(
                         predicate, tableSchema.logicalRowType(), tableSchema.partitionKeys());
         if (pair.getLeft().isPresent()) {
-            scan.withPartitionFilter(pair.getLeft().get());
+            scan.withPartitionFilterAnd(pair.getLeft().get());
         }
         if (!pair.getRight().isEmpty()) {
             this.hasNonPartitionFilter = true;
