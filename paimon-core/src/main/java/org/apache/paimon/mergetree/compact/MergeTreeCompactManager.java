@@ -72,6 +72,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
+    private String logInfo = "";
+
     public MergeTreeCompactManager(
             ExecutorService executor,
             Levels levels,
@@ -103,6 +105,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.forceKeepDelete = forceKeepDelete;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
+    }
+
+    /** Set additional compact task information for logging purposes. */
+    public void setLogInfo(String logInfo) {
+        this.logInfo = logInfo;
     }
 
     @Override
@@ -244,6 +251,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
+        task.setLogInfo(logInfo);
         taskFuture = executor.submit(task);
         if (metricsReporter != null) {
             metricsReporter.increaseCompactionsQueuedCount();

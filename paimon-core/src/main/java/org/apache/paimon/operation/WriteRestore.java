@@ -39,13 +39,20 @@ public interface WriteRestore {
 
     @Nullable
     static Integer extractDataFiles(List<ManifestEntry> entries, List<DataFileMeta> dataFiles) {
+        return extractDataFiles(entries, dataFiles, null);
+    }
+
+    @Nullable
+    static Integer extractDataFiles(
+            List<ManifestEntry> entries, List<DataFileMeta> dataFiles, @Nullable String context) {
         Integer totalBuckets = null;
         for (ManifestEntry entry : entries) {
             if (totalBuckets != null && totalBuckets != entry.totalBuckets()) {
+                String contextInfo = context == null ? "" : " for " + context;
                 throw new RuntimeException(
                         String.format(
-                                "Bucket data files has different total bucket number, %s vs %s, this should be a bug.",
-                                totalBuckets, entry.totalBuckets()));
+                                "Bucket data files%s has different total bucket number, %s vs %s, this should be a bug.",
+                                contextInfo, totalBuckets, entry.totalBuckets()));
             }
             totalBuckets = entry.totalBuckets();
             dataFiles.add(entry.file());

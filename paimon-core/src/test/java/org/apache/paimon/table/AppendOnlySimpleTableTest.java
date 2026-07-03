@@ -195,7 +195,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         try (BatchTableWrite write = writeBuilder.newWrite()) {
             if (ordered) {
                 assertThatThrownBy(() -> write.write(rowData(1, 10, 100L)))
-                        .hasMessageContaining("FileNotFoundException");
+                        .hasMessageContaining("Failed to restore existing files")
+                        .hasRootCauseInstanceOf(java.io.FileNotFoundException.class);
             } else {
                 // no exception
                 write.write(rowData(1, 10, 100L));

@@ -37,22 +37,33 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
+    private String logInfo = "";
+
     public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
         this.metricsReporter = metricsReporter;
+    }
+
+    /** Set additional compact task information for logging purposes. */
+    public void setLogInfo(String logInfo) {
+        this.logInfo = logInfo;
     }
 
     @Override
     public CompactResult call() throws Exception {
         MetricUtils.safeCall(this::startTimer, LOG);
+        LOG.info(
+                "Paimon compact task started: {}, taskType={}",
+                logInfo,
+                getClass().getSimpleName());
         try {
             long startMillis = System.currentTimeMillis();
             CompactResult result = doCompact();
+            long durationMs = System.currentTimeMillis() - startMillis;
 
             MetricUtils.safeCall(
                     () -> {
                         if (metricsReporter != null) {
-                            metricsReporter.reportCompactionTime(
-                                    System.currentTimeMillis() - startMillis);
+                            metricsReporter.reportCompactionTime(durationMs);
                             metricsReporter.increaseCompactionsCompletedCount();
                             metricsReporter.reportCompactionInputSize(
                                     result.before().stream()
@@ -68,10 +79,28 @@ public abstract class CompactTask implements Callable<CompactResult> {
                     },
                     LOG);
 
+            LOG.info(
+                    "Paimon compact task finished: {}, taskType={}, "
+                            + "inputFiles={}, inputBytes={}, outputFiles={}, outputBytes={}, durationMs={}",
+                    logInfo,
+                    getClass().getSimpleName(),
+                    result.before().size(),
+                    result.before().stream().mapToLong(DataFileMeta::fileSize).sum(),
+                    result.after().size(),
+                    result.after().stream().mapToLong(DataFileMeta::fileSize).sum(),
+                    durationMs);
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug(logMetric(startMillis, result.before(), result.after()));
             }
             return result;
+        } catch (Exception e) {
+            LOG.warn(
+                    "Paimon compact task failed: {}, taskType={}",
+                    logInfo,
+                    getClass().getSimpleName(),
+                    e);
+            throw e;
         } finally {
             MetricUtils.safeCall(this::stopTimer, LOG);
             MetricUtils.safeCall(this::decreaseCompactionsQueuedCount, LOG);
