@@ -33,6 +33,7 @@ from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.schema.data_types import DataField
 from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           exclude_predicate_with_fields,
                                            remove_row_id_filter,
                                            trim_and_transform_predicate)
 from pypaimon.read.scan_stats import ScanStats
@@ -221,6 +222,9 @@ class FileScanner:
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
         self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
+        # Partition columns aren't in data files, so skip them for value-stats pruning.
+        self.predicate_for_stats = exclude_predicate_with_fields(
+            self.predicate_for_stats, set(self.table.partition_keys))
         self.limit = limit
 
         self.snapshot_manager = table.snapshot_manager()

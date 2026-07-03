@@ -101,6 +101,30 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_isnull_partition_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.isnull_partition_filter', schema, False)
+        table = self.catalog.get_table('default.isnull_partition_filter')
+        data = pa.Table.from_pydict({
+            'user_id': [1, 2],
+            'item_id': [1001, 1002],
+            'behavior': ['a', 'b'],
+            'dt': [None, 'p1'],
+        }, schema=self.pa_schema)
+        wb = table.new_batch_write_builder()
+        w, c = wb.new_write(), wb.new_commit()
+        w.write_arrow(data)
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        rb = table.new_read_builder().with_filter(pb.is_null('dt'))
+        result = self._read_test_table(rb)
+
+        self.assertEqual(result.column('dt').to_pylist(), [None])
+        self.assertEqual(result.column('user_id').to_pylist(), [1])
+
     def test_plan_snapshot_id_for_empty_and_non_empty_scan(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_plan_snapshot_id', schema, False)
