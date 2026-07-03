@@ -108,9 +108,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
-        if (queryAuthResult != null) {
-            applyAuthFilter(queryAuthResult.extractPredicate());
-        }
+        // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
+        applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
             plan = queryAuthResult.convertPlan(plan);

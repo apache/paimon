@@ -138,6 +138,11 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
+        if (authHasNonPartitionFilter) {
+            // Auth drops rows at read time but isn't pushed to FileStoreScan, so clear the
+            // file-level limit too, else the scan may stop before authorized rows.
+            snapshotReader.withLimit(0);
+        }
         if (pushDownLimit == null
                 || snapshotReader.hasNonPartitionFilter()
                 || authHasNonPartitionFilter) {
@@ -179,7 +184,11 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownTopN() {
-        if (topN == null || pushDownLimit != null || !schema.primaryKeys().isEmpty()) {
+        // Auth drops rows at read time, so split-level TopN pruning could drop authorized rows.
+        if (topN == null
+                || pushDownLimit != null
+                || authHasNonPartitionFilter
+                || !schema.primaryKeys().isEmpty()) {
             return Optional.empty();
         }
 
