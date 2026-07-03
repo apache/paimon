@@ -80,6 +80,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String NESTED_KEY_NULL_STRATEGY = "nested-key-null-strategy";
+
     public static final String NESTED_SEQUENCE_FIELD = "nested-sequence-field";
 
     public static final String COUNT_LIMIT = "count-limit";
@@ -2944,6 +2946,13 @@ public class CoreOptions implements Serializable {
         return Arrays.stream(keyString.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
+    public NestedKeyNullStrategy fieldNestedUpdateAggNestedKeyNullStrategy(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY_NULL_STRATEGY)
+                        .enumType(NestedKeyNullStrategy.class)
+                        .defaultValue(NestedKeyNullStrategy.MERGE));
+    }
+
     public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
         String keyString =
                 options.get(
@@ -5031,6 +5040,39 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+    }
+
+    /** Strategy for handling rows whose nested-key contains null values. */
+    public enum NestedKeyNullStrategy implements DescribedEnum {
+        MERGE(
+                "merge",
+                "Merge rows even if the nested-key contains null values, without enforcing primary key semantics."),
+
+        IGNORE(
+                "ignore",
+                "Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics."),
+
+        ERROR(
+                "error",
+                "Throw an exception if the nested-key contains null values, because primary key fields must not be null.");
+
+        private final String value;
+        private final String description;
+
+        NestedKeyNullStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @Override
+        public String toString() {
+            return value;
         }
     }
 }
