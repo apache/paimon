@@ -204,39 +204,32 @@ class ScanQuery:
         return columns
 
     def _blob_read_projection(self, blob_cols: List[str]) -> List[str]:
-        # Read the selected non-BLOB columns + only the requested BLOB
-        # descriptors; never pull unrequested BLOB columns.
+        # Base on _effective_projection() (honours with_row_id), drop BLOB
+        # descriptors, then append predicate-only columns (so where() is not
+        # dropped) and the requested BLOB columns.
         blob_set = set(self._all_blob_columns())
-        if self._projection is None:
+        effective = self._effective_projection()
+        if effective is None:
             base = [f.name for f in self._table.fields if f.name not in blob_set]
         else:
-            base = [name for name in self._projection if name not in blob_set]
-            # The row-level filter is silently dropped unless every predicate
-            # column is read, so pull in predicate-only columns (they are
-            # trimmed back out of the scalar result by _scalar_columns).
+            base = [name for name in effective if name not in blob_set]
             for name in self._predicate_fields():
                 if name not in base and name not in blob_set:
                     base.append(name)
-        # with_row_id() adds _ROW_ID, mirroring to_arrow()'s _effective_projection.
-        if self._include_row_id and SpecialFields.ROW_ID.name not in base:
-            base.append(SpecialFields.ROW_ID.name)
         # base already excludes every BLOB, so append the requested ones as-is.
         return base + list(blob_cols)
 
     def _scalar_columns(self, available) -> List[str]:
-        # Non-BLOB columns to expose to the user, dropping BLOB descriptors and
-        # any predicate-only helper columns pulled in for filtering.
+        # Non-BLOB columns to expose, based on _effective_projection() so
+        # with_row_id() is honoured; drop BLOBs and predicate-only helpers, and
+        # skip unknown projected names to match to_arrow()'s silent drop.
         blob_set = set(self._all_blob_columns())
-        if self._projection is None:
+        effective = self._effective_projection()
+        if effective is None:
             return [name for name in available if name not in blob_set]
-        # Skip unknown projected names, matching to_arrow()'s silent drop.
         available = set(available)
-        cols = [name for name in self._projection
+        return [name for name in effective
                 if name in available and name not in blob_set]
-        row_id = SpecialFields.ROW_ID.name
-        if self._include_row_id and row_id in available and row_id not in cols:
-            cols.append(row_id)
-        return cols
 
     def _predicate_fields(self):
         if self._predicate is None:

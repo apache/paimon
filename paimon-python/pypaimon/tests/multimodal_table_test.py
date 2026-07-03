@@ -892,13 +892,19 @@ class MultimodalTableTest(unittest.TestCase):
         ])
         row_id = "_ROW_ID"
 
+        expected = {r["idx"]: r[row_id]
+                    for r in obs.scan().with_row_id().to_arrow().to_pylist()}
+
         scalar, blobs = (
             obs.scan().with_row_id().select(["idx", "image"]).read_blobs("image"))
         self.assertIn(row_id, scalar.schema.names)
-        expected = {r["idx"]: r[row_id]
-                    for r in obs.scan().with_row_id().to_arrow().to_pylist()}
-        got = dict(zip(scalar.column("idx").to_pylist(),
-                       scalar.column(row_id).to_pylist()))
+        self.assertEqual(expected, dict(zip(scalar.column("idx").to_pylist(),
+                                            scalar.column(row_id).to_pylist())))
+
+        got = {}
+        for sb, _ in obs.scan().with_row_id().select(["idx", "image"]).stream_blobs("image"):
+            self.assertIn(row_id, sb.schema.names)
+            got.update(zip(sb.column("idx").to_pylist(), sb.column(row_id).to_pylist()))
         self.assertEqual(expected, got)
 
     def test_search_query_rejects_blob_reads(self):
