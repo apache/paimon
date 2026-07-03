@@ -313,9 +313,7 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
   Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
 
-  This option is optional. If it is not configured, the behavior is equivalent to using `merge`.
-
-   - `merge`: Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
+   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
    - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
    - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
 

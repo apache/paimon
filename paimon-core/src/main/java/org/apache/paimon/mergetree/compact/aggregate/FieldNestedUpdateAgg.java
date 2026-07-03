@@ -41,8 +41,6 @@ import java.util.Map;
 import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
-import static org.apache.paimon.options.ConfigOptions.key;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -83,24 +81,11 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             this.elementEqualiser = null;
         }
 
-        checkArgument(
-                nestedKeyNullStrategy == null || this.keyProjection != null,
-                "Option 'fields.<field-name>.nested-key-null-strategy' requires "
-                        + "'fields.<field-name>.nested-key' to be configured.");
-
-        // Default to MERGE to preserve the previous behavior.
-        this.nestedKeyNullStrategy =
-                nestedKeyNullStrategy == null
-                        ? CoreOptions.NestedKeyNullStrategy.MERGE
-                        : nestedKeyNullStrategy;
+        this.nestedKeyNullStrategy = nestedKeyNullStrategy;
 
         // If nestedSequenceField is set, we need to compare sequence fields to determine
         // whether to update. Only update when the new sequence is greater than the old one.
         if (!nestedSequenceField.isEmpty()) {
-            checkArgument(
-                    this.keyProjection != null,
-                    "Option 'fields.<field-name>.nested-sequence-field' requires "
-                            + "'fields.<field-name>.nested-key' to be configured.");
             this.sequenceProjection = newProjection(nestedType, nestedSequenceField);
             this.hasSequenceField = true;
 

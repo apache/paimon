@@ -2949,7 +2949,7 @@ public class CoreOptions implements Serializable {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY_NULL_STRATEGY)
                         .enumType(NestedKeyNullStrategy.class)
-                        .noDefaultValue());
+                        .defaultValue(NestedKeyNullStrategy.MERGE));
     }
 
     public List<String> fieldNestedUpdateAggNestedSequenceField(String fieldName) {
