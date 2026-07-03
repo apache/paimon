@@ -38,7 +38,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -114,7 +113,7 @@ public class PartitionTimeResolver {
      * variable's segment according to the pattern-to-format mapping.
      */
     public LinkedHashMap<String, String> resolvePartitionValues(LocalDateTime dateTime) {
-        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter);
+        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
         String formatted = dateTime.format(dateTimeFormatter);
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         for (Map.Entry<PatternToken, Pair<Integer, Integer>> entry :
@@ -128,23 +127,25 @@ public class PartitionTimeResolver {
     }
 
     public LocalDateTime parsePartitionValues(List<?> partitionValues) {
+        Map<String, Object> valueMap = new HashMap<>();
+        for (int i = 0; i < partitionColumns.size(); i++) {
+            valueMap.put(partitionColumns.get(i), partitionValues.get(i));
+        }
+
         StringBuilder timestampString = new StringBuilder();
-        int valueIdx = 0;
         for (PatternToken token : patternTokens) {
             if (token.isVariable) {
-                timestampString.append(partitionValues.get(valueIdx).toString());
-                valueIdx++;
+                timestampString.append(valueMap.get(token.token.substring(1)));
             } else {
                 timestampString.append(token.token);
             }
         }
         DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
         try {
-            return LocalDateTime.parse(timestampString, Objects.requireNonNull(dateTimeFormatter));
+            return LocalDateTime.parse(timestampString, dateTimeFormatter);
         } catch (DateTimeParseException e) {
             return LocalDateTime.of(
-                    LocalDate.parse(timestampString, Objects.requireNonNull(dateTimeFormatter)),
-                    LocalTime.MIDNIGHT);
+                    LocalDate.parse(timestampString, dateTimeFormatter), LocalTime.MIDNIGHT);
         }
     }
 
@@ -220,26 +221,37 @@ public class PartitionTimeResolver {
 
     /** Parses pattern string into pattern tokens (variables and literals). */
     private List<PatternToken> parsePattern() {
+        List<String> sortedPartCols =
+                partitionColumns.stream()
+                        .sorted(Comparator.reverseOrder())
+                        .collect(Collectors.toList());
+
         List<PatternToken> tokens = new ArrayList<>();
-        int len = pattern.length();
-        int cursor = 0;
-        int partCursor = 0;
         StringBuilder literalBuf = new StringBuilder();
-        while (cursor < len) {
+        for (int cursor = 0, len = pattern.length(); cursor < len; ) {
             char curr = pattern.charAt(cursor);
             if (curr == '$') {
                 if (literalBuf.length() > 0) {
                     tokens.add(new PatternToken(literalBuf.toString(), false));
                     literalBuf.setLength(0);
                 }
+                boolean matched = false;
+                // Match the longest column name first to resolve ambiguity when one column name
+                // is a prefix of another (e.g., "dt" vs "dt1").
+                for (String part : sortedPartCols) {
+                    String varToken = curr + part;
+                    if (pattern.substring(cursor).startsWith(varToken)) {
+                        tokens.add(new PatternToken(varToken, true));
+                        cursor += varToken.length();
+                        matched = true;
+                        break;
+                    }
+                }
                 checkArgument(
-                        partCursor < partitionColumns.size(),
-                        "Extra variable in pattern, exceed partitionColumns count");
-                String part = curr + partitionColumns.get(partCursor);
-                checkArgument(pattern.substring(cursor).startsWith(part));
-                tokens.add(new PatternToken(part, true));
-                cursor += part.length();
-                partCursor++;
+                        matched,
+                        "Unknown variable in pattern '%s' at position %s",
+                        pattern,
+                        cursor);
             } else {
                 literalBuf.append(curr);
                 cursor++;
