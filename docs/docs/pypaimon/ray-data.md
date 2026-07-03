@@ -486,3 +486,6 @@ print(metrics)   # {"num_updated": 50}
   `_ROW_ID` raises rather than silently writing.
 - Multiple source rows mapping to the same `_ROW_ID` is rejected — deduplicate first.
 - Blob columns cannot be updated through this path.
+- Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
+- Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
+  in its data file, so it can't be told apart from a live row without reading the target.

@@ -164,6 +164,18 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_by_row_id(name, src, self.catalog_options, update_cols=["name"])
 
+    def test_rejects_deletion_vectors_table(self):
+        # A DV-deleted row still lives in its file, so update_by_row_id can't tell it is
+        # gone without reading the target; DV tables are refused for now.
+        opts = dict(self.de_options, **{"deletion-vectors.enabled": "true"})
+        target = self._create(options=opts)
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0], "age": [9]},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
+        with self.assertRaises(ValueError):
+            update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
+
     def test_rejects_blob_column_update(self):
         blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
         name = f"default.u_{uuid.uuid4().hex[:8]}"

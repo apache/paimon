@@ -39,7 +39,7 @@ from pypaimon.ray.data_evolution_merge_transform import build_update_schema
 __all__ = ["update_by_row_id"]
 
 
-def _blob_col_names(table) -> set:
+def _blob_col_names(table: "FileStoreTable") -> set:
     return {f.name for f in table.table_schema.fields
             if getattr(f.type, "type", None) == "BLOB"}
 
@@ -80,6 +80,12 @@ def update_by_row_id(
     if not table.options.row_tracking_enabled():
         raise ValueError(
             f"update_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
+    if table.options.deletion_vectors_enabled():
+        # A DV-deleted row still lives in its data file, so row-id ranges can't tell it
+        # apart without reading the target; refuse rather than update a deleted row.
+        raise ValueError(
+            f"update_by_row_id does not support deletion-vectors-enabled tables yet: "
+            f"'{target}'.")
 
     rid = SpecialFields.ROW_ID.name
     blob_cols = _blob_col_names(table)
@@ -114,9 +120,10 @@ def update_by_row_id(
     update_ds = source_ds.map_batches(_project_cast, batch_format="pyarrow")
 
     base = table.snapshot_manager().get_latest_snapshot()
+    # Without deletion vectors (rejected above), total_record_count is the live row
+    # count, so 0 means the target is empty (never written, or emptied by overwrite).
     if base is None or base.total_record_count == 0:
-        # No live rows (never written, or emptied by overwrite) -> every source row id
-        # is foreign; don't silently no-op non-empty input.
+        # Every source row id is foreign; don't silently no-op non-empty input.
         if update_ds.limit(1).count() > 0:
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
@@ -130,10 +137,13 @@ def update_by_row_id(
         )
     except Exception as e:
         _reraise_inner(e)
+        raise  # _reraise_inner always raises; keeps msgs/num_updated defined for linters
 
     if msgs:
         wb = table.new_batch_write_builder()
         tc = wb.new_commit()
-        tc.commit(msgs)
-        tc.close()
+        try:
+            tc.commit(msgs)
+        finally:
+            tc.close()
     return {"num_updated": num_updated}
