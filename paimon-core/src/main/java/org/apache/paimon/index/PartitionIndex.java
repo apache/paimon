@@ -34,7 +34,6 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -110,25 +109,31 @@ public class PartitionIndex {
         }
 
         // 2. find bucket from existing buckets
-        Iterator<Map.Entry<Integer, Long>> iterator =
-                nonFullBucketInformation.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<Integer, Long> entry = iterator.next();
-            Integer bucket = entry.getKey();
-            Long number = entry.getValue();
+        for (Integer bucket : nonFullBucketInformation.keySet()) {
+            Long number = nonFullBucketInformation.get(bucket);
+            if (number == null) {
+                continue; // concurrently removed by a background refresh
+            }
             // Non-blocking: lets later assignments see buckets freed by compaction.
             if (shouldRefreshWhenBucketNearFull(
                             number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)
                     && isReachedTheMinRefreshInterval(minRefreshInterval)) {
                 refreshBucketsFromDisk(bucketFilter);
             }
-            if (number < targetBucketRowNumber) {
-                entry.setValue(number + 1);
+            // Atomic update so we don't clobber a value a concurrent refresh may have reconciled.
+            Long assigned =
+                    nonFullBucketInformation.computeIfPresent(
+                            bucket,
+                            (b, number) -> {
+                                if (number < targetBucketRowNumber) {
+                                    return number + 1;
+                                }
+                                diskRowCountAtLastRefresh.remove(b);
+                                return null;
+                            });
+            if (assigned != null) {
                 hash2Bucket.put(hash, (short) bucket.intValue());
                 return bucket;
-            } else {
-                iterator.remove();
-                diskRowCountAtLastRefresh.remove(bucket);
             }
         }
 
