@@ -1107,6 +1107,54 @@ class AoReaderTest(unittest.TestCase):
         self.assertFalse(pb.equal('pt', 'x').test(row_null))
         self.assertTrue(pb.equal('pt', 'x').test(row_x))
 
+    def test_early_partition_filter_isnull_scan(self):
+        # Black-box: drive the early manifest partition filter through an actual
+        # scan (not just Predicate.test), over a null + non-null partition mix.
+        # isNull must keep only the null partition, and the non-matching entries
+        # must be skipped before their _FILE block is deserialized.
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('pk', pa.int32()), ('pt', pa.string())]),
+            partition_keys=['pt'])
+        self.catalog.create_table('default.early_isnull_pt', schema, False)
+        table = self.catalog.get_table('default.early_isnull_pt')
+        ws = pa.schema([('pk', pa.int32()), ('pt', pa.string())])
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pydict({'pk': [0], 'pt': [None]}, schema=ws))
+        for i in range(1, 6):
+            w.write_arrow(pa.Table.from_pydict(
+                {'pk': [i], 'pt': [f'p{i}']}, schema=ws))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        pb = table.new_read_builder().new_predicate_builder()
+
+        # isNull keeps only the null partition; count DataFileMeta constructions to
+        # prove the 5 non-null entries were skipped by the early filter pre-_FILE
+        # (each kept entry builds 2: _FILE + drop_stats copy).
+        constructed = {'n': 0}
+        orig_init = DataFileMeta.__init__
+
+        def counting_init(self_dfm, *args, **kwargs):
+            constructed['n'] += 1
+            orig_init(self_dfm, *args, **kwargs)
+
+        DataFileMeta.__init__ = counting_init
+        try:
+            null_splits = table.new_read_builder().with_filter(
+                pb.is_null('pt')).new_scan().plan().splits()
+        finally:
+            DataFileMeta.__init__ = orig_init
+        self.assertEqual([s.partition.values for s in null_splits], [[None]])
+        self.assertEqual(constructed['n'], 2)
+
+        # complement: equal keeps only the matching non-null partition
+        p3_splits = table.new_read_builder().with_filter(
+            pb.equal('pt', 'p3')).new_scan().plan().splits()
+        self.assertEqual([s.partition.values for s in p3_splits], [['p3']])
+
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
 
