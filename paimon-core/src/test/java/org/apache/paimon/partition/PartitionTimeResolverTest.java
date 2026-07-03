@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.testutils.assertj.PaimonAssertions;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainPartitionProjector;
@@ -41,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link PartitionTimeResolver}. */
@@ -145,6 +147,11 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$date $time", "yyyyMMdd hh", "date", "time"))
                 .isEqualTo(Duration.ofHours(1));
         assertThat(extractMinStep("$a $b", "yyyyMMdd hh", "a", "b")).isEqualTo(Duration.ofHours(1));
+        assertThatThrownBy(() -> extractMinStep("$dt", "yyyyMMddHHmmssSSS", "dt"))
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Unsupported formatter pattern letter 'S' in formatter: yyyyMMddHHmmssSSS."));
     }
 
     @Test
