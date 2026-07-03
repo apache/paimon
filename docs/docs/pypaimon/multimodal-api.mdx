@@ -332,6 +332,57 @@ result = (
 )
 ```
 
+### Reading BLOB columns
+
+`scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
+rows using concurrent, same-file coalesced ranged reads. This is much faster than
+a per-row loop and avoids the slow row-by-row blob resolution on data-evolution
+tables. It returns `(scalar_table, {column: [bytes | None]})`, row-aligned; the
+scalar table drops all BLOB columns.
+
+```python
+scalar, blobs = (
+    docs.scan()
+    .where("category = 'lake'")
+    .read_blobs("image", max_workers=32)
+)
+images = blobs["image"]          # list[bytes | None], aligned with scalar rows
+```
+
+`where()` takes SQL-like strings only, so filter by a list of keys with `IN (...)`:
+
+```python
+ids = ["a", "b", "c"]
+in_clause = ", ".join(f"'{i}'" for i in ids)
+scalar, blobs = docs.scan().where(f"id IN ({in_clause})").read_blobs("image")
+```
+
+`where()` is a SQL string, so build the `IN (...)` clause only from trusted,
+already-escaped ids -- do not interpolate untrusted external input.
+
+Read several BLOB columns at once (fetched together, not column-by-column):
+
+```python
+scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(["image", "audio"])
+```
+
+For a memory-bounded read (e.g. streaming into a trainer), `stream_blobs` yields
+one batch at a time, so peak memory is a single batch rather than the whole result:
+
+```python
+for scalar, blobs in docs.scan().where("category = 'lake'").stream_blobs("image"):
+    for img in blobs["image"]:
+        ...  # feed the trainer, then drop the batch
+```
+
+Notes:
+
+- `max_workers` ~16–32 is the sweet spot over the public network; go higher on an
+  internal/VPC endpoint.
+- Fastest when the matching rows are contiguous (bulk/range reads coalesce into a
+  few large reads); scattered point reads coalesce less.
+- Blob reads are available only on `scan()`, not on the `search()` queries.
+
 ## Row IDs
 
 Multimodal tables enable `row-tracking.enabled` by default, so each row has a

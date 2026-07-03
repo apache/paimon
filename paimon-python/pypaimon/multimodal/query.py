@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
+
+import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.table.special_fields import SpecialFields
@@ -98,6 +100,143 @@ class ScanQuery:
     def to_list(self) -> List[dict]:
         return self.to_arrow().to_pylist()
 
+    def read_blobs(
+            self, columns=None, *, max_workers: int = 64
+    ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
+        """Materialise BLOB column(s) for the filtered rows with concurrent,
+        coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
+        row-by-row blob resolution on multi-group data-evolution splits.
+
+        ``columns`` picks the BLOB column(s) (default: all, intersected with
+        ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
+        row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
+        """
+        blob_cols = self._resolve_blob_columns(columns)
+        read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
+        arrow = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        bodies = self._fetch_bodies(
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, max_workers)
+        scalar = arrow.select(self._scalar_columns(arrow.column_names))
+        return scalar, bodies
+
+    def stream_blobs(self, columns=None, *, max_workers: int = 64):
+        """Memory-bounded streaming variant of :meth:`read_blobs`: yield
+        ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
+        is one batch rather than the whole result.
+        """
+        # Validate eagerly so a bad column raises here, not on the first next().
+        blob_cols = self._resolve_blob_columns(columns)
+        read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
+        return self._iter_blobs(read_builder, file_io, blob_cols, max_workers)
+
+    def _iter_blobs(self, read_builder, file_io, blob_cols, max_workers):
+        reader = read_builder.new_read().to_arrow_batch_reader(
+            read_builder.new_scan().plan().splits())
+        try:
+            for batch in reader:
+                bodies = self._fetch_bodies(
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, max_workers)
+                scalar = batch.select(self._scalar_columns(batch.schema.names))
+                yield scalar, bodies
+        finally:
+            # Close the reader even if the caller breaks out early.
+            if hasattr(reader, "close"):
+                reader.close()
+
+    def _blob_descriptor_read_builder(self, blob_cols: List[str]):
+        """Blob-as-descriptor read builder with this query's filter/projection/limit;
+        returns ``(read_builder, file_io)``."""
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = read_table.new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._blob_read_projection(blob_cols)
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        return read_builder, read_table.file_io
+
+    @staticmethod
+    def _fetch_bodies(file_io, data, blob_cols, max_workers):
+        # Decode each cell (descriptor / view / inline) via Blob.from_bytes,
+        # then read all columns in one coalesced pass.
+        from pypaimon.table.row.blob import Blob
+        flat = []
+        for col in blob_cols:
+            for value in data[col]:
+                flat.append(None if value is None
+                            else Blob.from_bytes(value, file_io))
+        fetched = file_io.read_blobs_concurrent(flat, max_workers)
+        bodies = {}
+        offset = 0
+        for col in blob_cols:
+            n = len(data[col])
+            bodies[col] = fetched[offset:offset + n]
+            offset += n
+        return bodies
+
+    def _all_blob_columns(self) -> List[str]:
+        return [
+            field.name for field in self._table.fields
+            if getattr(field.type, "type", None) == "BLOB"
+        ]
+
+    def _resolve_blob_columns(self, columns) -> List[str]:
+        all_blob = self._all_blob_columns()
+        if columns is None:
+            selected = all_blob
+            if self._projection is not None:
+                selected = [c for c in all_blob if c in self._projection]
+            if not selected:
+                raise ValueError("No BLOB column to read; pass columns=.")
+            return selected
+        if isinstance(columns, str):
+            columns = [columns]
+        columns = list(dict.fromkeys(columns))  # de-dup, keep order
+        for name in columns:
+            if name not in all_blob:
+                raise ValueError(f"Column {name!r} is not a BLOB column.")
+        return columns
+
+    def _blob_read_projection(self, blob_cols: List[str]) -> List[str]:
+        # Read the selected non-BLOB columns + only the requested BLOB
+        # descriptors; never pull unrequested BLOB columns.
+        blob_set = set(self._all_blob_columns())
+        if self._projection is None:
+            base = [f.name for f in self._table.fields if f.name not in blob_set]
+        else:
+            base = [name for name in self._projection if name not in blob_set]
+            # The row-level filter is silently dropped unless every predicate
+            # column is read, so pull in predicate-only columns (they are
+            # trimmed back out of the scalar result by _scalar_columns).
+            for name in self._predicate_fields():
+                if name not in base and name not in blob_set:
+                    base.append(name)
+        # base already excludes every BLOB, so append the requested ones as-is.
+        return base + list(blob_cols)
+
+    def _scalar_columns(self, available) -> List[str]:
+        # Non-BLOB columns to expose to the user, dropping BLOB descriptors and
+        # any predicate-only helper columns pulled in for filtering.
+        blob_set = set(self._all_blob_columns())
+        if self._projection is None:
+            return [name for name in available if name not in blob_set]
+        # Skip unknown projected names, matching to_arrow()'s silent drop.
+        available = set(available)
+        return [name for name in self._projection
+                if name in available and name not in blob_set]
+
+    def _predicate_fields(self):
+        if self._predicate is None:
+            return ()
+        from pypaimon.read.push_down_utils import _get_all_fields
+        return _get_all_fields(self._predicate)
+
     def _coerce_predicate(self, predicate, method):
         if predicate is None:
             return None
@@ -129,6 +268,13 @@ class _PreFilterQuery(ScanQuery):
         if predicate is not None:
             self._pre_filter = self._and_predicate(self._pre_filter, predicate)
         return self
+
+    # Blob reads bypass the search result_factory, so reject them (else a plain scan).
+    def read_blobs(self, *args, **kwargs):
+        raise TypeError("read_blobs is only supported on scan(), not search queries.")
+
+    def stream_blobs(self, *args, **kwargs):
+        raise TypeError("stream_blobs is only supported on scan(), not search queries.")
 
 
 class VectorQuery(_PreFilterQuery):

@@ -749,6 +749,205 @@ class MultimodalTableTest(unittest.TestCase):
             rows,
         )
 
+    def test_scan_read_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = [("blob-%d-" % i).encode() * (i + 1) for i in range(6)]
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": payloads[0]},
+            {"clip": "c1", "idx": 1, "image": payloads[1]},
+            {"clip": "c1", "idx": 2, "image": payloads[2]},
+            {"clip": "c2", "idx": 0, "image": payloads[3]},
+            {"clip": "c2", "idx": 1, "image": payloads[4]},
+            {"clip": "c3", "idx": 0, "image": None},
+        ])
+
+        # scalar table is row-aligned with the blob list and drops the blob column
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs("image")
+        images = blobs["image"]
+        self.assertEqual(3, len(images))
+        self.assertNotIn("image", scalar.column_names)
+        got = dict(zip(scalar.column("idx").to_pylist(), images))
+        self.assertEqual({0: payloads[0], 1: payloads[1], 2: payloads[2]}, got)
+
+        # blob column auto-detected when columns=None
+        _, blobs2 = obs.scan().where("clip = 'c2'").read_blobs()
+        self.assertEqual({payloads[3], payloads[4]}, set(blobs2["image"]))
+
+        # null blob -> None
+        _, blobs3 = obs.scan().where("clip = 'c3'").read_blobs("image")
+        self.assertEqual([None], blobs3["image"])
+
+        # non-BLOB column is rejected
+        with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+            obs.scan().read_blobs("idx")
+
+        # empty result: 0 matching rows -> empty blob list, schema preserved
+        scalar_e, blobs_e = obs.scan().where("clip = 'none'").read_blobs("image")
+        self.assertEqual(0, scalar_e.num_rows)
+        self.assertEqual([], blobs_e["image"])
+
+    def test_scan_read_blobs_multi_column(self):
+        obs = self.conn.create_table(
+            "multi",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "img": pa.large_binary(),
+                "aud": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i,
+             "img": ("img-%d" % i).encode(), "aud": ("aud-%d" % i).encode()}
+            for i in range(4)
+        ])
+
+        # both BLOB columns fetched in one call, each row-aligned with the scalars
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs(["img", "aud"])
+        self.assertEqual({"img", "aud"}, set(blobs))
+        self.assertNotIn("img", scalar.column_names)
+        self.assertNotIn("aud", scalar.column_names)
+        idx = scalar.column("idx").to_pylist()
+        self.assertEqual({i: ("img-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["img"])))
+        self.assertEqual({i: ("aud-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["aud"])))
+
+        # reading only one BLOB column must not leak the other into scalar as
+        # descriptor bytes
+        scalar1, blobs1 = obs.scan().where("clip = 'c1'").read_blobs("img")
+        self.assertEqual({"img"}, set(blobs1))
+        self.assertEqual(["clip", "idx"], scalar1.column_names)
+
+        # columns=None intersects all BLOBs with select() -> only projected BLOB
+        _, blobs2 = obs.scan().where("clip = 'c1'").select(["clip", "idx", "img"]).read_blobs()
+        self.assertEqual({"img"}, set(blobs2))
+
+        # duplicate columns are de-duplicated
+        _, blobs3 = obs.scan().where("clip = 'c1'").read_blobs(["img", "img"])
+        self.assertEqual({"img"}, set(blobs3))
+
+    def test_scan_read_blobs_filter_column_not_selected(self):
+        # The row filter must apply even when its column is not in select().
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i, "image": ("v-%d" % i).encode()}
+            for i in range(4)
+        ])
+
+        scalar, blobs = (
+            obs.scan().select(["image"]).where("idx = 1").read_blobs("image"))
+        self.assertEqual([b"v-1"], blobs["image"])
+        self.assertNotIn("idx", scalar.schema.names)
+
+        scalar2, blobs2 = (
+            obs.scan().select(["idx", "image"]).where("idx = 2").read_blobs("image"))
+        self.assertEqual([b"v-2"], blobs2["image"])
+        self.assertEqual([2], scalar2.column("idx").to_pylist())
+
+        streamed = []
+        for _, body in (
+                obs.scan().select(["image"]).where("idx = 1").stream_blobs("image")):
+            streamed.extend(body["image"])
+        self.assertEqual([b"v-1"], streamed)
+
+        scalar3, _ = obs.scan().select(["missing", "image"]).read_blobs("image")
+        self.assertNotIn("missing", scalar3.schema.names)
+
+    def test_search_query_rejects_blob_reads(self):
+        t = self.conn.create_table(
+            "srch",
+            schema=_schema({
+                "id": pa.int32(),
+                "emb": _vector(3),
+                "img": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
+
+    def test_scan_stream_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = {i: ("s-%d-" % i).encode() * (i + 1) for i in range(5)}
+        obs.add([
+            {"clip": "c1", "idx": i, "image": payloads[i]} for i in range(5)
+        ])
+
+        # collecting every streamed batch must reproduce the full, row-aligned result
+        got = {}
+        batches = 0
+        for scalar, blobs in obs.scan().where("clip = 'c1'").stream_blobs("image"):
+            batches += 1
+            self.assertNotIn("image", scalar.schema.names)
+            for idx, img in zip(scalar.column("idx").to_pylist(), blobs["image"]):
+                got[idx] = img
+        self.assertGreaterEqual(batches, 1)
+        self.assertEqual({i: payloads[i] for i in range(5)}, got)
+
+        # bad column is rejected eagerly (not deferred to first iteration)
+        with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+            obs.scan().stream_blobs("idx")
+        # breaking out early closes the reader without error
+        it = obs.scan().where("clip = 'c1'").stream_blobs("image")
+        next(it)
+        it.close()
+        # empty result streams nothing
+        self.assertEqual(
+            [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
+
+    def test_fetch_bodies_decodes_descriptor_inline_and_null(self):
+        # Cells may be descriptor bytes (incl. -1 read-to-EOF), inline bytes, or null.
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.table.row.blob import BlobDescriptor
+        data = bytes(range(64))
+        path = os.path.join(self.temp_dir, "blob.bin")
+        with open(path, "wb") as f:
+            f.write(data)
+        file_io = FileIO.get("file://" + self.temp_dir, {})
+        cells = [
+            BlobDescriptor(path, 0, -1).serialize(),
+            BlobDescriptor(path, 10, 8).serialize(),
+            b"raw-inline-bytes",
+            None,
+        ]
+        bodies = ScanQuery._fetch_bodies(
+            file_io, {"image": cells}, ["image"], 4)
+        self.assertEqual(
+            [data, data[10:18], b"raw-inline-bytes", None], bodies["image"])
+
     def test_scan_does_not_expose_pre_filter(self):
         users = self.conn.create_table(
             "users",
