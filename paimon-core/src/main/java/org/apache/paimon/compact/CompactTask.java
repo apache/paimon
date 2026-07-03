@@ -36,16 +36,11 @@ public abstract class CompactTask implements Callable<CompactResult> {
     private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
+    private final String bucketInfo;
 
-    private String logInfo = "";
-
-    public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
+    public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter, String bucketInfo) {
         this.metricsReporter = metricsReporter;
-    }
-
-    /** Set additional compact task information for logging purposes. */
-    public void setLogInfo(String logInfo) {
-        this.logInfo = logInfo;
+        this.bucketInfo = bucketInfo;
     }
 
     @Override
@@ -53,7 +48,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
         MetricUtils.safeCall(this::startTimer, LOG);
         LOG.info(
                 "Paimon compact task started: {}, taskType={}",
-                logInfo,
+                bucketInfo,
                 getClass().getSimpleName());
         try {
             long startMillis = System.currentTimeMillis();
@@ -82,7 +77,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
             LOG.info(
                     "Paimon compact task finished: {}, taskType={}, "
                             + "inputFiles={}, inputBytes={}, outputFiles={}, outputBytes={}, durationMs={}",
-                    logInfo,
+                    bucketInfo,
                     getClass().getSimpleName(),
                     result.before().size(),
                     result.before().stream().mapToLong(DataFileMeta::fileSize).sum(),
@@ -97,7 +92,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
         } catch (Exception e) {
             LOG.warn(
                     "Paimon compact task failed: {}, taskType={}",
-                    logInfo,
+                    bucketInfo,
                     getClass().getSimpleName(),
                     e);
             throw e;

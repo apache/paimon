@@ -173,34 +173,28 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         if (metricsReporter != null) {
             rewriter.setMetricsReporter(metricsReporter);
         }
-        MergeTreeCompactManager compactManager =
-                new MergeTreeCompactManager(
-                        compactExecutor,
-                        levels,
-                        compactStrategy,
-                        keyComparator,
-                        options.compactionFileSize(true),
-                        options.numSortedRunStopTrigger(),
-                        rewriter,
-                        metricsReporter,
-                        dvMaintainer,
-                        options.prepareCommitWaitCompaction(),
-                        options.needLookup(),
-                        recordLevelExpire,
-                        options.forceRewriteAllFiles(),
-                        options.isChainTable());
-        compactManager.setLogInfo(compactTaskLogInfo(partition, bucket));
-        return compactManager;
-    }
-
-    private String compactTaskLogInfo(BinaryRow partition, int bucket) {
-        String partitionString;
-        try {
-            partitionString = readerFactoryBuilder.pathFactory().getPartitionString(partition);
-        } catch (Exception e) {
-            partitionString = partition.toString();
+        String bucketInfo = "bucket=" + bucket;
+        if (partition.getFieldCount() > 0) {
+            String partitionString =
+                    readerFactoryBuilder.pathFactory().getPartitionString(partition);
+            bucketInfo = String.format("partition=%s, ", partitionString) + bucketInfo;
         }
-        return String.format("partition=%s, bucket=%d", partitionString, bucket);
+        return new MergeTreeCompactManager(
+                compactExecutor,
+                levels,
+                compactStrategy,
+                keyComparator,
+                options.compactionFileSize(true),
+                options.numSortedRunStopTrigger(),
+                rewriter,
+                metricsReporter,
+                dvMaintainer,
+                options.prepareCommitWaitCompaction(),
+                options.needLookup(),
+                recordLevelExpire,
+                options.forceRewriteAllFiles(),
+                options.isChainTable(),
+                bucketInfo);
     }
 
     private CompactStrategy createCompactStrategy(

@@ -62,6 +62,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -540,7 +541,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(BinaryRow partition, int bucket) {
-        String partInfo = partitionInfo(partition);
+        Supplier<String> partInfo =
+                () ->
+                        partitionType.getFieldCount() > 0
+                                ? "partition "
+                                        + getPartitionComputer(
+                                                        partitionType,
+                                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                                        legacyPartitionName)
+                                                .generatePartValues(partition)
+                                : "table";
         RestoreFiles restored;
         try {
             restored =
@@ -553,7 +563,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             throw new RuntimeException(
                     String.format(
                             "Failed to restore existing files for %s, bucket %d.",
-                            partInfo, bucket),
+                            partInfo.get(), bucket),
                     e);
         }
         Integer restoredTotalBuckets = restored.totalBuckets();
@@ -566,20 +576,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     String.format(
                             "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
                                     + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, numBuckets, totalBuckets));
+                            partInfo.get(), numBuckets, totalBuckets));
         }
         return restored;
-    }
-
-    private String partitionInfo(BinaryRow partition) {
-        return partitionType.getFieldCount() > 0
-                ? "partition "
-                        + getPartitionComputer(
-                                        partitionType,
-                                        PARTITION_DEFAULT_NAME.defaultValue(),
-                                        legacyPartitionName)
-                                .generatePartValues(partition)
-                : "table";
     }
 
     private ExecutorService compactExecutor() {

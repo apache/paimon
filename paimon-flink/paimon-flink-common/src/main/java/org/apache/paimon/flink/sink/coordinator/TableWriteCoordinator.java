@@ -28,7 +28,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -43,7 +42,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.utils.InstantiationUtil.deserializeObject;
 import static org.apache.paimon.utils.InstantiationUtil.serializeObject;
@@ -171,11 +169,7 @@ public class TableWriteCoordinator {
 
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         List<ManifestEntry> entries = scan.withPartitionBucket(partition, bucket).plan().files();
-        Integer totalBuckets =
-                WriteRestore.extractDataFiles(
-                        entries,
-                        restoreFiles,
-                        String.format("%s, bucket %d", partitionInfo(partition), bucket));
+        Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
 
         IndexFileMeta dynamicBucketIndex = null;
         if (request.scanDynamicBucketIndex()) {
@@ -216,18 +210,6 @@ public class TableWriteCoordinator {
         refresh();
         // refresh latest committed identifiers for all users
         latestCommittedIdentifiers.clear();
-    }
-
-    private String partitionInfo(BinaryRow partition) {
-        if (table.schema().logicalPartitionType().getFieldCount() == 0) {
-            return "table";
-        }
-        return "partition "
-                + FileStorePathFactory.getPartitionComputer(
-                                table.schema().logicalPartitionType(),
-                                table.coreOptions().toConfiguration().get(PARTITION_DEFAULT_NAME),
-                                table.coreOptions().legacyPartitionName())
-                        .generatePartValues(partition);
     }
 
     private static class CoordinationKey {
