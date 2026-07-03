@@ -823,35 +823,31 @@ public class FieldAggregatorTest {
                         "Option 'fields.<field-name>.nested-sequence-field' requires "
                                 + "'fields.<field-name>.nested-key' to be configured.");
 
-        FieldNestedUpdateAgg agg1 =
-                new FieldNestedUpdateAggFactory()
-                        .create(
-                                DataTypes.ARRAY(elementRowType),
-                                CoreOptions.fromMap(new HashMap<>()),
-                                "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg1).isNotNull();
-
-        FieldNestedUpdateAgg agg2 =
-                new FieldNestedUpdateAggFactory()
-                        .create(
-                                DataTypes.ARRAY(elementRowType),
-                                CoreOptions.fromMap(
-                                        ImmutableMap.of("fields.filedName.nested-key", "k0,k1")),
-                                "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg2).isNotNull();
-
-        FieldNestedUpdateAgg agg3 =
+        FieldNestedUpdateAgg seqAgg =
                 new FieldNestedUpdateAggFactory()
                         .create(
                                 DataTypes.ARRAY(elementRowType),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
-                                                "fields.filedName.nested-key",
+                                                "fields.fieldName.nested-key",
                                                 "k0,k1",
-                                                "fields.filedName.nested-sequence-field",
+                                                "fields.fieldName.nested-sequence-field",
                                                 "seq")),
                                 "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg3).isNotNull();
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "A", 1)));
+        accumulator = (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "B", 2)));
+
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "B", 2));
+
+        accumulator =
+                (InternalArray) seqAgg.agg(accumulator, singletonArray(row(0, 1, "b_Late", 1)));
+
+        assertThat(unnest(accumulator, elementGetter)).containsExactly(row(0, 1, "B", 2));
     }
 
     @Test
@@ -878,35 +874,68 @@ public class FieldAggregatorTest {
                         "Option 'fields.<field-name>.nested-key-null-strategy' requires "
                                 + "'fields.<field-name>.nested-key' to be configured.");
 
-        FieldNestedUpdateAgg agg1 =
-                new FieldNestedUpdateAggFactory()
-                        .create(
-                                DataTypes.ARRAY(elementRowType),
-                                CoreOptions.fromMap(new HashMap<>()),
-                                "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg1).isNotNull();
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
 
-        FieldNestedUpdateAgg agg2 =
-                new FieldNestedUpdateAggFactory()
-                        .create(
-                                DataTypes.ARRAY(elementRowType),
-                                CoreOptions.fromMap(
-                                        ImmutableMap.of("fields.filedName.nested-key", "k0,k1")),
-                                "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg2).isNotNull();
-
-        FieldNestedUpdateAgg agg3 =
+        // verify merge behavior
+        FieldNestedUpdateAgg mergeAgg =
                 new FieldNestedUpdateAggFactory()
                         .create(
                                 DataTypes.ARRAY(elementRowType),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
-                                                "fields.filedName.nested-key",
+                                                "fields.fieldName.nested-key",
                                                 "k0,k1",
-                                                "fields.filedName.nested-key-null-strategy",
+                                                "fields.fieldName.nested-key-null-strategy",
                                                 "merge")),
                                 "fieldName");
-        org.assertj.core.api.Assertions.assertThat(agg3).isNotNull();
+
+        InternalArray mergeAccumulator = null;
+        mergeAccumulator =
+                (InternalArray)
+                        mergeAgg.agg(mergeAccumulator, singletonArray(row(0, null, "A", 1)));
+
+        assertThat(unnest(mergeAccumulator, elementGetter)).containsExactly(row(0, null, "A", 1));
+
+        // verify ignore behavior
+        FieldNestedUpdateAgg ignoreAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-key-null-strategy",
+                                                "ignore")),
+                                "fieldName");
+
+        InternalArray ignoreAccumulator = null;
+        ignoreAccumulator =
+                (InternalArray) ignoreAgg.agg(ignoreAccumulator, singletonArray(row(0, 1, "A", 1)));
+        ignoreAccumulator =
+                (InternalArray)
+                        ignoreAgg.agg(ignoreAccumulator, singletonArray(row(0, null, "B", 2)));
+
+        assertThat(unnest(ignoreAccumulator, elementGetter)).containsExactly(row(0, 1, "A", 1));
+
+        // verify error behavior
+        FieldNestedUpdateAgg errorAgg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key",
+                                                "k0,k1",
+                                                "fields.fieldName.nested-key-null-strategy",
+                                                "error")),
+                                "fieldName");
+
+        assertThatThrownBy(() -> errorAgg.agg(null, singletonArray(row(0, null, "B", 2))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Nested key contains null values. Primary key fields must not be null.");
     }
 
     @Test
@@ -1224,6 +1253,31 @@ public class FieldAggregatorTest {
                 .hasMessage(
                         "Option 'fields.<field-name>.nested-sequence-field' requires "
                                 + "'fields.<field-name>.nested-key' to be configured.");
+
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAggFactory()
+                        .create(
+                                DataTypes.ARRAY(elementRowType),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of(
+                                                "fields.fieldName.nested-key", "k0,k1",
+                                                "fields.fieldName.nested-sequence-field", "seq",
+                                                "fields.fieldName.count-limit", "2")),
+                                "fieldName");
+
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
+
+        InternalArray accumulator = null;
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "A", 1)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 2, "B", 2)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 3, "C", 3)));
+        accumulator =
+                (InternalArray) agg.agg(accumulator, singletonArray(row(0, 1, "A_Update", 4)));
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(row(0, 2, "B_Late", 1)));
+
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrder(row(0, 1, "A_Update", 4), row(0, 2, "B", 2));
     }
 
     @Test
