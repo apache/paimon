@@ -219,6 +219,21 @@ public class TableCommitImpl implements InnerTableCommit {
         commit.compactManifest();
     }
 
+    public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
+        checkCommitted();
+        boolean success = commit.rollbackToAsLatest(targetSnapshot);
+        if (success) {
+            // Skip automatic expiration for the rollback path. rollback_to_as_latest promises not
+            // to
+            // delete snapshots or tags whose snapshot id is larger than the target snapshot, but
+            // the newly committed latest snapshot would otherwise let expiration (e.g. a low
+            // snapshot.num-retained.max) immediately remove the rolled-back snapshot and the later
+            // snapshots/tags it is meant to preserve.
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, false);
+        }
+        return success;
+    }
+
     private void checkCommitted() {
         checkState(!batchCommitted, "BatchTableCommit only support one-time committing.");
         batchCommitted = true;

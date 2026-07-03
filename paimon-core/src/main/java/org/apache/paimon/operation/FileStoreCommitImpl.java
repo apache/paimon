@@ -111,6 +111,7 @@ import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRo
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -1285,6 +1286,160 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null);
 
         return commitSnapshotImpl(newSnapshot, emptyList());
+    }
+
+    @Override
+    public boolean rollbackToAsLatest(Snapshot targetSnapshot) {
+        Snapshot latest =
+                checkNotNull(
+                        snapshotManager.latestSnapshot(),
+                        "Latest snapshot is null, can not roll back.");
+
+        Map<FileEntry.Identifier, ManifestEntry> latestEntries = new HashMap<>();
+        FileEntry.mergeEntries(
+                manifestFile,
+                manifestList.readDataManifests(latest),
+                latestEntries,
+                options.scanManifestParallelism());
+
+        latestEntries.entrySet().removeIf(entry -> entry.getValue().kind() != FileKind.ADD);
+
+        Map<FileEntry.Identifier, ManifestEntry> targetEntries = new HashMap<>();
+        FileEntry.mergeEntries(
+                manifestFile,
+                manifestList.readDataManifests(targetSnapshot),
+                targetEntries,
+                options.scanManifestParallelism());
+        targetEntries.entrySet().removeIf(entry -> entry.getValue().kind() != FileKind.ADD);
+
+        List<ManifestEntry> deltaFiles = new ArrayList<>();
+        for (Map.Entry<FileEntry.Identifier, ManifestEntry> entry : latestEntries.entrySet()) {
+            if (!targetEntries.containsKey(entry.getKey())) {
+                ManifestEntry manifestEntry = entry.getValue();
+                deltaFiles.add(
+                        ManifestEntry.create(
+                                FileKind.DELETE,
+                                manifestEntry.partition(),
+                                manifestEntry.bucket(),
+                                manifestEntry.totalBuckets(),
+                                manifestEntry.file()));
+            }
+        }
+        for (Map.Entry<FileEntry.Identifier, ManifestEntry> entry : targetEntries.entrySet()) {
+            if (!latestEntries.containsKey(entry.getKey())) {
+                ManifestEntry manifestEntry = entry.getValue();
+                deltaFiles.add(
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                manifestEntry.partition(),
+                                manifestEntry.bucket(),
+                                manifestEntry.totalBuckets(),
+                                manifestEntry.file()));
+            }
+        }
+
+        Pair<String, Long> baseManifestList =
+                manifestList.write(manifestFile.write(new ArrayList<>(latestEntries.values())));
+        Pair<String, Long> deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
+        // For row-tracking tables nextRowId must stay monotonic: a rollback to an older snapshot
+        // must not move it backwards, otherwise new appends would reuse row ids already assigned by
+        // the snapshots between the target and the previous latest, breaking the global uniqueness
+        // of _ROW_ID. Keep the larger of the previous latest and the target nextRowId.
+        Long nextRowId = maxNextRowId(latest.nextRowId(), targetSnapshot.nextRowId());
+        Snapshot newSnapshot =
+                new Snapshot(
+                        latest.id() + 1,
+                        targetSnapshot.schemaId(),
+                        baseManifestList.getKey(),
+                        baseManifestList.getRight(),
+                        deltaManifestList.getKey(),
+                        deltaManifestList.getRight(),
+                        null,
+                        null,
+                        targetSnapshot.indexManifest(),
+                        commitUser,
+                        Long.MAX_VALUE,
+                        CommitKind.OVERWRITE,
+                        System.currentTimeMillis(),
+                        targetSnapshot.totalRecordCount(),
+                        recordCountAdd(deltaFiles) - recordCountDelete(deltaFiles),
+                        null,
+                        targetSnapshot.watermark(),
+                        targetSnapshot.statistics(),
+                        targetSnapshot.properties(),
+                        nextRowId);
+
+        // The rollback is an overwrite from the previous latest to the target, so the base files,
+        // delta files and index changes describe the transition the callbacks need. These are
+        // shared by the pre- and post-commit callbacks below.
+        List<SimpleFileEntry> baseFiles =
+                SimpleFileEntry.from(new ArrayList<>(latestEntries.values()));
+        List<IndexManifestEntry> indexChanges = rollbackIndexChanges(latest, targetSnapshot);
+
+        // Like a regular commit, run the pre-commit callbacks before the snapshot becomes visible.
+        // They may veto the rollback by throwing (e.g. a chain-table snapshot branch rejects a
+        // pure-DELETE overwrite that would drop a snapshot partition still anchoring delta
+        // partitions), in which case the rollback snapshot is never created.
+        commitPreCallbacks.forEach(
+                callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+
+        boolean success =
+                commitSnapshotImpl(newSnapshot, new ArrayList<>(PartitionEntry.merge(deltaFiles)));
+        if (success) {
+            // Notify the post-commit callbacks so external views stay in sync with the rolled-back
+            // state (e.g. Iceberg compatibility metadata and chain-table overwrite handling).
+            CommitCallback.Context context =
+                    new CommitCallback.Context(
+                            baseFiles,
+                            deltaFiles,
+                            indexChanges,
+                            newSnapshot,
+                            newSnapshot.commitIdentifier());
+            commitCallbacks.forEach(callback -> callback.call(context));
+        }
+        return success;
+    }
+
+    /**
+     * Computes the index file changes between the previous latest snapshot and the rollback target,
+     * mirroring how the data delta files are derived: entries that only exist in the previous
+     * latest are marked as {@link FileKind#DELETE}, entries that only exist in the target are kept
+     * as ADD.
+     */
+    private List<IndexManifestEntry> rollbackIndexChanges(Snapshot latest, Snapshot target) {
+        Set<IndexManifestEntry> latestIndexEntries = readIndexEntries(latest.indexManifest());
+        Set<IndexManifestEntry> targetIndexEntries = readIndexEntries(target.indexManifest());
+
+        List<IndexManifestEntry> indexChanges = new ArrayList<>();
+        for (IndexManifestEntry entry : latestIndexEntries) {
+            if (!targetIndexEntries.contains(entry)) {
+                indexChanges.add(entry.toDeleteEntry());
+            }
+        }
+        for (IndexManifestEntry entry : targetIndexEntries) {
+            if (!latestIndexEntries.contains(entry)) {
+                indexChanges.add(entry);
+            }
+        }
+        return indexChanges;
+    }
+
+    private Set<IndexManifestEntry> readIndexEntries(@Nullable String indexManifest) {
+        if (indexManifest == null) {
+            return Collections.emptySet();
+        }
+        return new HashSet<>(indexManifestFile.read(indexManifest));
+    }
+
+    @Nullable
+    private static Long maxNextRowId(@Nullable Long left, @Nullable Long right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return Math.max(left, right);
     }
 
     public void compactManifest() {

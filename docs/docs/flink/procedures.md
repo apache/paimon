@@ -499,6 +499,36 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>rollback_to_as_latest</td>
+      <td>
+         -- for Flink 1.18<br/>
+         -- roll back to a snapshot as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest('identifier', cast(null as string), snapshotId)<br/><br/>
+         -- roll back to a tag as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest('identifier', 'tagName', cast(null as bigint))<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         -- roll back to a snapshot as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest(`table` => 'identifier', snapshot_id => snapshotId)<br/><br/>
+         -- roll back to a tag as the latest snapshot<br/>
+         CALL [catalog.]sys.rollback_to_as_latest(`table` => 'identifier', tag => 'tagName')
+      </td>
+      <td>
+         To roll a table back to a specific version and materialize it as the latest snapshot, without deleting later
+         snapshots or tags. Batch and time-travel reads are correct; for deletion-vector tables, a rollback whose only
+         difference is a deletion-vector change is not guaranteed to be observed by streaming overwrite readers.
+         Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>snapshotId (Long): id of the snapshot to roll back to.</li>
+            <li>tagName: name of the tag to roll back to.</li>
+      </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL sys.rollback_to_as_latest('default.T', cast(null as string), 10)<br/><br/>
+         -- for Flink 1.19 and later<br/>
+         CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 10)
+      </td>
+   </tr>
+   <tr>
       <td>rollback_to_timestamp</td>
       <td>
          -- for Flink 1.18<br/>

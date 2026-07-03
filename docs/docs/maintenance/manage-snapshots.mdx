@@ -362,6 +362,33 @@ CALL sys.rollback(table => 'database_name.table_name', snapshot => snasphot_id);
 
 </Tabs>
 
+## Rollback to Snapshot as Latest
+
+Roll a table back to the state of a specific snapshot id by materializing that state as a new latest snapshot. Unlike
+`rollback_to`, this operation does not delete snapshots or tags whose snapshot id is larger than the target snapshot.
+
+<Tabs groupId="rollback-to-as-latest">
+
+<TabItem value="flink-sql" label="Flink SQL">
+
+Run the following command:
+
+```sql
+CALL sys.rollback_to_as_latest(`table` => 'database_name.table_name', snapshot_id => <snapshot-id>);
+```
+
+</TabItem>
+
+</Tabs>
+
+:::note
+Batch and time-travel reads of the new latest snapshot are correct, because it points to the target snapshot's index
+manifest. However, for tables using deletion vectors, a rollback whose only difference from the current latest is a
+deletion-vector change (the data files are identical) produces an empty data delta, so it is not guaranteed to be
+observed by streaming overwrite readers — the same as a plain deletion-vector delete, which is only streamable through a
+changelog producer.
+:::
+
 ## Remove Orphan Files
 
 Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred
