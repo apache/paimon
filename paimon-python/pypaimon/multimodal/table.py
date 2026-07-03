@@ -109,6 +109,23 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
+        arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
+        overwrite_partition = dict(partition) if partition is not None else None
+        write_builder = (
+            self.raw_table.new_batch_write_builder()
+            .overwrite(overwrite_partition)
+        )
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        try:
+            table_write.write_arrow(arrow_table)
+            table_commit.commit(table_write.prepare_commit())
+        finally:
+            table_write.close()
+            table_commit.close()
+        return self
+
     def update(self, where, values):
         query = self.scan().where(where)
         predicate = query._predicate
