@@ -95,6 +95,13 @@ public abstract class FlinkTableSinkBase
                     builder.addContainedKind(kind);
                 }
             }
+            // FLIP-510: a primary-key Paimon table applies changes (including deletes) by primary
+            // key, so it can always accept key-only (partial) deletes. Advertise this as a sink
+            // capability so the planner can drop the upstream ChangelogNormalize when the source
+            // produces deletes by key. We set the flag unconditionally (rather than echoing
+            // requestedMode.keyOnlyDeletes()) because the planner builds the requested mode via
+            // ModifyKindSet#toDefaultChangelogMode(), which does not carry the keyOnlyDeletes flag.
+            builder.keyOnlyDeletes(true);
             return builder.build();
         }
     }
