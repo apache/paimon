@@ -209,7 +209,11 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
     }
 
     private static DataType buildPhysicalType(
-            DataType logicalType, Type fileType, boolean caseSensitive) {
+            DataType logicalType, @Nullable Type fileType, boolean caseSensitive) {
+        if (fileType == null) {
+            return logicalType;
+        }
+
         if (logicalType instanceof VariantType
                 || VariantMetadataUtils.isVariantRowType(logicalType)) {
             Type clippedType =
@@ -265,10 +269,11 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
         }
     }
 
+    @Nullable
     private static Type matchParquetField(
             GroupType group, String fieldName, boolean caseSensitive) {
         if (caseSensitive) {
-            return group.getType(fieldName);
+            return group.containsField(fieldName) ? group.getType(fieldName) : null;
         }
         Type matched = null;
         for (Type field : group.getFields()) {
@@ -282,7 +287,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
                 matched = field;
             }
         }
-        return matched == null ? group.getType(fieldName) : matched;
+        return matched;
     }
 
     private static class VariantShreddingReadPlan implements ShreddingReadPlan {

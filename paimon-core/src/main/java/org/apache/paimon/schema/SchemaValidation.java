@@ -57,9 +57,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -353,6 +355,8 @@ public class SchemaValidation {
 
         validateFileIndex(schema);
 
+        validateMapStorageLayout(schema, options);
+
         validateRowTracking(schema, options);
 
         validateIncrementalClustering(schema, options);
@@ -364,8 +368,6 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
-
-        validateMapStorageLayout(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -664,7 +666,8 @@ public class SchemaValidation {
 
         if (hasSharedShredding) {
             validateMapSharedShreddingFileFormats(options);
-            validateNoVariantWithMapSharedShredding(schema);
+            validateMapSharedShreddingCompressions(options);
+            validateNoVariantOrBlobWithMapSharedShredding(schema);
             if (!schema.primaryKeys().isEmpty()) {
                 throw new IllegalArgumentException(
                         "MAP shared-shredding currently only supports append-only tables.");
@@ -676,33 +679,38 @@ public class SchemaValidation {
         }
     }
 
-    private static void validateNoVariantWithMapSharedShredding(TableSchema schema) {
-        if (containsVariantFields(new RowType(schema.fields()))) {
+    private static void validateNoVariantOrBlobWithMapSharedShredding(TableSchema schema) {
+        RowType rowType = new RowType(schema.fields());
+        if (containsType(rowType, type -> type instanceof VariantType)) {
             throw new IllegalArgumentException(
                     "MAP shared-shredding currently cannot be used with Variant fields.");
         }
+        if (containsType(rowType, type -> type.is(DataTypeRoot.BLOB))) {
+            throw new IllegalArgumentException(
+                    "MAP shared-shredding currently cannot be used with BLOB fields.");
+        }
     }
 
-    private static boolean containsVariantFields(DataType dataType) {
-        if (dataType instanceof VariantType) {
+    private static boolean containsType(DataType dataType, Predicate<DataType> predicate) {
+        if (predicate.test(dataType)) {
             return true;
         }
         if (dataType instanceof RowType) {
             for (DataField field : ((RowType) dataType).getFields()) {
-                if (containsVariantFields(field.type())) {
+                if (containsType(field.type(), predicate)) {
                     return true;
                 }
             }
         } else if (dataType instanceof ArrayType) {
-            return containsVariantFields(((ArrayType) dataType).getElementType());
+            return containsType(((ArrayType) dataType).getElementType(), predicate);
         } else if (dataType instanceof MultisetType) {
-            return containsVariantFields(((MultisetType) dataType).getElementType());
+            return containsType(((MultisetType) dataType).getElementType(), predicate);
         } else if (dataType instanceof MapType) {
             MapType mapType = (MapType) dataType;
-            return containsVariantFields(mapType.getKeyType())
-                    || containsVariantFields(mapType.getValueType());
+            return containsType(mapType.getKeyType(), predicate)
+                    || containsType(mapType.getValueType(), predicate);
         } else if (dataType instanceof VectorType) {
-            return containsVariantFields(((VectorType) dataType).getElementType());
+            return containsType(((VectorType) dataType).getElementType(), predicate);
         }
         return false;
     }
@@ -719,6 +727,32 @@ public class SchemaValidation {
                 CoreOptions.CHANGELOG_FILE_FORMAT.key(), options.changelogFileFormat());
         validateMapSharedShreddingFileFormat(
                 CoreOptions.VECTOR_FILE_FORMAT.key(), options.vectorFileFormatString());
+    }
+
+    private static void validateMapSharedShreddingCompressions(CoreOptions options) {
+        validateMapSharedShreddingCompression(
+                CoreOptions.FILE_COMPRESSION.key(), options.fileCompression());
+        for (Map.Entry<Integer, String> entry : options.fileCompressionPerLevel().entrySet()) {
+            validateMapSharedShreddingCompression(
+                    CoreOptions.FILE_COMPRESSION_PER_LEVEL.key() + "." + entry.getKey(),
+                    entry.getValue());
+        }
+        validateMapSharedShreddingCompression(
+                CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), options.changelogFileCompression());
+    }
+
+    private static void validateMapSharedShreddingCompression(
+            String optionKey, String compression) {
+        if (StringUtils.isEmpty(compression)) {
+            return;
+        }
+        String normalized = compression.toLowerCase(Locale.ROOT);
+        if (!"none".equals(normalized) && !"lz4".equals(normalized) && !"zstd".equals(normalized)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "MAP shared-shredding only supports none/lz4/zstd compression, but %s is %s.",
+                            optionKey, compression));
+        }
     }
 
     private static void validateMapSharedShreddingFileFormat(String optionKey, String format) {

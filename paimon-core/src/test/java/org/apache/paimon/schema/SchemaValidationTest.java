@@ -374,6 +374,74 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testMapSharedShreddingCannotCombineWithBlob() {
+        Map<String, String> options = mapSharedShreddingOptions();
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB())));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                fields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with BLOB fields.");
+
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "metrics",
+                                DataTypes.MAP(
+                                        DataTypes.STRING(),
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(0, "payload", DataTypes.BLOB())))));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                nestedFields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with BLOB fields.");
+
+        List<DataField> topLevelBlobFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1, "metrics", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                        new DataField(2, "payload", DataTypes.BLOB()));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        new TableSchema(
+                                                1,
+                                                topLevelBlobFields,
+                                                10,
+                                                emptyList(),
+                                                emptyList(),
+                                                options,
+                                                "")))
+                .hasMessageContaining(
+                        "MAP shared-shredding currently cannot be used with BLOB fields.");
+    }
+
+    @Test
     public void testMapSharedShreddingFileFormatValidation() {
         Map<String, String> fileFormatOptions = mapSharedShreddingOptions();
         fileFormatOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
@@ -413,6 +481,50 @@ class SchemaValidationTest {
                                         mapSharedShreddingSchema(vectorFormatOptions, emptyList())))
                 .hasMessageContaining(
                         "MAP shared-shredding only supports parquet/orc file formats, but vector.file.format is json.");
+    }
+
+    @Test
+    public void testMapSharedShreddingFileCompressionValidation() {
+        Map<String, String> fileCompressionOptions = mapSharedShreddingOptions();
+        fileCompressionOptions.put(CoreOptions.FILE_COMPRESSION.key(), "snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                fileCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but file.compression is snappy.");
+
+        Map<String, String> levelCompressionOptions = mapSharedShreddingOptions();
+        levelCompressionOptions.put(CoreOptions.FILE_COMPRESSION_PER_LEVEL.key(), "0:snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                levelCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but file.compression.per.level.0 is snappy.");
+
+        Map<String, String> changelogCompressionOptions = mapSharedShreddingOptions();
+        changelogCompressionOptions.put(CoreOptions.CHANGELOG_FILE_COMPRESSION.key(), "snappy");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        mapSharedShreddingSchema(
+                                                changelogCompressionOptions, emptyList())))
+                .hasMessageContaining(
+                        "MAP shared-shredding only supports none/lz4/zstd compression, but changelog-file.compression is snappy.");
+
+        for (String compression : Arrays.asList("none", "lz4", "zstd", "ZSTD")) {
+            Map<String, String> supportedOptions = mapSharedShreddingOptions();
+            supportedOptions.put(CoreOptions.FILE_COMPRESSION.key(), compression);
+            assertThatNoException()
+                    .isThrownBy(
+                            () ->
+                                    validateTableSchema(
+                                            mapSharedShreddingSchema(
+                                                    supportedOptions, emptyList())));
+        }
     }
 
     @Test
