@@ -102,7 +102,17 @@ def update_by_row_id(
                 f"update_by_row_id cannot update partition column {col!r}; "
                 "cross-partition row movement is not supported.")
 
-    source_ds = _normalize_source(source, catalog_options)
+    if isinstance(source, str):
+        # read_paimon's default schema omits row-tracking system fields, so a
+        # table-name source must project _ROW_ID; pin its snapshot for consistency.
+        from pypaimon.ray.ray_paimon import read_paimon
+        src_snap = (CatalogFactory.create(catalog_options).get_table(source)
+                    .snapshot_manager().get_latest_snapshot())
+        source_ds = read_paimon(
+            source, catalog_options, projection=[rid] + update_cols,
+            snapshot_id=src_snap.id if src_snap is not None else None)
+    else:
+        source_ds = _normalize_source(source, catalog_options)
     src_cols = set(source_ds.schema().names)
     missing = [c for c in [rid] + update_cols if c not in src_cols]
     if missing:
