@@ -196,6 +196,17 @@ trait PaimonRowLevelCommand
       sparkSession)
   }
 
+  protected def collectDataEvolutionDeletionVectors(
+      candidateDataSplits: Seq[DataSplit],
+      dataFilePathToMeta: Map[String, SparkDataFileMeta],
+      dataset: Dataset[Row],
+      sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
+    buildDeletionVectors(
+      dataFilePathToMeta,
+      dataEvolutionDeletionTargets(candidateDataSplits, dataset, sparkSession),
+      sparkSession)
+  }
+
   private def pathAndIndexDeletionTargets(
       dataset: Dataset[Row],
       sparkSession: SparkSession): Dataset[PaimonRowLevelCommand.DeletionTarget] = {
