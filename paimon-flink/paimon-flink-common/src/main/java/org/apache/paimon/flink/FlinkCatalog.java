@@ -257,6 +257,10 @@ public class FlinkCatalog extends AbstractCatalog {
                     context == null
                             ? Thread.currentThread().getContextClassLoader()
                             : context.getClassLoader();
+            // the built-in functions are bundled in Paimon connector
+            if (BuiltInFunctions.FUNCTIONS.containsKey(functionName)) {
+                classLoader = FlinkCatalog.class.getClassLoader();
+            }
             UserDefinedFunction function =
                     UserDefinedFunctionHelper.instantiateFunction(
                             classLoader, new Configuration(), functionName, catalogFunction);
@@ -1480,6 +1484,11 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public final boolean functionExists(ObjectPath functionPath) throws CatalogException {
+        if (isSystemNamespace(functionPath.getDatabaseName())
+                && BuiltInFunctions.FUNCTIONS.containsKey(functionPath.getObjectName())) {
+            return true;
+        }
+
         try {
             return catalog.listFunctions(functionPath.getDatabaseName())
                     .contains(functionPath.getObjectName());
