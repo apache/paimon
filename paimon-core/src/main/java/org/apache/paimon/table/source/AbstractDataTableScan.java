@@ -90,6 +90,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Nullable private RowType readType;
     // Last applied auth predicate; guards redundant re-application across plan()s.
     @Nullable private Predicate appliedAuthPredicate;
+    // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
+    // DataTableBatchScan to disable limit push down; not pushed through withFilter.
+    protected boolean authHasNonPartitionFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -142,10 +145,9 @@ abstract class AbstractDataTableScan implements DataTableScan {
         // Push only the partition part, to a dedicated slot overwritten/cleared each plan() so a
         // changed/removed auth leaves no stale pruning. The full filter is enforced at read time.
         snapshotReader.manifestsReader().withAuthPartitionFilter(authPartitionFilter);
-        if (hasNonPartitionPart) {
-            // Non-partition auth removes rows at read time, so limit push down is unsafe.
-            snapshotReader.markHasNonPartitionFilter();
-        }
+        // A non-partition auth part is enforced only at read time, so limit push down is unsafe
+        // (DataTableBatchScan reads this). Kept off SnapshotReader since it is not a pushed filter.
+        this.authHasNonPartitionFilter = hasNonPartitionPart;
     }
 
     @Override

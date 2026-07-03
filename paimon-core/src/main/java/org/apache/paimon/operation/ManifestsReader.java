@@ -34,7 +34,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -110,18 +109,6 @@ public class ManifestsReader {
 
     public ManifestsReader withPartitionFilter(PartitionPredicate predicate) {
         this.partitionFilter = predicate;
-        return this;
-    }
-
-    public ManifestsReader withPartitionFilterAnd(PartitionPredicate predicate) {
-        if (predicate != null) {
-            List<PartitionPredicate> predicates = new ArrayList<>();
-            if (partitionFilter != null) {
-                predicates.add(partitionFilter);
-            }
-            predicates.add(predicate);
-            this.partitionFilter = PartitionPredicate.and(predicates);
-        }
         return this;
     }
 

@@ -124,9 +124,6 @@ public interface SnapshotReader {
     /** Whether the pushed filter still contains non-partition predicates. */
     boolean hasNonPartitionFilter();
 
-    /** Marks a non-partition filter present (e.g. read-time auth), disabling limit push down. */
-    void markHasNonPartitionFilter();
-
     /** Get splits plan from snapshot. */
     Plan read();
 
