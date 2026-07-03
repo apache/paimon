@@ -124,9 +124,9 @@ public class PartitionIndex {
             Long assigned =
                     nonFullBucketInformation.computeIfPresent(
                             bucket,
-                            (b, number) -> {
-                                if (number < targetBucketRowNumber) {
-                                    return number + 1;
+                            (b, currentNumber) -> {
+                                if (currentNumber < targetBucketRowNumber) {
+                                    return currentNumber + 1;
                                 }
                                 diskRowCountAtLastRefresh.remove(b);
                                 return null;
