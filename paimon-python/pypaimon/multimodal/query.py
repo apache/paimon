@@ -110,6 +110,8 @@ class ScanQuery:
         ``columns`` picks the BLOB column(s) (default: all, intersected with
         ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
         row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
+
+        Unresolved blob-view columns are not supported and raise ``ValueError``.
         """
         blob_cols = self._resolve_blob_columns(columns)
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
@@ -163,14 +165,23 @@ class ScanQuery:
 
     @staticmethod
     def _fetch_bodies(file_io, data, blob_cols, max_workers):
-        # Decode each cell (descriptor / view / inline) via Blob.from_bytes,
-        # then read all columns in one coalesced pass.
-        from pypaimon.table.row.blob import Blob
+        # Decode each cell (descriptor / inline) via Blob.from_bytes, then read all
+        # columns in one coalesced pass.
+        from pypaimon.table.row.blob import Blob, BlobView
         flat = []
         for col in blob_cols:
             for value in data[col]:
-                flat.append(None if value is None
-                            else Blob.from_bytes(value, file_io))
+                if value is None:
+                    flat.append(None)
+                    continue
+                blob = Blob.from_bytes(value, file_io)
+                if isinstance(blob, BlobView) and not blob.is_resolved():
+                    # read_blobs_concurrent would call to_data() on this and raise an
+                    # opaque error; reject it clearly instead.
+                    raise ValueError(
+                        "read_blobs does not support unresolved blob-view columns; "
+                        "read such a column on its own, or enable blob-view resolution.")
+                flat.append(blob)
         fetched = file_io.read_blobs_concurrent(flat, max_workers)
         bodies = {}
         offset = 0

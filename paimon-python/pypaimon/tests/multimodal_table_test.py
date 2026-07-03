@@ -981,6 +981,13 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(
             [data, data[10:18], b"raw-inline-bytes", None], bodies["image"])
 
+    def test_fetch_bodies_rejects_unresolved_blob_view(self):
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.table.row.blob import BlobViewStruct
+        view_bytes = BlobViewStruct("db.tbl", 1, 2).serialize()
+        with self.assertRaisesRegex(ValueError, "blob-view"):
+            ScanQuery._fetch_bodies(None, {"image": [view_bytes]}, ["image"], 4)
+
     def test_scan_does_not_expose_pre_filter(self):
         users = self.conn.create_table(
             "users",
