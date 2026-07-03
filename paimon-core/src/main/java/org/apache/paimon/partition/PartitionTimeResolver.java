@@ -207,6 +207,11 @@ public class PartitionTimeResolver {
                 } else {
                     tokens.add(new LiteralToken(str.replace("''", "'"), start, pos + 1));
                 }
+            } else if (Character.isLetter(c)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Unsupported formatter pattern letter '%s' in formatter: %s.",
+                                c, formatter));
             } else {
                 tokens.add(new LiteralToken(String.valueOf(c), pos, pos + 1));
             }
@@ -240,7 +245,7 @@ public class PartitionTimeResolver {
                 // is a prefix of another (e.g., "dt" vs "dt1").
                 for (String part : sortedPartCols) {
                     String varToken = curr + part;
-                    if (pattern.substring(cursor).startsWith(varToken)) {
+                    if (pattern.startsWith(varToken, cursor)) {
                         tokens.add(new PatternToken(varToken, true));
                         cursor += varToken.length();
                         matched = true;
