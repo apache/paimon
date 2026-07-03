@@ -111,6 +111,24 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(back["age"], [10, 999, 30, 40, 888, 60])
         self.assertEqual(back["name"], [f"n{i}" for i in range(1, 7)])  # untouched
 
+    def test_updates_correct_row_across_files(self):
+        # A _ROW_ID owned by a middle data file must update only that row.
+        target = self._create()
+        for chunk in ([10, 11, 12], [20, 21], [30, 31, 32, 33]):
+            self._write(target, pa.Table.from_pydict(
+                {"id": chunk, "name": ["x"] * len(chunk), "age": [0] * len(chunk)},
+                schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        src = pa.table({"_ROW_ID": [rid[21]], "age": [999]},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
+        stats = update_by_row_id(target, ray.data.from_arrow(src),
+                                 self.catalog_options, update_cols=["age"])
+        self.assertEqual(stats, {"num_updated": 1})
+        back = self._read(target).sort_by("id").to_pydict()
+        got = dict(zip(back["id"], back["age"]))
+        self.assertEqual(got[21], 999)
+        self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
+
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
         # which uses it for commit-time conflict detection against concurrent writers.
