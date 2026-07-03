@@ -3941,13 +3941,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
-    void testRowFilterReadLimitReadsPastUnauthorizedRows() throws Exception {
+    void testRowFilterReadBuilderLimitAfterAuth() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit");
         catalog.createDatabase(identifier.getDatabaseName(), true);
 
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "id", DataTypes.INT()));
-        fields.add(new DataField(1, "secret", DataTypes.INT()));
+        fields.add(new DataField(1, "v", DataTypes.INT()));
         catalog.createTable(
                 identifier,
                 new Schema(
@@ -3960,20 +3960,69 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         Table table = catalog.getTable(identifier);
 
-        // One file: the authorized row (secret=1) comes after unauthorized rows (secret=0).
-        commitRows(table, GenericRow.of(1, 0), GenericRow.of(2, 0), GenericRow.of(3, 1));
+        // Rows 1,2 unauthorized and come first; rows 3,4 authorized.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
 
-        LeafPredicate secretFilter =
+        LeafPredicate idGt2 =
                 LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "secret", DataTypes.INT())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(1));
-        setRowFilter(identifier, Collections.singletonList(secretFilter));
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
 
-        // The read-side limit must be disabled under auth, else it stops at the first
-        // (unauthorized) rows and misses the authorized one.
+        // withLimit(1) must return exactly one authorized row: skipping the limit returns 2,
+        // applying it before auth returns 0.
         List<String> result = batchReadWithReadLimit(table, 1);
-        assertThat(result).contains("+I[3, 1]");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0)).isIn("+I[3, 30]", "+I[4, 40]");
+    }
+
+    @Test
+    void testRowFilterReadLimitSkippedWithTopN() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit_topn");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "score", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Rows 1,2 unauthorized; 3,4 authorized. The highest-sorted authorized row (id=4) is last.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
+
+        LeafPredicate idGt2 =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
+
+        // With a TopN pushed, the read-side limit must be skipped so all authorized rows reach the
+        // engine's ORDER BY; else id=4 (last in scan order) gets truncated.
+        TopN topN = new TopN(new FieldRef(1, "score", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN).withLimit(1);
+        List<String> result = batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+        assertThat(result).containsExactlyInAnyOrder("+I[3, 30]", "+I[4, 40]");
     }
 
     @Test
