@@ -75,8 +75,6 @@ case class MergeIntoPaimonDataEvolutionTable(
   extends PaimonRowLevelCommand
   with Logging {
 
-  override lazy val writer: PaimonSparkWriter = PaimonSparkWriter(table)
-
   assert(
     matchedActions.forall {
       case _: UpdateAction | _: DeleteAction => true

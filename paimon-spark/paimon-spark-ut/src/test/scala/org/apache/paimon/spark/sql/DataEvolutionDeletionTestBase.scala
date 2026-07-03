@@ -326,6 +326,8 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution deletion: merge not matched by source delete") {
+    assume(gteqSpark3_4)
+
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT)")
       sql("INSERT INTO s VALUES (1), (3)")
@@ -353,6 +355,8 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution deletion: merge update insert and not matched by source delete") {
+    assume(gteqSpark3_4)
+
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, new_b INT)")
       sql("INSERT INTO s VALUES (1, 100), (4, 400)")
@@ -380,6 +384,8 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution deletion: repeated complex merge on table with deletion vectors") {
+    assume(gteqSpark3_4)
+
     withTempView("s") {
       withTable("t") {
         sql("""
@@ -463,6 +469,8 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
   }
 
   test("Data Evolution deletion: not matched by source delete does not trigger partial copy") {
+    assume(gteqSpark3_4)
+
     withTable("s", "t") {
       sql("CREATE TABLE s (id INT, new_b INT)")
       sql("INSERT INTO s VALUES (1, 100)")
