@@ -173,21 +173,34 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         if (metricsReporter != null) {
             rewriter.setMetricsReporter(metricsReporter);
         }
-        return new MergeTreeCompactManager(
-                compactExecutor,
-                levels,
-                compactStrategy,
-                keyComparator,
-                options.compactionFileSize(true),
-                options.numSortedRunStopTrigger(),
-                rewriter,
-                metricsReporter,
-                dvMaintainer,
-                options.prepareCommitWaitCompaction(),
-                options.needLookup(),
-                recordLevelExpire,
-                options.forceRewriteAllFiles(),
-                options.isChainTable());
+        MergeTreeCompactManager compactManager =
+                new MergeTreeCompactManager(
+                        compactExecutor,
+                        levels,
+                        compactStrategy,
+                        keyComparator,
+                        options.compactionFileSize(true),
+                        options.numSortedRunStopTrigger(),
+                        rewriter,
+                        metricsReporter,
+                        dvMaintainer,
+                        options.prepareCommitWaitCompaction(),
+                        options.needLookup(),
+                        recordLevelExpire,
+                        options.forceRewriteAllFiles(),
+                        options.isChainTable());
+        compactManager.setLogInfo(compactTaskLogInfo(partition, bucket));
+        return compactManager;
+    }
+
+    private String compactTaskLogInfo(BinaryRow partition, int bucket) {
+        String partitionString;
+        try {
+            partitionString = readerFactoryBuilder.pathFactory().getPartitionString(partition);
+        } catch (Exception e) {
+            partitionString = partition.toString();
+        }
+        return String.format("partition=%s, bucket=%d", partitionString, bucket);
     }
 
     private CompactStrategy createCompactStrategy(

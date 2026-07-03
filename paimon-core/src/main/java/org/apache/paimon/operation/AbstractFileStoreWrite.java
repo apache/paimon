@@ -540,27 +540,28 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(BinaryRow partition, int bucket) {
-        RestoreFiles restored =
-                restore.restoreFiles(
-                        partition,
-                        bucket,
-                        dbMaintainerFactory != null,
-                        dvMaintainerFactory != null);
+        String partInfo = partitionInfo(partition);
+        RestoreFiles restored;
+        try {
+            restored =
+                    restore.restoreFiles(
+                            partition,
+                            bucket,
+                            dbMaintainerFactory != null,
+                            dvMaintainerFactory != null);
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to restore existing files for %s, bucket %d.",
+                            partInfo, bucket),
+                    e);
+        }
         Integer restoredTotalBuckets = restored.totalBuckets();
         int totalBuckets = numBuckets;
         if (restoredTotalBuckets != null) {
             totalBuckets = restoredTotalBuckets;
         }
         if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            String partInfo =
-                    partitionType.getFieldCount() > 0
-                            ? "partition "
-                                    + getPartitionComputer(
-                                                    partitionType,
-                                                    PARTITION_DEFAULT_NAME.defaultValue(),
-                                                    legacyPartitionName)
-                                            .generatePartValues(partition)
-                            : "table";
             throw new RuntimeException(
                     String.format(
                             "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
@@ -568,6 +569,17 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             partInfo, numBuckets, totalBuckets));
         }
         return restored;
+    }
+
+    private String partitionInfo(BinaryRow partition) {
+        return partitionType.getFieldCount() > 0
+                ? "partition "
+                        + getPartitionComputer(
+                                        partitionType,
+                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                        legacyPartitionName)
+                                .generatePartValues(partition)
+                : "table";
     }
 
     private ExecutorService compactExecutor() {
