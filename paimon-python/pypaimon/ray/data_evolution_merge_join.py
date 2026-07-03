@@ -441,8 +441,16 @@ def distributed_update_apply(
                 f"Column '{col}' is not in target table schema."
             )
 
+    # Pin the planner to the caller's base snapshot so row-id routing and the
+    # commit-time conflict check agree even if a concurrent commit lands (mirrors
+    # the delete path).
+    from pypaimon.common.options.core_options import CoreOptions
+    scan_table = (
+        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        if base_snapshot_id is not None else table
+    )
     planner = TableUpdateByRowId(
-        table,
+        scan_table,
         "_merge_into_planner_" + uuid.uuid4().hex[:8],
         BATCH_COMMIT_IDENTIFIER,
     )

@@ -111,6 +111,31 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(back["age"], [10, 999, 30, 40, 888, 60])
         self.assertEqual(back["name"], [f"n{i}" for i in range(1, 7)])  # untouched
 
+    def test_pins_base_snapshot_for_conflict_detection(self):
+        # The update pins its base snapshot and threads it to distributed_update_apply,
+        # which uses it for commit-time conflict detection against concurrent writers.
+        import importlib
+        m = importlib.import_module("pypaimon.ray.update_by_row_id")  # module, not the fn
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        expected_sid = self.catalog.get_table(
+            target).snapshot_manager().get_latest_snapshot().id
+        rid = self._rowid_by_id(target)
+        src = pa.table({"_ROW_ID": [rid[1]], "age": [9]},
+                       schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())]))
+
+        captured = {}
+
+        def fake_apply(update_ds, table, cols, *, num_partitions,
+                       ray_remote_args=None, base_snapshot_id=None):
+            captured["base_snapshot_id"] = base_snapshot_id
+            return [], 0, []
+
+        with mock.patch.object(m, "distributed_update_apply", fake_apply):
+            update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
+        self.assertEqual(captured["base_snapshot_id"], expected_sid)
+
     def test_accepts_pyarrow_and_pandas_source(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
