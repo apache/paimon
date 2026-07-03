@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
+import org.apache.spark.sql.types.TimestampType
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
@@ -647,6 +648,40 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                 }
               }
             }
+        }
+    }
+  }
+
+  test("Paimon DDL: legacy timestamp mapping") {
+    assume(gteqSpark3_4)
+
+    Seq("orc", "parquet").foreach {
+      format =>
+        withSparkSQLConf("spark.paimon.legacy-timestamp-mapping.enabled" -> "true") {
+          withTimeZone("Asia/Shanghai") {
+            withTable("paimon_tbl") {
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (reported_time timestamp)
+                     |USING paimon
+                     |TBLPROPERTIES ('file.format'='$format')
+                     |""".stripMargin)
+
+              sql("INSERT INTO paimon_tbl VALUES (timestamp'2026-06-30 23:47:51')")
+
+              Assertions.assertEquals(
+                TimestampType,
+                spark.table("paimon_tbl").schema("reported_time").dataType)
+              checkAnswer(
+                sql("""
+                      |SELECT from_unixtime(
+                      |  unix_timestamp(reported_time) + 24 * 3600,
+                      |  'yyyy-MM-dd HH:mm:ss'
+                      |) FROM paimon_tbl
+                      |""".stripMargin),
+                Row("2026-07-01 23:47:51") :: Nil
+              )
+            }
+          }
         }
     }
   }
