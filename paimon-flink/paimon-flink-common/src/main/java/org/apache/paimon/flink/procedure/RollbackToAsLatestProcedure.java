@@ -25,9 +25,11 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
@@ -35,6 +37,7 @@ import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.types.Row;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
@@ -54,6 +57,7 @@ import java.util.UUID;
 public class RollbackToAsLatestProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "rollback_to_as_latest";
+    private static final String ROLLBACK_TO_AS_LATEST_TAG_PREFIX = "rollback-to-as-latest-";
 
     @ProcedureHint(
             argument = {
@@ -80,20 +84,39 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
         Preconditions.checkArgument(
                 hasTag != hasSnapshot, "Must specify exactly one of tag and snapshot_id.");
 
+        TagManager tagManager = store.newTagManager();
+        Tag targetTag;
         Snapshot targetSnapshot;
         if (hasTag) {
-            targetSnapshot = store.newTagManager().getOrThrow(tagName).trimToSnapshot();
+            targetTag = tagManager.getOrThrow(tagName);
+            targetSnapshot = targetTag.trimToSnapshot();
         } else {
-            targetSnapshot = findSnapshot(store, snapshotId);
+            targetTag = null;
+            targetSnapshot = findSnapshot(store, tagManager, snapshotId);
         }
 
-        try (TableCommitImpl commit =
-                fileStoreTable.newCommit("rollback-to-as-latest-" + UUID.randomUUID().toString())) {
-            Preconditions.checkState(
-                    commit.rollbackToAsLatest(targetSnapshot),
-                    "Failed to roll back to snapshot %s as latest.",
-                    targetSnapshot.id());
+        String createdRollbackTag = null;
+        String commitUser = "rollback-to-as-latest-" + UUID.randomUUID().toString();
+        try {
+            if (!hasTag) {
+                createdRollbackTag = createRollbackToAsLatestTag(tagManager, targetSnapshot);
+                targetTag = tagManager.getOrThrow(createdRollbackTag);
+            }
+
+            try (TableCommitImpl commit = fileStoreTable.newCommit(commitUser)) {
+                boolean success = commit.rollbackToAsLatest(targetTag);
+                Preconditions.checkState(
+                        success,
+                        "Failed to roll back to snapshot %s as latest.",
+                        targetSnapshot.id());
+            }
         } catch (Exception e) {
+            try {
+                deleteCreatedRollbackTagIfNotCommitted(
+                        store, tagManager, createdRollbackTag, latestSnapshot.id() + 1, commitUser);
+            } catch (Exception cleanupException) {
+                e.addSuppressed(cleanupException);
+            }
             throw new RuntimeException(
                     String.format(
                             "Failed to roll back to snapshot %s as latest.", targetSnapshot.id()),
@@ -108,13 +131,48 @@ public class RollbackToAsLatestProcedure extends ProcedureBase {
         };
     }
 
-    private Snapshot findSnapshot(FileStore<?> store, long snapshotId) {
+    private String createRollbackToAsLatestTag(TagManager tagManager, Snapshot targetSnapshot) {
+        String tagName =
+                ROLLBACK_TO_AS_LATEST_TAG_PREFIX
+                        + targetSnapshot.id()
+                        + "-"
+                        + UUID.randomUUID().toString();
+        tagManager.createTag(targetSnapshot, tagName, null, Collections.emptyList(), false);
+        return tagName;
+    }
+
+    private void deleteCreatedRollbackTagIfNotCommitted(
+            FileStore<?> store,
+            TagManager tagManager,
+            String createdRollbackTag,
+            long rollbackSnapshotId,
+            String commitUser) {
+        if (createdRollbackTag == null
+                || rollbackSnapshotCommitted(
+                        store.snapshotManager(), rollbackSnapshotId, commitUser)) {
+            return;
+        }
+
+        tagManager.deleteTag(
+                createdRollbackTag,
+                store.newTagDeletion(),
+                store.snapshotManager(),
+                Collections.emptyList());
+    }
+
+    private boolean rollbackSnapshotCommitted(
+            SnapshotManager snapshotManager, long rollbackSnapshotId, String commitUser) {
+        return snapshotManager.snapshotExists(rollbackSnapshotId)
+                && commitUser.equals(snapshotManager.snapshot(rollbackSnapshotId).commitUser());
+    }
+
+    private Snapshot findSnapshot(FileStore<?> store, TagManager tagManager, long snapshotId) {
         SnapshotManager snapshotManager = store.snapshotManager();
         if (snapshotManager.snapshotExists(snapshotId)) {
             return snapshotManager.snapshot(snapshotId);
         }
 
-        SortedMap<Snapshot, List<String>> tags = store.newTagManager().tags();
+        SortedMap<Snapshot, List<String>> tags = tagManager.tags();
         for (Map.Entry<Snapshot, List<String>> entry : tags.entrySet()) {
             if (entry.getKey().id() == snapshotId) {
                 return entry.getKey();

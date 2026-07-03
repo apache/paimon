@@ -56,10 +56,12 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -81,6 +83,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -1054,6 +1057,48 @@ public class FileStoreCommitTest {
         List<Split> splits =
                 table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
         assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testExpireSnapshotsKeepsFilesRestoredByRollbackToAsLatest() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        KeyValue original = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "original");
+        KeyValue replacement = gen.nextInsert("20201111", 11, 2L, new int[] {2, 2}, "replacement");
+        KeyValue retainedBeforeRollback =
+                gen.nextInsert("20201112", 12, 3L, new int[] {3, 3}, "retained");
+
+        Snapshot target =
+                store.commitData(Collections.singletonList(original), gen::getPartition, kv -> 0)
+                        .get(0);
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        table.tagManager()
+                .createTag(
+                        target, "expiring-target", Duration.ZERO, Collections.emptyList(), false);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        table.tagManager().createTag(target, protectionTag, null, Collections.emptyList(), false);
+        store.overwriteData(
+                Collections.singletonList(replacement),
+                gen::getPartition,
+                kv -> 0,
+                Collections.emptyMap());
+        store.commitData(
+                Collections.singletonList(retainedBeforeRollback), gen::getPartition, kv -> 0);
+
+        try (TableCommitImpl commit = table.newCommit("rollback-to-as-latest-test")) {
+            assertThat(commit.rollbackToAsLatest(table.tagManager().getOrThrow(protectionTag)))
+                    .isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+        assertThat(table.tagManager().tags().get(target))
+                .contains("expiring-target")
+                .contains(protectionTag);
+
+        ((ExpireSnapshotsImpl) store.newExpire(1, 1, Long.MAX_VALUE)).expireUntil(1, 3);
+
+        List<KeyValue> actual = store.readKvsFromSnapshot(rolledBack.id());
+        assertThat(store.toKvMap(actual))
+                .isEqualTo(store.toKvMap(Collections.singletonList(original)));
     }
 
     @Test
