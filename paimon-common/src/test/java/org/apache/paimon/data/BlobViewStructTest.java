@@ -22,6 +22,10 @@ import org.apache.paimon.catalog.Identifier;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Arrays;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -84,5 +88,37 @@ public class BlobViewStructTest {
         assertThat(BlobViewStruct.isBlobViewStruct(null)).isFalse();
         assertThat(BlobViewStruct.isBlobViewStruct(new byte[] {1, 2, 3})).isFalse();
         assertThat(Blob.fromBytes(bytes, null, null)).isEqualTo(Blob.fromView(viewStruct));
+    }
+
+    @Test
+    public void testRejectMalformedPayloads() {
+        byte[] serialized =
+                new BlobViewStruct(Identifier.fromString("default.source"), 7, 5L).serialize();
+
+        byte[] headerOnly = Arrays.copyOf(serialized, Byte.BYTES + Long.BYTES);
+        assertThat(BlobViewStruct.isBlobViewStruct(headerOnly)).isTrue();
+        assertInvalidPayload(headerOnly, "too short");
+
+        byte[] negativeIdentifierLength = Arrays.copyOf(serialized, serialized.length);
+        putInt(negativeIdentifierLength, Byte.BYTES + Long.BYTES, -1);
+        assertInvalidPayload(negativeIdentifierLength, "negative identifier length");
+
+        byte[] oversizedIdentifierLength = Arrays.copyOf(serialized, serialized.length);
+        putInt(oversizedIdentifierLength, Byte.BYTES + Long.BYTES, 100);
+        assertInvalidPayload(oversizedIdentifierLength, "identifier length exceeds data size");
+
+        byte[] missingFieldIdRowId = Arrays.copyOf(serialized, serialized.length - Long.BYTES);
+        assertInvalidPayload(missingFieldIdRowId, "missing fieldId/rowId");
+    }
+
+    private static void putInt(byte[] bytes, int offset, int value) {
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putInt(offset, value);
+    }
+
+    private static void assertInvalidPayload(byte[] bytes, String message) {
+        assertThatThrownBy(() -> BlobViewStruct.deserialize(bytes))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid BlobViewStruct data:")
+                .hasMessageContaining(message);
     }
 }
