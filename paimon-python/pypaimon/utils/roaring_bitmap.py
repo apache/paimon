@@ -19,7 +19,164 @@
 Roaring Bitmap.
 """
 
+import struct
 from typing import Iterator
+
+
+_UINT32_MASK = (1 << 32) - 1
+_INT64_MAX = (1 << 63) - 1
+
+
+def _check_int64(value: int) -> None:
+    if value < 0 or value > _INT64_MAX:
+        raise ValueError("RoaringBitmap64 only supports values from 0 to 2^63 - 1.")
+
+
+class _ChunkedBitMap64:
+    """64-bit bitmap fallback built from pyroaring.BitMap chunks."""
+
+    def __init__(self):
+        from pyroaring import BitMap
+
+        self._bitmap_cls = BitMap
+        self._chunks = {}
+
+    def add(self, value: int) -> None:
+        _check_int64(value)
+        key = value >> 32
+        low = value & _UINT32_MASK
+        self._chunks.setdefault(key, self._bitmap_cls()).add(low)
+
+    def add_range(self, from_: int, to: int) -> None:
+        _check_int64(from_)
+        _check_int64(to - 1 if to > from_ else from_)
+        current = from_
+        while current < to:
+            key = current >> 32
+            next_key_start = (key + 1) << 32
+            chunk_end = min(to, next_key_start)
+            self._chunks.setdefault(key, self._bitmap_cls()).add_range(
+                current & _UINT32_MASK,
+                ((chunk_end - 1) & _UINT32_MASK) + 1
+            )
+            current = chunk_end
+
+    def __contains__(self, value: int) -> bool:
+        if value < 0 or value > _INT64_MAX:
+            return False
+        key = value >> 32
+        chunk = self._chunks.get(key)
+        return chunk is not None and (value & _UINT32_MASK) in chunk
+
+    def __iter__(self) -> Iterator[int]:
+        for key in sorted(self._chunks):
+            base = key << 32
+            for low in self._chunks[key]:
+                yield base + low
+
+    def __len__(self) -> int:
+        return sum(len(chunk) for chunk in self._chunks.values())
+
+    def clear(self) -> None:
+        self._chunks.clear()
+
+    def _copy_chunk(self, chunk):
+        return self._bitmap_cls.deserialize(chunk.serialize())
+
+    def serialize(self) -> bytes:
+        chunks = [
+            (key, chunk)
+            for key, chunk in sorted(self._chunks.items())
+            if len(chunk) > 0
+        ]
+        result = bytearray(struct.pack("<q", len(chunks)))
+        for key, chunk in chunks:
+            result.extend(struct.pack("<i", key))
+            result.extend(chunk.serialize())
+        return bytes(result)
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> '_ChunkedBitMap64':
+        from pyroaring import BitMap
+
+        result = cls()
+        offset = 0
+        count = struct.unpack_from("<q", data, offset)[0]
+        offset += 8
+        if count < 0:
+            raise ValueError("Invalid 64-bit roaring bitmap chunk count: %s" % count)
+
+        last_key = -1
+        for _ in range(count):
+            key = struct.unpack_from("<i", data, offset)[0]
+            offset += 4
+            if key < 0:
+                raise ValueError("Invalid 64-bit roaring bitmap chunk key: %s" % key)
+            if key <= last_key:
+                raise ValueError("64-bit roaring bitmap chunk keys must be ascending.")
+
+            chunk = BitMap.deserialize(data[offset:])
+            consumed = len(chunk.serialize())
+            if consumed <= 0:
+                raise ValueError("Invalid empty 32-bit roaring bitmap payload.")
+            offset += consumed
+            if len(chunk) > 0:
+                result._chunks[key] = chunk
+            last_key = key
+
+        if offset != len(data):
+            raise ValueError("Trailing bytes in 64-bit roaring bitmap payload.")
+
+        return result
+
+    def __and__(self, other: '_ChunkedBitMap64') -> '_ChunkedBitMap64':
+        result = _ChunkedBitMap64()
+        for key in set(self._chunks).intersection(other._chunks):
+            chunk = self._chunks[key] & other._chunks[key]
+            if len(chunk) > 0:
+                result._chunks[key] = chunk
+        return result
+
+    def __or__(self, other: '_ChunkedBitMap64') -> '_ChunkedBitMap64':
+        result = _ChunkedBitMap64()
+        for key in set(self._chunks).union(other._chunks):
+            left = self._chunks.get(key)
+            right = other._chunks.get(key)
+            if left is None:
+                chunk = self._copy_chunk(right)
+            elif right is None:
+                chunk = self._copy_chunk(left)
+            else:
+                chunk = left | right
+            if len(chunk) > 0:
+                result._chunks[key] = chunk
+        return result
+
+    def __sub__(self, other: '_ChunkedBitMap64') -> '_ChunkedBitMap64':
+        result = _ChunkedBitMap64()
+        for key, chunk in self._chunks.items():
+            other_chunk = other._chunks.get(key)
+            if other_chunk is None:
+                diff = self._copy_chunk(chunk)
+            else:
+                diff = chunk - other_chunk
+            if len(diff) > 0:
+                result._chunks[key] = diff
+        return result
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _ChunkedBitMap64):
+            return False
+        return self._chunks == other._chunks
+
+
+def _new_bitmap64():
+    try:
+        from pyroaring import BitMap64
+
+        return BitMap64()
+    except ImportError:
+        return _ChunkedBitMap64()
 
 
 class RoaringBitmap64:
@@ -31,15 +188,17 @@ class RoaringBitmap64:
     """
 
     def __init__(self):
-        from pyroaring import BitMap64
-        self._data = BitMap64()
+        self._data = _new_bitmap64()
 
     def add(self, value: int) -> None:
         """Add a single value to the bitmap."""
+        _check_int64(value)
         self._data.add(value)
 
     def add_range(self, from_: int, to: int) -> None:
         """Add a range of values [from_, to] to the bitmap."""
+        _check_int64(from_)
+        _check_int64(to)
         self._data.add_range(from_, to + 1)
 
     def contains(self, value: int) -> bool:
@@ -132,8 +291,12 @@ class RoaringBitmap64:
     def deserialize(data: bytes) -> 'RoaringBitmap64':
         """Deserialize a bitmap from bytes."""
         result = RoaringBitmap64()
-        from pyroaring import BitMap64
-        result._data = BitMap64.deserialize(data)
+        try:
+            from pyroaring import BitMap64
+
+            result._data = BitMap64.deserialize(data)
+        except ImportError:
+            result._data = _ChunkedBitMap64.deserialize(data)
         return result
 
     def __eq__(self, other: object) -> bool:

@@ -30,7 +30,9 @@ polars>=1,<2; python_version=="3.8"
 polars>=1.32,<2; python_version>="3.9"
 pyarrow>=6,<7; python_version < "3.8"
 pyarrow>=16,!=19.0.0,<20; python_version >= "3.8"
-pyroaring>=1.0.0
+pyroaring>=0.3.3,<0.3.4; python_version < "3.7"
+pyroaring>=0.4.5,<1.0.0; python_version >= "3.7" and python_version < "3.8"
+pyroaring>=1.0.0; python_version >= "3.8"
 readerwriterlock>=1,<2
 requests>=2.21.0,<3
 urllib3>=1.26,<3
