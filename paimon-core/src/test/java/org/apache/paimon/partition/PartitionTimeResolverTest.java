@@ -99,9 +99,9 @@ public class PartitionTimeResolverTest {
 
         assertThat(
                         extractMinStep(
-                                "$a $aaT$aaa $a4Z", "yyMM dd'T'HHmm ss'Z'", "a", "aa", "aaa", "a4"))
+                                "$a $aaT$aaa $a4Z", "yyMM dd'T'HHmm ss'Z'", "a4", "aa", "a", "aaa"))
                 .isEqualTo(Duration.ofSeconds(1));
-        assertThat(extractMinStep("$a12$aaT$aaa00Z", "yyyyMMdd'T'HHmmss'Z'", "a", "aa", "aaa"))
+        assertThat(extractMinStep("$a12$aaT$aaa00Z", "yyyyMMdd'T'HHmmss'Z'", "aa", "aaa", "a"))
                 .isEqualTo(Duration.ofMinutes(1));
         assertThat(extractMinStep("$aT$a1$a200", "yyyyMMdd'T'HHmmss", "a", "a1", "a2"))
                 .isEqualTo(Duration.ofMinutes(1));
@@ -120,13 +120,13 @@ public class PartitionTimeResolverTest {
 
         assertThat(extractMinStep("$a $b", "HH:mm:ss yyyyMMdd", "a", "b"))
                 .isEqualTo(Duration.ofSeconds(1));
-        assertThat(extractMinStep("12:$a $b", "HH:mm:ss yyyyMMdd", "a", "b"))
+        assertThat(extractMinStep("12:$a $b", "HH:mm:ss yyyyMMdd", "b", "a"))
                 .isEqualTo(Duration.ofSeconds(1));
         assertThat(extractMinStep("12:$a:01 $b", "HH:mm:ss yyyyMMdd", "a", "b"))
                 .isEqualTo(Duration.ofMinutes(1));
         assertThat(extractMinStep("12:02:01 $b", "HH:mm:ss yyyyMMdd", "b"))
                 .isEqualTo(Duration.ofDays(1));
-        assertThat(extractMinStep("$hour:00:00 $date", "HH:mm:ss yyyyMMdd", "hour", "date"))
+        assertThat(extractMinStep("$hour:00:00 $date", "HH:mm:ss yyyyMMdd", "date", "hour"))
                 .isEqualTo(Duration.ofHours(1));
         assertThat(extractMinStep("00:00:00 $b", "HH:mm:ss yyyyMMdd", "b"))
                 .isEqualTo(Duration.ofDays(1));
@@ -137,7 +137,7 @@ public class PartitionTimeResolverTest {
                                 "hour_minute",
                                 "date"))
                 .isEqualTo(Duration.ofMinutes(1));
-        assertThat(extractMinStep("12:$a $b", "HH:mm:ss yyMMdd", "a", "b"))
+        assertThat(extractMinStep("12:$a $b", "HH:mm:ss yyMMdd", "b", "a"))
                 .isEqualTo(Duration.ofSeconds(1));
         assertThat(extractMinStep("12$b", "HHmmss", "b")).isEqualTo(Duration.ofSeconds(1));
 
@@ -152,7 +152,7 @@ public class PartitionTimeResolverTest {
         assertThat(extractMinStep("$a-01-$b", "yyyy-MM-dd", "a", "b"))
                 .isEqualTo(Duration.ofDays(1));
         assertThat(extractMinStep("$a-01", "yyyy-MM-dd", "a")).isEqualTo(Period.ofMonths(1));
-        assertThat(extractMinStep("$y/$m/$d", "yyyy/MM/dd", "y", "m", "d"))
+        assertThat(extractMinStep("$y/$m/$d", "yyyy/MM/dd", "d", "y", "m"))
                 .isEqualTo(Duration.ofDays(1));
 
         assertThat(extractMinStep("$a", "yyyyMMdd", "a")).isEqualTo(Duration.ofDays(1));
@@ -213,26 +213,34 @@ public class PartitionTimeResolverTest {
     public void testParsePartitionValues() {
         PartitionTimeResolver resolver =
                 new PartitionTimeResolver(
-                        Arrays.asList("a", "aa", "aaa"),
+                        Arrays.asList("aa", "a", "aaa"),
                         "$a-$aa-$aaa 00:00:00",
                         "yyyy-MM-dd HH:mm:ss");
-        assertThat(resolver.parsePartitionValues(Arrays.asList("2023", "01", "01")))
-                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+        assertThat(resolver.parsePartitionValues(Arrays.asList("01", "2023", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
 
         resolver =
                 new PartitionTimeResolver(
-                        Arrays.asList("aa", "a", "aaa"), "$aa$a$aaaT000000", "yyyyMMdd'T'HHmmss");
-        assertThat(resolver.parsePartitionValues(Arrays.asList("2023", "01", "01")))
-                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+                        Arrays.asList("a", "aa", "aaa"), "$aaa$a$aaT000000", "yyyyMMdd'T'HHmmss");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("01", "02", "2023")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
 
         resolver =
-                new PartitionTimeResolver(Arrays.asList("aa", "a", "aaa"), "$aa$a$aaa", "yyyyMMdd");
-        assertThat(resolver.parsePartitionValues(Arrays.asList("2023", "01", "01")))
-                .isEqualTo(LocalDateTime.parse("2023-01-01T00:00:00"));
+                new PartitionTimeResolver(Arrays.asList("aa", "a", "aaa"), "$a$aa$aaa", "yyyyMMdd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("01", "2023", "02")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
 
         resolver = new PartitionTimeResolver(Arrays.asList("dt", "hr"), "$dt $hr", "yyyyMMdd HH");
         assertThat(resolver.parsePartitionValues(Arrays.asList("20230102", "03")))
                 .isEqualTo(LocalDateTime.parse("2023-01-02T03:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("hr", "dt"), "$dt $hr", "yyyyMMdd HH");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("03", "20230102")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T03:00:00"));
+
+        resolver = new PartitionTimeResolver(Arrays.asList("dt"), "$dt-$dt", "yyyyMMdd-yyyyMMdd");
+        assertThat(resolver.parsePartitionValues(Arrays.asList("20230102")))
+                .isEqualTo(LocalDateTime.parse("2023-01-02T00:00:00"));
     }
 
     @Test
