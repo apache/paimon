@@ -29,12 +29,18 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.tag.Tag;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -101,6 +107,47 @@ public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
         assertTrue(snapshotManager.snapshotExists(2));
         assertTrue(snapshotManager.snapshotExists(3));
         assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, "a"));
+        assertThat(tagsOfSnapshot(table.tagManager(), 1))
+                .extracting(Pair::getRight)
+                .containsExactly("tag-1");
+    }
+
+    @Test
+    public void testRollbackCreatesNonExpiringProtectionTag() throws Exception {
+        sql("CREATE TABLE T (id INT, name STRING)");
+
+        FileStoreTable table = paimonTable("T");
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        commitRow(table, 1, "a");
+        commitRow(table, 2, "b");
+        commitRow(table, 3, "c");
+        assertEquals(3, snapshotManager.latestSnapshotId());
+
+        Snapshot target = snapshotManager.snapshot(1);
+        TagManager tagManager = table.tagManager();
+        tagManager.createTag(
+                target, "expiring-target", Duration.ZERO, Collections.emptyList(), false);
+
+        assertThat(sql("CALL sys.rollback_to_as_latest(`table` => 'default.T', snapshot_id => 1)"))
+                .containsExactly(Row.of(3L, 1L, 4L));
+
+        List<Pair<Tag, String>> targetTags = tagsOfSnapshot(tagManager, target.id());
+        assertThat(targetTags)
+                .anyMatch(
+                        tag ->
+                                tag.getRight().equals("expiring-target")
+                                        && Duration.ZERO.equals(
+                                                tag.getLeft().getTagTimeRetained()));
+        assertThat(targetTags)
+                .anyMatch(
+                        tag ->
+                                tag.getRight()
+                                                .startsWith(
+                                                        "rollback-to-as-latest-"
+                                                                + target.id()
+                                                                + "-")
+                                        && tag.getLeft().getTagTimeRetained() == null);
     }
 
     @Test
@@ -197,6 +244,12 @@ public class RollbackToAsLatestProcedureITCase extends CatalogITCaseBase {
         assertThat(deltaManifests.get(0).numAddedFiles()).isEqualTo(expectedNumAddedFiles);
         assertThat(deltaManifests.get(0).numDeletedFiles()).isEqualTo(expectedNumDeletedFiles);
         assertThat(snapshot.deltaRecordCount()).isEqualTo(expectedDeltaRecordCount);
+    }
+
+    private List<Pair<Tag, String>> tagsOfSnapshot(TagManager tagManager, long snapshotId) {
+        return tagManager.tagObjects().stream()
+                .filter(tag -> tag.getLeft().id() == snapshotId)
+                .collect(Collectors.toList());
     }
 
     private void commitRow(FileStoreTable table, int id, String name) throws Exception {

@@ -616,8 +616,15 @@ public class ChainTablePartitionExpireTest {
         // regular overwrite) instead of silently breaking the chain.
         FileStoreTable snapshotBranch = loadTable(tablePath).switchToBranch("snapshot");
         Snapshot target = snapshotBranch.snapshotManager().snapshot(1);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        snapshotBranch
+                .tagManager()
+                .createTag(target, protectionTag, null, Collections.emptyList(), false);
         try (TableCommitImpl commit = snapshotBranch.newCommit(commitUser)) {
-            assertThatThrownBy(() -> commit.rollbackToAsLatest(target))
+            assertThatThrownBy(
+                            () ->
+                                    commit.rollbackToAsLatest(
+                                            snapshotBranch.tagManager().getOrThrow(protectionTag)))
                     .hasMessageContaining("Snapshot partition cannot be dropped");
         }
         // The dangerous rollback was aborted, so the latest snapshot is unchanged.
