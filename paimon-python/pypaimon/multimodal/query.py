@@ -18,6 +18,7 @@
 from typing import Callable, List, Optional
 
 from pypaimon.common.where_parser import parse_where_clause
+from pypaimon.table.special_fields import SpecialFields
 
 
 class ScanQuery:
@@ -31,6 +32,7 @@ class ScanQuery:
         self._predicate = None
         self._projection = None
         self._limit = None
+        self._include_row_id = False
         self._result_factory = result_factory
 
     def where(self, predicate):
@@ -43,6 +45,10 @@ class ScanQuery:
         if isinstance(columns, str):
             columns = [columns]
         self._projection = list(columns)
+        return self
+
+    def with_row_id(self):
+        self._include_row_id = True
         return self
 
     def limit(self, limit: int):
@@ -62,11 +68,23 @@ class ScanQuery:
         read_builder = self._table.new_read_builder()
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
-        if self._projection is not None:
-            read_builder = read_builder.with_projection(self._projection)
+        projection = self._effective_projection()
+        if projection is not None:
+            read_builder = read_builder.with_projection(projection)
         if self._limit is not None:
             read_builder = read_builder.with_limit(self._limit)
         return read_builder
+
+    def _effective_projection(self):
+        if self._projection is None:
+            if not self._include_row_id:
+                return None
+            projection = [field.name for field in self._table.fields]
+        else:
+            projection = list(self._projection)
+        if self._include_row_id and SpecialFields.ROW_ID.name not in projection:
+            projection.append(SpecialFields.ROW_ID.name)
+        return projection
 
     def _read_global_index_result(self, result):
         read_builder = self._configured_read_builder()

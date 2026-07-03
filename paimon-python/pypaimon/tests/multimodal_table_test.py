@@ -513,6 +513,137 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_scan_with_row_id_returns_system_column(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        result = (
+            users.scan()
+            .with_row_id()
+            .select(["id"])
+            .to_arrow()
+        )
+
+        self.assertEqual(["id", "_ROW_ID"], result.column_names)
+        self.assertEqual([1, 2], result["id"].to_pylist())
+        self.assertEqual([0, 1], result["_ROW_ID"].to_pylist())
+
+    def test_take_row_ids_reads_projected_rows(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[
+                {"id": 1, "content": "alpha"},
+                {"id": 2, "content": "beta"},
+                {"id": 3, "content": "gamma"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        manifest = {
+            row["id"]: row["_ROW_ID"]
+            for row in docs.scan().select(["id"]).with_row_id().to_list()
+        }
+
+        rows = sorted(
+            docs.take_row_ids([manifest[3], manifest[1]])
+            .select(["id", "content"])
+            .with_row_id()
+            .to_list(),
+            key=lambda row: row["id"],
+        )
+
+        self.assertEqual(
+            [
+                {"id": 1, "content": "alpha", "_ROW_ID": manifest[1]},
+                {"id": 3, "content": "gamma", "_ROW_ID": manifest[3]},
+            ],
+            rows,
+        )
+
+    def test_take_row_ids_accepts_empty_manifest(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": 1}],
+            schema=_schema({"id": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        self.assertEqual([], docs.take_row_ids([]).select(["id"]).to_list())
+
+    def test_take_row_ids_supports_snapshot_and_tag_time_travel(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+                "embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([
+            {"id": 1, "content": "first", "embedding": [1.0, 0.0, 0.0]},
+        ])
+        snapshot_id = docs.raw_table.snapshot_manager().get_latest_snapshot().id
+        docs.raw_table.create_tag("v1", snapshot_id=snapshot_id)
+        row_id = (
+            docs.scan(snapshot_id=snapshot_id)
+            .select(["id"])
+            .with_row_id()
+            .to_list()[0]["_ROW_ID"]
+        )
+
+        docs.delete(where="id = 1")
+
+        self.assertEqual(
+            [],
+            docs.take_row_ids([row_id]).select(["id"]).to_list(),
+        )
+        self.assertEqual(
+            [{"id": 1, "_ROW_ID": row_id}],
+            docs.take_row_ids([row_id], snapshot_id=snapshot_id)
+            .select(["id"])
+            .with_row_id()
+            .to_list(),
+        )
+        self.assertEqual(
+            [{"id": 1}],
+            docs.take_row_ids([row_id], tag_name="v1")
+            .select(["id"])
+            .to_list(),
+        )
+        self.assertEqual(
+            snapshot_id,
+            docs.search(
+                [1.0, 0.0, 0.0],
+                column="embedding",
+                snapshot_id=snapshot_id,
+            )._table.options.scan_snapshot_id(),
+        )
+
+    def test_time_travel_rejects_snapshot_id_and_tag_name_together(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": 1}],
+            schema=_schema({"id": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+            docs.take_row_ids([0], snapshot_id=1, tag_name="v1")
+
     def test_overwrite_replaces_unpartitioned_table(self):
         users = self.conn.create_table(
             "users",
@@ -1177,6 +1308,45 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("embedding", calls["column"])
         self.assertEqual([1.0, 0.0, 0.0], calls["vector"])
         self.assertEqual([{"id": 1, "embedding": [1.0, 0.0, 0.0]}], result)
+
+    def test_search_with_row_id_returns_system_column(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([{"id": 1, "embedding": [1.0, 0.0, 0.0]}])
+
+        class FakeVectorBuilder:
+            def with_vector_column(self, column):
+                return self
+
+            def with_query_vector(self, vector):
+                return self
+
+            def with_limit(self, limit):
+                return self
+
+            def with_options(self, options):
+                return self
+
+            def execute_local(self):
+                return GlobalIndexResult.from_range(Range(0, 0))
+
+        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+
+        result = (
+            docs.search([1.0, 0.0, 0.0], column="embedding")
+            .select(["id"])
+            .with_row_id()
+            .limit(1)
+            .to_list()
+        )
+
+        self.assertEqual([{"id": 1, "_ROW_ID": 0}], result)
 
     def test_search_rejects_batch_vectors(self):
         docs = self.conn.create_table(
