@@ -101,7 +101,7 @@ class ScanQuery:
         return self.to_arrow().to_pylist()
 
     def read_blobs(
-            self, columns=None, *, max_workers: int = 64
+            self, columns=None, *, parallelism: int = 64
     ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
         """Materialise BLOB column(s) for the filtered rows with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
@@ -118,11 +118,11 @@ class ScanQuery:
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
         bodies = self._fetch_bodies(
-            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, max_workers)
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, parallelism)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
-    def stream_blobs(self, columns=None, *, max_workers: int = 64):
+    def stream_blobs(self, columns=None, *, parallelism: int = 64):
         """Memory-bounded streaming variant of :meth:`read_blobs`: yield
         ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
         is one batch rather than the whole result.
@@ -130,15 +130,15 @@ class ScanQuery:
         # Validate eagerly so a bad column raises here, not on the first next().
         blob_cols = self._resolve_blob_columns(columns)
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
-        return self._iter_blobs(read_builder, file_io, blob_cols, max_workers)
+        return self._iter_blobs(read_builder, file_io, blob_cols, parallelism)
 
-    def _iter_blobs(self, read_builder, file_io, blob_cols, max_workers):
+    def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
         reader = read_builder.new_read().to_arrow_batch_reader(
             read_builder.new_scan().plan().splits())
         try:
             for batch in reader:
                 bodies = self._fetch_bodies(
-                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, max_workers)
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
         finally:
@@ -164,7 +164,7 @@ class ScanQuery:
         return read_builder, read_table.file_io
 
     @staticmethod
-    def _fetch_bodies(file_io, data, blob_cols, max_workers):
+    def _fetch_bodies(file_io, data, blob_cols, parallelism):
         # Decode each cell (descriptor / inline) via Blob.from_bytes, then read all
         # columns in one coalesced pass.
         from pypaimon.table.row.blob import Blob, BlobView
@@ -182,7 +182,7 @@ class ScanQuery:
                         "read_blobs does not support unresolved blob-view columns; "
                         "read such a column on its own, or enable blob-view resolution.")
                 flat.append(blob)
-        fetched = file_io.read_blobs_concurrent(flat, max_workers)
+        fetched = file_io.read_blobs_concurrent(flat, parallelism)
         bodies = {}
         offset = 0
         for col in blob_cols:
@@ -216,18 +216,18 @@ class ScanQuery:
 
     def _blob_read_projection(self, blob_cols: List[str]) -> List[str]:
         # Base on _effective_projection() (honours with_row_id), drop BLOB
-        # descriptors, then append predicate-only columns (so where() is not
-        # dropped) and the requested BLOB columns.
+        # descriptors, then append the requested BLOB columns and every predicate
+        # column -- including predicate columns that are themselves BLOB (read as
+        # descriptor) -- so SplitRead keeps the row-level filter for where().
         blob_set = set(self._all_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             base = [f.name for f in self._table.fields if f.name not in blob_set]
         else:
             base = [name for name in effective if name not in blob_set]
-            for name in self._predicate_fields():
-                if name not in base and name not in blob_set:
-                    base.append(name)
-        # base already excludes every BLOB, so append the requested ones as-is.
+        for name in self._predicate_fields():
+            if name not in base and name not in blob_cols:
+                base.append(name)
         return base + list(blob_cols)
 
     def _scalar_columns(self, available) -> List[str]:

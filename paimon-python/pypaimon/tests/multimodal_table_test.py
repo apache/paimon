@@ -907,6 +907,30 @@ class MultimodalTableTest(unittest.TestCase):
             got.update(zip(sb.column("idx").to_pylist(), sb.column(row_id).to_pylist()))
         self.assertEqual(expected, got)
 
+    def test_scan_read_blobs_where_on_blob_column(self):
+        # A where() on one BLOB column must still filter when a different BLOB is
+        # read (the predicate BLOB column is read as descriptor for filtering).
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "imga": pa.large_binary(),
+                "imgb": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": 0, "imga": b"a0", "imgb": b"b0"},
+            {"clip": "c1", "idx": 1, "imga": None, "imgb": b"b1"},
+            {"clip": "c1", "idx": 2, "imga": b"a2", "imgb": b"b2"},
+        ])
+
+        scalar, blobs = obs.scan().where("imga IS NOT NULL").read_blobs("imgb")
+        self.assertEqual([b"b0", b"b2"], blobs["imgb"])
+        self.assertNotIn("imga", scalar.schema.names)
+
     def test_search_query_rejects_blob_reads(self):
         t = self.conn.create_table(
             "srch",

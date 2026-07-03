@@ -344,7 +344,7 @@ scalar table drops all BLOB columns.
 scalar, blobs = (
     docs.scan()
     .where("category = 'lake'")
-    .read_blobs("image", max_workers=32)
+    .read_blobs("image", parallelism=32)
 )
 images = blobs["image"]          # list[bytes | None], aligned with scalar rows
 ```
@@ -377,7 +377,7 @@ for scalar, blobs in docs.scan().where("category = 'lake'").stream_blobs("image"
 
 Notes:
 
-- `max_workers` ~16–32 is the sweet spot over the public network; go higher on an
+- `parallelism` ~16–32 is the sweet spot over the public network; go higher on an
   internal/VPC endpoint.
 - Fastest when the matching rows are contiguous (bulk/range reads coalesce into a
   few large reads); scattered point reads coalesce less.
