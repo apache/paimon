@@ -717,7 +717,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testRefreshDoesNotImportBucketCreatedAfterLoad() throws IOException {
+    public void testRefreshImportsBucketCreatedAfterLoad() throws IOException {
         commit.commit(
                 0,
                 Collections.singletonList(
@@ -730,7 +730,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         PartitionIndex index =
                 PartitionIndex.loadIndex(fileHandler, row(1), 5, hash -> true, bucket -> true);
 
-        // Bucket 4 created after load: passes bucketFilter but is absent from totalBucketSet.
+        // Bucket 4 created after load: it belongs to this assigner (passes bucketFilter), so the
+        // refresh must pick it up even though it was not present at load time.
         commit.commit(
                 1,
                 Collections.singletonList(
@@ -742,8 +743,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
 
         index.assign(999, bucket -> true, -1, 2, 2, Duration.ofMillis(1));
 
-        long deadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
-        while (System.nanoTime() < deadline) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (System.nanoTime() < deadline && !index.nonFullBucketInformation.containsKey(4)) {
             try {
                 Thread.sleep(10);
             } catch (InterruptedException e) {
@@ -751,6 +752,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 break;
             }
         }
-        assertThat(index.nonFullBucketInformation).doesNotContainKey(4);
+        assertThat(index.nonFullBucketInformation)
+                .as("refresh imports the assigner's bucket created after load, with its disk count")
+                .containsEntry(4, 2L);
     }
 }
