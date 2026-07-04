@@ -383,6 +383,70 @@ Notes:
   few large reads); scattered point reads coalesce less.
 - Blob reads are available only on `scan()`, not on the `search()` queries.
 
+### Distributed BLOB processing with Ray
+
+For larger offline jobs, `scan().to_ray()` reads scalar columns plus BLOB
+Descriptors as a Ray Dataset, and `map_with_blobs` fetches BLOB bytes on Ray
+workers before calling your UDF.
+
+```python
+import ray
+import pyarrow as pa
+import pypaimon.multimodal as pm
+from pypaimon.ray import map_with_blobs
+
+ray.init(num_cpus=8)
+
+conn = pm.connect(
+    database="default",
+    options={"warehouse": "file:///tmp/warehouse"},
+)
+docs = conn.get_table("docs")
+
+ids = ["a", "b", "c"]
+in_clause = ", ".join(f"'{i}'" for i in ids)
+
+scalar_cols = ["id", "category"]
+blob_cols = ["image"]
+
+
+def process_batch(scalar_batch, blobs):
+    # scalar_batch is a pyarrow.Table with non-BLOB columns.
+    # blobs is dict[str, list[bytes | None]].
+    images = blobs["image"]
+
+    # Decode, infer, write samples, or train here. Return a small result.
+    return pa.table({"rows": [scalar_batch.num_rows]})
+
+
+# Most jobs can leave concurrency / override_num_blocks unset; Ray chooses them.
+ds = (
+    docs.scan()
+    .where(f"id IN ({in_clause})")
+    .select(scalar_cols + blob_cols)
+    .to_ray()
+)
+
+# Most jobs can also start with the default parallelism and batch_size.
+result_ds = map_with_blobs(ds, blob_cols, process_batch)
+```
+
+`process_batch` must return a Ray-compatible batch, such as a small
+`pyarrow.Table`. For side-effect-only jobs, return an empty table rather than
+`None`. Avoid returning raw BLOB bytes, which would materialize large payloads
+in Ray's object store.
+
+Optional tuning parameters:
+
+- `to_ray(concurrency=...)` limits concurrent Ray read tasks. By default, Ray
+  decides based on available resources.
+- `to_ray(override_num_blocks=...)` controls Ray Dataset block count. Most jobs
+  do not need to set it manually.
+- `map_with_blobs(parallelism=...)` controls the per-Ray-task BLOB fetch threads.
+  It is not the number of Ray workers.
+- `map_with_blobs(batch_size=...)` controls rows per UDF call. Reduce it when
+  individual BLOBs are large or worker memory is tight.
+
 ## Row IDs
 
 Multimodal tables enable `row-tracking.enabled` by default, so each row has a
