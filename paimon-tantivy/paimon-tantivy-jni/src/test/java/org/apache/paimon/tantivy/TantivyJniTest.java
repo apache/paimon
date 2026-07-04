@@ -55,6 +55,8 @@ public class TantivyJniTest {
         }
 
         try (TantivySearcher searcher = new TantivySearcher(indexPath)) {
+            assertEquals(3, searcher.numDocs());
+
             SearchResult result = searcher.search("paimon", 10);
             assertTrue(result.size() > 0, "Should find at least one result");
             assertEquals(result.getRowIds().length, result.getScores().length);

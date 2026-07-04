@@ -71,6 +71,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -184,6 +185,63 @@ public class VectorSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Row 0 (1.0, 0.0) should be the closest to query (0.85, 0.15)
         assertThat(ids).contains(0);
+    }
+
+    @Test
+    public void testVectorSearchExcludesDeletedIndexedRows() throws Exception {
+        catalog.createTable(
+                identifier("vector_search_deleted_indexed_rows"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("vector_search_deleted_indexed_rows"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+        commitDeletionVectors(table, 0L, 1L);
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+
+        assertThat(result.results().getLongCardinality()).isEqualTo(2);
+        assertThat(result.results()).contains(2L, 3L);
+        assertThat(result.results()).doesNotContain(0L, 1L);
+        assertThat(readIds(table, result)).containsExactly(2, 3);
+    }
+
+    @Test
+    public void testBatchVectorSearchExcludesDeletedIndexedRows() throws Exception {
+        catalog.createTable(
+                identifier("batch_vector_search_deleted_indexed_rows"),
+                vectorSchemaBuilder(VECTOR_FIELD_NAME)
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("batch_vector_search_deleted_indexed_rows"));
+
+        float[][] vectors = {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f}};
+        writeVectors(table, vectors);
+        buildAndCommitIndex(table, vectors);
+        commitDeletionVectors(table, 0L, 3L);
+
+        List<GlobalIndexResult> results =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.0f, 0.0f}, {3.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeBatchLocal();
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).results()).contains(1L);
+        assertThat(results.get(0).results()).doesNotContain(0L);
+        assertThat(results.get(1).results()).contains(2L);
+        assertThat(results.get(1).results()).doesNotContain(3L);
     }
 
     @Test

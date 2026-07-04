@@ -346,8 +346,21 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
 
         import tantivy
 
+        include_row_ids = full_text_search.include_row_ids
+        search_limit = limit
+        if include_row_ids is not None:
+            if include_row_ids.is_empty():
+                return _completed_future(DictBasedScoredIndexResult({}))
+            search_limit = self._required_shard_doc_count()
+
         id_to_scores = self._search_full_text_query(
-            tantivy, full_text_search.query, limit)
+            tantivy, full_text_search.query, search_limit)
+        if include_row_ids is not None:
+            id_to_scores = {
+                row_id: score
+                for row_id, score in id_to_scores.items()
+                if include_row_ids.contains(row_id)
+            }
         return _completed_future(
             DictBasedScoredIndexResult(id_to_scores).top_k(limit))
 
@@ -377,10 +390,25 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             self._parse_structured_query(tantivy, query), limit)
 
     def _child_query_limit(self, limit):
-        num_docs = getattr(self._searcher, "num_docs", None)
+        num_docs = self._shard_doc_count()
         if num_docs is None:
             return limit
         return max(limit, int(num_docs))
+
+    def _required_shard_doc_count(self):
+        num_docs = self._shard_doc_count()
+        if num_docs is None:
+            raise RuntimeError(
+                "PyPaimon Tantivy full-text search with include_row_ids "
+                "requires a tantivy-py Searcher with num_docs support."
+            )
+        return max(0, int(num_docs))
+
+    def _shard_doc_count(self):
+        num_docs = getattr(self._searcher, "num_docs", None)
+        if callable(num_docs):
+            num_docs = num_docs()
+        return None if num_docs is None else int(num_docs)
 
     def _search_boolean_query(self, tantivy, query, limit):
         from pypaimon.globalindex.full_text_query import Occur

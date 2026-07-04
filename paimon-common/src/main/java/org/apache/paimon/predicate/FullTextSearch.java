@@ -18,6 +18,10 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.List;
 
@@ -28,6 +32,8 @@ public class FullTextSearch implements Serializable {
 
     private final FullTextQuery query;
     private final int limit;
+
+    @Nullable private RoaringNavigableMap64 includeRowIds;
 
     public FullTextSearch(FullTextQuery query, int limit) {
         if (query == null) {
@@ -54,6 +60,24 @@ public class FullTextSearch implements Serializable {
 
     public FullTextQuery query() {
         return query;
+    }
+
+    public RoaringNavigableMap64 includeRowIds() {
+        return includeRowIds;
+    }
+
+    public FullTextSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
+        this.includeRowIds = includeRowIds;
+        return this;
+    }
+
+    public FullTextSearch offsetRange(long from, long to) {
+        if (includeRowIds != null) {
+            FullTextSearch target = new FullTextSearch(query, limit);
+            target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
+            return target;
+        }
+        return this;
     }
 
     public String queryJson() {

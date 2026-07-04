@@ -115,6 +115,7 @@ public class FullTextReadImpl implements FullTextRead {
         }
 
         GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
+        RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
         ScoredGlobalIndexResult result =
                 evalQuery(
                         query,
@@ -122,7 +123,8 @@ public class FullTextReadImpl implements FullTextRead {
                         splitsByColumn,
                         indexPathFactory,
                         indexFileReader,
-                        executor);
+                        executor,
+                        liveRows);
         if (!rawRowRanges.isEmpty()) {
             result =
                     new RawFullTextReadImpl(table, partitionFilter, limit, query, this::evalQuery)
@@ -139,6 +141,24 @@ public class FullTextReadImpl implements FullTextRead {
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor) {
+        return evalQuery(
+                query,
+                fieldsByName,
+                splitsByColumn,
+                indexPathFactory,
+                indexFileReader,
+                executor,
+                null);
+    }
+
+    private ScoredGlobalIndexResult evalQuery(
+            FullTextQuery query,
+            Map<String, DataField> fieldsByName,
+            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
+            IndexPathFactory indexPathFactory,
+            GlobalIndexFileReader indexFileReader,
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
         if (query instanceof FullTextQuery.Match) {
             return evalColumnQuery(
                     query,
@@ -147,7 +167,8 @@ public class FullTextReadImpl implements FullTextRead {
                     splitsByColumn,
                     indexPathFactory,
                     indexFileReader,
-                    executor);
+                    executor,
+                    liveRows);
         }
         if (query instanceof FullTextQuery.Phrase) {
             return evalColumnQuery(
@@ -157,7 +178,8 @@ public class FullTextReadImpl implements FullTextRead {
                     splitsByColumn,
                     indexPathFactory,
                     indexFileReader,
-                    executor);
+                    executor,
+                    liveRows);
         }
         if (query instanceof FullTextQuery.MultiMatch) {
             return evalMultiMatch(
@@ -166,7 +188,8 @@ public class FullTextReadImpl implements FullTextRead {
                     splitsByColumn,
                     indexPathFactory,
                     indexFileReader,
-                    executor);
+                    executor,
+                    liveRows);
         }
         if (query instanceof FullTextQuery.Boost) {
             FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
@@ -177,14 +200,16 @@ public class FullTextReadImpl implements FullTextRead {
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor),
+                            executor,
+                            liveRows),
                     evalQuery(
                             boost.negative(),
                             fieldsByName,
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor),
+                            executor,
+                            liveRows),
                     boost.negativeBoost());
         }
         if (query instanceof FullTextQuery.BooleanQuery) {
@@ -194,7 +219,8 @@ public class FullTextReadImpl implements FullTextRead {
                     splitsByColumn,
                     indexPathFactory,
                     indexFileReader,
-                    executor);
+                    executor,
+                    liveRows);
         }
         throw new IllegalArgumentException("Unsupported full-text query: " + query);
     }
@@ -205,7 +231,8 @@ public class FullTextReadImpl implements FullTextRead {
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
         List<String> columns = query.columns();
         List<Float> boosts = query.boosts();
         List<ScoredGlobalIndexResult> results = new ArrayList<>(columns.size());
@@ -227,7 +254,8 @@ public class FullTextReadImpl implements FullTextRead {
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor));
+                            executor,
+                            liveRows));
         }
         return or(results).topK(limit);
     }
@@ -238,7 +266,8 @@ public class FullTextReadImpl implements FullTextRead {
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
         ScoredGlobalIndexResult result = null;
         for (FullTextQuery child : query.must()) {
             ScoredGlobalIndexResult childResult =
@@ -248,7 +277,8 @@ public class FullTextReadImpl implements FullTextRead {
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor);
+                            executor,
+                            liveRows);
             result = result == null ? childResult : and(result, childResult);
         }
 
@@ -261,7 +291,8 @@ public class FullTextReadImpl implements FullTextRead {
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor));
+                            executor,
+                            liveRows));
         }
         if (!shouldResults.isEmpty()) {
             ScoredGlobalIndexResult shouldResult = or(shouldResults);
@@ -279,7 +310,8 @@ public class FullTextReadImpl implements FullTextRead {
                             splitsByColumn,
                             indexPathFactory,
                             indexFileReader,
-                            executor);
+                            executor,
+                            liveRows);
             result = andNot(result, childResult);
         }
         return result.topK(limit);
@@ -292,7 +324,8 @@ public class FullTextReadImpl implements FullTextRead {
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 liveRows) {
         List<IndexFullTextSearchSplit> columnSplits = splitsByColumn.get(column);
         if (columnSplits == null || columnSplits.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
@@ -328,7 +361,9 @@ public class FullTextReadImpl implements FullTextRead {
                             split.fullTextIndexFiles(),
                             query,
                             indexFileReader,
-                            executor));
+                            executor,
+                            GlobalIndexLiveRowFilter.forRange(
+                                    liveRows, split.rowRangeStart(), split.rowRangeEnd())));
         }
 
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -352,7 +387,11 @@ public class FullTextReadImpl implements FullTextRead {
             List<IndexFileMeta> fullTextIndexFiles,
             FullTextQuery query,
             GlobalIndexFileReader indexFileReader,
-            ExecutorService executor) {
+            ExecutorService executor,
+            @Nullable RoaringNavigableMap64 includeRowIds) {
+        if (includeRowIds != null && includeRowIds.isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
         List<GlobalIndexIOMeta> indexIOMetaList = new ArrayList<>();
         for (IndexFileMeta indexFile : fullTextIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
@@ -365,7 +404,8 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         FullTextSearch fullTextSearch =
-                new FullTextSearch(query, candidateLimit(rowRangeStart, rowRangeEnd));
+                new FullTextSearch(query, candidateLimit(rowRangeStart, rowRangeEnd))
+                        .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
                 .whenComplete((r, t) -> IOUtils.closeQuietly(reader));

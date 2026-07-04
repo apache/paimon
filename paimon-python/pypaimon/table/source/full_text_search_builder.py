@@ -123,7 +123,11 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
         if self._limit <= 0:
             raise ValueError("Limit must be positive, set via with_limit()")
         return FullTextReadImpl(
-            self._table, self._limit, self._text_columns(), self._query
+            self._table,
+            self._limit,
+            self._text_columns(),
+            self._query,
+            partition_filter=self._partition_filter,
         )
 
     def _text_columns(self):
