@@ -168,11 +168,16 @@ class FileStoreCommit:
 
     def _commit_data(self, commit_messages: List[CommitMessage], commit_identifier: int,
                      index_adds: List, index_deletes: List) -> None:
-        # Extract the minimum check_from_snapshot from commit messages
+        # Only data-side messages (those contributing new/deleted files) anchor
+        # row-id conflict detection; compaction-only messages must not. Assign
+        # unconditionally so a prior commit's anchor cannot leak into this
+        # APPEND/OVERWRITE commit via the reusable ConflictDetection instance
+        # (StreamTableCommit reuses the same FileStoreCommit across commits).
         valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
-                           if msg.check_from_snapshot != -1]
-        if valid_snapshots:
-            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
+                           if msg.check_from_snapshot != -1
+                           and not msg.data_increment.is_empty()]
+        self.conflict_detection._row_id_check_from_snapshot = (
+            min(valid_snapshots) if valid_snapshots else None)
 
         commit_entries = self._build_data_entries(commit_messages)
         changelog_entries = self._collect_changelog_entries(commit_messages)

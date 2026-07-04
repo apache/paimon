@@ -245,6 +245,52 @@ class TestFileStoreCommitCompact(unittest.TestCase):
         self.assertFalse(kwargs['detect_conflicts'])
         self.assertFalse(kwargs['allow_rollback'])
 
+    def test_compact_only_commit_does_not_anchor_row_id_check(self, *_):
+        # A compact message can carry check_from_snapshot (it round-trips through
+        # the serializer), but compaction skips row-id conflict detection, so it
+        # must not set the reusable ConflictDetection's row-id check anchor.
+        commit = self._create_commit()
+        commit._try_commit = Mock()
+        msg = CommitMessage(
+            partition=('p1',),
+            bucket=0,
+            compact_increment=CompactIncrement(
+                compact_before=[_make_file('old.parquet')],
+                compact_after=[_make_file('new.parquet')],
+            ),
+            check_from_snapshot=7,
+        )
+
+        commit.commit([msg], commit_identifier=300)
+
+        self.assertIsNone(commit.conflict_detection._row_id_check_from_snapshot)
+        self.assertFalse(commit.conflict_detection.has_row_id_check_from_snapshot())
+
+    def test_row_id_check_state_reset_between_commits(self, *_):
+        # StreamTableCommit reuses one FileStoreCommit (and its ConflictDetection)
+        # across commits. A data commit's row-id anchor must not leak into a later
+        # commit whose own messages carry no check_from_snapshot.
+        commit = self._create_commit()
+        commit._try_commit = Mock()
+
+        first = CommitMessage(
+            partition=('p1',),
+            bucket=0,
+            data_increment=DataIncrement(new_files=[_make_file('a.parquet')]),
+            check_from_snapshot=5,
+        )
+        commit.commit([first], commit_identifier=1)
+        self.assertEqual(5, commit.conflict_detection._row_id_check_from_snapshot)
+
+        second = CommitMessage(
+            partition=('p1',),
+            bucket=0,
+            data_increment=DataIncrement(new_files=[_make_file('b.parquet')]),
+            check_from_snapshot=-1,
+        )
+        commit.commit([second], commit_identifier=2)
+        self.assertIsNone(commit.conflict_detection._row_id_check_from_snapshot)
+
     def test_commit_skips_when_no_messages(self, *_):
         commit = self._create_commit()
         commit._try_commit = Mock()
