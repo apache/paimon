@@ -188,9 +188,11 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownTopN() {
-        // Auth drops rows at read time, so split-level TopN pruning could drop authorized rows.
+        // A read-time filter (WHERE or auth) drops rows after split pruning, so split-level TopN
+        // pruning could keep too few splits. Skip it when either is present.
         if (topN == null
                 || pushDownLimit != null
+                || snapshotReader.hasNonPartitionFilter()
                 || authHasNonPartitionFilter
                 || !schema.primaryKeys().isEmpty()) {
             return Optional.empty();
