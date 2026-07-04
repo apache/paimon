@@ -1281,6 +1281,17 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchInde
 }
 
 #[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_numDocs(
+    _env: JNIEnv,
+    _class: JClass,
+    searcher_ptr: jlong,
+) -> jint {
+    let handle = unsafe { &*(searcher_ptr as *const TantivySearcherHandle) };
+    let num_docs = handle.reader.searcher().num_docs() as u64;
+    std::cmp::min(num_docs, i32::MAX as u64) as jint
+}
+
+#[no_mangle]
 pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_freeSearcher(
     _env: JNIEnv,
     _class: JClass,

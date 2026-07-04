@@ -32,10 +32,12 @@ class FullTextSearch:
     Attributes:
         query: The structured full-text query
         limit: Maximum number of results to return
+        include_row_ids: Optional bitmap of row IDs to include in search
     """
 
     query: FullTextQuery
     limit: int
+    include_row_ids: Optional['RoaringBitmap64'] = None
 
     def __post_init__(self):
         if self.query is None:
@@ -53,6 +55,29 @@ class FullTextSearch:
 
     def query_json(self) -> str:
         return self.query.to_json()
+
+    def with_include_row_ids(self, include_row_ids: 'RoaringBitmap64') -> 'FullTextSearch':
+        """Return a new FullTextSearch with the specified include_row_ids."""
+        return FullTextSearch(
+            query=self.query,
+            limit=self.limit,
+            include_row_ids=include_row_ids,
+        )
+
+    def offset_range(self, from_: int, to: int) -> 'FullTextSearch':
+        """Offset include_row_ids into the given range."""
+        if self.include_row_ids is None:
+            return self
+
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+
+        range_bitmap = RoaringBitmap64()
+        range_bitmap.add_range(from_, to)
+        and_result = RoaringBitmap64.and_(range_bitmap, self.include_row_ids)
+        offset_bitmap = RoaringBitmap64()
+        for row_id in and_result:
+            offset_bitmap.add(row_id - from_)
+        return self.with_include_row_ids(offset_bitmap)
 
     def visit(self, visitor: 'GlobalIndexReader') -> 'Future[Optional[ScoredGlobalIndexResult]]':
         """Visit the global index reader with this full-text search."""

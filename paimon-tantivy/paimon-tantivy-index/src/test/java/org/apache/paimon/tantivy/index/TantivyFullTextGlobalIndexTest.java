@@ -346,6 +346,36 @@ public class TantivyFullTextGlobalIndexTest {
     }
 
     @Test
+    public void testIncludeRowIdsSearchesFullShardBeforeTopK() throws IOException {
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
+
+        writer.write(BinaryString.fromString("paimon paimon paimon paimon"), 0);
+        writer.write(BinaryString.fromString("paimon paimon"), 1);
+        writer.write(BinaryString.fromString("paimon"), 2);
+
+        List<ResultEntry> results = writer.finish();
+        List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
+
+        RoaringNavigableMap64 includeRowIds = new RoaringNavigableMap64();
+        includeRowIds.add(2L);
+        FullTextSearch search =
+                new FullTextSearch(FullTextQuery.match("paimon", "text"), 1)
+                        .withIncludeRowIds(includeRowIds);
+
+        try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
+            Optional<ScoredGlobalIndexResult> searchResult =
+                    reader.visitFullTextSearch(search).join();
+            assertThat(searchResult).isPresent();
+
+            RoaringNavigableMap64 rowIds = searchResult.get().results();
+            assertThat(rowIds.getLongCardinality()).isEqualTo(1);
+            assertThat(rowIds.contains(2L)).isTrue();
+        }
+    }
+
+    @Test
     public void testPoolReuse() throws IOException {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);

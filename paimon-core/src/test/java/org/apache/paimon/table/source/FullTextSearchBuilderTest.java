@@ -65,6 +65,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -123,6 +124,40 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         assertThat(ids.size()).isLessThanOrEqualTo(3);
         // Rows 0, 1, 3 contain "Paimon"
         assertThat(ids).containsAnyOf(0, 1, 3);
+    }
+
+    @Test
+    public void testFullTextSearchExcludesDeletedIndexedRows() throws Exception {
+        Identifier identifier = identifier("full_text_deleted_indexed_rows");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.STRING())
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] documents = {
+            "paimon keyword", "paimon keyword", "paimon keyword", "paimon keyword"
+        };
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        commitDeletionVectors(table, 0L, 1L);
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("keyword", TEXT_FIELD_NAME))
+                        .withLimit(2)
+                        .executeLocal();
+
+        assertThat(result.results().getLongCardinality()).isEqualTo(2);
+        assertThat(result.results()).contains(2L, 3L);
+        assertThat(result.results()).doesNotContain(0L, 1L);
+        assertThat(readIds(table, result)).containsExactlyInAnyOrder(2, 3);
     }
 
     @Test

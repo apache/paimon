@@ -37,6 +37,7 @@ from pypaimon.globalindex.vector_search_result import (
     DictBasedScoredIndexResult,
     ScoredGlobalIndexResult,
 )
+from pypaimon.table.source import global_index_live_row_filter
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
@@ -61,12 +62,14 @@ class FullTextReadImpl(FullTextRead):
         table: 'FileStoreTable',
         limit: int,
         text_column,
-        query: FullTextQuery
+        query: FullTextQuery,
+        partition_filter=None,
     ):
         self._table = table
         self._limit = limit
         self._text_columns = text_column if isinstance(text_column, list) else [text_column]
         self._query = query
+        self._partition_filter = partition_filter
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
         if not splits:
@@ -75,38 +78,45 @@ class FullTextReadImpl(FullTextRead):
         splits_by_column: Dict[str, List[FullTextSearchSplit]] = {}
         for split in splits:
             splits_by_column.setdefault(split.column_name, []).append(split)
-        return self._eval_query(self._query, splits_by_column).top_k(self._limit)
+        live_rows = global_index_live_row_filter.live_rows(
+            self._table, self._partition_filter)
+        return self._eval_query(
+            self._query, splits_by_column, live_rows).top_k(self._limit)
 
     def _eval_query(
             self,
             query: FullTextQuery,
-            splits_by_column: Dict[str, List[FullTextSearchSplit]]
+            splits_by_column: Dict[str, List[FullTextSearchSplit]],
+            live_rows
     ) -> ScoredGlobalIndexResult:
         if isinstance(query, MatchQuery):
-            return self._eval_column_query(query, query.column, splits_by_column)
+            return self._eval_column_query(
+                query, query.column, splits_by_column, live_rows)
         if isinstance(query, PhraseQuery):
-            return self._eval_column_query(query, query.column, splits_by_column)
+            return self._eval_column_query(
+                query, query.column, splits_by_column, live_rows)
         if isinstance(query, MultiMatchQuery):
             results = []
             for column, boost in zip(query.columns, query.boosts):
                 match = MatchQuery(
                     query.query, column, boost=boost, operator=query.operator)
                 results.append(
-                    self._eval_column_query(match, column, splits_by_column))
+                    self._eval_column_query(match, column, splits_by_column, live_rows))
             return _or(results).top_k(self._limit)
         if isinstance(query, BoostQuery):
-            positive = self._eval_query(query.positive, splits_by_column)
-            negative = self._eval_query(query.negative, splits_by_column)
+            positive = self._eval_query(query.positive, splits_by_column, live_rows)
+            negative = self._eval_query(query.negative, splits_by_column, live_rows)
             return _boost(positive, negative, query.negative_boost)
         if isinstance(query, BooleanQuery):
             result = None
             for child in query.must():
-                child_result = self._eval_query(child, splits_by_column)
+                child_result = self._eval_query(child, splits_by_column, live_rows)
                 result = child_result if result is None else _and(result, child_result)
 
             should_results = []
             for child in query.should():
-                should_results.append(self._eval_query(child, splits_by_column))
+                should_results.append(
+                    self._eval_query(child, splits_by_column, live_rows))
             if should_results:
                 should_result = _or(should_results)
                 result = should_result if result is None else _and_with_bonus(
@@ -115,7 +125,8 @@ class FullTextReadImpl(FullTextRead):
             if result is None:
                 return ScoredGlobalIndexResult.create_empty()
             for child in query.must_not():
-                result = _and_not(result, self._eval_query(child, splits_by_column))
+                result = _and_not(
+                    result, self._eval_query(child, splits_by_column, live_rows))
             return result
         raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
 
@@ -123,19 +134,26 @@ class FullTextReadImpl(FullTextRead):
             self,
             query: FullTextQuery,
             column: str,
-            splits_by_column: Dict[str, List[FullTextSearchSplit]]
+            splits_by_column: Dict[str, List[FullTextSearchSplit]],
+            live_rows
     ) -> ScoredGlobalIndexResult:
         splits = splits_by_column.get(column, [])
         if not splits:
             return ScoredGlobalIndexResult.create_empty()
-        futures = [
-            self._eval(
+        futures = []
+        for split in splits:
+            include_row_ids = global_index_live_row_filter.for_range(
+                live_rows, split.row_range_start, split.row_range_end)
+            if include_row_ids is not None and include_row_ids.is_empty():
+                continue
+            futures.append(self._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files,
                 query,
-            )
-            for split in splits
-        ]
+                include_row_ids,
+            ))
+        if not futures:
+            return ScoredGlobalIndexResult.create_empty()
 
         wait(futures)
 
@@ -150,7 +168,8 @@ class FullTextReadImpl(FullTextRead):
 
         return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
-    def _eval(self, row_range_start, row_range_end, full_text_index_files, query):
+    def _eval(self, row_range_start, row_range_end, full_text_index_files,
+              query, include_row_ids):
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
@@ -177,6 +196,8 @@ class FullTextReadImpl(FullTextRead):
             query=query,
             limit=_candidate_limit(row_range_start, row_range_end),
         )
+        if include_row_ids is not None:
+            full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
         offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
         future = offset_reader.visit_full_text_search(full_text_search)

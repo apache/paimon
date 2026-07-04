@@ -31,6 +31,8 @@ import org.apache.paimon.tantivy.StreamFileInput;
 import org.apache.paimon.tantivy.TantivySearcher;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -93,10 +95,22 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     try {
                         ensureLoaded();
+                        RoaringNavigableMap64 includeRowIds = fullTextSearch.includeRowIds();
+                        if (includeRowIds != null && includeRowIds.isEmpty()) {
+                            return Optional.of(ScoredGlobalIndexResult.createEmpty());
+                        }
+                        int searchLimit =
+                                includeRowIds == null
+                                        ? fullTextSearch.limit()
+                                        : borrowed.searcher.numDocs();
+                        if (searchLimit <= 0) {
+                            return Optional.of(ScoredGlobalIndexResult.createEmpty());
+                        }
                         SearchResult result =
                                 borrowed.searcher.searchJson(
-                                        fullTextSearch.queryJson(), fullTextSearch.limit());
-                        return Optional.of(toScoredResult(result));
+                                        fullTextSearch.queryJson(), searchLimit);
+                        ScoredGlobalIndexResult scored = toScoredResult(result, includeRowIds);
+                        return Optional.of(scored.topK(fullTextSearch.limit()));
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to search Tantivy full-text index", e);
                     }
@@ -104,11 +118,15 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                 executor);
     }
 
-    private ScoredGlobalIndexResult toScoredResult(SearchResult result) {
+    private ScoredGlobalIndexResult toScoredResult(
+            SearchResult result, @Nullable RoaringNavigableMap64 includeRowIds) {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(result.size());
         for (int i = 0; i < result.size(); i++) {
             long rowId = result.getRowIds()[i];
+            if (includeRowIds != null && !includeRowIds.contains(rowId)) {
+                continue;
+            }
             bitmap.add(rowId);
             id2scores.put(rowId, result.getScores()[i]);
         }

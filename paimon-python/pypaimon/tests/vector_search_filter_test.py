@@ -121,6 +121,13 @@ def _entry(partition_row, field_id, index_type, file_name,
                               index_file=index_file)
 
 
+def _bitmap(*row_ids):
+    bitmap = RoaringBitmap64()
+    for row_id in row_ids:
+        bitmap.add(row_id)
+    return bitmap
+
+
 def _install_raw_vector_read_builder(table, vector_column_name, row_id_to_vector,
                                      calls=None):
     """Install a fake raw read builder which honors GlobalIndexResult ranges."""
@@ -386,15 +393,25 @@ class _FakeSearcher:
     def __init__(self):
         self.query = None
         self.queries = []
+        self.num_docs = 3
 
     def search(self, query, limit):
         self.query = query
         self.queries.append(query)
         query_text = _fake_query_text(query)
         if query_text == "positive":
-            return _FakeSearchResults([(10.0, ("addr", 1)), (5.0, ("addr", 2))])
+            hits = [(10.0, ("addr", 1)), (5.0, ("addr", 2))]
+            return _FakeSearchResults(hits[:limit])
         if query_text == "negative":
-            return _FakeSearchResults([(7.0, ("addr", 2))])
+            hits = [(7.0, ("addr", 2))]
+            return _FakeSearchResults(hits[:limit])
+        if query_text == "ranked":
+            hits = [
+                (10.0, ("addr", 1)),
+                (9.0, ("addr", 2)),
+                (8.0, ("addr", 3)),
+            ]
+            return _FakeSearchResults(hits[:limit])
         return _FakeSearchResults()
 
     def fast_field_values(self, name, addresses):
@@ -460,6 +477,99 @@ class _FakeTantivy(types.SimpleNamespace):
 
 
 # ----------------------------- tests ---------------------------------------
+
+
+class GlobalIndexLiveRowFilterTest(unittest.TestCase):
+
+    def tearDown(self):
+        mock.patch.stopall()
+
+    def test_live_rows_noops_without_deletion_vectors(self):
+        from pypaimon.table.source import global_index_live_row_filter
+
+        class _Options:
+            def deletion_vectors_enabled(self_inner, default=False):
+                return False
+
+        class _Table:
+            options = _Options()
+
+            def new_read_builder(self_inner):
+                raise AssertionError("non-DV table must not be scanned")
+
+        self.assertIsNone(global_index_live_row_filter.live_rows(_Table()))
+
+    def test_live_rows_subtracts_deletion_vector_positions(self):
+        from pypaimon.read.split import DataSplit
+        from pypaimon.table.source import global_index_live_row_filter
+        from pypaimon.table.source.deletion_file import DeletionFile
+
+        calls = {}
+
+        class _Options:
+            def deletion_vectors_enabled(self_inner, default=False):
+                return True
+
+        class _File:
+            first_row_id = 10
+            row_count = 5
+
+            def row_id_range(self_inner):
+                return Range(10, 14)
+
+        deletion_file = DeletionFile("dv", 0, 1, cardinality=2)
+        split = DataSplit(
+            files=[_File()],
+            partition=None,
+            bucket=0,
+            data_deletion_files=[deletion_file],
+        )
+
+        class _Plan:
+            def splits(self_inner):
+                return [split]
+
+        class _Scan:
+            def plan(self_inner):
+                return _Plan()
+
+        class _Builder:
+            def with_partition_filter(self_inner, predicate):
+                calls["partition_filter"] = predicate
+                return self_inner
+
+            def new_scan(self_inner):
+                calls["new_scan"] = True
+                return _Scan()
+
+        class _Table:
+            options = _Options()
+            file_io = object()
+
+            def new_read_builder(self_inner):
+                calls["new_read_builder"] = True
+                return _Builder()
+
+        class _DeletionVector:
+            def is_empty(self_inner):
+                return False
+
+            def bit_map(self_inner):
+                return [1, 3]
+
+        partition_filter = object()
+        with mock.patch(
+                "pypaimon.table.source.global_index_live_row_filter."
+                "DeletionVector.read",
+                return_value=_DeletionVector()) as read:
+            rows = global_index_live_row_filter.live_rows(
+                _Table(), partition_filter)
+
+        read.assert_called_once_with(_Table.file_io, deletion_file)
+        self.assertIs(partition_filter, calls["partition_filter"])
+        self.assertTrue(calls["new_read_builder"])
+        self.assertTrue(calls["new_scan"])
+        self.assertEqual([10, 12, 14], rows.to_list())
 
 
 class VectorReaderFactoryTest(unittest.TestCase):
@@ -899,6 +1009,36 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
             ["positive", "negative"],
             [_fake_query_text(q) for q in tantivy.last_index.searcher_instance.queries],
         )
+
+    def test_reader_applies_include_row_ids_before_top_k(self):
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        tantivy = _FakeTantivy()
+        old_tantivy = sys.modules.get("tantivy")
+        sys.modules["tantivy"] = tantivy
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                search = FullTextSearch(
+                    MatchQuery("ranked", "content"), 1
+                ).with_include_row_ids(_bitmap(3))
+                result = reader.visit_full_text_search(search).result()
+            finally:
+                reader.close()
+        finally:
+            if old_tantivy is None:
+                sys.modules.pop("tantivy", None)
+            else:
+                sys.modules["tantivy"] = old_tantivy
+
+        self.assertEqual([3], sorted(list(result.results())))
+        self.assertEqual(8.0, result.score_getter()(3))
 
     def test_reader_rejects_java_unsupported_match_options(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch
@@ -1519,11 +1659,14 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(1, scanner.scan.call_count)
         self.assertIs(filter_pred, scanner.scan.call_args[0][0])
 
-        # [0,4] sees empty local bitmap; [5,9] sees {0..4}.
-        self.assertEqual(
-            [0, 5],
-            sorted(vs.include_row_ids.cardinality()
-                   for vs in captured_searches))
+        # [0,4] sees empty local bitmap; [5,9] is fully included and stays None.
+        include_summary = sorted(
+            ("all", None)
+            if vs.include_row_ids is None
+            else ("bitmap", vs.include_row_ids.cardinality())
+            for vs in captured_searches
+        )
+        self.assertEqual([("all", None), ("bitmap", 0)], include_summary)
 
         # Vector reader io_meta carries external_path from IndexFileMeta.
         seen_paths = {meta.external_path
@@ -1532,6 +1675,112 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(
             {"oss://bucket/vec-0.index", "oss://bucket/vec-1.index"},
             seen_paths)
+
+    def test_indexed_vector_search_filters_deleted_rows(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+        from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
+
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index", row_range_start=10,
+                       row_range_end=14)
+        table = _StubTable(fields=[self.embedding_field], entries=[entry])
+        split = IndexVectorSearchSplit(
+            row_range_start=10,
+            row_range_end=14,
+            vector_index_files=[entry.index_file],
+        )
+        live_rows = _bitmap(10, 12, 13, 14)
+        captured = []
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader:
+                def visit_vector_search(self_inner, vs):
+                    captured.append(vs.include_row_ids)
+                    return _completed_future(
+                        DictBasedScoredIndexResult({2: 1.0}))
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read."
+                "global_index_live_row_filter.live_rows",
+                return_value=live_rows), \
+             mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            result = VectorSearchReadImpl(
+                table,
+                limit=3,
+                vector_column=self.embedding_field,
+                query_vector=[1.0],
+            ).read([split])
+
+        self.assertEqual([[0, 2, 3, 4]], [b.to_list() for b in captured])
+        self.assertEqual([12], sorted(list(result.results())))
+
+    def test_batch_indexed_vector_search_filters_deleted_rows(self):
+        from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.vector_search_read import (
+            BatchVectorSearchReadImpl,
+        )
+        from pypaimon.table.source.vector_search_split import IndexVectorSearchSplit
+
+        entry = _entry(None, field_id=1, index_type="lumina-vector-ann",
+                       file_name="vec.index", row_range_start=10,
+                       row_range_end=14)
+        table = _StubTable(fields=[self.embedding_field], entries=[entry])
+        split = IndexVectorSearchSplit(
+            row_range_start=10,
+            row_range_end=14,
+            vector_index_files=[entry.index_file],
+        )
+        live_rows = _bitmap(10, 12, 13, 14)
+        captured = []
+
+        def _fake_create(index_type, file_io, index_path,
+                         index_io_meta_list, options=None):
+            class _FakeReader(GlobalIndexReader):
+                def visit_batch_vector_search(self_inner, bvs):
+                    captured.append(bvs.include_row_ids)
+                    return _completed_future([
+                        DictBasedScoredIndexResult({2: 1.0})
+                        for _ in range(bvs.vector_count)
+                    ])
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.vector_search_read."
+                "global_index_live_row_filter.live_rows",
+                return_value=live_rows), \
+             mock.patch(
+                "pypaimon.table.source.vector_search_read._create_vector_reader",
+                side_effect=_fake_create):
+            results = BatchVectorSearchReadImpl(
+                table,
+                limit=3,
+                vector_column=self.embedding_field,
+                query_vectors=[[1.0], [2.0]],
+            ).read_batch([split])
+
+        self.assertEqual([[0, 2, 3, 4]], [b.to_list() for b in captured])
+        self.assertEqual([[12], [12]], [
+            sorted(list(result.results()))
+            for result in results
+        ])
 
     def test_read_threads_options_to_vector_search(self):
         scan_plan = self._builder().new_vector_search_scan().scan()
@@ -2952,6 +3201,64 @@ class FullTextSearchManySplitsTest(unittest.TestCase):
         self.assertEqual(1, len(captured_io_metas))
         self.assertEqual("oss://bucket/ft.index",
                          captured_io_metas[0][0].external_path)
+
+    def test_full_text_read_filters_deleted_rows(self):
+        from pypaimon.globalindex.vector_search_result import (
+            DictBasedScoredIndexResult,
+        )
+        from pypaimon.table.source.full_text_read import FullTextReadImpl
+        from pypaimon.table.source.full_text_search_split import (
+            FullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(None, field_id=1, index_type="tantivy-fulltext",
+                       file_name="ft.index", row_range_start=10,
+                       row_range_end=14)
+        table = _StubTable(fields=[text_field], entries=[entry])
+        split = FullTextSearchSplit(
+            column_name="content",
+            row_range_start=10,
+            row_range_end=14,
+            full_text_index_files=[entry.index_file],
+        )
+        live_rows = _bitmap(10, 12, 13, 14)
+        partition_filter = object()
+        captured = []
+
+        def _fake_create(index_type, file_io, index_path, index_io_meta_list):
+            class _FakeReader:
+                def visit_full_text_search(self_inner, fts):
+                    captured.append(fts.include_row_ids)
+                    return _completed_future(
+                        DictBasedScoredIndexResult({
+                            row_id: float(row_id)
+                            for row_id in fts.include_row_ids
+                        }))
+
+                def close(self_inner):
+                    pass
+
+            return _FakeReader()
+
+        with mock.patch(
+                "pypaimon.table.source.full_text_read."
+                "global_index_live_row_filter.live_rows",
+                return_value=live_rows) as live_rows_fn, \
+             mock.patch(
+                "pypaimon.table.source.full_text_read._create_full_text_reader",
+                side_effect=_fake_create):
+            result = FullTextReadImpl(
+                table,
+                limit=10,
+                text_column=text_field,
+                query=MatchQuery("test", "content"),
+                partition_filter=partition_filter,
+            ).read([split])
+
+        live_rows_fn.assert_called_once_with(table, partition_filter)
+        self.assertEqual([[0, 2, 3, 4]], [b.to_list() for b in captured])
+        self.assertEqual([10, 12, 13, 14], sorted(list(result.results())))
 
     def test_full_text_search_with_many_splits(self):
         from pypaimon.globalindex.vector_search_result import (

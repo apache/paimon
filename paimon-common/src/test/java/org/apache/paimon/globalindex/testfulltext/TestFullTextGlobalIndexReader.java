@@ -82,8 +82,12 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         // Min-heap: smallest score at head, so we evict the weakest candidate.
         PriorityQueue<ScoredRow> topK =
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
+        RoaringNavigableMap64 includeRowIds = fullTextSearch.includeRowIds();
 
         for (int i = 0; i < count; i++) {
+            if (includeRowIds != null && !includeRowIds.contains(rowIds[i])) {
+                continue;
+            }
             float score = computeScore(documents[i], fullTextSearch.query());
             if (score <= 0) {
                 continue;
