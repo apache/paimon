@@ -990,7 +990,7 @@ class MultimodalTableTest(unittest.TestCase):
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
     @unittest.skipIf(ray is None, "ray is not installed")
-    def test_scan_to_ray_map_blobs(self):
+    def test_scan_to_ray_map_with_blobs(self):
         started_ray = False
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True, num_cpus=2)
@@ -1013,8 +1013,8 @@ class MultimodalTableTest(unittest.TestCase):
         ])
 
         def collect_batch(scalar, blobs, prefix):
-            self.assertIsInstance(scalar, pa.Table)
-            self.assertEqual(["idx"], scalar.column_names)
+            assert isinstance(scalar, pa.Table)
+            assert ["idx"] == scalar.column_names
             idxs = scalar.column("idx").to_pylist()
             rows = []
             for idx, image in zip(idxs, blobs["image"]):
@@ -1022,7 +1022,7 @@ class MultimodalTableTest(unittest.TestCase):
             return pa.Table.from_pylist(rows)
 
         try:
-            from pypaimon.ray import map_blobs
+            from pypaimon.ray import map_with_blobs
 
             ds = (
                 obs.scan()
@@ -1030,7 +1030,10 @@ class MultimodalTableTest(unittest.TestCase):
                 .select(["idx", "image", "audio"])
                 .to_ray(concurrency=1, override_num_blocks=1)
             )
-            result = map_blobs(
+            with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+                map_with_blobs(ds, ["idx"], collect_batch)
+
+            result = map_with_blobs(
                 ds,
                 ["image"],
                 collect_batch,

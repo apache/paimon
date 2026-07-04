@@ -137,7 +137,7 @@ def read_paimon(
     return ds
 
 
-def map_blobs(
+def map_with_blobs(
     dataset: "ray.data.Dataset",
     columns,
     fn: Callable,
@@ -177,12 +177,12 @@ def map_blobs(
         resolved_file_io = getattr(dataset, "_paimon_blob_file_io", None)
     if resolved_file_io is None:
         raise ValueError(
-            "map_blobs requires a FileIO. Use table.scan().to_ray() or "
+            "map_with_blobs requires a FileIO. Use table.scan().to_ray() or "
             "pass file_io= explicitly.")
 
     batch_format = map_args.pop("batch_format", "pyarrow")
     if batch_format != "pyarrow":
-        raise ValueError("map_blobs requires batch_format='pyarrow'")
+        raise ValueError("map_with_blobs requires batch_format='pyarrow'")
 
     kwargs = dict(map_args)
     kwargs["batch_format"] = "pyarrow"
@@ -192,7 +192,12 @@ def map_blobs(
         _set_map_batches_remote_args(dataset, kwargs, ray_remote_args)
 
     all_blob_cols = getattr(dataset, "_paimon_blob_columns", None)
-    if all_blob_cols is None:
+    if all_blob_cols is not None:
+        all_blob = set(all_blob_cols)
+        invalid = [name for name in blob_cols if name not in all_blob]
+        if invalid:
+            raise ValueError("Column {!r} is not a BLOB column.".format(invalid[0]))
+    else:
         all_blob_cols = blob_cols
 
     return dataset.map_batches(
@@ -234,7 +239,7 @@ def _map_blob_batch(
     result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
     if result is None:
         raise ValueError(
-            "map_blobs UDF must return a Ray-compatible batch, such as a "
+            "map_with_blobs UDF must return a Ray-compatible batch, such as a "
             "pyarrow.Table. For side-effect-only processing, return an empty "
             "pyarrow.Table instead of None.")
     return result
