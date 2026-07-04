@@ -392,6 +392,13 @@ public static class BitmapContainsUDF extends ScalarFunction {
   ARRAY\<ROW\> data types. You need to use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the
   nested table. The values in each row are written by partial updating some columns.
 
+  Use `fields.<field-name>.nested-key-null-strategy=<merge|ignore|error>` to specify how rows are handled when the nested-key does not satisfy primary key semantics (e.g., primary key fields contain null values).
+
+   - `merge` (default): Merge rows even if the nested-key does not satisfy primary key semantics. This is the same behavior as when this option is not configured.
+   - `ignore`: Ignore rows whose nested-key contains null values because they do not satisfy primary key semantics.
+   - `error`: Throw an exception if the nested-key contains null values, because primary key fields must not be null.
+
+
 ### collect
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
   It only supports ARRAY type.
