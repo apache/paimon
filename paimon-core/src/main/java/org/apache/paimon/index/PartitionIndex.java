@@ -229,6 +229,9 @@ public class PartitionIndex {
 
     // Merges disk row count into nonFullBucketInformation, keeping uncommitted increments.
     private void reconcileBucketWithDisk(int bucket, long diskNow) {
+        if (!totalBucketSet.contains(bucket)) {
+            return;
+        }
         nonFullBucketInformation.compute(
                 bucket,
                 (b, inMemory) ->
