@@ -108,4 +108,34 @@ public class RoaringNavigableMap64Test {
         assertThat(values.get(0)).isEqualTo(start);
         assertThat(values.get(100)).isEqualTo(end);
     }
+
+    @Test
+    public void testToRangeListAcrossHighBitmapBoundary() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        long start = (1L << 32) - 2;
+        long end = (1L << 32) + 2;
+        bitmap.addRange(new Range(start, end));
+
+        assertThat(bitmap.toRangeList()).containsExactly(new Range(start, end));
+    }
+
+    @Test
+    public void testToRangeListForLargeContiguousRange() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.addRange(new Range(0, 9999));
+
+        assertThat(bitmap.toRangeList()).containsExactly(new Range(0, 9999));
+    }
+
+    @Test
+    public void testToRangeListDoesNotMergeUnsignedWrapAround() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.add(Long.MAX_VALUE);
+        bitmap.add(Long.MIN_VALUE);
+
+        assertThat(bitmap.toRangeList())
+                .containsExactly(
+                        new Range(Long.MAX_VALUE, Long.MAX_VALUE),
+                        new Range(Long.MIN_VALUE, Long.MIN_VALUE));
+    }
 }
