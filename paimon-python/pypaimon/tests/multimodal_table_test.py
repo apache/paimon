@@ -1032,26 +1032,22 @@ class MultimodalTableTest(unittest.TestCase):
                 .select(["idx", "image", "audio"])
                 .to_ray(concurrency=1, override_num_blocks=1)
             )
-            with self.assertRaisesRegex(ValueError, "not a BLOB column"):
-                map_with_blobs(ds, ["idx"], collect_batch)
+            ds = ds.filter(lambda row: row["idx"] >= 0)
 
-            blob_columns = getattr(ds, "_paimon_blob_columns")
-            delattr(ds, "_paimon_blob_columns")
-            try:
-                with self.assertRaisesRegex(ValueError, "all_blob_columns"):
-                    map_with_blobs(ds, ["image"], collect_batch)
-                result = map_with_blobs(
-                    ds,
-                    ["image"],
-                    collect_batch,
-                    all_blob_columns=["image", "audio"],
-                    parallelism=2,
-                    batch_size=1,
-                    fn_kwargs={"prefix": b"got-"},
-                    ray_remote_args={"num_cpus": 1},
-                )
-            finally:
-                setattr(ds, "_paimon_blob_columns", blob_columns)
+            with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+                obs.map_with_blobs(ds, ["idx"], collect_batch)
+            with self.assertRaisesRegex(ValueError, "FileIO"):
+                map_with_blobs(ds, ["image"], collect_batch)
+
+            result = obs.map_with_blobs(
+                ds,
+                ["image"],
+                collect_batch,
+                parallelism=2,
+                batch_size=1,
+                fn_kwargs={"prefix": b"got-"},
+                ray_remote_args={"num_cpus": 1},
+            )
             rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
 
             self.assertEqual(

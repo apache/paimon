@@ -393,7 +393,6 @@ workers before calling your UDF.
 import ray
 import pyarrow as pa
 import pypaimon.multimodal as pm
-from pypaimon.ray import map_with_blobs
 
 ray.init(num_cpus=8)
 
@@ -427,16 +426,20 @@ ds = (
     .to_ray()
 )
 
+# Optional Ray transforms are fine as long as BLOB descriptor columns remain.
+# ds = ds.filter(lambda row: row["category"] == "lake")
+# ds = ds.repartition(32)
+
 # Most jobs can also start with the default parallelism and batch_size.
-result_ds = map_with_blobs(ds, blob_cols, process_batch)
+result_ds = docs.map_with_blobs(ds, blob_cols, process_batch)
 ```
 
 `process_batch` must return a Ray-compatible batch, such as a small
 `pyarrow.Table`. For side-effect-only jobs, return an empty table rather than
 `None`. Avoid returning raw BLOB bytes, which would materialize large payloads
-in Ray's object store. Call `map_with_blobs` directly on the Dataset returned by
-`to_ray()`; if intermediate Ray transforms drop Dataset metadata, pass `file_io`
-and `all_blob_columns` explicitly.
+in Ray's object store. Use `MultimodalTable.map_with_blobs(...)` when applying
+Ray transforms between `to_ray()` and BLOB processing; the table supplies the
+BLOB read context.
 
 Optional tuning parameters:
 

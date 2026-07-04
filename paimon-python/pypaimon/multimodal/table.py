@@ -157,6 +157,18 @@ class MultimodalTable:
     def merge(self, on):
         return _MergeBuilder(self, on)
 
+    def map_with_blobs(self, dataset, columns, fn, **kwargs):
+        from pypaimon.ray import map_with_blobs
+
+        return map_with_blobs(
+            dataset,
+            columns,
+            fn,
+            file_io=self.raw_table.file_io,
+            all_blob_columns=_blob_columns(self.raw_table),
+            **kwargs,
+        )
+
     def scan(
             self,
             *,
@@ -355,6 +367,13 @@ class _MergeBuilder:
             when_not_matched=self._when_not_matched,
             operation="merge",
         )
+
+
+def _blob_columns(table):
+    return tuple(
+        field.name for field in table.fields
+        if getattr(field.type, "type", None) == "BLOB"
+    )
 
 
 def _to_arrow_table(data, target_schema=None):
