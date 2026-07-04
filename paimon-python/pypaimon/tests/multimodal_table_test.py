@@ -950,6 +950,8 @@ class MultimodalTableTest(unittest.TestCase):
             t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
             t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").to_ray()
 
     def test_scan_stream_blobs(self):
         obs = self.conn.create_table(
