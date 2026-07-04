@@ -430,7 +430,7 @@ ds = (
 # ds = ds.filter(lambda row: row["category"] == "lake")
 # ds = ds.repartition(32)
 
-# For multiple BLOB tables, process each BLOB source with its own table context.
+# Multiple BLOB tables: map each source separately.
 # Most jobs can also start with the default parallelism and batch_size.
 result_ds = docs.map_with_blobs(ds, blob_cols, process_batch)
 ```
