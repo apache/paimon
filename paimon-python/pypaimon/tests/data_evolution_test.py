@@ -1140,6 +1140,61 @@ class DataEvolutionTest(unittest.TestCase):
         filtered = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
         self.assertEqual(filtered, [], "empty row_ranges must return no entries, not all entries")
 
+    def test_filter_manifest_entries_by_row_range_index(self):
+        from pypaimon.read.scanner.file_scanner import _filter_manifest_entries_by_row_ranges
+        from pypaimon.utils.range import Range
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+        from pypaimon.utils.row_range_index import RowRangeIndex
+
+        entry_0 = SimpleNamespace(
+            file=SimpleNamespace(
+                first_row_id=0,
+                row_count=10,
+                row_id_range=lambda: Range(0, 9)))
+        entry_1 = SimpleNamespace(
+            file=SimpleNamespace(
+                first_row_id=20,
+                row_count=10,
+                row_id_range=lambda: Range(20, 29)))
+        bitmap = RoaringBitmap64.from_ranges([Range(5, 6), Range(22, 24)])
+        row_range_index = RowRangeIndex.from_bitmap(bitmap)
+
+        filtered = _filter_manifest_entries_by_row_ranges(
+            [entry_0, entry_1], None, row_range_index=row_range_index)
+
+        self.assertEqual(filtered, [entry_0, entry_1])
+
+    def test_wrap_to_indexed_splits_by_row_range_index(self):
+        from pypaimon.globalindex.indexed_split import IndexedSplit
+        from pypaimon.read.scanner.data_evolution_split_generator import (
+            DataEvolutionSplitGenerator,
+        )
+        from pypaimon.utils.range import Range
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+        from pypaimon.utils.row_range_index import RowRangeIndex
+
+        table = SimpleNamespace(options=SimpleNamespace(options={}))
+        row_range_index = RowRangeIndex.from_bitmap(
+            RoaringBitmap64.from_ranges([Range(5, 6), Range(22, 24)]))
+        generator = DataEvolutionSplitGenerator(
+            table,
+            target_split_size=1024,
+            open_file_cost=1,
+            row_range_index=row_range_index)
+        split = SimpleNamespace(files=[
+            SimpleNamespace(row_id_range=lambda: Range(0, 9)),
+            SimpleNamespace(row_id_range=lambda: Range(20, 29)),
+        ])
+
+        result = generator._wrap_to_indexed_splits(
+            [split], row_range_index=generator.row_range_index)
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], IndexedSplit)
+        self.assertEqual(
+            result[0].row_ranges(),
+            [Range(5, 6), Range(22, 24)])
+
     def test_more_data(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),

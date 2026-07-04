@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,5 +108,57 @@ public class RoaringNavigableMap64Test {
         assertThat(values).hasSize(101);
         assertThat(values.get(0)).isEqualTo(start);
         assertThat(values.get(100)).isEqualTo(end);
+    }
+
+    @Test
+    public void testRangePredicates() {
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.fromRanges(
+                        Arrays.asList(new Range(0, 9), new Range(20, 29), new Range(40, 45)));
+
+        assertThat(bitmap.intersects(new Range(5, 5))).isTrue();
+        assertThat(bitmap.intersects(new Range(10, 19))).isFalse();
+        assertThat(bitmap.intersects(new Range(29, 40))).isTrue();
+        assertThat(bitmap.intersects(new Range(30, 39))).isFalse();
+
+        assertThat(bitmap.containsRange(new Range(0, 9))).isTrue();
+        assertThat(bitmap.containsRange(new Range(2, 8))).isTrue();
+        assertThat(bitmap.containsRange(new Range(9, 20))).isFalse();
+        assertThat(bitmap.containsRange(new Range(10, 19))).isFalse();
+        assertThat(bitmap.containsRange(new Range(40, 45))).isTrue();
+    }
+
+    @Test
+    public void testIntersectedRanges() {
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.fromRanges(
+                        Arrays.asList(new Range(0, 9), new Range(20, 29), new Range(40, 45)));
+        bitmap.add(35);
+        bitmap.add(37);
+
+        assertThat(bitmap.intersectedRanges(5, 42))
+                .containsExactly(
+                        new Range(5, 9),
+                        new Range(20, 29),
+                        new Range(35, 35),
+                        new Range(37, 37),
+                        new Range(40, 42));
+        assertThat(bitmap.intersectedRanges(10, 19)).isEmpty();
+    }
+
+    @Test
+    public void testLargeIntersectedRanges() {
+        long start = Integer.MAX_VALUE + 100L;
+        RoaringNavigableMap64 bitmap =
+                RoaringNavigableMap64.fromRanges(
+                        Arrays.asList(
+                                new Range(start, start + 99), new Range(start + 200, start + 299)));
+
+        assertThat(bitmap.intersects(new Range(start + 50, start + 60))).isTrue();
+        assertThat(bitmap.containsRange(new Range(start + 20, start + 80))).isTrue();
+        assertThat(bitmap.containsRange(new Range(start + 100, start + 199))).isFalse();
+        assertThat(bitmap.intersectedRanges(start + 95, start + 205))
+                .containsExactly(
+                        new Range(start + 95, start + 99), new Range(start + 200, start + 205));
     }
 }

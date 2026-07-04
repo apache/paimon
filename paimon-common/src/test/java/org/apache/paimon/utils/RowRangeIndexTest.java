@@ -20,7 +20,9 @@ package org.apache.paimon.utils;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,5 +39,79 @@ class RowRangeIndexTest {
         assertThat(index.contains(new Range(50, 120))).isTrue();
         assertThat(index.contains(new Range(150, 199))).isFalse();
         assertThat(index.contains(new Range(100, 200))).isFalse();
+    }
+
+    @Test
+    void testContainsExactlyKeepsRangeBoundaries() {
+        RowRangeIndex merged =
+                RowRangeIndex.create(Arrays.asList(new Range(0, 99), new Range(100, 149)));
+        assertThat(merged.contains(new Range(0, 149))).isTrue();
+        assertThat(merged.containsExactly(new Range(0, 149))).isTrue();
+        assertThat(merged.containsExactly(new Range(0, 99))).isFalse();
+
+        RowRangeIndex notMerged =
+                RowRangeIndex.create(Arrays.asList(new Range(0, 99), new Range(100, 149)), false);
+        assertThat(notMerged.contains(new Range(0, 149))).isFalse();
+        assertThat(notMerged.contains(new Range(0, 99))).isTrue();
+        assertThat(notMerged.containsExactly(new Range(0, 149))).isFalse();
+        assertThat(notMerged.containsExactly(new Range(0, 99))).isTrue();
+        assertThat(notMerged.containsExactly(new Range(100, 149))).isTrue();
+    }
+
+    @Test
+    void testIntersectsAndIntersectedRanges() {
+        RowRangeIndex index =
+                RowRangeIndex.create(
+                        Arrays.asList(new Range(0, 9), new Range(20, 29), new Range(40, 45)));
+
+        assertThat(index.intersects(5, 15)).isTrue();
+        assertThat(index.intersects(10, 19)).isFalse();
+        assertThat(collectIntersections(index, 5, 42))
+                .containsExactly(new Range(5, 9), new Range(20, 29), new Range(40, 42));
+        assertThat(collectIntersections(index, 10, 19)).isEmpty();
+        assertThat(
+                        index.intersect(RowRangeIndex.create(Arrays.asList(new Range(5, 42))))
+                                .toRangeList())
+                .containsExactly(new Range(5, 9), new Range(20, 29), new Range(40, 42));
+    }
+
+    @Test
+    void testBitmapBackedIndex() {
+        RoaringNavigableMap64 rowIds =
+                RoaringNavigableMap64.fromRanges(
+                        Arrays.asList(new Range(0, 9), new Range(20, 29), new Range(40, 45)));
+        rowIds.add(35);
+        rowIds.add(37);
+
+        RowRangeIndex index = RowRangeIndex.fromBitmap(rowIds);
+
+        assertThat(index.intersects(5, 15)).isTrue();
+        assertThat(index.intersects(10, 19)).isFalse();
+        assertThat(collectIntersections(index, 5, 42))
+                .containsExactly(
+                        new Range(5, 9),
+                        new Range(20, 29),
+                        new Range(35, 35),
+                        new Range(37, 37),
+                        new Range(40, 42));
+        assertThat(index.containsExactly(new Range(20, 29))).isTrue();
+        assertThat(index.containsExactly(new Range(40, 44))).isFalse();
+        assertThat(collectIntersections(index, 34, 38))
+                .containsExactly(new Range(35, 35), new Range(37, 37));
+        assertThat(
+                        index.intersect(RowRangeIndex.create(Arrays.asList(new Range(5, 42))))
+                                .toRangeList())
+                .containsExactly(
+                        new Range(5, 9),
+                        new Range(20, 29),
+                        new Range(35, 35),
+                        new Range(37, 37),
+                        new Range(40, 42));
+    }
+
+    private static List<Range> collectIntersections(RowRangeIndex index, long start, long end) {
+        List<Range> ranges = new ArrayList<>();
+        index.forEachIntersectedRange(start, end, (from, to) -> ranges.add(new Range(from, to)));
+        return ranges;
     }
 }

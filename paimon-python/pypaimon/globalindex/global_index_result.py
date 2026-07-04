@@ -69,17 +69,12 @@ class GlobalIndexResult(ABC):
     @staticmethod
     def from_range(range_: Range) -> 'GlobalIndexResult':
         """Returns a new GlobalIndexResult from Range."""
-        result = RoaringBitmap64()
-        result.add_range(range_.from_, range_.to)
-        return SimpleGlobalIndexResult(result)
+        return SimpleGlobalIndexResult(RoaringBitmap64.from_ranges([range_]))
 
     @staticmethod
     def from_ranges(ranges: List[Range]) -> 'GlobalIndexResult':
         """Returns a new GlobalIndexResult from multiple Ranges."""
-        result = RoaringBitmap64()
-        for r in ranges:
-            result.add_range(r.from_, r.to)
-        return SimpleGlobalIndexResult(result)
+        return SimpleGlobalIndexResult(RoaringBitmap64.from_ranges(ranges))
 
 
 class SimpleGlobalIndexResult(GlobalIndexResult):

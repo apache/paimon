@@ -48,6 +48,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -307,11 +308,7 @@ public abstract class AbstractVectorRead implements Serializable {
             return result;
         }
         ScoredGlobalIndexResult candidates = result.topK(indexedSearchLimit(indexType));
-        return readRawSearch(
-                candidates.results().toRangeList(),
-                candidates.results(),
-                globalIndexer,
-                queryVector);
+        return readRawSearch(candidates.results(), null, globalIndexer, queryVector);
     }
 
     protected String vectorIndexType(List<IndexVectorSearchSplit> splits) {
@@ -367,19 +364,53 @@ public abstract class AbstractVectorRead implements Serializable {
             @Nullable RoaringNavigableMap64 preFilter,
             String metric,
             float[] queryVector) {
-        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
         if (preFilter != null) {
-            rawRowRanges =
-                    Range.and(
-                            Range.sortAndMergeOverlap(rawRowRanges, true),
-                            Range.sortAndMergeOverlap(preFilter.toRangeList(), true));
+            RoaringNavigableMap64 rawRows = bitmapOf(rawRowRanges);
+            rawRows.and(preFilter);
+            return readRawSearch(rawRows, null, metric, queryVector);
         }
+
+        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
         if (rawRowRanges.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
 
         TableScan.Plan plan =
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
+        return readRawSearch(plan, readType, metric, queryVector);
+    }
+
+    protected ScoredGlobalIndexResult readRawSearch(
+            RoaringNavigableMap64 rawRows,
+            @Nullable RoaringNavigableMap64 preFilter,
+            @Nullable GlobalIndexer globalIndexer,
+            float[] queryVector) {
+        return readRawSearch(rawRows, preFilter, rawSearchMetric(globalIndexer), queryVector);
+    }
+
+    protected ScoredGlobalIndexResult readRawSearch(
+            RoaringNavigableMap64 rawRows,
+            @Nullable RoaringNavigableMap64 preFilter,
+            String metric,
+            float[] queryVector) {
+        if (preFilter != null) {
+            rawRows = RoaringNavigableMap64.and(rawRows, preFilter);
+        }
+        if (rawRows.isEmpty()) {
+            return ScoredGlobalIndexResult.createEmpty();
+        }
+
+        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType());
+        TableScan.Plan plan =
+                newRawReadBuilder(readType, false)
+                        .withRowRangeIndex(RowRangeIndex.fromBitmap(rawRows))
+                        .newScan()
+                        .plan();
+        return readRawSearch(plan, readType, metric, queryVector);
+    }
+
+    private ScoredGlobalIndexResult readRawSearch(
+            TableScan.Plan plan, RowType readType, String metric, float[] queryVector) {
         ReadBuilder readBuilder = newRawReadBuilder(readType, true);
         RoaringNavigableMap64 resultBitmap = new RoaringNavigableMap64();
         Map<Long, Float> scoreMap = new HashMap<>();

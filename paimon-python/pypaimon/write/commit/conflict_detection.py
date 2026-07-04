@@ -28,6 +28,7 @@ from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
+from pypaimon.utils.row_range_index import RowRangeIndex
 from pypaimon.write.commit.commit_scanner import CommitScanner
 
 
@@ -318,8 +319,8 @@ class ConflictDetection:
                 key = (tuple(entry.partition.values), entry.bucket)
                 data_ranges.setdefault(key, []).append(row_range)
 
-        data_ranges = {
-            key: Range.sort_and_merge_overlap(ranges, True, True)
+        row_range_indexes = {
+            key: RowRangeIndex.create(ranges)
             for key, ranges in data_ranges.items()
         }
 
@@ -330,7 +331,8 @@ class ConflictDetection:
                 global_index.row_range_end,
             )
             key = (tuple(index_entry.partition.values), index_entry.bucket)
-            if index_range.exclude(data_ranges.get(key, [])):
+            row_range_index = row_range_indexes.get(key)
+            if row_range_index is None or not row_range_index.contains(index_range):
                 return RuntimeError(
                     "Global index row ID existence conflict: index file '{}' "
                     "references row range {}, but this range is not fully "
@@ -399,31 +401,30 @@ class ConflictDetection:
         if not files_to_check:
             return None
 
-        existing_index = set()
         existing_ranges = {}
         for base in base_entries:
             if base.file.first_row_id is not None:
-                existing_index.add((
-                    base.partition, base.bucket,
-                    base.file.first_row_id, base.file.row_count))
                 if not DataFileMeta.is_blob_file(base.file.file_name):
                     existing_ranges.setdefault((base.partition, base.bucket), []).append(
                         base.file.row_id_range())
 
-        existing_ranges = {
-            key: Range.sort_and_merge_overlap(ranges, True, True)
+        existing_range_indexes = {
+            key: RowRangeIndex.create(ranges, merge_adjacent=False)
             for key, ranges in existing_ranges.items()
         }
 
         for entry in files_to_check:
-            if DataFileMeta.is_blob_file(entry.file.file_name):
-                base_ranges = existing_ranges.get((entry.partition, entry.bucket), [])
-                if not entry.file.row_id_range().exclude(base_ranges):
-                    continue
-
-            key = (entry.partition, entry.bucket,
-                   entry.file.first_row_id, entry.file.row_count)
-            if key not in existing_index:
+            row_range = entry.file.row_id_range()
+            row_range_index = existing_range_indexes.get((entry.partition, entry.bucket))
+            exists = (
+                row_range_index is not None
+                and (
+                    row_range_index.contains(row_range)
+                    if DataFileMeta.is_blob_file(entry.file.file_name)
+                    else row_range_index.contains_exactly(row_range)
+                )
+            )
+            if not exists:
                 return RuntimeError(
                     "Row ID existence conflict: file '{}' references "
                     "firstRowId={}, rowCount={} in bucket {}, "

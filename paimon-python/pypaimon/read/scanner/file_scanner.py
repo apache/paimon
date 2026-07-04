@@ -102,7 +102,18 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
     return visit(predicate)
 
 
-def _build_early_row_range_filter(row_ranges):
+def _to_row_range_index(row_ranges=None, row_bitmap=None, row_range_index=None):
+    if row_range_index is not None:
+        return row_range_index
+    from pypaimon.utils.row_range_index import RowRangeIndex
+    if row_bitmap is not None:
+        return RowRangeIndex.from_bitmap(row_bitmap)
+    if row_ranges is not None:
+        return RowRangeIndex.create(row_ranges)
+    return None
+
+
+def _build_early_row_range_filter(row_ranges, row_bitmap=None, row_range_index=None):
     """Skip entries whose row-id range doesn't intersect ``row_ranges``.
 
     Runs on the raw fastavro record (OrderedDict) before the expensive
@@ -113,10 +124,11 @@ def _build_early_row_range_filter(row_ranges):
     Safe for DELETE entries because ADD and DELETE for the same file
     share the same ``_FIRST_ROW_ID``.
     """
-    if row_ranges is None or not row_ranges:
+    row_range_index = _to_row_range_index(row_ranges, row_bitmap, row_range_index)
+    if row_range_index is None:
         return None
-
-    from pypaimon.utils.range import Range
+    if row_range_index.is_empty():
+        return lambda record: False
 
     def _filter(record):
         file_dict = record.get('_FILE')
@@ -130,10 +142,7 @@ def _build_early_row_range_filter(row_ranges):
             return True
         file_start = int(first_row_id)
         file_end = file_start + int(row_count) - 1
-        for r in row_ranges:
-            if Range.intersect(file_start, file_end, r.from_, r.to):
-                return True
-        return False
+        return row_range_index.intersects(file_start, file_end)
 
     return _filter
 
@@ -153,44 +162,45 @@ def _filter_manifest_files_by_row_ranges(
     Returns:
         Filtered list of manifest files
     """
-    from pypaimon.utils.range import Range
+    from pypaimon.utils.row_range_index import RowRangeIndex
+    return _filter_manifest_files_by_row_range_index(
+        manifest_files, RowRangeIndex.create(row_ranges))
+
+
+def _filter_manifest_files_by_row_bitmap(
+        manifest_files: List[ManifestFileMeta],
+        row_bitmap) -> List[ManifestFileMeta]:
+    from pypaimon.utils.row_range_index import RowRangeIndex
+    return _filter_manifest_files_by_row_range_index(
+        manifest_files, RowRangeIndex.from_bitmap(row_bitmap))
+
+
+def _filter_manifest_files_by_row_range_index(
+        manifest_files: List[ManifestFileMeta],
+        row_range_index) -> List[ManifestFileMeta]:
+    if row_range_index.is_empty():
+        return []
 
     filtered_files = []
     for manifest in manifest_files:
         min_row_id = manifest.min_row_id
         max_row_id = manifest.max_row_id
-
-        # If min_row_id or max_row_id is None, we cannot filter, keep the file
         if min_row_id is None or max_row_id is None:
             filtered_files.append(manifest)
             continue
-
-        # Check if manifest row range overlaps with any of the expected row ranges
-        manifest_row_range = Range(min_row_id, max_row_id)
-        should_keep = False
-
-        for expected_range in row_ranges:
-            # Check if ranges intersect
-            intersect = Range.intersect(
-                manifest_row_range.from_,
-                manifest_row_range.to,
-                expected_range.from_,
-                expected_range.to)
-            if intersect:
-                should_keep = True
-                break
-
-        if should_keep:
+        if row_range_index.intersects(min_row_id, max_row_id):
             filtered_files.append(manifest)
-
     return filtered_files
 
 
 def _filter_manifest_entries_by_row_ranges(
         entries: List[ManifestEntry],
-        row_ranges: List) -> List[ManifestEntry]:
+        row_ranges: List,
+        row_bitmap=None,
+        row_range_index=None) -> List[ManifestEntry]:
 
-    if not row_ranges:
+    row_range_index = _to_row_range_index(row_ranges, row_bitmap, row_range_index)
+    if row_range_index is None or row_range_index.is_empty():
         return []
 
     filtered = []
@@ -200,10 +210,8 @@ def _filter_manifest_entries_by_row_ranges(
             filtered.append(entry)
             continue
         file_range = entry.file.row_id_range()
-        for r in row_ranges:
-            if file_range.overlaps(r):
-                filtered.append(entry)
-                break
+        if row_range_index.intersects(file_range.from_, file_range.to):
+            filtered.append(entry)
     return filtered
 
 
@@ -361,6 +369,7 @@ class FileScanner:
 
     def _create_data_evolution_split_generator(self):
         row_ranges = None
+        row_range_index = None
         score_getter = None
         # Fetch snapshot once and share with global index evaluation to avoid
         # a duplicate /snapshot REST round-trip (#7513).
@@ -371,21 +380,28 @@ class FileScanner:
         global_index_result = self._global_index_result if self._global_index_result is not None \
             else self._eval_global_index(snapshot)
         if global_index_result is not None:
-            row_ranges = global_index_result.results().to_range_list()
+            from pypaimon.utils.row_range_index import RowRangeIndex
+            row_range_index = RowRangeIndex.from_bitmap(global_index_result.results())
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
-        if row_ranges is None and self.predicate is not None:
+        if row_range_index is None and self.predicate is not None:
             row_ranges = _row_ranges_from_predicate(self.predicate)
+            if row_ranges is not None:
+                from pypaimon.utils.row_range_index import RowRangeIndex
+                row_range_index = RowRangeIndex.create(row_ranges)
 
         # Filter manifest files by row ranges if available
-        if row_ranges is not None:
-            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
+        if row_range_index is not None:
+            manifest_files = _filter_manifest_files_by_row_range_index(
+                manifest_files, row_range_index)
 
-        entries = self.read_manifest_entries(manifest_files, row_ranges=row_ranges)
+        entries = self.read_manifest_entries(
+            manifest_files, row_ranges=row_ranges, row_range_index=row_range_index)
 
         # Redundant when early_record_filter ran; kept for explain mode and as safety net.
-        if row_ranges is not None:
-            entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        if row_range_index is not None:
+            entries = _filter_manifest_entries_by_row_ranges(
+                entries, row_ranges, row_range_index=row_range_index)
 
         return entries, DataEvolutionSplitGenerator(
             self.table,
@@ -393,7 +409,8 @@ class FileScanner:
             self.open_file_cost,
             self._deletion_files_map(entries),
             row_ranges,
-            score_getter
+            score_getter,
+            row_range_index=row_range_index
         )
 
     def plan_files(self) -> List[ManifestEntry]:
@@ -433,7 +450,9 @@ class FileScanner:
             return None
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta],
-                              row_ranges=None) -> List[ManifestEntry]:
+                              row_ranges=None,
+                              row_bitmap=None,
+                              row_range_index=None) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if self.scan_stats is not None:
             self.scan_stats.manifest_files_total += len(manifest_files)
@@ -452,7 +471,7 @@ class FileScanner:
         # Disable both early filters in explain mode (scan_stats) so all entries
         # flow through _filter_manifest_entry for accurate funnel counting.
         early_row_filter = None if self.scan_stats is not None \
-            else _build_early_row_range_filter(row_ranges)
+            else _build_early_row_range_filter(row_ranges, row_bitmap, row_range_index)
         partition_filter = None if self.scan_stats is not None \
             else self.partition_key_predicate
         return self.manifest_file_manager.read_entries_parallel(

@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.SpecialFields.ROW_ID;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
@@ -244,7 +245,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             Optional<GlobalIndexResult> indexResult = evalGlobalIndex();
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
-                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                rowRangeIndex = RowRangeIndex.fromBitmap(result.results());
                 if (result instanceof ScoredGlobalIndexResult) {
                     scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
@@ -308,12 +309,10 @@ public class DataEvolutionBatchScan implements DataTableScan {
             DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
         List<DataFileMeta> files = dataSplit.dataFiles();
 
-        List<Range> expected = new ArrayList<>();
-        for (DataFileMeta file : files) {
-            Range fileRange = file.nonNullRowIdRange();
-            expected.addAll(rowRangeIndex.intersectedRanges(fileRange.from, fileRange.to));
-        }
-        expected = Range.sortAndMergeOverlap(expected, true);
+        List<Range> fileRanges =
+                files.stream().map(DataFileMeta::nonNullRowIdRange).collect(Collectors.toList());
+        List<Range> expected =
+                rowRangeIndex.intersect(RowRangeIndex.create(fileRanges)).toRangeList();
         if (expected.isEmpty()) {
             long min = files.stream().mapToLong(f -> f.nonNullRowIdRange().from).min().orElse(-1L);
             long max = files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(-1L);

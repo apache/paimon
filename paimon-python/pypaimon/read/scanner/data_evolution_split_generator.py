@@ -18,12 +18,13 @@
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
-from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.utils.range import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import DataSplit, Split
+from pypaimon.utils.range import Range
+from pypaimon.utils.row_range_index import RowRangeIndex
 
 
 class DataEvolutionSplitGenerator(AbstractSplitGenerator):
@@ -38,11 +39,20 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         open_file_cost: int,
         deletion_files_map=None,
         row_ranges: Optional[List] = None,
-        score_getter=None
+        score_getter=None,
+        row_bitmap=None,
+        row_range_index=None
     ):
         super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
         self.row_ranges = row_ranges
         self.score_getter = score_getter
+        self.row_bitmap = row_bitmap
+        self.row_range_index = row_range_index
+        if self.row_range_index is None:
+            if row_bitmap is not None:
+                self.row_range_index = RowRangeIndex.from_bitmap(row_bitmap)
+            elif row_ranges is not None:
+                self.row_range_index = RowRangeIndex.create(row_ranges)
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """
@@ -100,15 +110,18 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 flatten_packed_files, packed_files, sorted_entries_list
             )
 
-        # merge slice_row_ranges and self.row_ranges
-        if slice_row_ranges is None:
-            slice_row_ranges = self.row_ranges
-        elif self.row_ranges is not None:
-            slice_row_ranges = Range.and_(slice_row_ranges, self.row_ranges)
+        effective_row_range_index = self.row_range_index
+        if slice_row_ranges is not None:
+            if effective_row_range_index is not None:
+                effective_row_range_index = effective_row_range_index.intersect(
+                    RowRangeIndex.create(slice_row_ranges))
+            else:
+                effective_row_range_index = RowRangeIndex.create(slice_row_ranges)
 
         # Wrap splits with IndexedSplit for slice-based filtering or row_ranges
-        if slice_row_ranges:
-            splits = self._wrap_to_indexed_splits(splits, slice_row_ranges)
+        if effective_row_range_index is not None:
+            splits = self._wrap_to_indexed_splits(
+                splits, row_range_index=effective_row_range_index)
 
         return splits
 
@@ -317,13 +330,25 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return list(range_to_files.values())
 
-    def _wrap_to_indexed_splits(self, splits: List[Split], row_ranges: List[Range]) -> List[Split]:
+    def _wrap_to_indexed_splits(
+            self,
+            splits: List[Split],
+            row_ranges: Optional[List[Range]] = None,
+            row_bitmap=None,
+            row_range_index=None) -> List[Split]:
         """
         Wrap splits with IndexedSplit for row range filtering.
         """
+        if row_range_index is None:
+            if row_bitmap is not None:
+                row_range_index = RowRangeIndex.from_bitmap(row_bitmap)
+            elif row_ranges is not None:
+                row_range_index = RowRangeIndex.create(row_ranges)
+        if row_range_index is None:
+            return splits
+
         indexed_splits = []
         for split in splits:
-            # Calculate file ranges for this split
             file_ranges = [file.row_id_range() for file in split.files]
 
             if not file_ranges:
@@ -331,11 +356,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 indexed_splits.append(split)
                 continue
 
-            # Merge file ranges
-            file_ranges = Range.merge_sorted_as_possible(file_ranges)
-
-            # Intersect with row_ranges from global index
-            expected = Range.and_(file_ranges, row_ranges)
+            expected = row_range_index.intersect(
+                RowRangeIndex.create(file_ranges)).to_range_list()
 
             if not expected:
                 # No intersection, skip this split

@@ -26,6 +26,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -47,6 +48,14 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
 
     public void addRange(Range range) {
         roaring64NavigableMap.addRange(range.from, range.to + 1);
+    }
+
+    public boolean intersects(Range range) {
+        return rangeCardinality(range.from, range.to) > 0;
+    }
+
+    public boolean containsRange(Range range) {
+        return rangeCardinality(range.from, range.to) == range.count();
     }
 
     public boolean contains(long x) {
@@ -89,6 +98,91 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return roaring64NavigableMap.iterator();
     }
 
+    public List<Range> intersectedRanges(long start, long end) {
+        List<Range> ranges = new ArrayList<>();
+        forEachIntersectedRange(start, end, (from, to) -> ranges.add(new Range(from, to)));
+        return Range.mergeSortedAsPossible(ranges);
+    }
+
+    public void forEachIntersectedRange(long start, long end, LongRangeConsumer consumer) {
+        if (start > end) {
+            return;
+        }
+
+        MergingRangeConsumer mergingConsumer = new MergingRangeConsumer(consumer);
+        collectIntersectedRanges(start, end, mergingConsumer);
+        mergingConsumer.flush();
+    }
+
+    private void collectIntersectedRanges(long start, long end, LongRangeConsumer consumer) {
+        long cardinality = rangeCardinality(start, end);
+        if (cardinality == 0) {
+            return;
+        }
+
+        if (cardinality == end - start + 1) {
+            consumer.accept(start, end);
+            return;
+        }
+
+        if (start == end) {
+            consumer.accept(start, end);
+            return;
+        }
+
+        long mid = start + (end - start) / 2;
+        collectIntersectedRanges(start, mid, consumer);
+        collectIntersectedRanges(mid + 1, end, consumer);
+    }
+
+    private static class MergingRangeConsumer implements LongRangeConsumer {
+
+        private final LongRangeConsumer wrapped;
+        private boolean hasRange;
+        private long from;
+        private long to;
+
+        private MergingRangeConsumer(LongRangeConsumer wrapped) {
+            this.wrapped = wrapped;
+        }
+
+        @Override
+        public void accept(long from, long to) {
+            if (!hasRange) {
+                this.hasRange = true;
+                this.from = from;
+                this.to = to;
+                return;
+            }
+
+            if (from <= this.to || (this.to != Long.MAX_VALUE && from == this.to + 1)) {
+                this.to = Math.max(this.to, to);
+                return;
+            }
+
+            flush();
+            this.hasRange = true;
+            this.from = from;
+            this.to = to;
+        }
+
+        private void flush() {
+            if (hasRange) {
+                wrapped.accept(from, to);
+                hasRange = false;
+            }
+        }
+    }
+
+    private synchronized long rangeCardinality(long start, long end) {
+        if (start > end || roaring64NavigableMap.isEmpty()) {
+            return 0;
+        }
+
+        long beforeStart = start <= 0 ? 0 : roaring64NavigableMap.rankLong(start - 1);
+        return roaring64NavigableMap.rankLong(end) - beforeStart;
+    }
+
     public static RoaringNavigableMap64 and(RoaringNavigableMap64 x1, RoaringNavigableMap64 x2) {
         Roaring64NavigableMap result = new Roaring64NavigableMap();
         result.or(x1.roaring64NavigableMap);
@@ -101,6 +195,15 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         result.or(x1.roaring64NavigableMap);
         result.or(x2.roaring64NavigableMap);
         return new RoaringNavigableMap64(result);
+    }
+
+    public static RoaringNavigableMap64 fromRanges(List<Range> ranges) {
+        RoaringNavigableMap64 result = new RoaringNavigableMap64();
+        for (Range range : ranges) {
+            result.addRange(range);
+        }
+        result.runOptimize();
+        return result;
     }
 
     @Override

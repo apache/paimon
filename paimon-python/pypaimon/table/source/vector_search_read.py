@@ -221,10 +221,8 @@ class AbstractVectorSearchReadImpl:
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector, index_type=None):
         raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
         if pre_filter is not None:
-            raw_row_ranges = Range.and_(
-                raw_row_ranges,
-                Range.sort_and_merge_overlap(pre_filter.to_range_list(), True),
-            )
+            raw_rows = RoaringBitmap64.and_(_bitmap_of_ranges(raw_row_ranges), pre_filter)
+            return self._read_raw_bitmap_search(raw_rows, query_vector, index_type)
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
 
@@ -241,6 +239,43 @@ class AbstractVectorSearchReadImpl:
         read_builder = read_builder.with_projection(projection)
         plan = read_builder.new_scan().with_global_index_result(
             GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        table = read_builder.new_read().to_arrow(plan.splits())
+        if table is None or table.num_rows == 0:
+            return DictBasedScoredIndexResult({})
+
+        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        vectors = table.column(self._vector_column.name).to_pylist()
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+        scores = {}
+        for row_id, stored in zip(row_ids, vectors):
+            if stored is None:
+                continue
+            stored_vector = _to_vector_list(stored)
+            if len(stored_vector) != len(query_vector):
+                raise ValueError(
+                    "Query vector dimension mismatch: expected %d, got %d"
+                    % (len(stored_vector), len(query_vector)))
+            scores[row_id] = _compute_score(query_vector, stored_vector, metric)
+        return DictBasedScoredIndexResult(scores).top_k(self._limit)
+
+    def _read_raw_bitmap_search(self, raw_rows, query_vector, index_type=None):
+        if raw_rows.is_empty():
+            return DictBasedScoredIndexResult({})
+
+        read_builder = self._table.new_read_builder()
+        if self._partition_filter is not None:
+            read_builder = read_builder.with_partition_filter(
+                self._partition_filter)
+        if self._filter is not None:
+            read_builder = read_builder.with_filter(self._filter)
+        from pypaimon.table.special_fields import SpecialFields
+        projection = [f.name for f in self._table.fields]
+        if SpecialFields.ROW_ID.name not in projection:
+            projection.append(SpecialFields.ROW_ID.name)
+        read_builder = read_builder.with_projection(projection)
+        plan = read_builder.new_scan().with_global_index_result(
+            GlobalIndexResult.create(raw_rows)).plan()
         table = read_builder.new_read().to_arrow(plan.splits())
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
@@ -294,12 +329,8 @@ class AbstractVectorSearchReadImpl:
                 result.results().is_empty()):
             return result
         candidates = result.top_k(self._indexed_search_limit(index_type))
-        return self._read_raw_search(
-            candidates.results().to_range_list(),
-            candidates.results(),
-            query_vector,
-            index_type,
-        )
+        return self._read_raw_bitmap_search(
+            candidates.results(), query_vector, index_type)
 
     def _configured_refine_factor(self, index_type):
         value = _configured_refine_factor(

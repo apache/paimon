@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.Test;
@@ -83,9 +84,12 @@ public class DataEvolutionBatchScanTest {
             }
 
             List<Range> rowRanges = Range.sortAndMergeOverlap(candidateRanges, true);
+            RowRangeIndex rowRangeIndex =
+                    round % 2 == 0
+                            ? RowRangeIndex.create(rowRanges)
+                            : RowRangeIndex.fromBitmap(RoaringNavigableMap64.fromRanges(rowRanges));
             List<Split> indexedSplits =
-                    DataEvolutionBatchScan.wrapToIndexSplits(
-                                    splits, RowRangeIndex.create(rowRanges), null)
+                    DataEvolutionBatchScan.wrapToIndexSplits(splits, rowRangeIndex, null)
                             .splits();
 
             assertThat(indexedSplits).hasSize(splits.size());
