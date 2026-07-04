@@ -990,7 +990,7 @@ class MultimodalTableTest(unittest.TestCase):
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
 
     @unittest.skipIf(ray is None, "ray is not installed")
-    def test_scan_to_ray_read_blobs(self):
+    def test_scan_to_ray_map_blobs(self):
         started_ray = False
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True, num_cpus=2)
@@ -1012,8 +1012,16 @@ class MultimodalTableTest(unittest.TestCase):
             {"clip": "c2", "idx": 0, "image": b"img-x", "audio": b"aud-x"},
         ])
 
+        def collect_batch(scalar, blobs, prefix):
+            self.assertIsInstance(scalar, pa.Table)
+            idxs = scalar.column("idx").to_pylist()
+            rows = []
+            for idx, image, audio in zip(idxs, blobs["image"], blobs["audio"]):
+                rows.append({"idx": idx, "image": prefix + image, "audio": audio})
+            return pa.Table.from_pylist(rows)
+
         try:
-            from pypaimon.ray import read_blobs
+            from pypaimon.ray import map_blobs
 
             ds = (
                 obs.scan()
@@ -1021,13 +1029,21 @@ class MultimodalTableTest(unittest.TestCase):
                 .select(["idx", "image", "audio"])
                 .to_ray(concurrency=1, override_num_blocks=1)
             )
-            ds = read_blobs(ds, ["image", "audio"], parallelism=2, batch_size=1)
-            rows = sorted(ds.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+            result = map_blobs(
+                ds,
+                ["image", "audio"],
+                collect_batch,
+                parallelism=2,
+                batch_size=1,
+                fn_kwargs={"prefix": b"got-"},
+                ray_remote_args={"num_cpus": 1},
+            )
+            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
 
             self.assertEqual(
                 [
-                    {"idx": 0, "image": b"img-0", "audio": b"aud-0"},
-                    {"idx": 1, "image": b"img-1", "audio": b"aud-1"},
+                    {"idx": 0, "image": b"got-img-0", "audio": b"aud-0"},
+                    {"idx": 1, "image": b"got-img-1", "audio": b"aud-1"},
                 ],
                 rows,
             )

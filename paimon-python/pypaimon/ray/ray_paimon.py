@@ -27,7 +27,7 @@ Usage::
 """
 
 import importlib
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
 
@@ -137,29 +137,45 @@ def read_paimon(
     return ds
 
 
-def read_blobs(
+def map_blobs(
     dataset: "ray.data.Dataset",
     columns,
+    fn: Callable,
     *,
     file_io=None,
     parallelism: int = 64,
     batch_size: Optional[int] = 1024,
+    fn_kwargs: Optional[Dict[str, Any]] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     **map_args,
 ) -> "ray.data.Dataset":
-    """Materialise serialized BlobDescriptor columns in a Ray Dataset.
+    """Read BLOB payloads on Ray workers and apply a batch function.
 
     The input Dataset is expected to contain BLOB columns read as serialized
     descriptor bytes, e.g. from ``table.scan().to_ray(...)`` on a multimodal
-    table. The returned Dataset has the same schema shape, with the requested
-    BLOB columns replaced by payload bytes. Work runs inside Ray ``map_batches``
-    tasks, so descriptor batches stay distributed instead of being collected on
-    the driver. ``batch_size`` bounds how many rows are materialised by one
-    worker task, which avoids very large Ray blocks turning into large in-memory
-    payload batches.
+    table. For each Ray batch, the requested BLOB columns are fetched as
+    row-aligned ``bytes`` lists and passed to ``fn`` together with the scalar
+    columns::
+
+        fn(scalar_batch, blobs, **fn_kwargs)
+
+    ``scalar_batch`` is a ``pyarrow.Table`` with non-BLOB columns. ``blobs`` is
+    a ``dict`` mapping each requested BLOB column to ``List[bytes | None]``.
+    The return value of ``fn`` becomes the output Ray Dataset. Large jobs should
+    return a small ``pyarrow.Table`` with processed results, such as embeddings
+    or output paths, instead of returning raw BLOB bytes. For side-effect-only
+    processing, return an empty ``pyarrow.Table`` rather than ``None``.
+
+    ``file_io`` is resolved from the Dataset created by
+    ``table.scan().to_ray(...)`` by default. ``ray_remote_args`` and
+    ``**map_args`` are forwarded to ``ray.data.Dataset.map_batches``; use them
+    for Ray execution options such as CPU resources, retries, and concurrency.
+    ``batch_format`` is always ``"pyarrow"``.
     """
     _require_ray_data()
 
+    if not callable(fn):
+        raise ValueError("fn must be callable")
     if isinstance(columns, str):
         blob_cols = [columns]
     else:
@@ -176,28 +192,33 @@ def read_blobs(
         resolved_file_io = getattr(dataset, "_paimon_blob_file_io", None)
     if resolved_file_io is None:
         raise ValueError(
-            "read_blobs requires a FileIO. Use table.scan().to_ray(...) on a "
+            "map_blobs requires a FileIO. Use table.scan().to_ray(...) on a "
             "multimodal table, or pass file_io= explicitly.")
 
+    batch_format = map_args.pop("batch_format", "pyarrow")
+    if batch_format != "pyarrow":
+        raise ValueError("map_blobs requires batch_format='pyarrow'")
+
     kwargs = dict(map_args)
-    kwargs.setdefault("batch_format", "pyarrow")
+    kwargs["batch_format"] = "pyarrow"
     if batch_size is not None:
         kwargs.setdefault("batch_size", batch_size)
     if ray_remote_args is not None:
         kwargs.update(ray_remote_args)
 
     return dataset.map_batches(
-        _read_blob_batch,
+        _map_blob_batch,
         fn_kwargs={
             "file_io": resolved_file_io,
             "blob_cols": blob_cols,
             "parallelism": parallelism,
+            "fn": fn,
+            "fn_kwargs": dict(fn_kwargs or {}),
         },
         **kwargs)
 
 
-def _read_blob_batch(batch, file_io, blob_cols, parallelism):
-    import pyarrow as pa
+def _map_blob_batch(batch, file_io, blob_cols, parallelism, fn, fn_kwargs):
     from pypaimon.multimodal.blob_read import fetch_blob_bodies
 
     missing = [name for name in blob_cols if name not in batch.schema.names]
@@ -205,17 +226,17 @@ def _read_blob_batch(batch, file_io, blob_cols, parallelism):
         raise ValueError("BLOB column(s) not found in Ray Dataset: {}".format(
             ", ".join(missing)))
 
-    bodies = fetch_blob_bodies(file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
-    arrays = []
-    fields = []
-    for field in batch.schema:
-        if field.name in bodies:
-            arrays.append(pa.array(bodies[field.name], type=pa.large_binary()))
-            fields.append(pa.field(field.name, pa.large_binary(), nullable=field.nullable))
-        else:
-            arrays.append(batch.column(field.name))
-            fields.append(field)
-    return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+    bodies = fetch_blob_bodies(
+        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+    scalar_cols = [name for name in batch.schema.names if name not in blob_cols]
+    result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
+    if result is None:
+        raise ValueError(
+            "map_blobs UDF must return a Ray-compatible batch, such as a "
+            "pyarrow.Table. For side-effect-only processing, return an empty "
+            "pyarrow.Table instead of None.")
+    return result
+
 
 def write_paimon(
     dataset: "ray.data.Dataset",

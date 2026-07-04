@@ -115,8 +115,8 @@ class ScanQuery:
         """Read this scan as a Ray Dataset.
 
         BLOB columns are read as serialized descriptors, so callers can run
-        :func:`pypaimon.ray.read_blobs` on the returned Dataset to materialise
-        payload bytes on Ray workers.
+        :func:`pypaimon.ray.map_blobs` on the returned Dataset to read payload
+        bytes and process them on Ray workers.
         """
         if self._result_factory is not None:
             raise TypeError("to_ray is only supported on scan(), not search queries.")
