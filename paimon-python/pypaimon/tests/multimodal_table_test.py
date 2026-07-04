@@ -1079,6 +1079,70 @@ class MultimodalTableTest(unittest.TestCase):
             if started_ray:
                 ray.shutdown()
 
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_blobs_guards(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs_guards",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([{"clip": "c1", "idx": 0, "image": b"img-0"}])
+
+        def return_none(scalar, blobs):
+            return None
+
+        try:
+            from pypaimon.ray import map_with_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+
+            with self.assertRaisesRegex(ValueError, "all_blob_columns"):
+                map_with_blobs(
+                    ray.data.from_arrow(pa.table({"image": [b"inline"]})),
+                    ["image"],
+                    lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                    file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(Exception, "must return"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=1,
+                ).take_all()
+
+            empty_ds = (
+                obs.scan()
+                .where("clip = 'none'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            result = obs.map_with_blobs(
+                empty_ds,
+                ["image"],
+                lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                batch_size=1,
+            )
+            self.assertEqual([], result.take_all())
+        finally:
+            if started_ray:
+                ray.shutdown()
+
     def test_scan_to_ray_nested_projection_output_names(self):
         obs = self.conn.create_table(
             "ray_nested_obs",
