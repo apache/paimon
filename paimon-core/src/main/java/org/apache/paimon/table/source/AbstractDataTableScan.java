@@ -69,6 +69,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
 
@@ -88,6 +89,11 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
+    // Last applied auth predicate; guards redundant re-application across plan()s.
+    @Nullable private Predicate appliedAuthPredicate;
+    // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
+    // DataTableBatchScan to disable limit push down; not pushed through withFilter.
+    protected boolean authHasNonPartitionFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -103,6 +109,8 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public final TableScan.Plan plan() {
         TableQueryAuthResult queryAuthResult = authQuery();
+        // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
+        applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
             plan = queryAuthResult.convertPlan(plan);
@@ -111,6 +119,36 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     protected abstract TableScan.Plan planWithoutAuth();
+
+    private void applyAuthFilter(@Nullable Predicate authPredicate) {
+        if (Objects.equals(authPredicate, appliedAuthPredicate)) {
+            return;
+        }
+        appliedAuthPredicate = authPredicate;
+
+        PartitionPredicate authPartitionFilter = null;
+        boolean hasNonPartitionPart = false;
+        if (authPredicate != null) {
+            // Remap field-id FieldRefs to positional indices by name (as doAuth does on read), so
+            // pruning stays correct across schema evolution.
+            Predicate remappedAuth =
+                    TableQueryAuthResult.remapPredicate(authPredicate, schema.logicalRowType());
+            if (remappedAuth != null) {
+                Pair<Optional<PartitionPredicate>, List<Predicate>> split =
+                        PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                remappedAuth, schema.logicalRowType(), schema.partitionKeys());
+                authPartitionFilter = split.getLeft().orElse(null);
+                hasNonPartitionPart = !split.getRight().isEmpty();
+            }
+        }
+
+        // Push only the partition part, to a dedicated slot overwritten/cleared each plan() so a
+        // changed/removed auth leaves no stale pruning. The full filter is enforced at read time.
+        snapshotReader.manifestsReader().withAuthPartitionFilter(authPartitionFilter);
+        // A non-partition auth part is enforced only at read time, so limit push down is unsafe
+        // (DataTableBatchScan reads this). Kept off SnapshotReader since it is not a pushed filter.
+        this.authHasNonPartitionFilter = hasNonPartitionPart;
+    }
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
