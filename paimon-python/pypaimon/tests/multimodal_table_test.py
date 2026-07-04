@@ -1021,7 +1021,7 @@ class MultimodalTableTest(unittest.TestCase):
                 .select(["idx", "image", "audio"])
                 .to_ray(concurrency=1, override_num_blocks=1)
             )
-            ds = read_blobs(ds, ["image", "audio"], parallelism=2)
+            ds = read_blobs(ds, ["image", "audio"], parallelism=2, batch_size=1)
             rows = sorted(ds.to_pandas().to_dict("records"), key=lambda row: row["idx"])
 
             self.assertEqual(

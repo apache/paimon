@@ -143,6 +143,7 @@ def read_blobs(
     *,
     file_io=None,
     parallelism: int = 64,
+    batch_size: Optional[int] = 1024,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     **map_args,
 ) -> "ray.data.Dataset":
@@ -153,7 +154,9 @@ def read_blobs(
     table. The returned Dataset has the same schema shape, with the requested
     BLOB columns replaced by payload bytes. Work runs inside Ray ``map_batches``
     tasks, so descriptor batches stay distributed instead of being collected on
-    the driver.
+    the driver. ``batch_size`` bounds how many rows are materialised by one
+    worker task, which avoids very large Ray blocks turning into large in-memory
+    payload batches.
     """
     _require_ray_data()
 
@@ -165,6 +168,8 @@ def read_blobs(
         raise ValueError("columns must contain at least one BLOB column")
     if parallelism < 1:
         raise ValueError("parallelism must be at least 1, got {}".format(parallelism))
+    if batch_size is not None and batch_size < 1:
+        raise ValueError("batch_size must be at least 1, got {}".format(batch_size))
 
     resolved_file_io = file_io
     if resolved_file_io is None:
@@ -176,6 +181,8 @@ def read_blobs(
 
     kwargs = dict(map_args)
     kwargs.setdefault("batch_format", "pyarrow")
+    if batch_size is not None:
+        kwargs.setdefault("batch_size", batch_size)
     if ray_remote_args is not None:
         kwargs.update(ray_remote_args)
 
