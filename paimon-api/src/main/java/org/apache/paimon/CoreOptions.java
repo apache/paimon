@@ -2556,6 +2556,17 @@ public class CoreOptions implements Serializable {
                                     + "writes. When false, the write fails when the descriptor is "
                                     + "read.");
 
+    public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_FETCH_FAILURE =
+            key("blob-write-null-on-fetch-failure")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to write NULL for a descriptor BLOB value when the "
+                                    + "referenced resource cannot be fetched during Flink writes "
+                                    + "(e.g. invalid URI or HTTP errors other than 404). "
+                                    + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
+                                    + "When false, the write fails when the descriptor is read.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -4131,6 +4142,10 @@ public class CoreOptions implements Serializable {
 
     public boolean blobWriteNullOnMissingFile() {
         return options.get(BLOB_WRITE_NULL_ON_MISSING_FILE);
+    }
+
+    public boolean blobWriteNullOnFetchFailure() {
+        return options.get(BLOB_WRITE_NULL_ON_FETCH_FAILURE);
     }
 
     public boolean postponeBatchWriteFixedBucket() {
