@@ -177,7 +177,7 @@ def read_blobs(
     kwargs = dict(map_args)
     kwargs.setdefault("batch_format", "pyarrow")
     if ray_remote_args is not None:
-        kwargs["ray_remote_args"] = ray_remote_args
+        kwargs.update(ray_remote_args)
 
     return dataset.map_batches(
         _read_blob_batch,
