@@ -499,3 +499,46 @@ For an end-to-end feature update workflow on Blob tables, see
 - Blob columns can be updated and inserted by `merge_into`. With `update="*"`
   or `insert="*"`, the source must include the corresponding blob columns.
   If an insert mapping omits a blob column, that column is written as `NULL`.
+
+## Update By Row Id
+
+`update_by_row_id` updates columns of a **data-evolution** table straight from a
+source that already carries `_ROW_ID` and the new values. Each row is routed to the
+data file that owns its row id and only those files are rewritten — the target is
+**never fully read** and there is **no join against it** (unlike
+`merge_into(on=["_ROW_ID"])`, which reads and shuffle-joins the whole target). It
+pairs with `bucket_join`, which produces the row ids without a shuffle. Requires
+`ray >= 2.50` and a target with `data-evolution.enabled` and `row-tracking.enabled`.
+
+```python
+from pypaimon.ray import update_by_row_id
+
+metrics = update_by_row_id(
+    target="database_name.table_name",
+    source=ray_dataset,          # ray.data.Dataset / pa.Table / pandas, carrying _ROW_ID
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    update_cols=["feature"],     # non-blob columns to overwrite
+)
+print(metrics)   # {"num_updated": 50}
+```
+
+**Parameters:**
+- `source`: a `ray.data.Dataset`, `pyarrow.Table`, or `pandas.DataFrame` carrying the
+  target `_ROW_ID` and every column in `update_cols`; extra columns are ignored, and
+  values are cast to the target column types. A table-name source is not accepted: a
+  table's system `_ROW_ID` is its own and cannot address the target's rows.
+- `update_cols`: the non-blob columns to overwrite. Must be non-empty.
+- `num_partitions`: parallelism for grouping the update rows by target file;
+  defaults to `max(1, cluster_cpus * 2)`.
+- `ray_remote_args`: Ray remote options applied to the update tasks.
+
+**Returns:** `{"num_updated": <rows>}`.
+
+**Notes:**
+- The row ids must exist in the target's current snapshot; a stale or foreign
+  `_ROW_ID` raises rather than silently writing.
+- Multiple source rows mapping to the same `_ROW_ID` is rejected — deduplicate first.
+- Blob columns cannot be updated through this path.
+- Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
+- Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
+  in its data file, so it can't be told apart from a live row without reading the target.

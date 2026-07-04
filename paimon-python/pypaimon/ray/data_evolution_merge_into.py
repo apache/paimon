@@ -468,7 +468,7 @@ def _require_ray_join() -> None:
 
     if parse(ray.__version__) < parse("2.50.0"):
         raise RuntimeError(
-            f"merge_into requires ray>=2.50; "
+            f"this Ray operation requires ray>=2.50; "
             f"installed ray is {ray.__version__}."
         )
 
