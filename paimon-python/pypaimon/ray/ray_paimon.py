@@ -238,10 +238,18 @@ def _map_blob_batch(
         raise ValueError("BLOB column(s) not found in Ray Dataset: {}".format(
             ", ".join(missing)))
 
-    bodies = fetch_blob_bodies(
-        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
     all_blob = set(all_blob_cols)
     scalar_cols = [name for name in batch.schema.names if name not in all_blob]
+    unknown = _unknown_blob_descriptor_columns(batch, scalar_cols)
+    if unknown:
+        raise ValueError(
+            "Column {!r} holds BLOB descriptors this table does not own "
+            "(likely from a joined BLOB table). Fetch it with its own "
+            "table.map_with_blobs() in a separate pass, or drop it before "
+            "mapping.".format(unknown[0]))
+
+    bodies = fetch_blob_bodies(
+        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
     result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
     if result is None:
         raise ValueError(
@@ -249,6 +257,26 @@ def _map_blob_batch(
             "pyarrow.Table. For side-effect-only processing, return an empty "
             "pyarrow.Table instead of None.")
     return result
+
+
+def _unknown_blob_descriptor_columns(batch, scalar_cols):
+    return [
+        name for name in scalar_cols
+        if _looks_like_blob_descriptor(batch.column(name))]
+
+
+def _looks_like_blob_descriptor(column):
+    import pyarrow as pa
+    from pypaimon.table.row.blob import BlobDescriptor
+
+    if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
+        return False
+    chunks = getattr(column, "chunks", None) or [column]
+    for chunk in chunks:
+        for value in chunk:
+            if value.is_valid:
+                return BlobDescriptor.is_blob_descriptor(value.as_py())
+    return False
 
 
 def write_paimon(

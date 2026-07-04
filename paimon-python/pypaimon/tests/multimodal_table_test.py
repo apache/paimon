@@ -1039,6 +1039,24 @@ class MultimodalTableTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "FileIO"):
                 map_with_blobs(ds, ["image"], collect_batch)
 
+            from pypaimon.table.row.blob import BlobDescriptor
+
+            descriptor = BlobDescriptor("oss://bucket/blob", 0, 1).serialize()
+            foreign_ds = ray.data.from_arrow(pa.table({
+                "idx": [0],
+                "image": [descriptor],
+                "foreign_blob": [descriptor],
+            }))
+            with self.assertRaisesRegex(Exception, "does not own"):
+                map_with_blobs(
+                    foreign_ds,
+                    ["image"],
+                    collect_batch,
+                    file_io=obs.raw_table.file_io,
+                    all_blob_columns=["image"],
+                    batch_size=1,
+                ).take_all()
+
             result = obs.map_with_blobs(
                 ds,
                 ["image"],
