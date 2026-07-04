@@ -135,6 +135,7 @@ class ScanQuery:
                 fn_kwargs={"columns": visible_columns},
                 batch_format="pyarrow")
         setattr(ds, "_paimon_blob_file_io", file_io)
+        setattr(ds, "_paimon_blob_columns", self._all_blob_columns())
         return ds
 
     def read_blobs(
@@ -203,11 +204,15 @@ class ScanQuery:
         if projection is None:
             return read_builder, read_table.file_io, None
         internal_column_names = [field.name for field in read_builder.read_type()]
-        internal_columns = set(internal_column_names)
-        visible_columns = [name for name in projection if name in internal_columns]
+        visible_columns = self._projected_output_columns(read_table, projection)
         if visible_columns == internal_column_names:
             visible_columns = None
         return read_builder, read_table.file_io, visible_columns
+
+    @staticmethod
+    def _projected_output_columns(table, projection):
+        builder = table.new_read_builder().with_projection(projection)
+        return [field.name for field in builder.read_type()]
 
     def _blob_descriptor_read_builder(self, blob_cols: List[str]):
         """Blob-as-descriptor read builder with this query's filter/projection/limit;

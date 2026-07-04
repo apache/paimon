@@ -1014,10 +1014,11 @@ class MultimodalTableTest(unittest.TestCase):
 
         def collect_batch(scalar, blobs, prefix):
             self.assertIsInstance(scalar, pa.Table)
+            self.assertEqual(["idx"], scalar.column_names)
             idxs = scalar.column("idx").to_pylist()
             rows = []
-            for idx, image, audio in zip(idxs, blobs["image"], blobs["audio"]):
-                rows.append({"idx": idx, "image": prefix + image, "audio": audio})
+            for idx, image in zip(idxs, blobs["image"]):
+                rows.append({"idx": idx, "image": prefix + image})
             return pa.Table.from_pylist(rows)
 
         try:
@@ -1031,7 +1032,7 @@ class MultimodalTableTest(unittest.TestCase):
             )
             result = map_blobs(
                 ds,
-                ["image", "audio"],
+                ["image"],
                 collect_batch,
                 parallelism=2,
                 batch_size=1,
@@ -1042,14 +1043,35 @@ class MultimodalTableTest(unittest.TestCase):
 
             self.assertEqual(
                 [
-                    {"idx": 0, "image": b"got-img-0", "audio": b"aud-0"},
-                    {"idx": 1, "image": b"got-img-1", "audio": b"aud-1"},
+                    {"idx": 0, "image": b"got-img-0"},
+                    {"idx": 1, "image": b"got-img-1"},
                 ],
                 rows,
             )
         finally:
             if started_ray:
                 ray.shutdown()
+
+    def test_scan_to_ray_nested_projection_output_names(self):
+        obs = self.conn.create_table(
+            "ray_nested_obs",
+            schema=_schema({
+                "id": pa.int32(),
+                "tag": pa.string(),
+                "payload": pa.struct([("a", pa.int64()), ("b", pa.string())]),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        _, _, visible_columns = (
+            obs.scan()
+            .where("tag = 'keep'")
+            .select(["id", "payload.a"])
+            ._blob_descriptor_query_read_builder()
+        )
+
+        self.assertEqual(["id", "payload_a"], visible_columns)
 
     def test_fetch_bodies_decodes_descriptor_inline_and_null(self):
         # Cells may be descriptor bytes (incl. -1 read-to-EOF), inline bytes, or null.

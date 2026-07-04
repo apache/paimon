@@ -149,28 +149,13 @@ def map_blobs(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     **map_args,
 ) -> "ray.data.Dataset":
-    """Read BLOB payloads on Ray workers and apply a batch function.
+    """Fetch BLOB payloads in Ray batches and call ``fn``.
 
-    The input Dataset is expected to contain BLOB columns read as serialized
-    descriptor bytes, e.g. from ``table.scan().to_ray(...)`` on a multimodal
-    table. For each Ray batch, the requested BLOB columns are fetched as
-    row-aligned ``bytes`` lists and passed to ``fn`` together with the scalar
-    columns::
-
-        fn(scalar_batch, blobs, **fn_kwargs)
-
-    ``scalar_batch`` is a ``pyarrow.Table`` with non-BLOB columns. ``blobs`` is
-    a ``dict`` mapping each requested BLOB column to ``List[bytes | None]``.
-    The return value of ``fn`` becomes the output Ray Dataset. Large jobs should
-    return a small ``pyarrow.Table`` with processed results, such as embeddings
-    or output paths, instead of returning raw BLOB bytes. For side-effect-only
-    processing, return an empty ``pyarrow.Table`` rather than ``None``.
-
-    ``file_io`` is resolved from the Dataset created by
-    ``table.scan().to_ray(...)`` by default. ``ray_remote_args`` and
-    ``**map_args`` are forwarded to ``ray.data.Dataset.map_batches``; use them
-    for Ray execution options such as CPU resources, retries, and concurrency.
-    ``batch_format`` is always ``"pyarrow"``.
+    ``fn(scalar_batch, blobs, **fn_kwargs)`` receives a ``pyarrow.Table`` of
+    non-BLOB columns and a row-aligned ``dict`` of BLOB bytes. Return a small
+    Ray-compatible batch; for side-effect-only work, return an empty
+    ``pyarrow.Table`` instead of ``None``. Tune ``batch_size`` for BLOB size and
+    worker memory.
     """
     _require_ray_data()
 
@@ -192,8 +177,8 @@ def map_blobs(
         resolved_file_io = getattr(dataset, "_paimon_blob_file_io", None)
     if resolved_file_io is None:
         raise ValueError(
-            "map_blobs requires a FileIO. Use table.scan().to_ray(...) on a "
-            "multimodal table, or pass file_io= explicitly.")
+            "map_blobs requires a FileIO. Use table.scan().to_ray() or "
+            "pass file_io= explicitly.")
 
     batch_format = map_args.pop("batch_format", "pyarrow")
     if batch_format != "pyarrow":
@@ -204,13 +189,18 @@ def map_blobs(
     if batch_size is not None:
         kwargs.setdefault("batch_size", batch_size)
     if ray_remote_args is not None:
-        kwargs.update(ray_remote_args)
+        _set_map_batches_remote_args(dataset, kwargs, ray_remote_args)
+
+    all_blob_cols = getattr(dataset, "_paimon_blob_columns", None)
+    if all_blob_cols is None:
+        all_blob_cols = blob_cols
 
     return dataset.map_batches(
         _map_blob_batch,
         fn_kwargs={
             "file_io": resolved_file_io,
             "blob_cols": blob_cols,
+            "all_blob_cols": list(all_blob_cols),
             "parallelism": parallelism,
             "fn": fn,
             "fn_kwargs": dict(fn_kwargs or {}),
@@ -218,7 +208,18 @@ def map_blobs(
         **kwargs)
 
 
-def _map_blob_batch(batch, file_io, blob_cols, parallelism, fn, fn_kwargs):
+def _set_map_batches_remote_args(dataset, kwargs, ray_remote_args):
+    import inspect
+
+    param = inspect.signature(dataset.map_batches).parameters.get("ray_remote_args")
+    if param is not None and param.kind != inspect.Parameter.VAR_KEYWORD:
+        kwargs["ray_remote_args"] = ray_remote_args
+    else:
+        kwargs.update(ray_remote_args)
+
+
+def _map_blob_batch(
+        batch, file_io, blob_cols, all_blob_cols, parallelism, fn, fn_kwargs):
     from pypaimon.multimodal.blob_read import fetch_blob_bodies
 
     missing = [name for name in blob_cols if name not in batch.schema.names]
@@ -228,7 +229,8 @@ def _map_blob_batch(batch, file_io, blob_cols, parallelism, fn, fn_kwargs):
 
     bodies = fetch_blob_bodies(
         file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
-    scalar_cols = [name for name in batch.schema.names if name not in blob_cols]
+    all_blob = set(all_blob_cols)
+    scalar_cols = [name for name in batch.schema.names if name not in all_blob]
     result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
     if result is None:
         raise ValueError(
