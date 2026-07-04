@@ -33,7 +33,7 @@ public class OSSFileIOTest {
         OSSClient ossClient =
                 (OSSClient) new OSSClientBuilder().build("http://oss.example.com", "ak", "sk");
         try {
-            OSSFileIO.swapSseKmsOperations(ossClient, "my-cmk-key-id");
+            OSSFileIO.swapSseKmsOperations(ossClient, "KMS", "my-cmk-key-id");
 
             assertThat(ossClient.getObjectOperation())
                     .isInstanceOf(OSSFileIO.SseKmsObjectOperation.class);

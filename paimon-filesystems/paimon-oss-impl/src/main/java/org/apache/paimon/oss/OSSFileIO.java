@@ -80,7 +80,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final String OSS_SECOND_LEVEL_DOMAIN_ENABLED = "fs.oss.sld.enabled";
     private static final String OSS_SSE_KMS_KEY_ID = "fs.oss.server-side-encryption-key-id";
 
-    /** OSS-native value for the {@code x-oss-server-side-encryption} header when using a CMK. */
+    /** SSE method key (hadoop-aliyun's native key); default {@link #SSE_KMS_ALGORITHM}. */
+    private static final String OSS_SSE_ALGORITHM = "fs.oss.server-side-encryption-algorithm";
+
+    /** Default SSE method for a CMK. */
     private static final String SSE_KMS_ALGORITHM = "KMS";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
@@ -200,7 +203,13 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                                             + "': the CMK key id must not be blank or contain"
                                             + " whitespace/newlines.");
                         }
-                        enableSseKms(fs, trimmed);
+                        // Configurable method, defaulting to KMS (what a CMK requires).
+                        String sseAlgorithm =
+                                hadoopOptions.getString(OSS_SSE_ALGORITHM, SSE_KMS_ALGORITHM);
+                        if (StringUtils.isNullOrWhitespaceOnly(sseAlgorithm)) {
+                            sseAlgorithm = SSE_KMS_ALGORITHM;
+                        }
+                        enableSseKms(fs, sseAlgorithm.trim(), trimmed);
                     }
 
                     return fs;
@@ -225,8 +234,7 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         metadata.setContentLength(bytes.length);
         metadata.setHeader("x-oss-forbid-overwrite", "true");
 
-        String sseAlgorithm =
-                hadoopOptions.getString("fs.oss.server-side-encryption-algorithm", "");
+        String sseAlgorithm = hadoopOptions.getString(OSS_SSE_ALGORITHM, "");
         if (StringUtils.isNotEmpty(sseAlgorithm)) {
             metadata.setServerSideEncryption(sseAlgorithm);
         }
@@ -280,9 +288,9 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
      * InitiateMultipartUpload. UploadPart/HeadObject/GetObject are left untouched (stamping SSE
      * headers on those makes OSS reject the request with 400).
      */
-    private void enableSseKms(AliyunOSSFileSystem fs, String kmsKeyId) {
+    private void enableSseKms(AliyunOSSFileSystem fs, String algorithm, String kmsKeyId) {
         try {
-            swapSseKmsOperations(getOssClient(fs), kmsKeyId);
+            swapSseKmsOperations(getOssClient(fs), algorithm, kmsKeyId);
         } catch (Exception e) {
             LOG.error("Failed to enable SSE-KMS BYOK.", e);
             throw new RuntimeException("Failed to enable SSE-KMS BYOK.", e);
@@ -294,7 +302,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
      * private so a unit test can pin the reflected field names and getters against the bundled
      * aliyun-oss-sdk version.
      */
-    static void swapSseKmsOperations(OSSClient ossClient, String kmsKeyId) throws Exception {
+    static void swapSseKmsOperations(OSSClient ossClient, String algorithm, String kmsKeyId)
+            throws Exception {
         ServiceClient serviceClient =
                 ReflectionUtils.getPrivateFieldValue(ossClient, "serviceClient");
         CredentialsProvider credsProvider =
@@ -302,10 +311,10 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         // Replacement operations must inherit the endpoint or requests NPE.
         URI endpoint = ossClient.getEndpoint();
         SseKmsObjectOperation objectOperation =
-                new SseKmsObjectOperation(serviceClient, credsProvider, kmsKeyId);
+                new SseKmsObjectOperation(serviceClient, credsProvider, algorithm, kmsKeyId);
         objectOperation.setEndpoint(endpoint);
         SseKmsMultipartOperation multipartOperation =
-                new SseKmsMultipartOperation(serviceClient, credsProvider, kmsKeyId);
+                new SseKmsMultipartOperation(serviceClient, credsProvider, algorithm, kmsKeyId);
         multipartOperation.setEndpoint(endpoint);
         ReflectionUtils.setPrivateFieldValue(ossClient, "objectOperation", objectOperation);
         ReflectionUtils.setPrivateFieldValue(ossClient, "multipartOperation", multipartOperation);
@@ -320,36 +329,43 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         }
     }
 
-    /** Stamps the customer CMK on the given metadata, allocating one if absent. */
-    private static ObjectMetadata applySseKms(ObjectMetadata metadata, String kmsKeyId) {
+    /** Stamps the SSE method + customer CMK on the metadata, allocating if absent. */
+    private static ObjectMetadata applySseKms(
+            ObjectMetadata metadata, String algorithm, String kmsKeyId) {
         if (metadata == null) {
             metadata = new ObjectMetadata();
         }
         String existing = metadata.getServerSideEncryption();
-        if (existing != null && !SSE_KMS_ALGORITHM.equals(existing)) {
+        if (existing != null && !algorithm.equals(existing)) {
             LOG.warn(
-                    "Customer CMK SSE-KMS is overriding the previously-set server-side "
-                            + "encryption algorithm '{}' with 'KMS'.",
-                    existing);
+                    "Customer CMK SSE is overriding the previously-set server-side encryption "
+                            + "algorithm '{}' with '{}'.",
+                    existing,
+                    algorithm);
         }
-        metadata.setServerSideEncryption(SSE_KMS_ALGORITHM);
+        metadata.setServerSideEncryption(algorithm);
         metadata.setServerSideEncryptionKeyId(kmsKeyId);
         return metadata;
     }
 
     /** Stamps the customer CMK on every simple PutObject. */
     static class SseKmsObjectOperation extends OSSObjectOperation {
+        private final String algorithm;
         private final String kmsKeyId;
 
         SseKmsObjectOperation(
-                ServiceClient serviceClient, CredentialsProvider credsProvider, String kmsKeyId) {
+                ServiceClient serviceClient,
+                CredentialsProvider credsProvider,
+                String algorithm,
+                String kmsKeyId) {
             super(serviceClient, credsProvider);
+            this.algorithm = algorithm;
             this.kmsKeyId = kmsKeyId;
         }
 
         @Override
         public PutObjectResult putObject(PutObjectRequest request) {
-            request.setMetadata(applySseKms(request.getMetadata(), kmsKeyId));
+            request.setMetadata(applySseKms(request.getMetadata(), algorithm, kmsKeyId));
             return super.putObject(request);
         }
 
@@ -359,7 +375,7 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
             // headers straight from these request fields, so setting them here stamps the CMK
             // without touching newObjectMetadata. Setting newObjectMetadata would force
             // metadata-directive REPLACE and drop the source object's Content-Type/user metadata.
-            request.setServerSideEncryption(SSE_KMS_ALGORITHM);
+            request.setServerSideEncryption(algorithm);
             request.setServerSideEncryptionKeyId(kmsKeyId);
             return super.copyObject(request);
         }
@@ -367,18 +383,24 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     /** Stamps the customer CMK on the multipart-upload init; parts inherit it. */
     static class SseKmsMultipartOperation extends OSSMultipartOperation {
+        private final String algorithm;
         private final String kmsKeyId;
 
         SseKmsMultipartOperation(
-                ServiceClient serviceClient, CredentialsProvider credsProvider, String kmsKeyId) {
+                ServiceClient serviceClient,
+                CredentialsProvider credsProvider,
+                String algorithm,
+                String kmsKeyId) {
             super(serviceClient, credsProvider);
+            this.algorithm = algorithm;
             this.kmsKeyId = kmsKeyId;
         }
 
         @Override
         public InitiateMultipartUploadResult initiateMultipartUpload(
                 InitiateMultipartUploadRequest request) {
-            request.setObjectMetadata(applySseKms(request.getObjectMetadata(), kmsKeyId));
+            request.setObjectMetadata(
+                    applySseKms(request.getObjectMetadata(), algorithm, kmsKeyId));
             return super.initiateMultipartUpload(request);
         }
     }
