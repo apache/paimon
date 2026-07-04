@@ -73,7 +73,8 @@ public class PartitionIndex {
     private volatile CompletableFuture<Void> refreshFuture;
 
     // null = never refreshed; the first refresh is not throttled by min-refresh-interval.
-    private Instant lastRefreshTime;
+    // volatile: written by the async refresh thread, read by the assign thread.
+    private volatile Instant lastRefreshTime;
 
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
@@ -228,9 +229,6 @@ public class PartitionIndex {
 
     // Merges disk row count into nonFullBucketInformation, keeping uncommitted increments.
     private void reconcileBucketWithDisk(int bucket, long diskNow) {
-        if (!totalBucketSet.contains(bucket)) {
-            return;
-        }
         nonFullBucketInformation.compute(
                 bucket,
                 (b, inMemory) ->
