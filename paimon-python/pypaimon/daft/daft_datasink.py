@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
 
     from pypaimon.table.file_store_table import FileStoreTable
 
+
+logger = logging.getLogger(__name__)
 
 _PaimonIdentifier = tuple[str, str, str | None]
 
@@ -243,8 +246,13 @@ class PaimonDataSink(DataSink[list[Any]]):
                     total_rows += batch.num_rows
                     total_bytes += batch.nbytes
             commit_messages = table_write.prepare_commit()
-        finally:
             table_write.close()
+        except Exception:
+            try:
+                table_write.abort()
+            except Exception:
+                logger.warning("Failed to abort Daft Paimon table write.", exc_info=True)
+            raise
 
         yield WriteResult(
             result=list(commit_messages),

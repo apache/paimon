@@ -30,6 +30,11 @@ from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.utils.range import Range
 
+try:
+    import ray
+except ImportError:
+    ray = None
+
 
 _PARQUET_OPTIONS = {
     "row-tracking.enabled": "true",
@@ -945,6 +950,8 @@ class MultimodalTableTest(unittest.TestCase):
             t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
         with self.assertRaisesRegex(TypeError, "only supported on scan"):
             t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").to_ray()
 
     def test_scan_stream_blobs(self):
         obs = self.conn.create_table(
@@ -983,6 +990,179 @@ class MultimodalTableTest(unittest.TestCase):
         # empty result streams nothing
         self.assertEqual(
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_blobs(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+                "audio": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": b"img-0", "audio": b"aud-0"},
+            {"clip": "c1", "idx": 1, "image": b"img-1", "audio": b"aud-1"},
+            {"clip": "c2", "idx": 0, "image": b"img-x", "audio": b"aud-x"},
+        ])
+
+        def collect_batch(scalar, blobs, prefix):
+            assert isinstance(scalar, pa.Table)
+            assert ["idx"] == scalar.column_names
+            idxs = scalar.column("idx").to_pylist()
+            rows = []
+            for idx, image in zip(idxs, blobs["image"]):
+                rows.append({"idx": idx, "image": prefix + image})
+            return pa.Table.from_pylist(rows)
+
+        try:
+            from pypaimon.ray import map_with_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image", "audio"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            ds = ds.filter(lambda row: row["idx"] >= 0)
+
+            with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+                obs.map_with_blobs(ds, ["idx"], collect_batch)
+            with self.assertRaisesRegex(ValueError, "FileIO"):
+                map_with_blobs(ds, ["image"], collect_batch)
+
+            from pypaimon.table.row.blob import BlobDescriptor
+
+            descriptor = BlobDescriptor("oss://bucket/blob", 0, 1).serialize()
+            foreign_ds = ray.data.from_arrow(pa.table({
+                "idx": [0],
+                "image": [descriptor],
+                "foreign_blob": [descriptor],
+            }))
+            with self.assertRaisesRegex(Exception, "does not own"):
+                map_with_blobs(
+                    foreign_ds,
+                    ["image"],
+                    collect_batch,
+                    file_io=obs.raw_table.file_io,
+                    all_blob_columns=["image"],
+                    batch_size=1,
+                ).take_all()
+
+            result = obs.map_with_blobs(
+                ds,
+                ["image"],
+                collect_batch,
+                parallelism=2,
+                batch_size=1,
+                fn_kwargs={"prefix": b"got-"},
+                ray_remote_args={"num_cpus": 1},
+            )
+            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+
+            self.assertEqual(
+                [
+                    {"idx": 0, "image": b"got-img-0"},
+                    {"idx": 1, "image": b"got-img-1"},
+                ],
+                rows,
+            )
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_blobs_guards(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs_guards",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([{"clip": "c1", "idx": 0, "image": b"img-0"}])
+
+        def return_none(scalar, blobs):
+            return None
+
+        try:
+            from pypaimon.ray import map_with_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+
+            with self.assertRaisesRegex(ValueError, "all_blob_columns"):
+                map_with_blobs(
+                    ray.data.from_arrow(pa.table({"image": [b"inline"]})),
+                    ["image"],
+                    lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                    file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(Exception, "must return"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=1,
+                ).take_all()
+
+            empty_ds = (
+                obs.scan()
+                .where("clip = 'none'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            result = obs.map_with_blobs(
+                empty_ds,
+                ["image"],
+                lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                batch_size=1,
+            )
+            self.assertEqual([], result.take_all())
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    def test_scan_to_ray_nested_projection_output_names(self):
+        obs = self.conn.create_table(
+            "ray_nested_obs",
+            schema=_schema({
+                "id": pa.int32(),
+                "tag": pa.string(),
+                "payload": pa.struct([("a", pa.int64()), ("b", pa.string())]),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        _, _, visible_columns = (
+            obs.scan()
+            .where("tag = 'keep'")
+            .select(["id", "payload.a"])
+            ._blob_descriptor_query_read_builder()
+        )
+
+        self.assertEqual(["id", "payload_a"], visible_columns)
 
     def test_fetch_bodies_decodes_descriptor_inline_and_null(self):
         # Cells may be descriptor bytes (incl. -1 read-to-EOF), inline bytes, or null.
