@@ -383,6 +383,54 @@ Notes:
   few large reads); scattered point reads coalesce less.
 - Blob reads are available only on `scan()`, not on the `search()` queries.
 
+### Distributed BLOB processing with Ray
+
+For larger jobs, read descriptors with `to_ray()`, then fetch and process BLOB
+bytes on Ray workers with `map_with_blobs`.
+
+```python
+import ray
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+ray.init(num_cpus=8)
+
+conn = pm.connect(database="default", options={"warehouse": "file:///tmp/warehouse"})
+docs = conn.get_table("docs")
+
+ids = ["a", "b", "c"]
+scalar_cols = ["id", "category"]
+blob_cols = ["image"]
+in_clause = ", ".join(f"'{i}'" for i in ids)
+
+
+def process_batch(scalar_batch, blobs):
+    images = blobs["image"]
+    # Decode, infer, write samples, or train here.
+    return pa.table({"rows": [scalar_batch.num_rows]})
+
+
+ds = (
+    docs.scan()
+    .where(f"id IN ({in_clause})")
+    .select(scalar_cols + blob_cols)
+    .to_ray()
+)
+
+# Optional Ray transforms are fine if BLOB descriptor columns remain.
+# ds = ds.filter(lambda row: row["category"] == "lake")
+
+result_ds = docs.map_with_blobs(ds, blob_cols, process_batch)
+```
+
+Notes:
+
+- `process_batch` must return a small Ray-compatible batch; return an empty
+  `pyarrow.Table` for side-effect-only jobs.
+- Avoid returning raw BLOB bytes, which would materialize payloads in Ray's
+  object store.
+- Tune `to_ray(...)` and `map_with_blobs(...)` parameters only when needed.
+
 ## Row IDs
 
 Multimodal tables enable `row-tracking.enabled` by default, so each row has a
