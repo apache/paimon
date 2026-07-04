@@ -137,6 +137,79 @@ def read_paimon(
     return ds
 
 
+def read_blobs(
+    dataset: "ray.data.Dataset",
+    columns,
+    *,
+    file_io=None,
+    parallelism: int = 64,
+    ray_remote_args: Optional[Dict[str, Any]] = None,
+    **map_args,
+) -> "ray.data.Dataset":
+    """Materialise serialized BlobDescriptor columns in a Ray Dataset.
+
+    The input Dataset is expected to contain BLOB columns read as serialized
+    descriptor bytes, e.g. from ``table.scan().to_ray(...)`` on a multimodal
+    table. The returned Dataset has the same schema shape, with the requested
+    BLOB columns replaced by payload bytes. Work runs inside Ray ``map_batches``
+    tasks, so descriptor batches stay distributed instead of being collected on
+    the driver.
+    """
+    _require_ray_data()
+
+    if isinstance(columns, str):
+        blob_cols = [columns]
+    else:
+        blob_cols = list(dict.fromkeys(columns))
+    if not blob_cols:
+        raise ValueError("columns must contain at least one BLOB column")
+    if parallelism < 1:
+        raise ValueError("parallelism must be at least 1, got {}".format(parallelism))
+
+    resolved_file_io = file_io
+    if resolved_file_io is None:
+        resolved_file_io = getattr(dataset, "_paimon_blob_file_io", None)
+    if resolved_file_io is None:
+        raise ValueError(
+            "read_blobs requires a FileIO. Use table.scan().to_ray(...) on a "
+            "multimodal table, or pass file_io= explicitly.")
+
+    kwargs = dict(map_args)
+    kwargs.setdefault("batch_format", "pyarrow")
+    if ray_remote_args is not None:
+        kwargs["ray_remote_args"] = ray_remote_args
+
+    return dataset.map_batches(
+        _read_blob_batch,
+        fn_kwargs={
+            "file_io": resolved_file_io,
+            "blob_cols": blob_cols,
+            "parallelism": parallelism,
+        },
+        **kwargs)
+
+
+def _read_blob_batch(batch, file_io, blob_cols, parallelism):
+    import pyarrow as pa
+    from pypaimon.multimodal.blob_read import fetch_blob_bodies
+
+    missing = [name for name in blob_cols if name not in batch.schema.names]
+    if missing:
+        raise ValueError("BLOB column(s) not found in Ray Dataset: {}".format(
+            ", ".join(missing)))
+
+    bodies = fetch_blob_bodies(file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+    arrays = []
+    fields = []
+    for field in batch.schema:
+        if field.name in bodies:
+            arrays.append(pa.array(bodies[field.name], type=pa.large_binary()))
+            fields.append(pa.field(field.name, pa.large_binary(), nullable=field.nullable))
+        else:
+            arrays.append(batch.column(field.name))
+            fields.append(field)
+    return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
+
 def write_paimon(
     dataset: "ray.data.Dataset",
     table_identifier: str,

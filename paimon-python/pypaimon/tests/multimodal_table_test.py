@@ -30,6 +30,11 @@ from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.utils.range import Range
 
+try:
+    import ray
+except ImportError:
+    ray = None
+
 
 _PARQUET_OPTIONS = {
     "row-tracking.enabled": "true",
@@ -983,6 +988,52 @@ class MultimodalTableTest(unittest.TestCase):
         # empty result streams nothing
         self.assertEqual(
             [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_read_blobs(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+                "audio": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": b"img-0", "audio": b"aud-0"},
+            {"clip": "c1", "idx": 1, "image": b"img-1", "audio": b"aud-1"},
+            {"clip": "c2", "idx": 0, "image": b"img-x", "audio": b"aud-x"},
+        ])
+
+        try:
+            from pypaimon.ray import read_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image", "audio"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            ds = read_blobs(ds, ["image", "audio"], parallelism=2)
+            rows = sorted(ds.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+
+            self.assertEqual(
+                [
+                    {"idx": 0, "image": b"img-0", "audio": b"aud-0"},
+                    {"idx": 1, "image": b"img-1", "audio": b"aud-1"},
+                ],
+                rows,
+            )
+        finally:
+            if started_ray:
+                ray.shutdown()
 
     def test_fetch_bodies_decodes_descriptor_inline_and_null(self):
         # Cells may be descriptor bytes (incl. -1 read-to-EOF), inline bytes, or null.

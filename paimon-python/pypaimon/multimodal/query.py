@@ -15,12 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
+from pypaimon.multimodal.blob_read import fetch_blob_bodies
 from pypaimon.table.special_fields import SpecialFields
+
+
+def _select_arrow_columns(batch, columns):
+    return batch.select(columns)
 
 
 class ScanQuery:
@@ -100,6 +105,38 @@ class ScanQuery:
     def to_list(self) -> List[dict]:
         return self.to_arrow().to_pylist()
 
+    def to_ray(
+            self,
+            *,
+            ray_remote_args: Optional[Dict[str, Any]] = None,
+            concurrency: Optional[int] = None,
+            override_num_blocks: Optional[int] = None,
+            **read_args):
+        """Read this scan as a Ray Dataset.
+
+        BLOB columns are read as serialized descriptors, so callers can run
+        :func:`pypaimon.ray.read_blobs` on the returned Dataset to materialise
+        payload bytes on Ray workers.
+        """
+        if self._result_factory is not None:
+            raise TypeError("to_ray is only supported on scan(), not search queries.")
+
+        read_builder, file_io, visible_columns = self._blob_descriptor_query_read_builder()
+        plan = read_builder.new_scan().plan()
+        ds = read_builder.new_read().to_ray(
+            plan.splits(),
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args)
+        if visible_columns is not None:
+            ds = ds.map_batches(
+                _select_arrow_columns,
+                fn_kwargs={"columns": visible_columns},
+                batch_format="pyarrow")
+        setattr(ds, "_paimon_blob_file_io", file_io)
+        return ds
+
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
     ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
@@ -146,6 +183,32 @@ class ScanQuery:
             if hasattr(reader, "close"):
                 reader.close()
 
+    def _blob_descriptor_query_read_builder(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = read_table.new_read_builder()
+        if self._predicate is not None:
+            read_builder = read_builder.with_filter(self._predicate)
+        projection = self._effective_projection()
+        if projection is not None:
+            internal_projection = list(projection)
+            for name in self._predicate_fields():
+                if name not in internal_projection:
+                    internal_projection.append(name)
+            read_builder = read_builder.with_projection(internal_projection)
+        if self._limit is not None:
+            read_builder = read_builder.with_limit(self._limit)
+        if projection is None:
+            return read_builder, read_table.file_io, None
+        internal_column_names = [field.name for field in read_builder.read_type()]
+        internal_columns = set(internal_column_names)
+        visible_columns = [name for name in projection if name in internal_columns]
+        if visible_columns == internal_column_names:
+            visible_columns = None
+        return read_builder, read_table.file_io, visible_columns
+
     def _blob_descriptor_read_builder(self, blob_cols: List[str]):
         """Blob-as-descriptor read builder with this query's filter/projection/limit;
         returns ``(read_builder, file_io)``."""
@@ -172,37 +235,7 @@ class ScanQuery:
         # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
-        from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
-        ranges = []
-        inline = {}  # cell index -> blob stored inline (returned as-is, no ranged read)
-        i = 0
-        for col in blob_cols:
-            for value in data[col]:
-                if value is None:
-                    ranges.append(None)
-                else:
-                    raw = bytes(value)
-                    if BlobViewStruct.is_blob_view_struct(raw):
-                        raise ValueError(
-                            "read_blobs does not support unresolved blob-view columns; "
-                            "read such a column on its own, or enable blob-view resolution.")
-                    if BlobDescriptor.is_blob_descriptor(raw):
-                        d = BlobDescriptor.deserialize(raw)
-                        ranges.append((d.uri, d.offset, d.length))
-                    else:  # blob stored inline: the bytes are the payload
-                        ranges.append(None)
-                        inline[i] = raw
-                i += 1
-        fetched = file_io.read_ranges_coalesced(ranges, parallelism)
-        for idx, raw in inline.items():
-            fetched[idx] = raw
-        bodies = {}
-        offset = 0
-        for col in blob_cols:
-            n = len(data[col])
-            bodies[col] = fetched[offset:offset + n]
-            offset += n
-        return bodies
+        return fetch_blob_bodies(file_io, data, blob_cols, parallelism)
 
     def _all_blob_columns(self) -> List[str]:
         return [
@@ -299,6 +332,9 @@ class _PreFilterQuery(ScanQuery):
 
     def stream_blobs(self, *args, **kwargs):
         raise TypeError("stream_blobs is only supported on scan(), not search queries.")
+
+    def to_ray(self, *args, **kwargs):
+        raise TypeError("to_ray is only supported on scan(), not search queries.")
 
 
 class VectorQuery(_PreFilterQuery):
