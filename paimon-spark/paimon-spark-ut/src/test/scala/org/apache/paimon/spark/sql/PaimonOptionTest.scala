@@ -305,3 +305,41 @@ class PaimonConfigCheckTest extends SparkFunSuite {
     }
   }
 }
+
+class PaimonV2WriteSchemaValidationTest extends SparkFunSuite with SparkVersionSupport {
+
+  test("Paimon V2 write: fail fast on incompatible query schema without Paimon extensions") {
+    assume(gteqSpark3_4)
+    val spark = SparkSession
+      .builder()
+      .master("local[2]")
+      .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+      .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+      .config("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+      .config("spark.paimon.write.use-v2-write", "true")
+      .getOrCreate()
+    try {
+      spark.sql("USE paimon")
+      spark.sql("CREATE TABLE T (a STRING, b STRING, pt STRING) PARTITIONED BY (pt)")
+
+      // A query schema that matches the table schema still works without the extensions.
+      spark.sql("INSERT INTO T VALUES ('x', 'y', '20260601')")
+      assert(spark.sql("SELECT * FROM T").collect() === Array(Row("x", "y", "20260601")))
+
+      // Type mismatch: without PaimonAnalysis no cast is added, the write must fail fast
+      // instead of corrupting data or throwing NegativeArraySizeException in the writer.
+      val typeMismatch = intercept[RuntimeException] {
+        spark.sql("INSERT OVERWRITE TABLE T PARTITION (pt) SELECT 'x', 0.98d, '20260601'")
+      }
+      assert(typeMismatch.getMessage.contains("PaimonSparkSessionExtensions"))
+
+      // Column count mismatch must fail fast as well.
+      val countMismatch = intercept[RuntimeException] {
+        spark.sql("INSERT INTO T VALUES ('x', 'y')")
+      }
+      assert(countMismatch.getMessage.contains("PaimonSparkSessionExtensions"))
+    } finally {
+      spark.close()
+    }
+  }
+}
