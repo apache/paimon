@@ -18,6 +18,7 @@
 import datetime
 import importlib
 import logging
+import posixpath
 import time
 from abc import ABC
 from dataclasses import dataclass
@@ -100,7 +101,12 @@ class PVFSTableIdentifier(PVFSIdentifier):
 
     def get_actual_path(self, storage_location: str):
         if self.sub_path:
-            return '{}/{}'.format(storage_location.rstrip("/"), self.sub_path.lstrip("/"))
+            normalized_sub = posixpath.normpath(self.sub_path)
+            if normalized_sub == ".." or normalized_sub.startswith("../") or normalized_sub.startswith("/"):
+                raise ValueError(
+                    "Path traversal detected: resolved path escapes table storage boundary"
+                )
+            return '{}/{}'.format(storage_location.rstrip("/"), normalized_sub)
         return storage_location
 
     def get_virtual_location(self):
@@ -733,6 +739,11 @@ class PaimonVirtualFileSystem(fsspec.AbstractFileSystem):
             return None
 
         components = [component for component in path_without_protocol.rstrip('/').split('/') if component]
+        for component in components:
+            if component == '..' or '\x00' in component:
+                raise ValueError(
+                    "Invalid path: path traversal components are not allowed"
+                )
         catalog: str = None
         endpoint: str = self.options.get(CatalogOptions.URI)
         if len(components) > 0:

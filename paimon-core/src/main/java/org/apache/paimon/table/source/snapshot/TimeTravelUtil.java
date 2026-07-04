@@ -48,7 +48,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+import static org.apache.paimon.utils.SnapshotManager.retryEarliestSnapshot;
 
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
@@ -65,6 +65,7 @@ public class TimeTravelUtil {
         SCAN_TIMESTAMP_MILLIS.key()
     };
 
+    @Nullable
     public static Snapshot tryTravelOrLatest(FileStoreTable table) {
         return tryTravelToSnapshot(table).orElseGet(() -> table.latestSnapshot().orElse(null));
     }
@@ -223,29 +224,11 @@ public class TimeTravelUtil {
             return null;
         }
 
-        if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
-        }
-
         FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
                 includeChangelog
                         ? s -> tryGetChangelogOrSnapshot(snapshotManager, changelogManager, s)
                         : snapshotManager::tryGetSnapshot;
-
-        do {
-            try {
-                return snapshotFunction.apply(snapshotId);
-            } catch (FileNotFoundException e) {
-                snapshotId++;
-                if (snapshotId > stopSnapshotId) {
-                    return null;
-                }
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
-            }
-        } while (true);
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, snapshotFunction);
     }
 
     private static Snapshot tryGetChangelogOrSnapshot(

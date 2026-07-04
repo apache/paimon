@@ -20,6 +20,7 @@ package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -79,16 +80,22 @@ public class BlobFileFormatTest {
 
         // write
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
-        List<byte[]> blobs =
-                Arrays.asList("hello".getBytes(), null, "world".getBytes(), new byte[0]);
+        List<Object> blobs =
+                Arrays.asList(
+                        "hello".getBytes(),
+                        null,
+                        BlobPlaceholder.INSTANCE,
+                        "world".getBytes(),
+                        new byte[0]);
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter formatWriter = writerFactory.create(out, null);
-            for (byte[] bytes : blobs) {
-                if (bytes == null) {
+            for (Object blob : blobs) {
+                if (blob == null) {
                     formatWriter.addElement(GenericRow.of((Object) null));
-                    continue;
+                } else if (blob == BlobPlaceholder.INSTANCE) {
+                    formatWriter.addElement(GenericRow.of(BlobPlaceholder.INSTANCE));
                 } else {
-                    formatWriter.addElement(GenericRow.of(new BlobData(bytes)));
+                    formatWriter.addElement(GenericRow.of(new BlobData((byte[]) blob)));
                 }
             }
             formatWriter.close();
@@ -98,7 +105,7 @@ public class BlobFileFormatTest {
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
-        List<byte[]> result = new ArrayList<>();
+        List<Object> result = new ArrayList<>();
         readerFactory
                 .createReader(context)
                 .forEachRemaining(
@@ -107,7 +114,10 @@ public class BlobFileFormatTest {
                                 result.add(null);
                             } else {
                                 Blob blob = row.getBlob(0);
-                                if (blobAsDescriptor) {
+                                if (blob == BlobPlaceholder.INSTANCE) {
+                                    result.add(BlobPlaceholder.INSTANCE);
+                                    return;
+                                } else if (blobAsDescriptor) {
                                     assertThat(blob).isInstanceOf(BlobRef.class);
                                 } else {
                                     assertThat(blob).isInstanceOf(BlobData.class);
@@ -117,19 +127,23 @@ public class BlobFileFormatTest {
                         });
 
         // assert
-        assertThat(result).containsExactlyElementsOf(blobs);
+        assertThat(result).hasSize(blobs.size());
+        assertThat((byte[]) result.get(0)).isEqualTo((byte[]) blobs.get(0));
+        assertThat(result.get(1)).isNull();
+        assertThat(result.get(2)).isSameAs(BlobPlaceholder.INSTANCE);
+        assertThat((byte[]) result.get(3)).isEqualTo((byte[]) blobs.get(3));
+        assertThat((byte[]) result.get(4)).isEqualTo((byte[]) blobs.get(4));
 
         // read with selection
         RoaringBitmap32 selection = new RoaringBitmap32();
         selection.add(2);
         context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
         result.clear();
-        readerFactory
-                .createReader(context)
-                .forEachRemaining(row -> result.add(row.getBlob(0).toData()));
+        readerFactory.createReader(context).forEachRemaining(row -> result.add(row.getBlob(0)));
 
         // assert
-        assertThat(result).containsOnly(blobs.get(2));
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0)).isSameAs(BlobPlaceholder.INSTANCE);
     }
 
     @Test

@@ -15,15 +15,21 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import random
 from typing import Dict, List, Tuple
 
 import pyarrow as pa
 
+
+logger = logging.getLogger(__name__)
+
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_utils import row_values_to_arrow_table
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
-from pypaimon.write.writer.data_blob_writer import DataBlobWriter
+from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.write.writer.data_vector_writer import DataVectorWriter
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
 from pypaimon.table.bucket_mode import BucketMode
@@ -39,8 +45,10 @@ class FileStoreWrite:
         self.data_writers: Dict[Tuple, DataWriter] = {}
         self.max_seq_numbers: dict = {}
         self.write_cols = None
+        self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
+        self.changelog_producer = self.options.changelog_producer()
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
@@ -58,13 +66,45 @@ class FileStoreWrite:
         writer = self.data_writers[key]
         writer.write(data)
 
+    def write_row(self, partition: Tuple, bucket: int, row, values_by_name: dict):
+        key = (partition, bucket)
+        if key not in self.data_writers:
+            self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
+        writer = self.data_writers[key]
+        if hasattr(writer, 'write_row'):
+            writer.write_row(row)
+            return
+
+        column_names = (
+            self.write_cols
+            if self.write_cols is not None
+            else list(self.table.field_names)
+        )
+        data = row_values_to_arrow_table(
+            values_by_name,
+            self.table.table_schema.fields,
+            column_names,
+        )
+        writer.write(data.to_batches()[0])
+
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
 
         # Check if table has blob columns
         if self._has_blob_columns():
-            return DataBlobWriter(
+            return DedicatedFormatWriter(
+                table=self.table,
+                partition=partition,
+                bucket=bucket,
+                max_seq_number=0,
+                options=options,
+                write_cols=self.write_cols,
+                blob_consumer=self.blob_consumer,
+                changelog_producer=self.changelog_producer,
+            )
+        elif self._has_vector_columns() and options.with_vector_format():
+            return DataVectorWriter(
                 table=self.table,
                 partition=partition,
                 bucket=bucket,
@@ -78,7 +118,9 @@ class FileStoreWrite:
                 partition=partition,
                 bucket=bucket,
                 max_seq_number=max_seq_number(),
-                options=options)
+                options=options,
+                merge_function=self._build_pk_merge_function(),
+                changelog_producer=self.changelog_producer)
         else:
             seq_number = 0 if self.table.bucket_mode() == BucketMode.BUCKET_UNAWARE else max_seq_number()
             return AppendOnlyDataWriter(
@@ -87,30 +129,140 @@ class FileStoreWrite:
                 bucket=bucket,
                 max_seq_number=seq_number,
                 options=options,
-                write_cols=self.write_cols
+                write_cols=self.write_cols,
+                changelog_producer=self.changelog_producer
             )
+
+    def _build_pk_merge_function(self):
+        """Build the merge function for the in-memory write buffer.
+
+        Shares ``merge_engine_dispatch.build_merge_function`` with the
+        read path so the supported engines (deduplicate, first-row,
+        partial-update with no out-of-scope options) cannot drift
+        between sides.
+
+        For wholly unsupported engines (``aggregation``) the writer
+        falls back to ``DeduplicateMergeFunction`` so the flushed file
+        still maintains the LSM "PK unique within a file" invariant.
+        The read path's dispatch still raises ``NotImplementedError``,
+        so the user gets an explicit error before they observe
+        wrong-engine data; the fallback only narrows the damage to
+        "file is deduped, not aggregated" rather than the silent
+        multi-row-per-PK corruption that existed pre-PR.
+
+        Partial-update with out-of-scope options (sequence-group,
+        per-field aggregator, ignore-delete, remove-record-on-*) does
+        **not** fall back: ``partial_update_unsupported_options`` sees
+        the configured keys and re-raises, so the first
+        ``write_arrow`` call (where ``_create_data_writer`` first runs)
+        surfaces the error. Silently degrading to dedupe there is the
+        same live corruption pattern this PR exists to close.
+
+        ``with_write_type`` (column-subset writes) on a PK table is
+        also rejected here. The buffer layout
+        ``_add_system_fields`` produces would carry only the subset
+        on the value side, while a ``MergeFunction`` such as
+        ``PartialUpdateMergeFunction`` is built against the full table
+        arity -- the two sides would mismatch on
+        ``KeyValue.value.get_field`` and raise ``IndexError`` at
+        flush time. Refusing it explicitly avoids that obscure failure
+        and keeps the supported surface narrow.
+
+        The value-side schema must match the layout
+        ``KeyValueDataWriter`` flushes -- ``_add_system_fields`` keeps
+        every original user column on the value side (the primary keys
+        are duplicated as ``_KEY_<pk>`` columns to the left of the
+        value side). So ``value_arity`` here is ``len(table.fields)``,
+        not ``len(table.fields) - len(primary_keys)``.
+        """
+        from pypaimon.common.merge_engine_dispatch import (
+            build_merge_function, partial_update_unsupported_options)
+        from pypaimon.common.options.core_options import MergeEngine
+        from pypaimon.read.reader.deduplicate_merge_function import \
+            DeduplicateMergeFunction
+
+        engine = self.options.merge_engine()
+        raw_options = self.options.options.to_map()
+
+        if self.write_cols is not None:
+            raise NotImplementedError(
+                "with_write_type is not yet supported on primary-key "
+                "tables: the writer-side merge buffer assumes the "
+                "input batch carries the full table schema. Drop the "
+                "with_write_type call or write the missing columns as "
+                "nulls in the input batch."
+            )
+
+        # PARTIAL_UPDATE + out-of-scope option: never silently fall
+        # back -- forward the read-side error verbatim so writes fail
+        # before the first flush rather than corrupt the file.
+        if engine == MergeEngine.PARTIAL_UPDATE \
+                and partial_update_unsupported_options(raw_options):
+            return build_merge_function(
+                engine=engine, raw_options=raw_options,
+                key_arity=len(self.table.trimmed_primary_keys),
+                value_arity=len(self.table.table_schema.fields),
+                value_field_nullables=[
+                    f.type.nullable for f in self.table.table_schema.fields],
+                value_field_names=[
+                    f.name for f in self.table.table_schema.fields],
+            )
+
+        # Catch the dispatch's "wholly unsupported engine" raise only
+        # for the engines we know are out of scope today; any other
+        # NotImplementedError is a bug we want to surface, not swallow.
+        if engine == MergeEngine.AGGREGATE:
+            # Surface the silent semantic mismatch in logs: the file
+            # will be PK-unique (better than the pre-PR multi-row
+            # corruption), but any reader that honours the declared
+            # engine will see wrong values. Users sharing tables
+            # across writers especially need to see this.
+            logger.warning(
+                "merge-engine '%s' is not implemented on the pypaimon "
+                "write path; falling back to deduplicate so the flushed "
+                "file stays PK-unique. The file contents reflect "
+                "deduplicate semantics (latest writer wins), not %s "
+                "semantics. Any reader that interprets the file under "
+                "the declared engine will return incorrect results. "
+                "Avoid the pypaimon writer for tables on this engine.",
+                engine.value, engine.value)
+            return DeduplicateMergeFunction()
+
+        all_value_fields = self.table.table_schema.fields
+        return build_merge_function(
+            engine=engine, raw_options=raw_options,
+            key_arity=len(self.table.trimmed_primary_keys),
+            value_arity=len(all_value_fields),
+            value_field_nullables=[
+                f.type.nullable for f in all_value_fields],
+            value_field_names=[f.name for f in all_value_fields],
+        )
 
     def _has_blob_columns(self) -> bool:
         """Check if the table schema contains blob columns."""
         for field in self.table.table_schema.fields:
-            # Check if field type is blob
             if hasattr(field.type, 'type') and field.type.type == 'BLOB':
                 return True
-            # Alternative: check for specific blob type class
             elif hasattr(field.type, '__class__') and 'blob' in field.type.__class__.__name__.lower():
                 return True
         return False
+
+    def _has_vector_columns(self) -> bool:
+        from pypaimon.schema.data_types import VectorType
+        return any(isinstance(f.type, VectorType) for f in self.table.table_schema.fields)
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
         self.commit_identifier = commit_identifier
         commit_messages = []
         for (partition, bucket), writer in self.data_writers.items():
             committed_files = writer.prepare_commit()
-            if committed_files:
+            changelog_files = writer.prepare_changelog_commit()
+            if committed_files or changelog_files:
                 commit_message = CommitMessage(
                     partition=partition,
                     bucket=bucket,
-                    new_files=committed_files
+                    new_files=committed_files,
+                    changelog_files=changelog_files,
                 )
                 commit_messages.append(commit_message)
         return commit_messages
@@ -119,6 +271,15 @@ class FileStoreWrite:
         """Close all data writers and clean up resources."""
         for writer in self.data_writers.values():
             writer.close()
+        self.data_writers.clear()
+
+    def abort(self):
+        """Abort all data writers and clean up files produced by this write."""
+        for writer in self.data_writers.values():
+            try:
+                writer.abort()
+            except Exception as e:
+                logger.warning("Failed to abort data writer.", exc_info=e)
         self.data_writers.clear()
 
     def _seq_number_stats(self, partition: Tuple) -> Dict[int, int]:

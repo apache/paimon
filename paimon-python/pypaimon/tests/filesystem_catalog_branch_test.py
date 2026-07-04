@@ -94,15 +94,18 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
                 self.identifier, "b1", tag_name="absent_tag")
         self.assertEqual(cm.exception.tag, "absent_tag")
 
-    # NOTE: ``test_create_branch_from_existing_tag`` (a true happy-path
-    # ``create_branch(tag_name=...)``) is not included here. The
-    # ``FileSystemBranchManager`` "from-tag" path has a pre-existing bug
-    # (``branch_snapshot_manager`` is constructed without switching to
-    # the new branch's path, so ``copy_file(src, dst)`` ends up with
-    # ``src == dst`` and raises ``SameFileError``). That's a manager-
-    # level fix, not in the scope of this catalog-layer thin wrapper.
-    # Catalog-layer error translation for the from-tag path is still
-    # covered by ``test_create_branch_from_nonexistent_tag_raises``.
+    def test_create_branch_from_existing_tag(self):
+        # The from-tag happy path: create_tag then create_branch(tag_name=...)
+        # must land the branch files under ``branch/branch-<name>/`` and not
+        # raise (regresses the historical src == dst SameFileError).
+        table = self.catalog.get_table(self.identifier)
+        table.create_tag("t1")
+        self.catalog.create_branch(self.identifier, "b1", tag_name="t1")
+        self.assertIn("b1", self.catalog.list_branches(self.identifier))
+        branch_root = "{}/branch/branch-b1".format(
+            table.table_path.rstrip('/'))
+        self.assertTrue(os.path.isdir(branch_root))
+        self.assertTrue(os.path.isfile("{}/tag/tag-t1".format(branch_root)))
 
     # -- list -----------------------------------------------------------------
 
@@ -164,12 +167,13 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
             self.catalog.fast_forward(self.identifier, "absent")
         self.assertEqual(cm.exception.branch, "absent")
 
-    # NOTE: a true happy-path ``fast_forward`` end-to-end test is not
-    # included here for the same reason as the create-branch-from-tag
-    # case above — it requires the manager-level fix to the from-tag
-    # path (so the branch carries a snapshot for fast-forward to move).
-    # Catalog-layer error translation is covered by the missing-branch
-    # case above.
+    def test_fast_forward_after_create_branch_from_tag(self):
+        # Happy path: create a branch from a tag, then fast-forward main to
+        # it. Must not raise (regresses the historical src == dst error).
+        table = self.catalog.get_table(self.identifier)
+        table.create_tag("t1")
+        self.catalog.create_branch(self.identifier, "b1", tag_name="t1")
+        self.catalog.fast_forward(self.identifier, "b1")
 
 
 if __name__ == "__main__":

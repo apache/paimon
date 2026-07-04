@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.GenericRow;
@@ -47,6 +48,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -68,7 +70,6 @@ import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -79,7 +80,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -150,6 +150,91 @@ public class BlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(1000);
+    }
+
+    @Test
+    public void testUpdateBlobColumn() throws Exception {
+        createTableDefault();
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] blob1 = "blob-1".getBytes();
+        byte[] blob2 = "blob-2".getBytes();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(0, BinaryString.fromString("row-0"), new BlobData(blob0)),
+                        GenericRow.of(1, BinaryString.fromString("row-1"), new BlobData(blob1)),
+                        GenericRow.of(2, BinaryString.fromString("row-2"), new BlobData(blob2))));
+
+        byte[] updatedBlob1 = "updated-blob-1".getBytes();
+        FileStoreTable table = getTableDefault();
+        RowType blobWriteType = table.schema().logicalRowType().project("f2");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+            write.write(GenericRow.of(new BlobData(updatedBlob1)));
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+
+        Map<Integer, byte[]> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getBlob(2).toData()));
+
+        assertThat(actual.size()).isEqualTo(3);
+        assertThat(actual.get(0)).isEqualTo(blob0);
+        assertThat(actual.get(1)).isEqualTo(updatedBlob1);
+        assertThat(actual.get(2)).isEqualTo(blob2);
+    }
+
+    @Test
+    public void testCompactUpdatedBlobColumn() throws Exception {
+        createTableDefault();
+
+        byte[] blob0 = "blob-0".getBytes();
+        byte[] blob1 = "blob-1".getBytes();
+        byte[] blob2 = "blob-2".getBytes();
+        writeDataDefault(
+                Arrays.asList(
+                        GenericRow.of(0, BinaryString.fromString("row-0"), new BlobData(blob0)),
+                        GenericRow.of(1, BinaryString.fromString("row-1"), new BlobData(blob1)),
+                        GenericRow.of(2, BinaryString.fromString("row-2"), new BlobData(blob2))));
+
+        byte[] updatedBlob1 = "updated-blob-1".getBytes();
+        FileStoreTable table = getTableDefault();
+        RowType blobWriteType = table.schema().logicalRowType().project("f2");
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite().withWriteType(blobWriteType);
+                BatchTableCommit commit = builder.newCommit()) {
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+            write.write(GenericRow.of(new BlobData(updatedBlob1)));
+            write.write(GenericRow.of(BlobPlaceholder.INSTANCE));
+
+            List<CommitMessage> commitMessages = write.prepareCommit();
+            assignFirstRowId(commitMessages, 0L);
+            commit.commit(commitMessages);
+        }
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, true, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+        assertThat(tasks.stream().anyMatch(DataEvolutionCompactTask::isBlobTask)).isTrue();
+
+        List<CommitMessage> compactMessages = new ArrayList<>();
+        for (DataEvolutionCompactTask task : tasks) {
+            compactMessages.add(task.doCompact(table, commitUser));
+        }
+        commitDefault(compactMessages);
+
+        Map<Integer, byte[]> actual = new HashMap<>();
+        readDefault(row -> actual.put(row.getInt(0), row.getBlob(2).toData()));
+
+        assertThat(actual.size()).isEqualTo(3);
+        assertThat(actual.get(0)).isEqualTo(blob0);
+        assertThat(actual.get(1)).isEqualTo(updatedBlob1);
+        assertThat(actual.get(2)).isEqualTo(blob2);
     }
 
     @Test
@@ -360,39 +445,8 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
-    public void testExternalStorageBlobField() throws Exception {
-        createExternalStorageTable();
-        FileStoreTable table = getTableDefault();
-
-        writeDataDefault(
-                Collections.singletonList(
-                        GenericRow.of(
-                                1, BinaryString.fromString("copy-test"), new BlobData(blobBytes))));
-
-        readDefault(
-                row -> {
-                    assertThat(row.getString(1).toString()).isEqualTo("copy-test");
-                    // The blob should be readable via descriptor
-                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
-                });
-
-        // Verify the blob file was written to the external storage path
-        java.nio.file.Path externalStoragePath = tempPath.resolve("external-storage-blob-path");
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-
-        // Verify no .blob files were created in the table directory
-        long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
-        assertThat(blobFiles).isEqualTo(0);
-    }
-
-    @Test
-    public void testThreeTypeBlobCoexistence() throws Exception {
-        createThreeTypeBlobTable();
+    public void testRawAndDescriptorBlobCoexistence() throws Exception {
+        createRawAndDescriptorBlobTable();
         FileStoreTable table = getTableDefault();
 
         // Prepare external blob for the descriptor field
@@ -405,98 +459,27 @@ public class BlobTableTest extends TableTestBase {
         UriReader uriReader = UriReader.fromFile(table.fileIO());
         Blob blobRef = Blob.fromDescriptor(uriReader, descriptor);
 
-        // Prepare data for the descriptor field backed by external storage
-        byte[] copyBytes = randomBytes();
-
         writeDataDefault(
                 Collections.singletonList(
                         GenericRow.of(
                                 1,
-                                BinaryString.fromString("three-types"),
+                                BinaryString.fromString("mixed-types"),
                                 new BlobData(blobBytes), // raw-data blob
-                                blobRef, // descriptor blob
-                                new BlobData(copyBytes)))); // descriptor blob with external storage
+                                blobRef))); // descriptor blob
 
         readDefault(
                 row -> {
-                    assertThat(row.getString(1).toString()).isEqualTo("three-types");
+                    assertThat(row.getString(1).toString()).isEqualTo("mixed-types");
                     // Raw-data blob
                     assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
                     // Descriptor blob
                     assertThat(row.getBlob(3).toDescriptor()).isEqualTo(descriptor);
                     assertThat(row.getBlob(3).toData()).isEqualTo(descriptorBytes);
-                    // External-storage descriptor blob
-                    assertThat(row.getBlob(4).toData()).isEqualTo(copyBytes);
                 });
 
         // Verify raw-data blob files exist (for f2)
         long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
         assertThat(blobFiles).isGreaterThanOrEqualTo(1);
-
-        // Verify descriptor files backed by external storage exist in the configured path
-        java.nio.file.Path externalStoragePath =
-                tempPath.resolve("external-storage-blob-path-3type");
-        assertThat(Files.exists(externalStoragePath)).isTrue();
-        try (Stream<java.nio.file.Path> stream = Files.list(externalStoragePath)) {
-            long externalStorageFiles =
-                    stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
-            assertThat(externalStorageFiles).isGreaterThanOrEqualTo(1);
-        }
-    }
-
-    @Test
-    public void testExternalStorageFieldValidationRequiresPath() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
-                            schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                            // No external storage path set
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "'"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key()
-                                + "' must be set when '"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
-                                + "' is configured.");
-    }
-
-    @Test
-    public void testExternalStorageFieldMustBeSubsetOfDescriptorField() {
-        assertThatThrownBy(
-                        () -> {
-                            Schema.Builder schemaBuilder = Schema.newBuilder();
-                            schemaBuilder.column("f0", DataTypes.INT());
-                            schemaBuilder.column("f1", DataTypes.STRING());
-                            schemaBuilder.column("f2", DataTypes.BLOB());
-                            schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-                            schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-                            schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-                            // f2 is configured for external storage but not in
-                            // blob-descriptor-field
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-                            schemaBuilder.option(
-                                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(), "/tmp/target");
-                            catalog.createTable(identifier(), schemaBuilder.build(), true);
-                        })
-                .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage(
-                        "Field 'f2' in '"
-                                + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
-                                + "' must also be in '"
-                                + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
-                                + "'.");
     }
 
     @Test
@@ -813,7 +796,8 @@ public class BlobTableTest extends TableTestBase {
                         GenericRow.of(
                                 1, BinaryString.fromString("row1"), new BlobData(imageBytes1)),
                         GenericRow.of(
-                                2, BinaryString.fromString("row2"), new BlobData(imageBytes2))));
+                                2, BinaryString.fromString("row2"), new BlobData(imageBytes2)),
+                        GenericRow.of(3, BinaryString.fromString("row3"), null)));
 
         int imageFieldId =
                 upstreamTable.rowType().getFields().stream()
@@ -829,6 +813,7 @@ public class BlobTableTest extends TableTestBase {
         Map<Integer, byte[]> idToBlob = new HashMap<>();
         idToBlob.put(1, imageBytes1);
         idToBlob.put(2, imageBytes2);
+        idToBlob.put(3, null);
         rowIdReader
                 .newRead()
                 .createReader(rowIdReader.newScan().plan())
@@ -837,7 +822,7 @@ public class BlobTableTest extends TableTestBase {
                             int id = row.getInt(0);
                             idToRowId.put(id, row.getLong(1));
                         });
-        assertThat(idToRowId.size()).isEqualTo(2);
+        assertThat(idToRowId.size()).isEqualTo(3);
 
         String downstreamTableName = "DownstreamView";
         Schema.Builder downstreamSchema = Schema.newBuilder();
@@ -871,7 +856,15 @@ public class BlobTableTest extends TableTestBase {
                                         new BlobViewStruct(
                                                 Identifier.fromString(upstreamFullName),
                                                 imageFieldId,
-                                                idToRowId.get(2))))));
+                                                idToRowId.get(2)))),
+                        GenericRow.of(
+                                3,
+                                BinaryString.fromString("label3"),
+                                Blob.fromView(
+                                        new BlobViewStruct(
+                                                Identifier.fromString(upstreamFullName),
+                                                imageFieldId,
+                                                idToRowId.get(3))))));
 
         ReadBuilder downstreamReadBuilder = downstreamTable.newReadBuilder();
         downstreamReadBuilder
@@ -880,7 +873,140 @@ public class BlobTableTest extends TableTestBase {
                 .forEachRemaining(
                         row -> {
                             int id = row.getInt(0);
+                            if (idToBlob.get(id) == null) {
+                                assertThat(row.isNullAt(2)).isTrue();
+                                assertThat(row.getBlob(2)).isNull();
+                                return;
+                            }
                             Blob blob = row.getBlob(2);
+                            assertThat(blob).isInstanceOf(BlobView.class);
+                            assertThat(((BlobView) blob).isResolved()).isTrue();
+                            assertThat(blob.toData()).isEqualTo(idToBlob.get(id));
+                        });
+    }
+
+    @Test
+    public void testForwardBlobViewReference() throws Exception {
+        String upstreamTableName = "UpstreamBlobForward";
+        Schema.Builder upstreamSchema = Schema.newBuilder();
+        upstreamSchema.column("id", DataTypes.INT());
+        upstreamSchema.column("image", DataTypes.BLOB());
+        upstreamSchema.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        upstreamSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        upstreamSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        catalog.createTable(identifier(upstreamTableName), upstreamSchema.build(), true);
+
+        FileStoreTable upstreamTable = getTable(identifier(upstreamTableName));
+        byte[] imageBytes1 = randomBytes();
+        byte[] imageBytes2 = randomBytes();
+        writeRows(
+                upstreamTable,
+                Arrays.asList(
+                        GenericRow.of(1, new BlobData(imageBytes1)),
+                        GenericRow.of(2, new BlobData(imageBytes2))));
+
+        int imageFieldId = upstreamTable.rowType().getField("image").id();
+        RowTrackingTable upstreamRowTracking = new RowTrackingTable(upstreamTable);
+        ReadBuilder rowIdReader =
+                upstreamRowTracking.newReadBuilder().withProjection(new int[] {0, 2});
+        Map<Integer, Long> idToRowId = new HashMap<>();
+        rowIdReader
+                .newRead()
+                .createReader(rowIdReader.newScan().plan())
+                .forEachRemaining(row -> idToRowId.put(row.getInt(0), row.getLong(1)));
+        assertThat(idToRowId.size()).isEqualTo(2);
+
+        String firstViewTableName = "FirstBlobView";
+        Schema.Builder firstViewSchema = Schema.newBuilder();
+        firstViewSchema.column("id", DataTypes.INT());
+        firstViewSchema.column("image", DataTypes.BLOB());
+        firstViewSchema.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        firstViewSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        firstViewSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        firstViewSchema.option(CoreOptions.BLOB_FIELD.key(), "image");
+        firstViewSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
+        catalog.createTable(identifier(firstViewTableName), firstViewSchema.build(), true);
+
+        String upstreamFullName = database + "." + upstreamTableName;
+        BlobViewStruct viewStruct1 =
+                new BlobViewStruct(
+                        Identifier.fromString(upstreamFullName), imageFieldId, idToRowId.get(1));
+        BlobViewStruct viewStruct2 =
+                new BlobViewStruct(
+                        Identifier.fromString(upstreamFullName), imageFieldId, idToRowId.get(2));
+        FileStoreTable firstViewTable = getTable(identifier(firstViewTableName));
+        writeRows(
+                firstViewTable,
+                Arrays.asList(
+                        GenericRow.of(1, Blob.fromView(viewStruct1)),
+                        GenericRow.of(2, Blob.fromView(viewStruct2))));
+
+        String secondViewTableName = "SecondBlobView";
+        Schema.Builder secondViewSchema = Schema.newBuilder();
+        secondViewSchema.column("id", DataTypes.INT());
+        secondViewSchema.column("image", DataTypes.BLOB());
+        secondViewSchema.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        secondViewSchema.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        secondViewSchema.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        secondViewSchema.option(CoreOptions.BLOB_FIELD.key(), "image");
+        secondViewSchema.option(CoreOptions.BLOB_VIEW_FIELD.key(), "image");
+        catalog.createTable(identifier(secondViewTableName), secondViewSchema.build(), true);
+
+        Map<String, String> preserveBlobViewOptions = new HashMap<>();
+        preserveBlobViewOptions.put(CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key(), "false");
+        FileStoreTable firstViewWithoutResolve = firstViewTable.copy(preserveBlobViewOptions);
+        ReadBuilder preserveReadBuilder = firstViewWithoutResolve.newReadBuilder();
+        RecordReader<InternalRow> preserveReader =
+                preserveReadBuilder.newRead().createReader(preserveReadBuilder.newScan().plan());
+        List<InternalRow> rowsToForward = new ArrayList<>();
+        InternalRowSerializer firstViewSerializer =
+                new InternalRowSerializer(firstViewWithoutResolve.rowType());
+        preserveReader.forEachRemaining(row -> rowsToForward.add(firstViewSerializer.copy(row)));
+        preserveReader.close();
+
+        rowsToForward.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
+        Blob preservedBlob1 = rowsToForward.get(0).getBlob(1);
+        Blob preservedBlob2 = rowsToForward.get(1).getBlob(1);
+        assertThat(preservedBlob1).isInstanceOf(BlobView.class);
+        assertThat(preservedBlob2).isInstanceOf(BlobView.class);
+        assertThat(((BlobView) preservedBlob1).isResolved()).isFalse();
+        assertThat(((BlobView) preservedBlob2).isResolved()).isFalse();
+        assertThat(((BlobView) preservedBlob1).viewStruct()).isEqualTo(viewStruct1);
+        assertThat(((BlobView) preservedBlob2).viewStruct()).isEqualTo(viewStruct2);
+
+        FileStoreTable secondViewTable = getTable(identifier(secondViewTableName));
+        writeRows(secondViewTable, rowsToForward);
+
+        FileStoreTable secondViewWithoutResolve = secondViewTable.copy(preserveBlobViewOptions);
+        ReadBuilder verifyReferenceBuilder = secondViewWithoutResolve.newReadBuilder();
+        RecordReader<InternalRow> verifyReferenceReader =
+                verifyReferenceBuilder
+                        .newRead()
+                        .createReader(verifyReferenceBuilder.newScan().plan());
+        List<InternalRow> secondViewRawRows = new ArrayList<>();
+        InternalRowSerializer secondViewSerializer =
+                new InternalRowSerializer(secondViewWithoutResolve.rowType());
+        verifyReferenceReader.forEachRemaining(
+                row -> secondViewRawRows.add(secondViewSerializer.copy(row)));
+        verifyReferenceReader.close();
+
+        secondViewRawRows.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
+        assertThat(((BlobView) secondViewRawRows.get(0).getBlob(1)).viewStruct())
+                .isEqualTo(viewStruct1);
+        assertThat(((BlobView) secondViewRawRows.get(1).getBlob(1)).viewStruct())
+                .isEqualTo(viewStruct2);
+
+        Map<Integer, byte[]> idToBlob = new HashMap<>();
+        idToBlob.put(1, imageBytes1);
+        idToBlob.put(2, imageBytes2);
+        ReadBuilder secondViewReadBuilder = secondViewTable.newReadBuilder();
+        secondViewReadBuilder
+                .newRead()
+                .createReader(secondViewReadBuilder.newScan().plan())
+                .forEachRemaining(
+                        row -> {
+                            int id = row.getInt(0);
+                            Blob blob = row.getBlob(1);
                             assertThat(blob).isInstanceOf(BlobView.class);
                             assertThat(((BlobView) blob).isResolved()).isTrue();
                             assertThat(blob.toData()).isEqualTo(idToBlob.get(id));
@@ -1558,23 +1684,6 @@ public class BlobTableTest extends TableTestBase {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    private void createExternalStorageTable() throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.STRING());
-        schemaBuilder.column("f2", DataTypes.BLOB());
-        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
-        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2");
-        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
-        schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f2");
-        schemaBuilder.option(
-                CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                tempPath.resolve("external-storage-blob-path").toString());
-        catalog.createTable(identifier(), schemaBuilder.build(), true);
-    }
-
     private void writeRows(Table table, Iterable<InternalRow> rows) throws Exception {
         BatchWriteBuilder builder = table.newBatchWriteBuilder();
         BatchTableWrite write = builder.newWrite();
@@ -1587,22 +1696,33 @@ public class BlobTableTest extends TableTestBase {
         commit.close();
     }
 
-    private void createThreeTypeBlobTable() throws Exception {
+    private static void assignFirstRowId(List<CommitMessage> commitMessages, long firstRowId) {
+        commitMessages.forEach(
+                commitMessage -> {
+                    CommitMessageImpl impl = (CommitMessageImpl) commitMessage;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(impl.newFilesIncrement().newFiles());
+                    impl.newFilesIncrement().newFiles().clear();
+                    impl.newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(file -> file.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
+    }
+
+    private void createRawAndDescriptorBlobTable() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
         schemaBuilder.column("f2", DataTypes.BLOB()); // raw-data blob
         schemaBuilder.column("f3", DataTypes.BLOB()); // descriptor blob
-        schemaBuilder.column("f4", DataTypes.BLOB()); // descriptor blob with external storage
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3,f4");
-        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3,f4");
-        schemaBuilder.option(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "f4");
-        schemaBuilder.option(
-                CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
-                tempPath.resolve("external-storage-blob-path-3type").toString());
+        schemaBuilder.option(CoreOptions.BLOB_FIELD.key(), "f2,f3");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 

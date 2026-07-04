@@ -44,10 +44,15 @@ class ReadBuilder:
         # in ``read_type()`` and downstream consumers.
         self._projection: Optional[List[str]] = None
         self._nested_paths: Optional[List[List[int]]] = None
+        self._partition_filter: Optional[Predicate] = None
         self._limit: Optional[int] = None
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
+        return self
+
+    def with_partition_filter(self, partition_filter: Predicate) -> 'ReadBuilder':
+        self._partition_filter = partition_filter
         return self
 
     def with_projection(self, projection: List[str]) -> 'ReadBuilder':
@@ -58,6 +63,9 @@ class ReadBuilder:
         only callers see the same observable behaviour as before — the
         dotted form is opt-in. Unknown names are silently skipped to
         preserve the pre-existing contract.
+
+        Precedence: if a dotted name matches an actual top-level field, the
+        top-level match wins and the name is not walked as a struct path.
         """
         self._projection = projection
         if projection and any('.' in name for name in projection):
@@ -74,7 +82,8 @@ class ReadBuilder:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
-            limit=self._limit
+            limit=self._limit,
+            partition_predicate=self._partition_filter,
         )
 
     def new_read(self) -> TableRead:
@@ -164,12 +173,12 @@ class ReadBuilder:
 
         paths: List[List[int]] = []
         for name in names:
-            if '.' not in name:
-                if name not in top_index:
-                    # Silently skip unknown names — preserves the
-                    # pre-existing contract from the plain top-level path.
-                    continue
+            # Dot can be part of a top-level field name, not only a struct path
+            # separator. Top-level match takes precedence over struct walk.
+            if name in top_index:
                 paths.append([top_index[name]])
+                continue
+            if '.' not in name:
                 continue
             parts = name.split('.')
             top = parts[0]

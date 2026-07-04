@@ -37,7 +37,19 @@ import java.util.Set;
 
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 
-/** A {@link BaseAppendDeleteFileMaintainer} of unaware bucket append table. */
+/**
+ * A {@link BaseAppendDeleteFileMaintainer} for an unaware-bucket append table. This class maintains
+ * a mapping from data file names to DeletionVectors. It has different semantics for normal append
+ * tables and data evolution tables:
+ *
+ * <ul>
+ *   <li>For append tables, each entry maps a file to its corresponding deletion vector.
+ *   <li>For data evolution tables, a row is logically composed of several files covering the same
+ *       row range. The key becomes the oldest file in the group (i.e., the one with the smallest
+ *       max_seq_num). For each file group, the oldest file is used to look up the corresponding
+ *       deletion vectors.
+ * </ul>
+ */
 public class AppendDeleteFileMaintainer implements BaseAppendDeleteFileMaintainer {
 
     private final DeletionVectorsIndexFile dvIndexFile;

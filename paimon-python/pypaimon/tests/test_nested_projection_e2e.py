@@ -95,6 +95,50 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
              {'mv_latest_version': 200, 'val': 'y', 'mv_latest_value': 'b'},
              {'mv_latest_version': 300, 'val': 'z', 'mv_latest_value': 'c'}])
 
+    def test_dotted_top_level_field_kept(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('media.left', pa.string()),
+        ])
+        identifier = 'default.ao_dotted_top_level'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'media.left': 'hello'}], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'media.left'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
+
+    def test_unknown_dotted_name_silently_skipped(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('plain', pa.string()),
+        ])
+        identifier = 'default.ao_unknown_dotted'
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'}),
+            False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(
+            [{'id': 1, 'plain': 'x'}], schema=pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'nonexistent.foo'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1}])
+
     def test_top_level_only_projection_unchanged(self):
         """A projection without dots must keep the existing top-level
         path — file-level pushdown still asks for plain column names,
@@ -149,6 +193,23 @@ class AppendOnlyNestedParquetTest(_AppendOnlyNestedBase):
             [{'part': 'A', 'mv_latest_version': 100, 'val': 'x'},
              {'part': 'B', 'mv_latest_version': 200, 'val': 'y'}])
 
+    def test_filter_on_projected_nested_leaf(self):
+        """A predicate on a projected nested leaf must actually filter rows.
+        The read widens the projection to the top-level struct, which drops
+        the leaf predicate from push-down (its path is absent from the read
+        fields); without re-applying it after the leaves are extracted, every
+        row leaks through."""
+        table = self._create_table('ao_nested_leaf_filter')
+        rb = table.new_read_builder().with_projection(['id', 'mv.latest_version'])
+        pred = rb.new_predicate_builder().greater_than('mv_latest_version', 150)
+        rb = rb.with_filter(pred)
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        got = sorted(got, key=lambda r: r['id'])
+        self.assertEqual(
+            got,
+            [{'id': 2, 'mv_latest_version': 200},
+             {'id': 3, 'mv_latest_version': 300}])
+
     def test_avro_nested_projection_python_fallback(self):
         """Avro has no native nested column pruning; the reader walks
         each fastavro record dict by path and assembles the column
@@ -201,10 +262,42 @@ class PrimaryKeyNestedTest(_AppendOnlyNestedBase):
             w.close()
         return table
 
+    def _create_pk_raw_table(self, name: str, file_format: str = 'parquet'):
+        """Single commit keeps the split raw-convertible, so the read stays on
+        the RawFileSplitRead fast path rather than the merge reader."""
+        identifier = 'default.{}'.format(name)
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['id'],
+            options={'bucket': '1', 'file.format': file_format},
+        )
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        wb = table.new_batch_write_builder()
+        w = wb.new_write()
+        w.write_arrow(pa.Table.from_pylist(self.rows, schema=self.pa_schema))
+        wb.new_commit().commit(w.prepare_commit())
+        w.close()
+        return table
+
     def _read_arrow(self, table, projection):
         rb = table.new_read_builder().with_projection(projection)
         splits = rb.new_scan().plan().splits()
         return rb.new_read().to_arrow(splits)
+
+    def test_raw_convertible_filter_on_projected_nested_leaf(self):
+        """PK raw-convertible split also widens nested projection and so drops
+        the leaf predicate from push-down. The filter must be re-applied on the
+        extracted leaves; otherwise all rows are returned (reviewer repro)."""
+        table = self._create_pk_raw_table('pk_raw_nested_leaf_filter')
+        rb = table.new_read_builder().with_projection(['id', 'mv.latest_version'])
+        pred = rb.new_predicate_builder().greater_than('mv_latest_version', 150)
+        rb = rb.with_filter(pred)
+        arrow = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        rows = sorted(zip(
+            arrow.column('id').to_pylist(),
+            arrow.column('mv_latest_version').to_pylist()))
+        self.assertEqual(rows, [(2, 200), (3, 300)])
 
     def test_extracts_single_nested_leaf(self):
         table = self._create_pk_table('pk_nested_single')
@@ -234,6 +327,43 @@ class PrimaryKeyNestedTest(_AppendOnlyNestedBase):
             arrow.column('mv_latest_version').to_pylist(),
             arrow.column('val').to_pylist()))
         self.assertEqual(rows, [(1, 100, 'x'), (2, 200, 'y'), (3, 300, 'z')])
+
+    def test_dotted_top_level_field_kept(self):
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('media.left', pa.string()),
+        ])
+        identifier = 'default.pk_dotted_top_level'
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, primary_keys=['id'], options={'bucket': '1'})
+        self.catalog.create_table(identifier, schema, False)
+        table = self.catalog.get_table(identifier)
+        rows = [{'id': 1, 'media.left': 'hello'}]
+        for _ in range(2):
+            wb = table.new_batch_write_builder()
+            w = wb.new_write()
+            w.write_arrow(pa.Table.from_pylist(rows, schema=pa_schema))
+            wb.new_commit().commit(w.prepare_commit())
+            w.close()
+
+        rb = table.new_read_builder().with_projection(['id', 'media.left'])
+        got = rb.new_read().to_arrow(rb.new_scan().plan().splits()).to_pylist()
+        self.assertEqual(got, [{'id': 1, 'media.left': 'hello'}])
+
+    def test_merge_filter_on_projected_nested_leaf(self):
+        """Non-raw-convertible PK splits go through the merge reader, which
+        widens the nested projection to the full ROW and so also drops the leaf
+        predicate from push-down. The filter must be re-applied on the extracted
+        leaves above the merge; otherwise all rows are returned."""
+        table = self._create_pk_table('pk_merge_nested_leaf_filter')
+        rb = table.new_read_builder().with_projection(['id', 'mv.latest_version'])
+        pred = rb.new_predicate_builder().greater_than('mv_latest_version', 150)
+        rb = rb.with_filter(pred)
+        arrow = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        rows = sorted(zip(
+            arrow.column('id').to_pylist(),
+            arrow.column('mv_latest_version').to_pylist()))
+        self.assertEqual(rows, [(2, 200), (3, 300)])
 
     def test_avro_extracts_single_nested_leaf(self):
         # Avro PK reads resolve DataFields through ``full_fields_map`` which

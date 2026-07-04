@@ -38,7 +38,7 @@ public class CompareUtils {
 
     private static int compare(byte[] first, byte[] second) {
         for (int x = 0; x < min(first.length, second.length); x++) {
-            int cmp = first[x] - second[x];
+            int cmp = Byte.toUnsignedInt(first[x]) - Byte.toUnsignedInt(second[x]);
             if (cmp != 0) {
                 return cmp;
             }

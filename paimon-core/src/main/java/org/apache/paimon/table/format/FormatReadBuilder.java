@@ -19,18 +19,23 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileRecordReader;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -47,6 +52,7 @@ import org.apache.paimon.utils.RowRangeIndex;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -75,7 +81,24 @@ public class FormatReadBuilder implements ReadBuilder {
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
         this.readType = this.table.rowType();
-        this.options = new CoreOptions(table.options());
+        this.options = mergeCaseSensitive(table);
+    }
+
+    /**
+     * Case-sensitivity is a catalog-level property carried by {@link CatalogContext}, not part of
+     * the table options. Merge it onto the format options bus once so it flows naturally to the
+     * format readers via {@link org.apache.paimon.format.FileFormatFactory.FormatContext}.
+     */
+    private static CoreOptions mergeCaseSensitive(FormatTable table) {
+        CatalogContext ctx = table.catalogContext();
+        if (ctx == null) {
+            return new CoreOptions(table.options());
+        }
+        Options merged = new Options(table.options());
+        ctx.options()
+                .getOptional(CatalogOptions.CASE_SENSITIVE)
+                .ifPresent(v -> merged.set(CatalogOptions.CASE_SENSITIVE, v));
+        return new CoreOptions(merged);
     }
 
     @Override
@@ -159,9 +182,6 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
-        Path filePath = dataSplit.dataPath();
-        FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), filePath, dataSplit.fileSize(), null);
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -176,14 +196,30 @@ public class FormatReadBuilder implements ReadBuilder {
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), readType().getFields(), table.partitionType());
+
+        BinaryRow partition = dataSplit.partition();
+        List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
+        for (FormatDataSplit.FileMeta file : dataSplit.files()) {
+            suppliers.add(() -> createFileReader(file, partition, readerFactory, partitionMapping));
+        }
+        return ConcatRecordReader.create(suppliers);
+    }
+
+    private RecordReader<InternalRow> createFileReader(
+            FormatDataSplit.FileMeta file,
+            @Nullable BinaryRow partition,
+            FormatReaderFactory readerFactory,
+            Pair<int[], RowType> partitionMapping)
+            throws IOException {
+        FormatReaderContext formatReaderContext =
+                new FormatReaderContext(table.fileIO(), file.filePath(), file.fileSize(), null);
         try {
             FileRecordReader<InternalRow> reader;
-            Long length = dataSplit.length();
+            Long length = file.length();
             if (length != null) {
-                reader =
-                        readerFactory.createReader(formatReaderContext, dataSplit.offset(), length);
+                reader = readerFactory.createReader(formatReaderContext, file.offset(), length);
             } else {
-                checkArgument(dataSplit.offset() == 0, "Offset must be 0.");
+                checkArgument(file.offset() == 0, "Offset must be 0.");
                 reader = readerFactory.createReader(formatReaderContext);
             }
             return new DataFileRecordReader(
@@ -193,7 +229,7 @@ public class FormatReadBuilder implements ReadBuilder {
                     options.scanIgnoreLostFile(),
                     null,
                     null,
-                    PartitionUtils.create(partitionMapping, dataSplit.partition()),
+                    PartitionUtils.create(partitionMapping, partition),
                     false,
                     null,
                     0,

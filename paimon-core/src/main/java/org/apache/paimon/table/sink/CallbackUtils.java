@@ -29,8 +29,12 @@ import java.util.Map;
 /** Utils to load callbacks. */
 public class CallbackUtils {
 
-    public static List<TagCallback> loadTagCallbacks(CoreOptions coreOptions) {
-        return loadCallbacks(coreOptions.tagCallbacks(), TagCallback.class);
+    public static List<TagCallback> loadTagCallbacks(
+            CoreOptions coreOptions, FileStoreTable table) {
+        List<TagCallback> tagCallbacks =
+                loadCallbacks(coreOptions.tagCallbacks(), TagCallback.class);
+        tagCallbacks.forEach(callback -> callback.setTable(table));
+        return tagCallbacks;
     }
 
     public static List<CommitCallback> loadCommitCallbacks(

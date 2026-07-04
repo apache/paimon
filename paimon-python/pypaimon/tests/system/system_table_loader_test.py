@@ -28,8 +28,11 @@ _EXPECTED_SYSTEM_TABLES = (
     "manifests",
     "files",
     "partitions",
+    "buckets",
     "tags",
     "branches",
+    "file_key_ranges",
+    "table_indexes",
 )
 
 # Short names recognised by the Paimon catalog that this loader does
@@ -41,9 +44,6 @@ _UNREGISTERED_NAMES = {
     "consumers",
     "statistics",
     "aggregation_fields",
-    "buckets",
-    "file_key_ranges",
-    "table_indexes",
     "row_tracking",
     "all_tables",
     "all_partitions",

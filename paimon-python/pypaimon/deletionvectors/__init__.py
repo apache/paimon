@@ -17,11 +17,16 @@
 
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.deletionvectors.bitmap_deletion_vector import BitmapDeletionVector
-from pypaimon.deletionvectors.apply_deletion_vector_reader import ApplyDeletionVectorReader, ApplyDeletionRecordIterator
+from pypaimon.deletionvectors.apply_deletion_vector_reader import (
+    ApplyDeletionVectorReader,
+    ApplyDeletionRecordIterator,
+    PositionMappedDeletionVector,
+)
 
 __all__ = [
     'DeletionVector',
     'BitmapDeletionVector',
     'ApplyDeletionVectorReader',
-    'ApplyDeletionRecordIterator'
+    'ApplyDeletionRecordIterator',
+    'PositionMappedDeletionVector',
 ]

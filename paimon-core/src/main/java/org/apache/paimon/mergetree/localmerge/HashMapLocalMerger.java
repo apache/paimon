@@ -119,6 +119,11 @@ public class HashMapLocalMerger implements LocalMerger {
     }
 
     @Override
+    public boolean isEmpty() {
+        return buffer.getNumElements() == 0;
+    }
+
+    @Override
     public void forEach(Consumer<InternalRow> consumer) throws IOException {
         KeyValueIterator<BinaryRow, BinaryRow> iterator = buffer.getEntryIterator(false);
         while (iterator.advanceNext()) {

@@ -25,17 +25,26 @@ import org.apache.paimon.types.DataField;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /** Abstract base class for global indexers. */
 public interface GlobalIndexer {
 
     GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException;
 
-    GlobalIndexReader createReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
-            throws IOException;
+    GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            ExecutorService executor);
 
-    static GlobalIndexer create(String type, DataField dataField, Options options) {
+    static GlobalIndexer create(String type, DataField indexField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
-        return globalIndexerFactory.create(dataField, options);
+        return globalIndexerFactory.create(indexField, options);
+    }
+
+    static GlobalIndexer create(
+            String type, DataField indexField, List<DataField> extraFields, Options options) {
+        GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
+        return globalIndexerFactory.create(indexField, extraFields, options);
     }
 }

@@ -18,30 +18,23 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.commands.UpdatePaimonTableCommand
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.commands.{UpdatePaimonDataEvolutionTableCommand, UpdatePaimonTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, Assignment, LogicalPlan, UpdateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 
 import scala.collection.JavaConverters._
 
-object PaimonUpdateTable
-  extends Rule[LogicalPlan]
-  with RowLevelHelper
-  with AssignmentAlignmentHelper {
+object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper with ExpressionHelper {
 
   override val operation: RowLevelOp = Update
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    // Spark 4.1 moved RewriteUpdateTable from the "DML rewrite" batch into the main Resolution
-    // batch, which marks the logical plan as analyzed before the Post-Hoc Resolution batch runs.
-    // `plan.resolveOperators` then short-circuits on the already-analyzed UPDATE node, leaving the
-    // plan for Spark's physical planner to reject with "Table does not support UPDATE TABLE". Use
-    // `transformDown` (which unconditionally visits every node) guarded by
-    // `AnalysisHelper.allowInvokingTransformsInAnalyzer` so the in-analyzer assertion does not
-    // trip. The pattern guard keeps the rewrite restricted to fully resolved plans.
+    // Spark 4.1 marks the plan analyzed before postHoc runs, so `resolveOperators` would
+    // short-circuit. Use `transformDown` under `allowInvokingTransformsInAnalyzer` instead.
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
         case u @ UpdateTable(PaimonRelation(table), assignments, condition) if u.resolved =>
@@ -56,28 +49,54 @@ object PaimonUpdateTable
                 throw new RuntimeException("Can't update the primary key column.")
               }
 
-              if (paimonTable.coreOptions().dataEvolutionEnabled()) {
-                throw new RuntimeException(
-                  "Update operation is not supported when data evolution is enabled yet.")
-              }
-
-              val alignedExpressions =
-                generateAlignedExpressions(relation.output, assignments).zip(relation.output)
-
-              val alignedAssignments = alignedExpressions.map {
-                case (expression, field) => Assignment(field, expression)
-              }
+              // Align against `u.table.output`: for CHAR/VARCHAR columns the analyzer adds a
+              // `readSidePadding` Project whose output has different exprIds than `relation`, and
+              // the parsed assignment keys reference the Project's attributes. Order matches
+              // `relation.output` 1:1, so the subsequent zip stays correct.
+              val alignedAssignments = PaimonAssignmentUtils.alignUpdateAssignments(
+                u.table.output,
+                assignments,
+                fromStar = false,
+                mergeSchemaEnabled = false)
+              val alignedExpressions = alignedAssignments.map(_.value).zip(relation.output)
 
               val alignedUpdateTable = u.copy(assignments = alignedAssignments)
+              val dataEvolutionEnabled = paimonTable.coreOptions().dataEvolutionEnabled()
+
+              if (dataEvolutionEnabled) {
+                // The rewritten files keep the original row ids, which are derived from the
+                // file's firstRowId per partition; moving a row to another partition would need
+                // re-assigned row ids (delete + insert semantics).
+                val partitionKeys = paimonTable.partitionKeys().asScala.toSeq
+                if (!validUpdateAssignment(u.table.outputSet, partitionKeys, assignments)) {
+                  throw new RuntimeException(
+                    "Update to partition columns is not supported for data evolution tables.")
+                }
+              }
 
               if (!shouldFallbackToV1Update(table, alignedUpdateTable)) {
+                if (dataEvolutionEnabled) {
+                  // Data-evolution tables do not currently expose Spark V2 row-level operations.
+                  // Keep this guard in case capability rules change; this branch intentionally
+                  // implements only V1 data-evolution UPDATE.
+                  throw new RuntimeException(
+                    "Update operation is not supported when data evolution is enabled yet.")
+                }
                 alignedUpdateTable
               } else {
-                UpdatePaimonTableCommand(
-                  relation,
-                  paimonTable,
-                  condition.getOrElse(TrueLiteral),
-                  alignedExpressions)
+                if (dataEvolutionEnabled) {
+                  UpdatePaimonDataEvolutionTableCommand(
+                    relation,
+                    table,
+                    condition.getOrElse(TrueLiteral),
+                    alignedExpressions)
+                } else {
+                  UpdatePaimonTableCommand(
+                    relation,
+                    paimonTable,
+                    condition.getOrElse(TrueLiteral),
+                    alignedExpressions)
+                }
               }
 
             case _ =>

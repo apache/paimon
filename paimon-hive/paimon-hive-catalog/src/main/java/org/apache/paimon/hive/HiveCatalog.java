@@ -114,8 +114,10 @@ import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.format.csv.CsvOptions.FIELD_DELIMITER;
+import static org.apache.paimon.hive.HiveCatalogOptions.ALTER_TABLE_CASCADE;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_SKIP_UPDATE_STATS;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.hive.HiveTableUtils.tryToFormatSchema;
@@ -299,6 +301,27 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in call to listDatabases", e);
+        }
+    }
+
+    @Override
+    protected boolean tableExists(Identifier identifier) {
+        try {
+            boolean inHms =
+                    clients()
+                            .run(
+                                    client ->
+                                            client.tableExists(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName()));
+            return inHms || super.tableExists(identifier);
+        } catch (TException e) {
+            throw new RuntimeException(
+                    "Cannot determine if table " + identifier.getFullName() + " exists.", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                    "Interrupted in call to tableExists " + identifier.getFullName(), e);
         }
     }
 
@@ -1292,7 +1315,16 @@ public class HiveCatalog extends AbstractCatalog {
         Path location = getTableLocation(identifier, table);
         // file format is null, because only data table support alter table.
         updateHmsTable(table, identifier, newSchema, null, location);
-        clients().execute(client -> HiveAlterTableUtils.alterTable(client, identifier, table));
+        boolean skipUpdateStats = options.get(HIVE_SKIP_UPDATE_STATS);
+        clients()
+                .execute(
+                        client ->
+                                HiveAlterTableUtils.alterTable(
+                                        client,
+                                        identifier,
+                                        table,
+                                        skipUpdateStats,
+                                        options.get(ALTER_TABLE_CASCADE)));
     }
 
     @Override

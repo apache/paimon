@@ -92,6 +92,8 @@ public class SchemaManagerTest {
     private final List<String> primaryKeys = Arrays.asList("f0", "f1");
     private final Map<String, String> options = Collections.singletonMap("key", "value");
     private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
+    private final RowType rowTypeWithSequenceField =
+            RowType.of(new IntType(), new BigIntType(), new VarCharType(), new BigIntType());
     private final Schema schema =
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
@@ -166,6 +168,59 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @Test
+    public void testResetSequenceGroupForAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "sum");
+        options.put("fields.f3.sequence-group", "f2");
+        Schema schema =
+                new Schema(
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.removeOption(
+                                                                "fields.f3.sequence-group"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field f2.");
+    }
+
+    @Test
+    public void testResetSequenceGroupForLastNonNullAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.f2.aggregate-function", "last_non_null_value");
+        options.put("fields.f3.sequence-group", "f2");
+        Schema schema =
+                new Schema(
+                        rowTypeWithSequenceField.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.removeOption("fields.f3.sequence-group")));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest.isPresent()).isTrue();
+        assertThat(latest.get().options()).doesNotContainKey("fields.f3.sequence-group");
     }
 
     @Test
@@ -458,6 +513,72 @@ public class SchemaManagerTest {
                                         SchemaChange.setOption("merge-engine", "deduplicate")))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
+    }
+
+    @Test
+    public void testCopyWithPrimaryKeyInOptions() throws Exception {
+        // Table created with primary-key in options — normalizePrimaryKeys strips it from the
+        // options map and stores it in the dedicated primaryKeys field. When the same value
+        // reappears in dynamicOptions (e.g. Spark 4.x merging Table.properties() into scan
+        // options), the immutability check should recognize it hasn't actually changed.
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("primary-key", "f0,f1");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        FileStoreTable copied = table.copy(Collections.singletonMap("primary-key", "f0,f1"));
+        assertThatCode(() -> copied.schema().toSchema()).doesNotThrowAnyException();
+        assertThat(copied.schema().options()).doesNotContainKey("primary-key");
+        assertThat(
+                        SchemaManager.isUnchangedNormalizedKey(
+                                "primary-key", null, null, copied.schema()))
+                .isFalse();
+    }
+
+    @Test
+    public void testAlterUnchangedNormalizedOptionsOnNonEmptyTable() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put("primary-key", "f0,f1");
+        tableOptions.put("partition", "f0");
+        tableOptions.put("bucket", "1");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        TableSchema latest =
+                manager.commitChanges(
+                        SchemaChange.setOption("primary-key", "f0,f1"),
+                        SchemaChange.setOption("partition", "f0"));
+        assertThat(latest.primaryKeys()).containsExactly("f0", "f1");
+        assertThat(latest.partitionKeys()).containsExactly("f0");
+        assertThat(latest.options()).doesNotContainKeys("primary-key", "partition");
+        assertThatCode(latest::toSchema).doesNotThrowAnyException();
     }
 
     @Test

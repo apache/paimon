@@ -41,7 +41,10 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -70,34 +73,46 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "partitions",
                         type = @DataTypeHint("STRING"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String indexColumn,
             String indexType,
-            String partitions)
+            @Nullable String partitions,
+            @Nullable Boolean dryRun)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
 
-        // Validate column exists
+        // Parse comma-separated columns (consistent with create procedure)
         RowType rowType = table.rowType();
-        checkArgument(
-                rowType.containsField(indexColumn),
-                "Column '%s' does not exist in table '%s'.",
-                indexColumn,
-                tableId);
+        List<String> indexColumns =
+                Arrays.stream(indexColumn.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        checkArgument(!indexColumns.isEmpty(), "At least one column required.");
+        for (String col : indexColumns) {
+            checkArgument(
+                    rowType.containsField(col),
+                    "Column '%s' does not exist in table '%s'.",
+                    col,
+                    tableId);
+        }
+        final List<Integer> indexFieldIds =
+                indexColumns.stream()
+                        .map(col -> rowType.getField(col).id())
+                        .collect(Collectors.toList());
+        final String columnsDesc = String.join(",", indexColumns);
 
         // Parse partition predicate
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
 
         // Normalize index type
         final String indexTypeLower = indexType.toLowerCase().trim();
-
-        // Get column field ID for final reference in lambda
-        final int columnId = rowType.getField(indexColumn).id();
 
         // Get latest snapshot
         Snapshot snapshot =
@@ -108,12 +123,15 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                                                 String.format(
                                                         "Table '%s' has no snapshot.", tableId)));
 
-        // Create filter for index entries to delete
+        // Create filter for index entries to delete — match by primary column + full column set
         Filter<IndexManifestEntry> filter =
                 entry ->
                         entry.indexFile().indexType().equals(indexTypeLower)
                                 && entry.indexFile().globalIndexMeta() != null
-                                && entry.indexFile().globalIndexMeta().indexFieldId() == columnId
+                                && entry.indexFile()
+                                        .globalIndexMeta()
+                                        .getIndexedFieldIds()
+                                        .equals(indexFieldIds)
                                 && (partitionPredicate == null
                                         || partitionPredicate.test(entry.partition()));
 
@@ -122,15 +140,30 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                 table.store().newIndexFileHandler().scan(snapshot, filter);
 
         LOG.info(
-                "Found {} {} global index files to delete for column '{}' on table '{}'",
+                "Found {} {} global index files to delete for columns '{}' on table '{}'",
                 waitToDelete.size(),
                 indexTypeLower,
-                indexColumn,
+                columnsDesc,
                 table.name());
+
+        // Dry run: report what would be dropped without committing any change.
+        if (dryRun != null && dryRun) {
+            return new String[] {
+                "Dry run: "
+                        + waitToDelete.size()
+                        + " "
+                        + indexTypeLower
+                        + " global index files would be dropped for columns '"
+                        + columnsDesc
+                        + "' on table '"
+                        + table.name()
+                        + "'"
+            };
+        }
 
         if (waitToDelete.isEmpty()) {
             return new String[] {
-                "No " + indexTypeLower + " global index found for column '" + indexColumn + "'"
+                "No " + indexTypeLower + " global index found for columns '" + columnsDesc + "'"
             };
         }
 
@@ -165,10 +198,10 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
         }
 
         LOG.info(
-                "Successfully dropped {} {} global index files for column '{}' on table '{}'",
+                "Successfully dropped {} {} global index files for columns '{}' on table '{}'",
                 waitToDelete.size(),
                 indexTypeLower,
-                indexColumn,
+                columnsDesc,
                 table.name());
 
         return new String[] {
@@ -176,8 +209,8 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                     + waitToDelete.size()
                     + " "
                     + indexTypeLower
-                    + " global index files for column '"
-                    + indexColumn
+                    + " global index files for columns '"
+                    + columnsDesc
                     + "' on table '"
                     + table.name()
                     + "'"

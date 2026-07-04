@@ -32,7 +32,7 @@ class FileType(Enum):
             hint files, _SUCCESS, consumer, service files
     - DATA: data files and any unrecognized files (default)
     - BUCKET_INDEX: bucket level index files (Hash, DV)
-    - GLOBAL_INDEX: table level global index files (btree, bitmap, lumina, tantivy)
+    - GLOBAL_INDEX: table level global index files (btree, lumina, tantivy)
     - FILE_INDEX: data-file index files (bloom filter, bitmap, etc.)
     """
     META = "META"

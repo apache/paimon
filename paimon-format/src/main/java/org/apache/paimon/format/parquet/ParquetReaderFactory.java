@@ -28,6 +28,7 @@ import org.apache.paimon.data.variant.VariantPathSegment;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.ArrayType;
@@ -35,6 +36,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
@@ -81,6 +83,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final Options conf;
     private final DataField[] readFields;
     private final int batchSize;
+    private final boolean caseSensitive;
     @Nullable private final FilterCompat.Filter filter;
 
     /**
@@ -101,6 +104,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         this.conf = conf;
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
+        this.caseSensitive = conf.getOptional(CatalogOptions.CASE_SENSITIVE).orElse(true);
         this.filter = filter;
     }
 
@@ -134,8 +138,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     requestedSchema.messageType);
         }
 
+        int actualBatchSize = computeBatchSize(reader, requestedSchema.messageType);
+        Preconditions.checkArgument(
+                actualBatchSize > 0,
+                "Parquet read batch size should be positive: %s",
+                actualBatchSize);
         reader.setRequestedSchema(requestedSchema.messageType);
-        WritableColumnVector[] writableVectors = createWritableVectors();
+        WritableColumnVector[] writableVectors = createWritableVectors(actualBatchSize);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),
@@ -143,7 +152,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 fileSchema,
                 requestedSchema.fields,
                 writableVectors,
-                batchSize,
+                actualBatchSize,
                 context.fileIO());
     }
 
@@ -169,19 +178,45 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Type[] types = new Type[readFields.length];
         for (int i = 0; i < readFields.length; ++i) {
             String fieldName = readFields[i].name();
-            if (!parquetSchema.containsField(fieldName)) {
+            Type matched = matchParquetField(parquetSchema, fieldName);
+            if (matched != null) {
+                types[i] = clipParquetType(readFields[i].type(), matched);
+            } else {
                 LOG.warn(
                         "{} does not exist in {}, will fill the field with null.",
                         fieldName,
                         parquetSchema);
                 types[i] = ParquetSchemaConverter.convertToParquetType(readFields[i]);
-            } else {
-                Type parquetType = parquetSchema.getType(fieldName);
-                types[i] = clipParquetType(readFields[i].type(), parquetType);
             }
         }
 
         return Types.buildMessage().addFields(types).named(PAIMON_SCHEMA);
+    }
+
+    /**
+     * Resolves a field of {@code group} by {@code fieldName}, returning {@code null} when no field
+     * matches. In case-sensitive mode only an exact-name match is accepted. In case-insensitive
+     * mode a name that matches more than one parquet field (differing only by case) is ambiguous
+     * and fails, mirroring Spark's case-insensitive Parquet resolution.
+     */
+    @Nullable
+    private Type matchParquetField(GroupType group, String fieldName) {
+        if (caseSensitive) {
+            return group.containsField(fieldName) ? group.getType(fieldName) : null;
+        }
+        Type matched = null;
+        for (Type field : group.getFields()) {
+            if (field.getName().equalsIgnoreCase(fieldName)) {
+                if (matched != null) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Found duplicate field(s) \"%s\": [%s, %s] in case-insensitive mode",
+                                    fieldName, matched.getName(), field.getName()));
+                }
+                matched = field;
+            }
+        }
+        return matched;
     }
 
     /** Clips `parquetType` by `readType`. */
@@ -196,8 +231,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 List<Type> rowGroupFields = new ArrayList<>();
                 for (DataField field : rowType.getFields()) {
                     String fieldName = field.name();
-                    if (rowGroup.containsField(fieldName)) {
-                        Type type = rowGroup.getType(fieldName);
+                    Type type = matchParquetField(rowGroup, fieldName);
+                    if (type != null) {
                         rowGroupFields.add(clipParquetType(field.type(), type));
                     } else {
                         // todo: support nested field missing
@@ -220,7 +255,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         clipParquetType(mapType.getKeyType(), keyValueType.getLeft()),
                         clipParquetType(mapType.getValueType(), keyValueType.getRight()));
             case ARRAY:
-                ArrayType arrayType = (ArrayType) readType;
+            case VECTOR:
+                DataType elementReadType =
+                        readType instanceof ArrayType
+                                ? ((ArrayType) readType).getElementType()
+                                : ((VectorType) readType).getElementType();
                 GroupType arrayGroup = (GroupType) parquetType;
                 int listSubFields = arrayGroup.getFieldCount();
                 Preconditions.checkArgument(
@@ -231,8 +270,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 // https://impala.apache.org/docs/build/html/topics/impala_parquet_array_resolution.html.
                 int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
                 Type elementType =
-                        clipParquetType(
-                                arrayType.getElementType(), parquetListElementType(arrayGroup));
+                        clipParquetType(elementReadType, parquetListElementType(arrayGroup));
 
                 if (level == 3) {
                     // In case that the name in middle level is not "list".
@@ -310,7 +348,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return parquetType.withNewFields(rowGroupFields);
     }
 
-    private WritableColumnVector[] createWritableVectors() {
+    /**
+     * Compute the batch size to use for the given file. Subclasses can override this to implement
+     * dynamic per-file batch sizing based on footer metadata. The default implementation returns
+     * the static {@code batchSize} passed to the constructor.
+     */
+    protected int computeBatchSize(ParquetFileReader reader, MessageType requestedSchema) {
+        return batchSize;
+    }
+
+    private WritableColumnVector[] createWritableVectors(int batchSize) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
             columns[i] = createWritableColumnVector(batchSize, readFields[i].type());

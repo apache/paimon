@@ -325,6 +325,10 @@ public interface PartitionPredicate extends Serializable {
             this.predicates = Collections.unmodifiableList(new ArrayList<>(predicates));
         }
 
+        public List<PartitionPredicate> predicates() {
+            return predicates;
+        }
+
         @Override
         public boolean test(BinaryRow partition) {
             for (PartitionPredicate predicate : predicates) {

@@ -60,6 +60,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Override
+    protected Map<String, String> catalogOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put("catalog-options-table.enabled", "true");
+        return options;
+    }
+
+    @Override
     protected boolean inferScanParallelism() {
         return true;
     }
@@ -183,7 +190,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testCatalogOptionsTable() {
         List<Row> result = sql("SELECT * FROM sys.catalog_options");
-        assertThat(result).containsExactly(Row.of("warehouse", path));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("catalog-options-table.enabled", "true"), Row.of("warehouse", path));
     }
 
     @Test
@@ -1171,7 +1180,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CALL sys.create_branch('default.T', 'stream')");
         sql("ALTER TABLE T SET ('scan.fallback-branch' = 'stream')");
         sql(
-                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'lookup')");
+                "ALTER TABLE T$branch_stream SET ('primary-key' = 'k,v', 'bucket' = '2','changelog-producer' = 'full-compaction')");
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql("show create table T$branch_stream");

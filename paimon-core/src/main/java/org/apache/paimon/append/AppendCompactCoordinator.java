@@ -387,16 +387,11 @@ public class AppendCompactCoordinator {
         }
 
         private AppendDeleteFileMaintainer dvMaintainer(BinaryRow partition) {
-            AppendDeleteFileMaintainer maintainer = cache.get(partition);
-            if (maintainer == null) {
-                synchronized (this) {
-                    maintainer =
+            return cache.computeIfAbsent(
+                    partition,
+                    p ->
                             BaseAppendDeleteFileMaintainer.forUnawareAppend(
-                                    indexFileHandler, snapshotManager.latestSnapshot(), partition);
-                }
-                cache.put(partition, maintainer);
-            }
-            return maintainer;
+                                    indexFileHandler, snapshotManager.latestSnapshot(), p));
         }
     }
 

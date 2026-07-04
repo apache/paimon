@@ -509,8 +509,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                     + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
                                     + "' or '"
                                     + CoreOptions.BLOB_VIEW_FIELD.key()
-                                    + "' or '"
-                                    + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
                                     + "') can be updated.");
                 }
 

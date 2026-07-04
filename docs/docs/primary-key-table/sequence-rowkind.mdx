@@ -71,3 +71,50 @@ By default, the primary key table determines the row kind according to the input
 `'rowkind.field'` to use a field to extract row kind.
 
 The valid row kind string should be `'+I'`, `'-U'`, `'+U'` or `'-D'`.
+
+## Snapshot Ordering
+
+In multi-writer scenarios where wall-clock sequence numbers cannot be globally ordered across writers,
+you can enable `'sequence.snapshot-ordering'` to use the commit snapshot id as the ordering key when
+merging records with the same primary key. Records from later snapshots are considered newer,
+regardless of their per-record sequence number.
+
+<Tabs>
+<TabItem value="flink" label="Flink">
+
+```sql
+CREATE TABLE my_table (
+    pk BIGINT PRIMARY KEY NOT ENFORCED,
+    v1 DOUBLE,
+    v2 BIGINT
+) WITH (
+    'sequence.snapshot-ordering' = 'true',
+    'write-only' = 'true'
+);
+```
+
+</TabItem>
+</Tabs>
+
+:::warning
+This option requires `'write-only' = 'true'`. Compaction must be performed by a separate dedicated
+compact job. This ensures that compaction correctly preserves the snapshot id of each record.
+:::
+
+:::info
+`'sequence.snapshot-ordering'` is mutually exclusive with `'sequence.field'`. You cannot enable both
+on the same table.
+:::
+
+:::info
+The ordering key is the commit snapshot id only; the order of records **within the same snapshot** is
+not guaranteed, and this is by design. Under the default configuration it is harmless: a writer
+buffers a commit's writes (`'write-buffer-spillable' = 'true'`) and runs them through the merge
+function before flushing, so at most one record per primary key is written per snapshot — the common
+case is fully covered. We therefore deliberately do not handle the case where the same key is spread
+across multiple files of one snapshot. That case only arises with `'write-buffer-spillable' = 'false'`,
+or when the spilled data exceeds `'write-buffer-spill-disk-size'`, where the buffer may be flushed
+mid-commit; the same key can then land in multiple files of the same snapshot with equal sequence
+numbers and their relative order becomes undefined. This affects only intra-snapshot order, never the
+cross-snapshot ordering this feature provides.
+:::

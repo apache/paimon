@@ -208,6 +208,36 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @MethodSource("parameters1")
+    public void testBatchReadDVTableWithMergeOnRead(String changelogProducer, boolean dvBitmap64) {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s', "
+                                + "'deletion-vectors.bitmap64' = '%s', 'write-only' = 'true', 'bucket' = '1')",
+                        changelogProducer, dvBitmap64));
+
+        sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
+
+        sql("INSERT INTO T VALUES (2, '2_1'), (3, '3_1')");
+
+        sql("INSERT INTO T VALUES (2, '2_2'), (4, '4_1')");
+
+        // write-only with fixed bucket, all files at level 0, not visible without merge-on-read
+        assertThat(batchSql("SELECT * FROM T")).isEmpty();
+
+        // with merge-on-read enabled, level 0 data becomes visible via MOR
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('deletion-vectors.merge-on-read'='true') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "111111111"),
+                        Row.of(2, "2_2"),
+                        Row.of(3, "3_1"),
+                        Row.of(4, "4_1"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("parameters1")
     public void testDVTableWithAggregationMergeEngine(String changelogProducer, boolean dvBitmap64)
             throws Exception {
         sql(
@@ -310,6 +340,28 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 3, "1_2"), Row.of(2, 2, "2_1"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testBatchReadDVTableWithOutOfOrderSequenceFieldAndAggregation(boolean dvBitmap64) {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, sequence INT, v INT) "
+                                + "WITH ("
+                                + "'deletion-vectors.enabled' = 'true', "
+                                + "'deletion-vectors.bitmap64' = '%s', "
+                                + "'changelog-producer' = 'none', "
+                                + "'sequence.field' = 'sequence', "
+                                + "'merge-engine' = 'aggregation', "
+                                + "'fields.v.aggregate-function' = 'sum')",
+                        dvBitmap64));
+
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'true') */ VALUES (1, 7, 7)");
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'true') */ VALUES (1, 8, 8)");
+        sql("INSERT INTO T /*+ OPTIONS('write-only' = 'false') */ VALUES (1, 6, 6)");
+
+        assertThat(batchSql("SELECT * FROM T")).containsExactly(Row.of(1, 8, 21));
     }
 
     @ParameterizedTest

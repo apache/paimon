@@ -296,6 +296,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                         coreOptions(),
                         newSnapshotReader(),
                         catalogEnvironment.tableQueryAuth(coreOptions()));
+        Integer scanBucket = coreOptions().scanBucket();
+        if (scanBucket != null) {
+            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
+            scan.withBucket(scanBucket);
+        }
         if (coreOptions().dataEvolutionEnabled()) {
             return new DataEvolutionBatchScan(this, scan);
         }
@@ -304,15 +309,22 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return new DataTableStreamScan(
-                tableSchema,
-                coreOptions(),
-                newSnapshotReader(),
-                snapshotManager(),
-                changelogManager(),
-                supportStreamingReadOverwrite(),
-                catalogEnvironment.tableQueryAuth(coreOptions()),
-                !tableSchema.primaryKeys().isEmpty());
+        DataTableStreamScan scan =
+                new DataTableStreamScan(
+                        tableSchema,
+                        coreOptions(),
+                        newSnapshotReader(),
+                        snapshotManager(),
+                        changelogManager(),
+                        supportStreamingReadOverwrite(),
+                        catalogEnvironment.tableQueryAuth(coreOptions()),
+                        !tableSchema.primaryKeys().isEmpty());
+        Integer scanBucket = coreOptions().scanBucket();
+        if (scanBucket != null) {
+            DataTableBatchScan.validateScanBucketOption(tableSchema, coreOptions(), scanBucket);
+            scan.withBucket(scanBucket);
+        }
+        return scan;
     }
 
     protected abstract SplitGenerator splitGenerator();
@@ -337,7 +349,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         dynamicOptions.forEach(
                 (k, newValue) -> {
                     String oldValue = oldOptions.get(k);
-                    if (!Objects.equals(oldValue, newValue)) {
+                    if (!Objects.equals(oldValue, newValue)
+                            && !SchemaManager.isUnchangedNormalizedKey(
+                                    k, oldValue, newValue, tableSchema)) {
                         SchemaManager.checkAlterTableOption(oldOptions, k, oldValue, newValue);
                     }
                 });
@@ -347,12 +361,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
-        // merge non-null dynamic options into schema.options
+        // merge dynamic options into schema.options
         dynamicOptions.forEach(
                 (k, v) -> {
                     if (v == null) {
                         options.remove(k);
-                    } else {
+                    } else if (!SchemaManager.isUnchangedNormalizedKey(
+                            k, tableSchema.options().get(k), v, tableSchema)) {
                         options.put(k, v);
                     }
                 });
@@ -374,7 +389,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
 
         return copy(newTableSchema);
     }
@@ -383,9 +398,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public FileStoreTable copyWithLatestSchema() {
         Optional<TableSchema> optionalLatestSchema = schemaManager().latest();
         if (optionalLatestSchema.isPresent()) {
-            Map<String, String> options = tableSchema.options();
-            TableSchema newTableSchema = optionalLatestSchema.get();
-            newTableSchema = newTableSchema.copy(options);
+            TableSchema latestSchema = optionalLatestSchema.get();
+            Map<String, String> mergedOptions = new HashMap<>(latestSchema.options());
+            mergedOptions.putAll(tableSchema.options());
+            TableSchema newTableSchema = latestSchema.copy(mergedOptions);
             SchemaValidation.validateTableSchema(newTableSchema);
             return copy(newTableSchema);
         } else {

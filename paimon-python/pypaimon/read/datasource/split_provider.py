@@ -67,6 +67,17 @@ class SplitProvider(ABC):
         """
         return None
 
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        """Parallel name paths for a nested-leaf projection, or ``None``.
+
+        Forwarded to the per-task ``TableRead`` so a projection like
+        ``['mv.latest_value.x']`` is read by widening to the parent struct and
+        extracting the requested leaves. Without it the worker treats the
+        flattened leaf names as missing top-level columns and reads every
+        projected leaf as NULL.
+        """
+        return None
+
 
 class CatalogSplitProvider(SplitProvider):
     """Plan splits from a fully-qualified table identifier and catalog options.
@@ -85,15 +96,34 @@ class CatalogSplitProvider(SplitProvider):
         limit: Optional[int] = None,
         snapshot_id: Optional[int] = None,
         tag_name: Optional[str] = None,
+        dynamic_options: Optional[Dict[str, str]] = None,
     ):
         if not table_identifier:
             raise ValueError("table_identifier is required")
         if catalog_options is None:
             raise ValueError("catalog_options is required")
+        from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+        scan_keys = set(SCAN_KEYS)
+
         if snapshot_id is not None and tag_name is not None:
             raise ValueError(
                 "snapshot_id and tag_name cannot be set at the same time"
             )
+
+        if dynamic_options:
+            dynamic_tt_keys = scan_keys & dynamic_options.keys()
+            if (snapshot_id is not None or tag_name is not None) and dynamic_tt_keys:
+                raise ValueError(
+                    "snapshot_id/tag_name and dynamic_options "
+                    "time-travel keys cannot be set at the same time, "
+                    "got: {}".format(", ".join(sorted(dynamic_tt_keys)))
+                )
+            if len(dynamic_tt_keys) > 1:
+                raise ValueError(
+                    "dynamic_options contains multiple time-travel "
+                    "keys which are mutually exclusive: {}".format(
+                        ", ".join(sorted(dynamic_tt_keys)))
+                )
         self._table_identifier = table_identifier
         self._catalog_options = catalog_options
         self._predicate = predicate
@@ -101,22 +131,26 @@ class CatalogSplitProvider(SplitProvider):
         self._limit = limit
         self._snapshot_id = snapshot_id
         self._tag_name = tag_name
+        self._dynamic_options = dynamic_options
         self._table_cached = None
         self._splits_cached = None
         self._read_type_cached = None
+        self._nested_name_paths_cached = None
 
     def _ensure_table(self):
         if self._table_cached is None:
             from pypaimon.catalog.catalog_factory import CatalogFactory
             catalog = CatalogFactory.create(self._catalog_options)
             table = catalog.get_table(self._table_identifier)
-            travel_options = {}
+            dynamic_options = {}
             if self._snapshot_id is not None:
-                travel_options["scan.snapshot-id"] = str(self._snapshot_id)
+                dynamic_options["scan.snapshot-id"] = str(self._snapshot_id)
             if self._tag_name is not None:
-                travel_options["scan.tag-name"] = self._tag_name
-            if travel_options:
-                table = table.copy(travel_options)
+                dynamic_options["scan.tag-name"] = self._tag_name
+            if self._dynamic_options:
+                dynamic_options.update(self._dynamic_options)
+            if dynamic_options:
+                table = table.copy(dynamic_options)
             self._table_cached = table
         return self._table_cached
 
@@ -132,6 +166,7 @@ class CatalogSplitProvider(SplitProvider):
         if self._limit is not None:
             rb = rb.with_limit(self._limit)
         self._read_type_cached = rb.read_type()
+        self._nested_name_paths_cached = rb._nested_name_paths()
         self._splits_cached = rb.new_scan().plan().splits()
 
     @property
@@ -148,6 +183,10 @@ class CatalogSplitProvider(SplitProvider):
     def read_type(self):
         self._ensure_planned()
         return self._read_type_cached
+
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        self._ensure_planned()
+        return self._nested_name_paths_cached
 
     def predicate(self):
         return self._predicate
@@ -168,12 +207,13 @@ class PreResolvedSplitProvider(SplitProvider):
     """
 
     def __init__(self, table, splits: List[Split], read_type, predicate=None,
-                 limit: Optional[int] = None):
+                 limit: Optional[int] = None, nested_name_paths=None):
         self._table = table
         self._splits = splits
         self._read_type = read_type
         self._predicate = predicate
         self._limit = limit
+        self._nested_name_paths = nested_name_paths
 
     def table(self):
         return self._table
@@ -183,6 +223,9 @@ class PreResolvedSplitProvider(SplitProvider):
 
     def read_type(self):
         return self._read_type
+
+    def nested_name_paths(self) -> Optional[List[List[str]]]:
+        return self._nested_name_paths
 
     def predicate(self):
         return self._predicate

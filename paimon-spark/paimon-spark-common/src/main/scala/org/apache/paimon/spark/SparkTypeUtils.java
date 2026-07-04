@@ -44,6 +44,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.DataType;
@@ -68,6 +69,9 @@ public class SparkTypeUtils {
      * Copy here from Spark ResolveDefaultColumnsUtils for old Spark versions.
      */
     public static final String CURRENT_DEFAULT_COLUMN_METADATA_KEY = "CURRENT_DEFAULT";
+
+    // Spark SQL functions store DEFAULT in a different metadata key than table columns.
+    public static final String SQL_FUNCTION_DEFAULT_METADATA_KEY = "default";
 
     public static RowType toPartitionType(Table table) {
         int[] projections = table.rowType().getFieldIndices(table.partitionKeys());
@@ -96,6 +100,23 @@ public class SparkTypeUtils {
 
     public static org.apache.paimon.types.DataType toPaimonType(DataType dataType) {
         return SparkToPaimonTypeVisitor.visit(dataType);
+    }
+
+    public static boolean containsCharType(org.apache.paimon.types.DataType type) {
+        if (type instanceof CharType) {
+            return true;
+        } else if (type instanceof RowType) {
+            return ((RowType) type).getFields().stream()
+                    .anyMatch(field -> containsCharType(field.type()));
+        } else if (type instanceof ArrayType) {
+            return containsCharType(((ArrayType) type).getElementType());
+        } else if (type instanceof MapType) {
+            MapType mapType = (MapType) type;
+            return containsCharType(mapType.getKeyType()) || containsCharType(mapType.getValueType());
+        } else if (type instanceof MultisetType) {
+            return containsCharType(((MultisetType) type).getElementType());
+        }
+        return false;
     }
 
     /**
@@ -127,8 +148,12 @@ public class SparkTypeUtils {
         } else if (sparkDataType instanceof org.apache.spark.sql.types.ArrayType) {
             org.apache.spark.sql.types.ArrayType s =
                     (org.apache.spark.sql.types.ArrayType) sparkDataType;
-            ArrayType r = (ArrayType) paimonDataType;
-            return r.newElementType(prunePaimonType(s.elementType(), r.getElementType()));
+            if (paimonDataType instanceof VectorType) {
+                return paimonDataType;
+            } else {
+                ArrayType r = (ArrayType) paimonDataType;
+                return r.newElementType(prunePaimonType(s.elementType(), r.getElementType()));
+            }
         } else {
             return paimonDataType;
         }
@@ -243,6 +268,11 @@ public class SparkTypeUtils {
         }
 
         @Override
+        public DataType visit(VectorType vectorType) {
+            return DataTypes.createArrayType(vectorType.getElementType().accept(this), false);
+        }
+
+        @Override
         public DataType visit(MultisetType multisetType) {
             return DataTypes.createMapType(
                     multisetType.getElementType().accept(this), DataTypes.IntegerType, false);
@@ -267,6 +297,7 @@ public class SparkTypeUtils {
                 MetadataBuilder metadataBuilder = new MetadataBuilder();
                 if (field.defaultValue() != null) {
                     metadataBuilder.putString(CURRENT_DEFAULT_COLUMN_METADATA_KEY, field.defaultValue());
+                    metadataBuilder.putString(SQL_FUNCTION_DEFAULT_METADATA_KEY, field.defaultValue());
                 }
                 StructField structField =
                         DataTypes.createStructField(
@@ -353,6 +384,9 @@ public class SparkTypeUtils {
                 if (field.metadata().contains(CURRENT_DEFAULT_COLUMN_METADATA_KEY)) {
                     defaultValue =
                             field.metadata().getString(CURRENT_DEFAULT_COLUMN_METADATA_KEY);
+                } else if (field.metadata().contains(SQL_FUNCTION_DEFAULT_METADATA_KEY)) {
+                    defaultValue =
+                            field.metadata().getString(SQL_FUNCTION_DEFAULT_METADATA_KEY);
                 }
                 newFields.add(
                         new DataField(

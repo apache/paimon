@@ -105,6 +105,38 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testLookupChangelogProducerWithOutOfOrderSequenceField() throws Exception {
+        sql(
+                "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, seq INT, v INT) WITH ("
+                        + "'bucket'='1', "
+                        + "'changelog-producer'='lookup', "
+                        + "'merge-engine'='aggregation', "
+                        + "'sequence.field'='seq', "
+                        + "'fields.v.aggregate-function'='sum', "
+                        + "'num-sorted-run.compaction-trigger'='2')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
+
+        sql("INSERT INTO T VALUES (1, 7, 7)");
+        assertThat(iterator.collect(1)).containsExactly(Row.of(1, 7, 7));
+
+        sql("INSERT INTO T VALUES (1, 8, 8)");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 7, 7),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 8, 15));
+
+        sql("INSERT INTO T VALUES (1, 6, 6)");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 8, 15),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 8, 21));
+
+        iterator.close();
+
+        assertThat(sql("SELECT * FROM T")).containsExactly(Row.of(1, 8, 21));
+    }
+
+    @Test
     public void testLookupChangelogProducerWithProjection() {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v1 INT, v2 INT) WITH ("

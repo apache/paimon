@@ -721,4 +721,50 @@ public class ChainTableUtilsTest {
         // (US, Beijing, 20250731) → country mismatch → no match
         assertThat(predicate.test(row(Lists.newArrayList("US", "Beijing", "20250731")))).isFalse();
     }
+
+    @Test
+    public void testFindFirstLatestPartitionsWithMultiChainKeys() {
+        // partition keys: (dt, hour), chain keys: (dt, hour)
+        RowType fullType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 2);
+
+        // Snapshot partitions with same dt but different hour
+        BinaryRow snap1 = row(Lists.newArrayList("20250809", "01"));
+        BinaryRow snap2 = row(Lists.newArrayList("20250809", "02"));
+        List<BinaryRow> snapshotPartitions = Arrays.asList(snap1, snap2);
+
+        // Delta partitions
+        BinaryRow delta1 = row(Lists.newArrayList("20250810", "03"));
+        BinaryRow delta2 = row(Lists.newArrayList("20250810", "05"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1, delta2);
+
+        RecordComparator chainComparator =
+                (a, b) -> {
+                    int cmp = a.getString(0).compareTo(b.getString(0));
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                    return a.getString(1).compareTo(b.getString(1));
+                };
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, snapshotPartitions, chainComparator, projector);
+
+        // delta (20250810,03) → snapshot (20250809,02) (nearest earlier)
+        BinaryRow matched1 = mapping.get(delta1);
+        assertThat(matched1).isNotNull();
+        assertThat(getString(matched1, 0)).isEqualTo("20250809");
+        assertThat(getString(matched1, 1)).isEqualTo("02");
+
+        // delta (20250810,05) → snapshot (20250809,02) (nearest earlier)
+        BinaryRow matched2 = mapping.get(delta2);
+        assertThat(matched2).isNotNull();
+        assertThat(getString(matched2, 0)).isEqualTo("20250809");
+        assertThat(getString(matched2, 1)).isEqualTo("02");
+    }
 }

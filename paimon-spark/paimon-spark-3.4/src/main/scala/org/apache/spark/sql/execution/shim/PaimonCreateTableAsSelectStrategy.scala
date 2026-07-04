@@ -18,13 +18,16 @@
 
 package org.apache.spark.sql.execution.shim
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.FormatTableCatalog
+import org.apache.paimon.spark.write.PaimonWriteOptions
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
-import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan}
+import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan}
+import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
 import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -32,7 +35,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
   extends Strategy
-  with PaimonStrategyHelper {
+  with PaimonTableAsSelectHelper {
 
   import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
 
@@ -46,7 +49,8 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           ifNotExists,
           analyzedQuery) =>
       assert(analyzedQuery.isDefined)
-      val (tableOptions, writeOptions) = PaimonStrategyHelper.splitTableAndWriteOptions(options)
+      val (tableOptions, writeOptions) =
+        splitTableAndWriteOptions(options)
       val qualifiedSpec = qualifyTableSpec(tableSpec, tableOptions)
 
       val isPartitionedFormatTable = {
@@ -69,7 +73,10 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
         analyzedQuery.get,
         planLater(query),
         qualifiedSpec,
-        new CaseInsensitiveStringMap(writeOptions.asJava),
+        new CaseInsensitiveStringMap(
+          (writeOptions +
+            (PaimonWriteOptions.OPERATION_OPTION -> Snapshot.Operation.CREATE_TABLE_AS_SELECT
+              .name())).asJava),
         ifNotExists
       ) :: Nil
     case _ => Nil

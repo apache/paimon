@@ -29,6 +29,7 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
@@ -38,6 +39,7 @@ import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.lookup.LookupSerializerFactory;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
+import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -52,9 +54,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
@@ -63,7 +67,7 @@ import static org.apache.paimon.mergetree.LookupFile.localFilePrefix;
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
 
-    private final Map<BinaryRow, Map<Integer, LookupLevels<KeyValue>>> tableView;
+    private final Map<BinaryRow, Map<Integer, BucketLookupState>> tableView;
 
     private final CoreOptions options;
 
@@ -77,16 +81,17 @@ public class LocalTableQuery implements TableQuery {
 
     private IOManager ioManager;
 
-    @Nullable private Cache<String, LookupFile> lookupFileCache;
+    @Nullable private volatile Cache<String, LookupFile> lookupFileCache;
 
     private final RowType rowType;
     private final RowType partitionType;
+    private final FileIO fileIO;
 
     @Nullable private Filter<InternalRow> cacheRowFilter;
 
     public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
-        this.tableView = new HashMap<>();
+        this.tableView = new ConcurrentHashMap<>();
         FileStore<?> tableStore = table.store();
         if (!(tableStore instanceof KeyValueFileStore)) {
             throw new UnsupportedOperationException(
@@ -97,6 +102,7 @@ public class LocalTableQuery implements TableQuery {
         this.readerFactoryBuilder = store.newReaderFactoryBuilder();
         this.rowType = table.schema().logicalRowType();
         this.partitionType = table.schema().logicalPartitionType();
+        this.fileIO = table.fileIO();
         RowType keyType = readerFactoryBuilder.keyType();
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.lookupStoreFactory =
@@ -114,28 +120,32 @@ public class LocalTableQuery implements TableQuery {
             int bucket,
             List<DataFileMeta> beforeFiles,
             List<DataFileMeta> dataFiles) {
-        LookupLevels<KeyValue> lookupLevels =
-                tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
-        if (lookupLevels == null) {
-            // Initial phase: ignore beforeFiles as they represent deletions from previous state
-            newLookupLevels(partition, bucket, dataFiles);
-        } else {
-            lookupLevels.getLevels().update(beforeFiles, dataFiles);
+        // Both tableView and its nested bucket maps are ConcurrentHashMaps; this nested
+        // computeIfAbsent pattern relies on each map providing atomic insertion.
+        BucketLookupState state =
+                tableView
+                        .computeIfAbsent(partition, k -> new ConcurrentHashMap<>())
+                        .computeIfAbsent(bucket, k -> new BucketLookupState());
+        state.lock.writeLock().lock();
+        try {
+            if (state.lookupLevels == null) {
+                // Initial phase: ignore beforeFiles as they represent deletions from previous state
+                state.lookupLevels = createLookupLevels(partition, bucket, dataFiles);
+            } else {
+                state.lookupLevels.getLevels().update(beforeFiles, dataFiles);
+            }
+        } finally {
+            state.lock.writeLock().unlock();
         }
     }
 
-    private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
+    private LookupLevels<KeyValue> createLookupLevels(
+            BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
         // TODO pass DeletionVector factory
         KeyValueFileReaderFactory factory =
                 readerFactoryBuilder.build(partition, bucket, DeletionVector.emptyFactory());
         Options options = this.options.toConfiguration();
-        if (lookupFileCache == null) {
-            lookupFileCache =
-                    LookupFile.createCache(
-                            options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                            options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
-        }
 
         RowType readValueType = readerFactoryBuilder.readValueType();
         LookupLevels<KeyValue> lookupLevels =
@@ -164,30 +174,77 @@ public class LocalTableQuery implements TableQuery {
                                         .getPathFile(),
                         lookupStoreFactory,
                         bfGenerator(options),
-                        lookupFileCache);
+                        lookupFileCache(options));
 
-        tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
+        // Optimization - download lookup files if already persisted to object store
+        // We download these files if three conditions are met
+        // 1) lookup.remote-file.enabled is true - files are persisted in the first place
+        // 2) deletion-vectors.enabled is false - SSTables only contain row positions, not values,
+        // when DVs are enabled
+        // 3) The client is accessing the full data row, as opposed to a projection
+        //    - The persisted remote SSTable files are created during compaction and hold the entire
+        // data row value
+        //    - We could deserialize and project in memory, but we'll have to read much more data,
+        // not as clear of a win
+        boolean fullValueRead = readerFactoryBuilder.readValueType().equals(rowType);
+        if (this.options.lookupRemoteFileEnabled()
+                && !this.options.deletionVectorsEnabled()
+                && fullValueRead) {
+            // Calling the constructor tells `lookupLevels` to load remote files
+            new RemoteLookupFileManager<>(
+                    fileIO,
+                    factory.pathFactory(),
+                    lookupLevels,
+                    this.options.lookupRemoteLevelThreshold());
+        }
+
+        return lookupLevels;
     }
 
-    /** TODO remove synchronized and supports multiple thread to lookup. */
+    private Cache<String, LookupFile> lookupFileCache(Options options) {
+        Cache<String, LookupFile> cache = lookupFileCache;
+        if (cache == null) {
+            synchronized (this) {
+                cache = lookupFileCache;
+                if (cache == null) {
+                    cache =
+                            LookupFile.createCache(
+                                    options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                                    options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+                    lookupFileCache = cache;
+                }
+            }
+        }
+        return cache;
+    }
+
     @Nullable
     @Override
-    public synchronized InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
-            throws IOException {
-        Map<Integer, LookupLevels<KeyValue>> buckets = tableView.get(partition);
+    public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
+        Map<Integer, BucketLookupState> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;
         }
-        LookupLevels<KeyValue> lookupLevels = buckets.get(bucket);
-        if (lookupLevels == null) {
+        BucketLookupState state = buckets.get(bucket);
+        if (state == null) {
             return null;
         }
 
-        KeyValue kv = lookupLevels.lookup(key, startLevel);
-        if (kv == null || kv.valueKind().isRetract()) {
-            return null;
-        } else {
-            return kv.value();
+        state.lock.readLock().lock();
+        try {
+            LookupLevels<KeyValue> lookupLevels = state.lookupLevels;
+            if (lookupLevels == null) {
+                return null;
+            }
+
+            KeyValue kv = lookupLevels.lookup(key, startLevel);
+            if (kv == null || kv.valueKind().isRetract()) {
+                return null;
+            } else {
+                return kv.value();
+            }
+        } finally {
+            state.lock.readLock().unlock();
         }
     }
 
@@ -214,16 +271,31 @@ public class LocalTableQuery implements TableQuery {
 
     @Override
     public void close() throws IOException {
-        for (Map.Entry<BinaryRow, Map<Integer, LookupLevels<KeyValue>>> buckets :
-                tableView.entrySet()) {
-            for (Map.Entry<Integer, LookupLevels<KeyValue>> bucket :
-                    buckets.getValue().entrySet()) {
-                bucket.getValue().close();
+        // ConcurrentHashMap iteration is weakly consistent. close is expected not to race with
+        // refreshFiles for the same query instance; callers may rebuild this query after close.
+        for (Map.Entry<BinaryRow, Map<Integer, BucketLookupState>> buckets : tableView.entrySet()) {
+            for (Map.Entry<Integer, BucketLookupState> bucket : buckets.getValue().entrySet()) {
+                BucketLookupState state = bucket.getValue();
+                state.lock.writeLock().lock();
+                try {
+                    if (state.lookupLevels != null) {
+                        state.lookupLevels.close();
+                    }
+                } finally {
+                    state.lock.writeLock().unlock();
+                }
             }
         }
         if (lookupFileCache != null) {
             lookupFileCache.invalidateAll();
         }
         tableView.clear();
+    }
+
+    private static class BucketLookupState {
+
+        private final ReadWriteLock lock = new ReentrantReadWriteLock();
+
+        @Nullable private LookupLevels<KeyValue> lookupLevels;
     }
 }

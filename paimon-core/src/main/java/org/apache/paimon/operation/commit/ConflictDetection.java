@@ -22,7 +22,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.errors.ErrorMessages;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
@@ -37,7 +39,9 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -224,7 +228,20 @@ public class ConflictDetection {
             return exception;
         }
 
+        if (commitKind != CommitKind.COMPACT) {
+            Long nextRowId = latestSnapshot.nextRowId();
+            exception = checkRowIdExistence(baseEntries, deltaEntries, nextRowId);
+            if (exception.isPresent()) {
+                return exception;
+            }
+        }
+
         exception = checkRowIdRangeConflicts(commitKind, mergedEntries);
+        if (exception.isPresent()) {
+            return exception;
+        }
+
+        exception = checkGlobalIndexRowIdExistence(baseEntries, deltaIndexEntries);
         if (exception.isPresent()) {
             return exception;
         }
@@ -525,14 +542,135 @@ public class ConflictDetection {
                 if (file.firstRowId() != null
                         && file.nonNullRowIdRange().from < checkNextRowId
                         && columnChecker.conflictsWith(file)) {
+                    LOG.debug(
+                            "Data evolution row id conflict detected for table {}, commit user {}, "
+                                    + "snapshot {}, file {}.",
+                            tableName,
+                            commitUser,
+                            snapshot.id(),
+                            file);
                     return Optional.of(
                             new RuntimeException(
-                                    "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
-                                            + " updating the same file, which can render some updates ineffective."));
+                                    ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE));
                 }
             }
         }
 
+        return Optional.empty();
+    }
+
+    private Optional<RuntimeException> checkGlobalIndexRowIdExistence(
+            List<SimpleFileEntry> baseEntries, List<IndexManifestEntry> deltaIndexEntries) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+
+        List<IndexManifestEntry> indexesToCheck = globalIndexFileAdditions(deltaIndexEntries);
+        if (indexesToCheck.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Map<Pair<BinaryRow, Integer>, List<Range>> dataRanges = new HashMap<>();
+        for (SimpleFileEntry entry : baseEntries) {
+            if (entry.kind() == FileKind.ADD && entry.firstRowId() != null) {
+                dataRanges
+                        .computeIfAbsent(
+                                Pair.of(entry.partition(), entry.bucket()), k -> new ArrayList<>())
+                        .add(entry.nonNullRowIdRange());
+            }
+        }
+        Map<Pair<BinaryRow, Integer>, RowRangeIndex> rowRangeIndexes =
+                dataRanges.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry -> RowRangeIndex.create(entry.getValue())));
+
+        for (IndexManifestEntry indexEntry : indexesToCheck) {
+            GlobalIndexMeta globalIndex = indexEntry.indexFile().globalIndexMeta();
+            checkState(globalIndex != null, "Global index meta must not be null.");
+            Range indexRange = globalIndex.rowRange();
+            RowRangeIndex rowRangeIndex =
+                    rowRangeIndexes.get(Pair.of(indexEntry.partition(), indexEntry.bucket()));
+            if (rowRangeIndex == null || !rowRangeIndex.contains(indexRange)) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Global index row ID existence conflict: index file '%s' "
+                                                + "references row range %s, but this range "
+                                                + "is not fully covered by current data "
+                                                + "files. The referenced row IDs may have been "
+                                                + "reassigned or removed by a concurrent commit.",
+                                        indexEntry.indexFile().fileName(), indexRange)));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private List<IndexManifestEntry> globalIndexFileAdditions(
+            List<IndexManifestEntry> indexFileChanges) {
+        List<IndexManifestEntry> result = new ArrayList<>();
+        for (IndexManifestEntry entry : indexFileChanges) {
+            if (entry.kind() == FileKind.ADD && entry.indexFile().globalIndexMeta() != null) {
+                result.add(entry);
+            }
+        }
+        return result;
+    }
+
+    Optional<RuntimeException> checkRowIdExistence(
+            List<SimpleFileEntry> baseEntries,
+            List<SimpleFileEntry> deltaEntries,
+            @Nullable Long nextRowId) {
+        if (!dataEvolutionEnabled) {
+            return Optional.empty();
+        }
+
+        List<SimpleFileEntry> filesToCheck =
+                deltaEntries.stream()
+                        .filter(
+                                e ->
+                                        e.kind() == FileKind.ADD
+                                                && e.firstRowId() != null
+                                                && nextRowId != null
+                                                && e.firstRowId() < nextRowId)
+                        .collect(Collectors.toList());
+
+        if (filesToCheck.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<Range> existingRanges =
+                baseEntries.stream()
+                        .filter(
+                                base ->
+                                        base.firstRowId() != null
+                                                && !dedicatedStorageFile(base.fileName()))
+                        .map(SimpleFileEntry::nonNullRowIdRange)
+                        .collect(Collectors.toList());
+        RowRangeIndex existingIndex = RowRangeIndex.create(existingRanges, false);
+
+        for (SimpleFileEntry entry : filesToCheck) {
+            Range rowRange = entry.nonNullRowIdRange();
+            boolean exists =
+                    dedicatedStorageFile(entry.fileName())
+                            ? existingIndex.contains(rowRange)
+                            : existingIndex.containsExactly(rowRange);
+            if (!exists) {
+                return Optional.of(
+                        new RuntimeException(
+                                String.format(
+                                        "Row ID existence conflict: file '%s' references "
+                                                + "firstRowId=%d, rowCount=%d in bucket %d, "
+                                                + "but no matching file exists in the current snapshot. "
+                                                + "The referenced file may have been rewritten by a "
+                                                + "concurrent compaction or removed by an overwrite.",
+                                        entry.fileName(),
+                                        entry.firstRowId(),
+                                        entry.rowCount(),
+                                        entry.bucket())));
+            }
+        }
         return Optional.empty();
     }
 

@@ -20,229 +20,258 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
-import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
-import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for BTree indexed batch scan. */
+/** Test for bitmap indexed batch scan. */
 public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
 
+    private static final String INDEX_TYPE = "bitmap";
+
     @Test
-    public void testBitmapGlobalIndex() throws Exception {
-        write(100000L);
-        createIndex("f1");
+    public void testBitmapGlobalIndexWithCoreScanAcrossRanges() throws Exception {
+        write(1000L);
+        createIndex("f1", Collections.singletonList(new Range(0L, 499L)));
+        createIndex("f1", Collections.singletonList(new Range(500L, 999L)));
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
         Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
+                new PredicateBuilder(table.rowType())
+                        .in(
+                                1,
+                                Arrays.asList(
+                                        BinaryString.fromString("a200"),
+                                        BinaryString.fromString("a700")));
 
         RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
-        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
+        assertThat(rowIds.toRangeList())
+                .containsExactlyInAnyOrder(new Range(200L, 200L), new Range(700L, 700L));
 
-        Predicate predicate2 =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        rowIds = globalIndexScan(table, predicate2);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
-        Assertions.assertThat(rowIds.toRangeList())
-                .containsExactlyInAnyOrder(
-                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
-
-        RoaringNavigableMap64 finalRowIds = rowIds;
-        DataEvolutionBatchScan scan =
-                (DataEvolutionBatchScan)
-                        table.newScan()
-                                .withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
-
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
         List<String> readF1 = new ArrayList<>();
-        table.newRead()
-                .createReader(scan.plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> readF1.add(row.getString(1).toString()));
 
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
+        assertThat(readF1).containsExactly("a200", "a700");
     }
 
     @Test
-    public void testBitmapGlobalIndexWithCoreScan() throws Exception {
-        write(100000L);
-        createIndex("f1");
+    public void testBitmapGlobalIndexComplementsAndNulls() throws Exception {
+        long oldRowCount = 10L;
+        write(oldRowCount);
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("f3", DataTypes.STRING()), false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.write(
+                    GenericRow.of(
+                            100,
+                            BinaryString.fromString("a-new"),
+                            BinaryString.fromString("b-new"),
+                            BinaryString.fromString("not-null")));
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        createIndex("f3", null);
+
+        table = (FileStoreTable) catalog.getTable(identifier());
+        Predicate isNull = new PredicateBuilder(table.rowType()).isNull(3);
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, isNull);
+        assertThat(rowIds.getLongCardinality()).isEqualTo(oldRowCount);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(0L, oldRowCount - 1));
+
+        Predicate isNotNull = new PredicateBuilder(table.rowType()).isNotNull(3);
+        rowIds = globalIndexScan(table, isNotNull);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(oldRowCount, oldRowCount));
+
+        Predicate notEqual =
+                new PredicateBuilder(table.rowType())
+                        .notEqual(3, BinaryString.fromString("not-null"));
+        rowIds = globalIndexScan(table, notEqual);
+        assertThat(rowIds.isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testBitmapGlobalIndexStartsWith() throws Exception {
+        write(1000L);
+        createIndex("f1", null);
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
         Predicate predicate =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400"),
-                                        BinaryString.fromString("a56789")));
+                new PredicateBuilder(table.rowType()).startsWith(1, BinaryString.fromString("a20"));
 
-        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-
-        List<String> readF1 = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
+        assertThat(rowIds.toRangeList())
+                .containsExactlyInAnyOrder(new Range(20L, 20L), new Range(200L, 209L));
     }
 
     @Test
-    public void testMultipleBitmapIndices() throws Exception {
-        write(100000L);
-        createIndex("f1");
-        createIndex("f2");
+    public void testBitmapGlobalIndexFallbackScan() throws Exception {
+        write(1000L);
+        createIndex("f1", null);
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        Predicate predicate1 =
+        Predicate contains =
+                new PredicateBuilder(table.rowType()).contains(1, BinaryString.fromString("20"));
+
+        RoaringNavigableMap64 rowIds = globalIndexScan(table, contains);
+        assertThat(rowIds.toRangeList())
+                .containsExactlyInAnyOrder(
+                        new Range(20L, 20L),
+                        new Range(120L, 120L),
+                        new Range(200L, 209L),
+                        new Range(220L, 220L),
+                        new Range(320L, 320L),
+                        new Range(420L, 420L),
+                        new Range(520L, 520L),
+                        new Range(620L, 620L),
+                        new Range(720L, 720L),
+                        new Range(820L, 820L),
+                        new Range(920L, 920L));
+
+        Predicate range =
                 new PredicateBuilder(table.rowType())
-                        .in(
+                        .between(
                                 1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a56789")));
-
-        Predicate predicate2 =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                2,
-                                Arrays.asList(
-                                        BinaryString.fromString("b200"),
-                                        BinaryString.fromString("b400"),
-                                        BinaryString.fromString("b56789")));
-
-        Predicate predicate = PredicateBuilder.and(predicate1, predicate2);
-        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-
-        List<String> result = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(
-                        row -> {
-                            result.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(result).containsExactly("a200", "a56789");
+                                BinaryString.fromString("a200"),
+                                BinaryString.fromString("a209"));
+        rowIds = globalIndexScan(table, range);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(200L, 209L));
     }
 
-    private void createIndex(String fieldName) throws Exception {
+    private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        FileIO fileIO = table.fileIO();
-        RowType rowType = SpecialFields.rowTypeWithRowTracking(table.rowType().project(fieldName));
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(rowType);
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
-
-        GlobalIndexFileReadWrite indexFileReadWrite =
-                new GlobalIndexFileReadWrite(
-                        fileIO,
-                        table.store().pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0));
-
         DataField indexField = table.rowType().getField(fieldName);
-        GlobalIndexerFactory globalIndexerFactory =
-                GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
+        RowType readRowType =
+                SpecialFields.rowTypeWithRowId(
+                        table.rowType().project(Collections.singletonList(fieldName)));
+        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readRowType);
 
-        List<IndexFileMeta> indexFileMetas =
-                createBitmapIndex(globalIndexerFactory, indexField, reader, indexFileReadWrite);
+        List<Split> splits =
+                rowRanges == null
+                        ? readBuilder.newScan().plan().splits()
+                        : readBuilder.withRowRanges(rowRanges).newScan().plan().splits();
 
-        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
-
-        CommitMessage commitMessage =
-                new CommitMessageImpl(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        null,
-                        dataIncrement,
-                        CompactIncrement.emptyIncrement());
-
-        table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (Split split : splits) {
+            commitMessages.add(buildIndex(table, indexField, readRowType, split));
+        }
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
     }
 
-    private List<IndexFileMeta> createBitmapIndex(
-            GlobalIndexerFactory indexerFactory,
-            DataField indexField,
-            RecordReader<InternalRow> reader,
-            GlobalIndexFileReadWrite indexFileReadWrite)
+    private CommitMessage buildIndex(
+            FileStoreTable table, DataField indexField, RowType readRowType, Split split)
             throws Exception {
-        GlobalIndexer globalIndexer = indexerFactory.create(indexField, new Options());
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter) globalIndexer.createWriter(indexFileReadWrite);
+        Range rowRange = rowRange(split);
+        GlobalIndexWriter indexWriter =
+                GlobalIndexBuilderUtils.createIndexWriter(
+                        table, INDEX_TYPE, indexField, table.coreOptions().toConfiguration());
+        GlobalIndexSingleColumnWriter writer = (GlobalIndexSingleColumnWriter) indexWriter;
+        InternalRow.FieldGetter fieldGetter =
+                InternalRow.createFieldGetter(
+                        indexField.type(), readRowType.getFieldIndex(indexField.name()));
+        int rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
 
-        reader.forEachRemaining(r -> writer.write(r.getString(0)));
+        try (RecordReader<InternalRow> reader =
+                        table.newReadBuilder()
+                                .withReadType(readRowType)
+                                .newRead()
+                                .createReader(Collections.singletonList(split));
+                CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                long rowId = row.getLong(rowIdIndex);
+                if (rowId >= rowRange.from && rowId <= rowRange.to) {
+                    writer.write(fieldGetter.getFieldOrNull(row), rowId - rowRange.from);
+                }
+            }
+        }
 
-        List<ResultEntry> results = writer.finish();
-        // bitmap index only generate one file for each writer
-        Assertions.assertThat(results).hasSize(1);
-        ResultEntry result = results.get(0);
+        List<ResultEntry> resultEntries = writer.finish();
+        List<IndexFileMeta> indexFileMetas =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexField.id(),
+                        INDEX_TYPE,
+                        resultEntries);
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
+        return new CommitMessageImpl(
+                partition(split), 0, null, dataIncrement, CompactIncrement.emptyIncrement());
+    }
 
-        String fileName = result.fileName();
-        long fileSize = indexFileReadWrite.fileSize(fileName);
-        GlobalIndexMeta globalIndexMeta =
-                new GlobalIndexMeta(0, result.rowCount() - 1, indexField.id(), null, result.meta());
-        return Collections.singletonList(
-                new IndexFileMeta(
-                        BitmapGlobalIndexerFactory.IDENTIFIER,
-                        fileName,
-                        fileSize,
-                        result.rowCount(),
-                        globalIndexMeta,
-                        null));
+    private BinaryRow partition(Split split) {
+        return dataSplit(split).partition();
+    }
+
+    private Range rowRange(Split split) {
+        if (split instanceof IndexedSplit) {
+            List<Range> rowRanges = ((IndexedSplit) split).rowRanges();
+            assertThat(rowRanges).hasSize(1);
+            return rowRanges.get(0);
+        }
+
+        List<Range> ranges =
+                dataSplit(split).dataFiles().stream()
+                        .map(DataFileMeta::nonNullRowIdRange)
+                        .sorted(Comparator.comparingLong(range -> range.from))
+                        .collect(Collectors.toList());
+        return new Range(ranges.get(0).from, ranges.get(ranges.size() - 1).to);
+    }
+
+    private DataSplit dataSplit(Split split) {
+        return split instanceof IndexedSplit
+                ? ((IndexedSplit) split).dataSplit()
+                : (DataSplit) split;
     }
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)

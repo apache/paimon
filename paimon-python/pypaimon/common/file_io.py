@@ -16,6 +16,7 @@
 # under the License.
 
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -25,6 +26,57 @@ import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
+
+
+def supports_pread(stream) -> bool:
+    """Check if the stream supports position-based reads (thread-safe I/O)."""
+    if hasattr(stream, 'read_at'):
+        return True
+    if hasattr(stream, 'fileno'):
+        try:
+            stream.fileno()
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def pread(stream, length: int, offset: int) -> bytes:
+    """Position-based read without changing the stream cursor. Thread-safe."""
+    if hasattr(stream, 'read_at'):
+        return stream.read_at(length, offset)
+    return os.pread(stream.fileno(), length, offset)
+
+
+# Coalescing bounds: merge same-file ranges whose gap is within GAP, capping a
+# merged read at SPAN so threads stay busy and memory stays bounded.
+_COALESCE_GAP = 1 << 20
+_COALESCE_SPAN = 8 << 20
+
+
+def _coalesce_ranges(items, max_gap, max_span):
+    """Group ``(idx, path, offset, length)`` (length >= 0) into merged spans:
+    ``[(path, span_offset, span_length, [(idx, offset, length), ...])]``."""
+    from collections import defaultdict
+    by_path = defaultdict(list)
+    for it in items:
+        by_path[it[1]].append(it)
+    spans = []
+    for path, group in by_path.items():
+        group.sort(key=lambda x: x[2])
+        cur, start, end = [], None, None
+        for idx, _, off, length in group:
+            stop = off + length
+            if cur and off - end <= max_gap and stop - start <= max_span:
+                cur.append((idx, off, length))
+                end = max(end, stop)
+            else:
+                if cur:
+                    spans.append((path, start, end - start, cur))
+                cur, start, end = [(idx, off, length)], off, stop
+        if cur:
+            spans.append((path, start, end - start, cur))
+    return spans
 
 
 class FileIO(ABC):
@@ -110,6 +162,89 @@ class FileIO(ABC):
                 raise ValueError(f"The path '{path}' should be a directory.")
         else:
             self.mkdirs(path)
+
+    def read_file_range(self, path, offset, length):
+        """Read a byte range. Thread-safe. ``length < 0`` = read to EOF (pread
+        can't express that, so seek + read)."""
+        stream = self.new_input_stream(path)
+        try:
+            if length >= 0 and supports_pread(stream):
+                return pread(stream, length, offset)
+            stream.seek(offset)
+            return stream.read() if length < 0 else stream.read(length)
+        finally:
+            stream.close()
+
+    def read_ranges_coalesced(self, ranges, parallelism,
+                              max_gap=_COALESCE_GAP, max_span=_COALESCE_SPAN):
+        """Read ``ranges`` (each ``None`` or ``(path, offset, length)``), returning
+        bytes in the same order. Same-file nearby ranges are merged into one read
+        to cut round trips, then sliced; reads run on a thread pool. Negative
+        length (read to EOF) is read on its own, never merged.
+
+        A failed read propagates and aborts the whole batch (unlike a per-row
+        ``file.open()`` loop that fails one row at a time).
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        # Threads write disjoint results[idx]; safe under the GIL (no list resize).
+        results: List[Optional[bytes]] = [None] * len(ranges)
+        coalescible, singletons = [], []
+        for i, r in enumerate(ranges):
+            # None path/offset/length => null blob, leave result None.
+            if r is None or r[0] is None or r[1] is None or r[2] is None:
+                continue
+            path, offset, length = r
+            if length < 0:  # unknown length => read to EOF, never coalesced
+                singletons.append((i, path, offset, length))
+            else:
+                coalescible.append((i, path, offset, length))
+
+        spans = _coalesce_ranges(coalescible, max_gap, max_span)
+
+        def _run(task):
+            kind, payload = task
+            if kind == "span":
+                path, span_off, span_len, members = payload
+                buf = self.read_file_range(path, span_off, span_len)
+                for idx, off, length in members:
+                    s = off - span_off
+                    results[idx] = buf[s:s + length]
+            else:
+                idx, path, off, length = payload
+                results[idx] = self.read_file_range(path, off, length)
+
+        tasks = [("span", s) for s in spans] + [("one", g) for g in singletons]
+        if not tasks:
+            return results
+        workers = max(1, min(parallelism, len(tasks)))
+        with ThreadPoolExecutor(workers) as pool:
+            list(pool.map(_run, tasks))
+        return results
+
+    def read_blobs_concurrent(self, blobs, parallelism):
+        """Read a list of Blobs concurrently, coalescing same-file ranged reads.
+
+        ``BlobRef`` values expose a file range and are coalesced; in-memory
+        ``BlobData`` values are returned directly.
+        """
+        from pypaimon.table.row.blob import BlobRef
+        results: List[Optional[bytes]] = [None] * len(blobs)
+        ranges: List[Optional[tuple]] = [None] * len(blobs)
+        inmem = []
+        for i, b in enumerate(blobs):
+            if b is None:
+                continue
+            if isinstance(b, BlobRef):
+                d = b.to_descriptor()
+                ranges[i] = (d.uri, d.offset, d.length)
+            else:
+                inmem.append((i, b))
+        for i, v in enumerate(self.read_ranges_coalesced(ranges, parallelism)):
+            if v is not None:
+                results[i] = v
+        for idx, b in inmem:
+            results[idx] = b.to_data()
+        return results
 
     def read_file_utf8(self, path: str) -> str:
         with self.new_input_stream(path) as input_stream:
@@ -257,6 +392,9 @@ class FileIO(ABC):
     def write_vortex(self, path: str, data, **kwargs):
         raise NotImplementedError("write_vortex must be implemented by FileIO subclasses")
 
+    def write_row(self, path: str, data, fields=None, zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_row must be implemented by FileIO subclasses")
+
     def close(self):
         pass
 
@@ -265,9 +403,19 @@ class FileIO(ABC):
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
         - LocalFileIO for local file system (file:// or no scheme)
-        - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
+        - HdfsNativeFileIO for HDFS/ViewFS (default; pure protocol client, no Hadoop install)
+        - PyArrowFileIO for other remote file systems (oss://, s3://, gs://, ...),
+          and for HDFS when explicitly requested via hdfs.client.impl=pyarrow
         """
+        import os as _os
         from urllib.parse import urlparse
+
+        from pypaimon.common.options.config import CatalogOptions
+
+        opts = catalog_options or Options({})
+        if opts.get(CatalogOptions.RESOLVING_FILE_IO_ENABLED):
+            from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
+            return ResolvingFileIO(opts)
 
         uri = urlparse(path)
         scheme = uri.scheme
@@ -276,5 +424,38 @@ class FileIO(ABC):
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
 
+        if scheme in ("hdfs", "viewfs"):
+            from pypaimon.common.options.config import HdfsOptions
+            impl_source = "hdfs.client.impl option"
+            # Treat an empty option value the same as "unset" so callers can
+            # blank it out (common in templated configs) without tripping
+            # the unsupported-impl branch.
+            impl_value = opts.to_map().get(HdfsOptions.HDFS_CLIENT_IMPL.key())
+            if not impl_value:
+                impl_value = _os.environ.get("PYPAIMON_HDFS_IMPL")
+                impl_source = "PYPAIMON_HDFS_IMPL env var"
+            if not impl_value:
+                impl_value = HdfsOptions.HDFS_CLIENT_IMPL.default_value()
+                impl_source = "default"
+            impl = impl_value.lower()
+            if impl == "native":
+                try:
+                    from pypaimon.filesystem.hdfs_native_file_io import \
+                        HdfsNativeFileIO
+                    return HdfsNativeFileIO(path, opts)
+                except (ImportError, RuntimeError) as e:
+                    fallback = opts.get(HdfsOptions.HDFS_CLIENT_FALLBACK_TO_PYARROW)
+                    if not fallback:
+                        raise
+                    logging.getLogger(__name__).warning(
+                        "Native HDFS backend init failed, falling back to "
+                        "pyarrow: %s", e,
+                    )
+            elif impl != "pyarrow":
+                raise ValueError(
+                    f"Unsupported hdfs.client.impl '{impl_value}' "
+                    f"(from {impl_source}). Supported: 'native', 'pyarrow'."
+                )
+
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-        return PyArrowFileIO(path, catalog_options or Options({}))
+        return PyArrowFileIO(path, opts)

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -39,6 +40,7 @@ public class GenericGlobalIndexBuilder implements Serializable {
     protected final FileStoreTable table;
 
     @Nullable protected PartitionPredicate partitionPredicate;
+    @Nullable private Snapshot scanSnapshot;
 
     public GenericGlobalIndexBuilder(FileStoreTable table) {
         this.table = table;
@@ -72,7 +74,22 @@ public class GenericGlobalIndexBuilder implements Serializable {
                         + "deleted rows to be indexed.",
                 table.name());
 
-        return table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+        scanSnapshot = table.snapshotManager().latestSnapshot();
+        if (scanSnapshot == null) {
+            return Collections.emptyList();
+        }
+
+        return table.store()
+                .newScan()
+                .withSnapshot(scanSnapshot)
+                .withPartitionFilter(partitionPredicate)
+                .plan()
+                .files();
+    }
+
+    @Nullable
+    public Snapshot scanSnapshot() {
+        return scanSnapshot;
     }
 
     /** Returns old index file entries that should be deleted after new indexes are built. */

@@ -17,7 +17,7 @@
 
 from typing import List
 
-from ..schema.data_types import AtomicType, DataField
+from ..schema.data_types import AtomicType, DataField, SYSTEM_FIELD_ID_START
 
 
 class SpecialFields:
@@ -35,10 +35,17 @@ class SpecialFields:
         '_ROW_ID'
     }
 
+    SYSTEM_FIELD_ID_START = SYSTEM_FIELD_ID_START
+
     @staticmethod
     def is_system_field(field_name: str) -> bool:
         """Check if a field is a system field."""
         return field_name in SpecialFields.SYSTEM_FIELD_NAMES
+
+    @staticmethod
+    def is_system_field_id(field_id: int) -> bool:
+        """Check if a field id is reserved for system fields."""
+        return field_id >= SYSTEM_FIELD_ID_START
 
     @staticmethod
     def find_system_fields(read_fields: List[DataField]) -> dict:
@@ -81,3 +88,22 @@ class SpecialFields:
             fields_with_row_tracking.append(SpecialFields.SEQUENCE_NUMBER)
 
         return fields_with_row_tracking
+
+    @staticmethod
+    def row_type_with_row_id(table_fields: List[DataField]) -> List[DataField]:
+        """Add ROW_ID field to the given fields list.
+
+        Args:
+            table_fields: The original table fields
+        """
+        fields_with_row_id = list(table_fields)
+
+        for field in fields_with_row_id:
+            if SpecialFields.ROW_ID.name == field.name:
+                raise ValueError(
+                    "Row tracking field name '{}' conflicts with existing field names."
+                    .format(field.name)
+                )
+
+        fields_with_row_id.append(SpecialFields.ROW_ID)
+        return fields_with_row_id

@@ -59,6 +59,7 @@ import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
@@ -83,9 +84,11 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
@@ -137,6 +140,8 @@ import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
@@ -638,6 +643,85 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Assertions.assertThrows(
                 BadRequestException.class,
                 () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale", null));
+    }
+
+    @Test
+    public void testListSystemTablesPaged() throws Exception {
+        String[] systemTableNames =
+                SystemTableLoader.loadGlobalTableNames(options).stream()
+                        .sorted()
+                        .toArray(String[]::new);
+        List<String> allTablePrefixedNames =
+                Arrays.stream(systemTableNames)
+                        .filter(tableName -> tableName.startsWith("all_table"))
+                        .collect(Collectors.toList());
+
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, 1, pagedTables.getNextPageToken(), null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[1]);
+        assertEquals(systemTableNames[1], pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "all_table%", null);
+        assertThat(pagedTables.getElements()).containsExactlyElementsOf(allTablePrefixedNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "catalog_%", null);
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.TABLE.toString());
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        PagedList<Table> pagedTableDetails =
+                catalog.listTableDetailsPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertPagedTableDetails(pagedTableDetails, 1, systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, "all_table%", TableType.TABLE.toString());
+        assertPagedTableDetails(
+                pagedTableDetails,
+                allTablePrefixedNames.size(),
+                allTablePrefixedNames.toArray(new String[0]));
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTableDetails.getElements()).isEmpty();
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTablesPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTableDetailsPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
     }
 
     @Test
@@ -2161,25 +2245,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
 
-        // Test rename branch
-        restCatalog.renameBranch(identifier, "my_branch", "renamed_branch");
-        assertThat(restCatalog.listBranches(identifier)).containsOnly("renamed_branch");
-        assertThat(restCatalog.getTable(new Identifier(databaseName, "table", "renamed_branch")))
-                .isNotNull();
-
-        // Test rename to existing branch should fail
-        restCatalog.createBranch(identifier, "another_branch", null);
-        assertThrows(
-                Catalog.BranchAlreadyExistException.class,
-                () -> restCatalog.renameBranch(identifier, "renamed_branch", "another_branch"));
-
-        // Test rename non-existent branch should fail
-        assertThrows(
-                Catalog.BranchNotExistException.class,
-                () -> restCatalog.renameBranch(identifier, "non_existent_branch", "new_branch"));
-
-        restCatalog.dropBranch(identifier, "renamed_branch");
-        restCatalog.dropBranch(identifier, "another_branch");
+        restCatalog.dropBranch(identifier, "my_branch");
 
         assertThrows(
                 Catalog.BranchNotExistException.class,
@@ -3837,6 +3903,169 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testRowFilterWithLimitReadsPastUnauthorizedFiles() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_limit");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "secret", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Two files, each with an authorized (secret=1) and an unauthorized (secret=0) row.
+        commitRows(table, GenericRow.of(1, 1), GenericRow.of(2, 0));
+        commitRows(table, GenericRow.of(3, 1), GenericRow.of(4, 0));
+
+        // secret is a data column, so the filter is enforced at read time, not pushed to the store.
+        LeafPredicate secretFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "secret", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        setRowFilter(identifier, Collections.singletonList(secretFilter));
+
+        // The file-store limit must be disabled under the auth filter, else the scan stops at the
+        // first file and misses the authorized row in the second.
+        List<String> result = batchReadWithLimit(table, 1);
+        assertThat(result).contains("+I[1, 1]", "+I[3, 1]");
+    }
+
+    @Test
+    void testRowFilterReadBuilderLimitAfterAuth() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "v", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Rows 1,2 unauthorized and come first; rows 3,4 authorized.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
+
+        LeafPredicate idGt2 =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
+
+        // withLimit(1) must return exactly one authorized row: skipping the limit returns 2,
+        // applying it before auth returns 0.
+        List<String> result = batchReadWithReadLimit(table, 1);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0)).isIn("+I[3, 30]", "+I[4, 40]");
+    }
+
+    @Test
+    void testRowFilterReadLimitSkippedWithTopN() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit_topn");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "score", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Rows 1,2 unauthorized; 3,4 authorized. The highest-sorted authorized row (id=4) is last.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
+
+        LeafPredicate idGt2 =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
+
+        // With a TopN pushed, the read-side limit must be skipped so all authorized rows reach the
+        // engine's ORDER BY; else id=4 (last in scan order) gets truncated.
+        TopN topN = new TopN(new FieldRef(1, "score", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN).withLimit(1);
+        List<String> result = batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+        assertThat(result).containsExactlyInAnyOrder("+I[3, 30]", "+I[4, 40]");
+    }
+
+    @Test
+    void testRowFilterWithTopNKeepsAuthorizedSplits() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_topn");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Partitioned so each row is its own split; TopN pruning works at split granularity.
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "pt", DataTypes.INT()));
+        fields.add(new DataField(1, "score", DataTypes.INT()));
+        fields.add(new DataField(2, "secret", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // The split with the highest score is unauthorized; the authorized row has a lower score.
+        commitRows(table, GenericRow.of(1, 100, 0));
+        commitRows(table, GenericRow.of(2, 50, 1));
+
+        LeafPredicate secretFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "secret", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        setRowFilter(identifier, Collections.singletonList(secretFilter));
+
+        // ORDER BY score DESC LIMIT 1: TopN split pruning must be disabled under the auth filter,
+        // else it keeps the top unauthorized split and drops the authorized row.
+        TopN topN = new TopN(new FieldRef(1, "score", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        List<String> result = batchReadWithTopN(table, topN);
+        assertThat(result).contains("+I[2, 50, 1]");
+    }
+
+    @Test
     public void testConflictRollback() throws Exception {
         doTestConflictRollback(false);
     }
@@ -4005,9 +4234,46 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         commit.close();
     }
 
+    protected void commitRows(Table table, GenericRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (GenericRow row : rows) {
+            write.write(row);
+        }
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+    }
+
     protected List<String> batchRead(Table table) throws IOException {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
+        return batchRead(table, table.newReadBuilder().newScan().plan().splits());
+    }
+
+    protected List<String> batchReadWithLimit(Table table, int limit) throws IOException {
+        // Limit only the scan (file pruning), not the read, so the result reflects the kept files.
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
+        return batchRead(table, scan.withLimit(limit).plan().splits());
+    }
+
+    protected List<String> batchReadWithTopN(Table table, TopN topN) throws IOException {
+        // Apply TopN only on the scan (split pruning), so the result reflects the kept splits.
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
+        return batchRead(table, scan.withTopN(topN).plan().splits());
+    }
+
+    protected List<String> batchReadWithReadLimit(Table table, int limit) throws IOException {
+        // Exercises the ReadBuilder.withLimit path, which limits both the scan and the read side.
+        ReadBuilder readBuilder = table.newReadBuilder().withLimit(limit);
+        return batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+    }
+
+    private List<String> batchRead(Table table, List<Split> splits) throws IOException {
+        return batchRead(table, splits, table.newReadBuilder());
+    }
+
+    private List<String> batchRead(Table table, List<Split> splits, ReadBuilder readBuilder)
+            throws IOException {
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         List<String> result = new ArrayList<>();

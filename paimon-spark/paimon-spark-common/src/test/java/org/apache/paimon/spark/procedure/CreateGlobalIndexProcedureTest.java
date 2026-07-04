@@ -22,11 +22,14 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.PojoDataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.PojoManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.spark.globalindex.DefaultGlobalIndexTopoBuilder;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.DataSplit;
@@ -50,6 +53,26 @@ public class CreateGlobalIndexProcedureTest {
 
     private final BiFunction<BinaryRow, Integer, Path> pathFactory =
             (a, b) -> new Path(UUID.randomUUID().toString());
+
+    @Test
+    void testCreateUserOptionsUsesTableOptionsAndParsedOptionsOverride() {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(BTreeIndexOptions.BTREE_INDEX_COMPRESSION.key(), "zstd");
+        tableOptions.put(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE.key(), "100");
+        tableOptions.put("unrelated-table-option", "table-value");
+
+        Options userOptions =
+                CreateGlobalIndexProcedure.createUserOptions(
+                        tableOptions,
+                        SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE.key()
+                                + "=200, procedure-only=procedure-value");
+
+        assertThat(userOptions.get(BTreeIndexOptions.BTREE_INDEX_COMPRESSION)).isEqualTo("zstd");
+        assertThat(userOptions.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE))
+                .isEqualTo(200L);
+        assertThat(userOptions.get("unrelated-table-option")).isEqualTo("table-value");
+        assertThat(userOptions.get("procedure-only")).isEqualTo("procedure-value");
+    }
 
     @Test
     void testGroupFilesIntoShardsByPartitionSingleFileInSingleShard() {
@@ -206,6 +229,34 @@ public class CreateGlobalIndexProcedureTest {
         assertThat(shardToSplit.get(shard0).dataFiles()).contains(file1);
         assertThat(shardToSplit.get(shard1).dataFiles()).contains(file2);
         assertThat(shardToSplit.get(shard2).dataFiles()).contains(file3);
+    }
+
+    @Test
+    void testGroupFilesIntoShardsByPartitionUsesUnindexedRanges() {
+        BinaryRow partition = createPartition(0);
+        DataFileMeta indexedLaterFile = createDataFileMeta(1000L, 100L);
+        DataFileMeta unindexedEarlierFile = createDataFileMeta(0L, 100L);
+
+        Map<BinaryRow, List<ManifestEntry>> entriesByPartition = new HashMap<>();
+        entriesByPartition.put(
+                partition,
+                Arrays.asList(
+                        createManifestEntry(partition, indexedLaterFile),
+                        createManifestEntry(partition, unindexedEarlierFile)));
+
+        Map<BinaryRow, List<IndexedSplit>> result =
+                DefaultGlobalIndexTopoBuilder.groupFilesIntoShardsByPartition(
+                        entriesByPartition,
+                        1000L,
+                        pathFactory,
+                        Collections.singletonList(new Range(0L, 99L)));
+
+        assertThat(result).hasSize(1);
+        List<IndexedSplit> shardSplits = result.get(partition);
+        assertThat(shardSplits).hasSize(1);
+        assertThat(shardSplits.get(0).rowRanges()).containsExactly(new Range(0L, 99L));
+        assertThat(shardSplits.get(0).dataSplit().dataFiles())
+                .containsExactly(unindexedEarlierFile);
     }
 
     @Test

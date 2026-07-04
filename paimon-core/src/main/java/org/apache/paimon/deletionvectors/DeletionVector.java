@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.LongConsumer;
 
 import static org.apache.paimon.deletionvectors.Bitmap64DeletionVector.toLittleEndianInt;
 
@@ -81,6 +82,9 @@ public interface DeletionVector extends DeletionVectorJudger {
 
     /** @return the number of distinct integers added to the DeletionVector. */
     long getCardinality();
+
+    /** Iterates over all deleted positions in this deletion vector. */
+    void forEachDeletedPosition(LongConsumer consumer);
 
     /** Serializes the deletion vector. */
     int serializeTo(DataOutputStream out) throws IOException;

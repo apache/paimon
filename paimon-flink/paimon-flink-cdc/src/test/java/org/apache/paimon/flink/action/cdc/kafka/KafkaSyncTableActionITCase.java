@@ -234,7 +234,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[105, hammer, 14oz carpenter's hammer, 0.875, 24]");
         waitForResult(expected, table, rowType, primaryKeys);
 
-        // column type covert exception (int64 -> string)
+        // column type convert exception (int64 -> string)
         writeRecordsToKafka(
                 topic, "kafka/%s/table/schema/%s/%s-data-5.txt", format, sourceDir, format);
 

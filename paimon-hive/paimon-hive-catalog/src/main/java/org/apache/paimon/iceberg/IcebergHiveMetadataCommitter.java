@@ -18,6 +18,7 @@
 
 package org.apache.paimon.iceberg;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.Path;
@@ -61,6 +62,8 @@ import static org.apache.paimon.iceberg.IcebergCommitCallback.catalogDatabasePat
 public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergHiveMetadataCommitter.class);
+    private static final int HIVE_COLUMN_COMMENT_MAX_LENGTH = 255;
+    private static final String TRUNCATION_MARKER = "...";
 
     private final FileStoreTable table;
     private final ClientPool<IMetaStoreClient, TException> clients;
@@ -263,6 +266,16 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         return new FieldSchema(
                 dataField.name(),
                 HiveTypeUtils.toTypeInfo(dataField.type()).getTypeName(),
-                dataField.description());
+                normalizeColumnComment(dataField.description()));
+    }
+
+    @VisibleForTesting
+    static String normalizeColumnComment(@Nullable String comment) {
+        if (comment == null || comment.length() <= HIVE_COLUMN_COMMENT_MAX_LENGTH) {
+            return comment;
+        }
+
+        return comment.substring(0, HIVE_COLUMN_COMMENT_MAX_LENGTH - TRUNCATION_MARKER.length())
+                + TRUNCATION_MARKER;
     }
 }

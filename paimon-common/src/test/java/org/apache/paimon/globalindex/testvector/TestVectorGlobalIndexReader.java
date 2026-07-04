@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Test vector index reader that performs brute-force linear scan for similarity search. Loads all
@@ -55,20 +56,38 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     private final GlobalIndexFileReader fileReader;
     private final GlobalIndexIOMeta ioMeta;
     private final String metric;
+    private final boolean reverseScore;
+    private final String requiredOptionKey;
+    private final String requiredOptionValue;
 
     private float[][] vectors;
+    private long[] rowIds;
     private int dimension;
     private int count;
 
     public TestVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader, GlobalIndexIOMeta ioMeta, String metric) {
+        this(fileReader, ioMeta, metric, false, null, null);
+    }
+
+    public TestVectorGlobalIndexReader(
+            GlobalIndexFileReader fileReader,
+            GlobalIndexIOMeta ioMeta,
+            String metric,
+            boolean reverseScore,
+            String requiredOptionKey,
+            String requiredOptionValue) {
         this.fileReader = fileReader;
         this.ioMeta = ioMeta;
         this.metric = metric;
+        this.reverseScore = reverseScore;
+        this.requiredOptionKey = requiredOptionKey;
+        this.requiredOptionValue = requiredOptionValue;
     }
 
     @Override
-    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    public CompletableFuture<Optional<ScoredGlobalIndexResult>> visitVectorSearch(
+            VectorSearch vectorSearch) {
         try {
             ensureLoaded();
         } catch (IOException e) {
@@ -76,6 +95,18 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
         }
 
         float[] queryVector = vectorSearch.vector();
+        if (requiredOptionKey != null) {
+            String actual = vectorSearch.options().get(requiredOptionKey);
+            if (!requiredOptionValue.equals(actual)) {
+                throw new IllegalArgumentException(
+                        "Required option "
+                                + requiredOptionKey
+                                + " expected "
+                                + requiredOptionValue
+                                + " but got "
+                                + actual);
+            }
+        }
         if (queryVector.length != dimension) {
             throw new IllegalArgumentException(
                     String.format(
@@ -86,7 +117,7 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
         int limit = vectorSearch.limit();
         int effectiveK = Math.min(limit, count);
         if (effectiveK <= 0) {
-            return Optional.empty();
+            return CompletableFuture.completedFuture(Optional.empty());
         }
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
@@ -96,15 +127,15 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
                 new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
 
         for (int i = 0; i < count; i++) {
-            if (includeRowIds != null && !includeRowIds.contains(i)) {
+            if (includeRowIds != null && !includeRowIds.contains(rowIds[i])) {
                 continue;
             }
             float score = computeScore(queryVector, vectors[i]);
             if (topK.size() < effectiveK) {
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             } else if (score > topK.peek().score) {
                 topK.poll();
-                topK.offer(new ScoredRow(i, score));
+                topK.offer(new ScoredRow(rowIds[i], score));
             }
         }
 
@@ -115,20 +146,26 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
             scoreMap.put(row.rowId, row.score);
         }
 
-        return Optional.of(ScoredGlobalIndexResult.create(() -> resultBitmap, scoreMap::get));
+        return CompletableFuture.completedFuture(
+                Optional.of(ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get)));
     }
 
     private float computeScore(float[] query, float[] stored) {
+        float score;
         switch (metric) {
             case "l2":
-                return computeL2Score(query, stored);
+                score = computeL2Score(query, stored);
+                break;
             case "cosine":
-                return computeCosineScore(query, stored);
+                score = computeCosineScore(query, stored);
+                break;
             case "inner_product":
-                return computeInnerProductScore(query, stored);
+                score = computeInnerProductScore(query, stored);
+                break;
             default:
                 throw new IllegalArgumentException("Unknown metric: " + metric);
         }
+        return reverseScore ? -score : score;
     }
 
     private static float computeL2Score(float[] a, float[] b) {
@@ -178,8 +215,14 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
 
             // Read vectors
             vectors = new float[count][dimension];
+            rowIds = new long[count];
+            byte[] rowIdBytes = new byte[Long.BYTES];
             byte[] vectorBytes = new byte[dimension * Float.BYTES];
             for (int i = 0; i < count; i++) {
+                readFully(in, rowIdBytes);
+                ByteBuffer rowIdBuf = ByteBuffer.wrap(rowIdBytes);
+                rowIdBuf.order(ByteOrder.LITTLE_ENDIAN);
+                rowIds[i] = rowIdBuf.getLong();
                 readFully(in, vectorBytes);
                 ByteBuffer vectorBuf = ByteBuffer.wrap(vectorBytes);
                 vectorBuf.order(ByteOrder.LITTLE_ENDIAN);
@@ -208,78 +251,91 @@ public class TestVectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         vectors = null;
+        rowIds = null;
     }
 
     // =================== unsupported predicate operations =====================
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNotNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIsNull(FieldRef fieldRef) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitStartsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEndsWith(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitContains(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLike(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitEqual(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return Optional.empty();
+    public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     /** A row ID paired with its similarity score, used in the top-k min-heap. */

@@ -25,15 +25,28 @@ large-type coercion, and the bucket-mode dispatch in
 in ``pypaimon/tests/ray_repartition_test.py``.
 """
 
+import importlib.util
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock
 
 import pyarrow as pa
 
-from pypaimon.ray.shuffle import (BUCKET_KEY_COL, _coerce_large_string_types,
-                                  _make_bucket_udf, _pick_bucket_col_name,
-                                  maybe_apply_repartition)
 from pypaimon.table.bucket_mode import BucketMode
+
+_SHUFFLE_PATH = (
+    Path(__file__).resolve().parents[1] / "ray" / "shuffle.py"
+)
+_SHUFFLE_SPEC = importlib.util.spec_from_file_location(
+    "pypaimon_ray_shuffle_under_test", _SHUFFLE_PATH)
+_SHUFFLE = importlib.util.module_from_spec(_SHUFFLE_SPEC)
+_SHUFFLE_SPEC.loader.exec_module(_SHUFFLE)
+
+BUCKET_KEY_COL = _SHUFFLE.BUCKET_KEY_COL
+_coerce_large_string_types = _SHUFFLE._coerce_large_string_types
+_make_bucket_udf = _SHUFFLE._make_bucket_udf
+_pick_bucket_col_name = _SHUFFLE._pick_bucket_col_name
+maybe_apply_repartition = _SHUFFLE.maybe_apply_repartition
 
 
 class BucketUdfTest(unittest.TestCase):
@@ -135,12 +148,13 @@ class CoerceLargeStringTypesTest(unittest.TestCase):
 
 
 class BucketModeDispatchTest(unittest.TestCase):
-    """``maybe_apply_repartition`` clusters HASH_FIXED tables and
-    returns other bucket modes unchanged."""
+    """``maybe_apply_repartition`` clusters only supported HASH_FIXED
+    writes and rejects unsafe primary-key Ray writes."""
 
-    def _make_table(self, bucket_mode):
+    def _make_table(self, bucket_mode, is_primary_key_table=False):
         table = MagicMock()
         table.bucket_mode.return_value = bucket_mode
+        table.is_primary_key_table = is_primary_key_table
         return table
 
     def test_bucket_unaware_returns_dataset_unchanged(self):
@@ -155,13 +169,89 @@ class BucketModeDispatchTest(unittest.TestCase):
 
         self.assertIs(maybe_apply_repartition(dataset, table), dataset)
 
+    def test_hash_dynamic_primary_key_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = self._make_table(
+            BucketMode.HASH_DYNAMIC, is_primary_key_table=True)
+
+        with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
+            maybe_apply_repartition(dataset, table)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_dynamic_primary_key_map_groups_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = self._make_table(
+            BucketMode.HASH_DYNAMIC, is_primary_key_table=True)
+
+        with self.assertRaisesRegex(ValueError, "HASH_DYNAMIC primary-key"):
+            maybe_apply_repartition(dataset, table, "map_groups")
+        dataset.map_batches.assert_not_called()
+
     def test_cross_partition_returns_dataset_unchanged(self):
         dataset = object()
         table = self._make_table(BucketMode.CROSS_PARTITION)
 
         self.assertIs(maybe_apply_repartition(dataset, table), dataset)
 
-    def test_hash_fixed_runs_map_batches_groupby_chain(self):
+    def test_cross_partition_primary_key_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = self._make_table(
+            BucketMode.CROSS_PARTITION, is_primary_key_table=True)
+
+        with self.assertRaisesRegex(ValueError, "CROSS_PARTITION primary-key"):
+            maybe_apply_repartition(dataset, table)
+        dataset.map_batches.assert_not_called()
+
+    def test_postpone_primary_key_returns_dataset_unchanged(self):
+        dataset = MagicMock(name="dataset")
+        table = self._make_table(
+            BucketMode.POSTPONE_MODE, is_primary_key_table=True)
+
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_default_returns_dataset_unchanged(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = False
+
+        self.assertIs(maybe_apply_repartition(dataset, table), dataset)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_off_returns_dataset_unchanged(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = False
+
+        self.assertIs(
+            maybe_apply_repartition(dataset, table, "off"),
+            dataset,
+        )
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_primary_key_default_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = True
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table)
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_primary_key_off_raises_value_error(self):
+        dataset = MagicMock(name="dataset")
+        table = MagicMock()
+        table.bucket_mode.return_value = BucketMode.HASH_FIXED
+        table.is_primary_key_table = True
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table, "off")
+        dataset.map_batches.assert_not_called()
+
+    def test_hash_fixed_map_groups_runs_map_batches_groupby_chain(self):
         dataset = MagicMock(name="dataset")
         dataset.map_batches.return_value.groupby.return_value \
             .map_groups.return_value.drop_columns.return_value = "clustered"
@@ -173,7 +263,7 @@ class BucketModeDispatchTest(unittest.TestCase):
             type("F", (), {"name": "value"})(),
         ]
 
-        out = maybe_apply_repartition(dataset, table)
+        out = maybe_apply_repartition(dataset, table, "map_groups")
 
         self.assertEqual(out, "clustered")
         # The helper appends a transient bucket column, groups by it,
@@ -199,11 +289,18 @@ class BucketModeDispatchTest(unittest.TestCase):
             type("F", (), {"name": "dt"})(),
         ]
 
-        maybe_apply_repartition(dataset, table)
+        maybe_apply_repartition(dataset, table, "map_groups")
 
         group_call = dataset.map_batches.return_value.groupby.call_args
         passed_keys = group_call.args[0]
         self.assertEqual(passed_keys, ["dt", BUCKET_KEY_COL])
+
+    def test_invalid_precluster_mode_raises_value_error(self):
+        dataset = object()
+        table = self._make_table(BucketMode.HASH_FIXED)
+
+        with self.assertRaises(ValueError):
+            maybe_apply_repartition(dataset, table, "hash_shuffle")
 
 
 if __name__ == "__main__":

@@ -299,7 +299,7 @@ class NotIn(Tester):
         return not any(min_v == l == max_v for l in literals)
 
     def test_by_arrow(self, val, literals) -> bool:
-        return ~val.isin(literals)
+        return (~val.isin(literals)) & val.is_valid()
 
 
 class Between(Tester):

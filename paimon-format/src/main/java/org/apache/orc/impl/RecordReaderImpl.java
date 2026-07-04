@@ -747,6 +747,12 @@ public class RecordReaderImpl implements RecordReader {
             TypeDescription type,
             boolean writerUsedProlepticGregorian,
             boolean useUTCTimestamp) {
+        // When statsProto is EMPTY_COLUMN_STATISTICS, this column does not actually provide
+        // statistics, so we cannot make any assumptions.
+        if (statsProto == EMPTY_COLUMN_STATISTICS) {
+            return SearchArgument.TruthValue.YES_NO_NULL;
+        }
+
         ColumnStatistics cs =
                 ColumnStatisticsImpl.deserialize(
                         null, statsProto, writerUsedProlepticGregorian, true);
@@ -840,14 +846,22 @@ public class RecordReaderImpl implements RecordReader {
             ValueRange range,
             BloomFilter bloomFilter,
             boolean useUTCTimestamp) {
+        // An invalid range means no value, including null, is written to this column.
         if (!range.isValid()) {
-            return SearchArgument.TruthValue.YES_NO_NULL;
+            return SearchArgument.TruthValue.NO;
         }
 
         // if we didn't have any values, everything must have been null
         if (!range.hasValues()) {
             if (predicate.getOperator() == PredicateLeaf.Operator.IS_NULL) {
                 return SearchArgument.TruthValue.YES;
+            } else if (predicate.getOperator() == PredicateLeaf.Operator.NULL_SAFE_EQUALS) {
+                Object literal = predicate.getLiteral();
+                if (literal == null) {
+                    return SearchArgument.TruthValue.YES;
+                } else {
+                    return SearchArgument.TruthValue.NO;
+                }
             } else {
                 return SearchArgument.TruthValue.NULL;
             }

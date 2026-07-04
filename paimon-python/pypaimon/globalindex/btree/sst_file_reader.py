@@ -21,18 +21,25 @@ An SST File Reader which serves point queries and range queries.
 Users can call createIterator to create a file iterator and then use seek
 and read methods to do range queries.
 
-Note that this class is NOT thread-safe.
+Thread-safe when the underlying stream supports position-based reads
+(PyArrow NativeFile.read_at or os.pread).
 """
 
 import struct
-import zlib
+import threading
 from typing import Optional, Callable
 from typing import BinaryIO
 
+from pypaimon.common.file_io import pread
+from pypaimon.globalindex.block_compression import (
+    BLOCK_TRAILER_LENGTH,
+    crc32c,
+    decompress_block,
+)
 from pypaimon.globalindex.btree.block_handle import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
-from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
+from pypaimon.globalindex.memory_slice_input import MemorySliceInput
 
 
 class SstFileIterator:
@@ -103,57 +110,58 @@ class SstFileIterator:
 class SstFileReader:
     """
     An SST File Reader which serves point queries and range queries.
-    
+
     Users can call createIterator to create a file iterator and then use seek
     and read methods to do range queries.
-    
-    Note that this class is NOT thread-safe.
+
+    Thread-safe when the underlying stream supports pread, or when an
+    io_lock is provided for seek+read fallback.
     """
-    
+
     def __init__(
         self,
         input_stream: BinaryIO,
         comparator: Callable[[bytes, bytes], int],
-        index_block_handle: BlockHandle
+        index_block_handle: BlockHandle,
+        use_pread: bool = False,
+        io_lock: Optional[threading.Lock] = None,
     ):
         self.comparator = comparator
         self.input_stream = input_stream
+        self._supports_pread = use_pread
+        self._lock = io_lock or threading.Lock()
         self.index_block = self._read_block(index_block_handle)
 
+    def _read_from(self, offset: int, length: int) -> bytes:
+        if self._supports_pread:
+            return pread(self.input_stream, length, offset)
+        with self._lock:
+            self.input_stream.seek(offset)
+            return self.input_stream.read(length)
+
     def _read_block(self, block_handle: BlockHandle) -> BlockReader:
-        self.input_stream.seek(block_handle.offset)
         # Read block data + 5 bytes trailer (1 byte compression type + 4 bytes CRC32)
-        block_data = self.input_stream.read(block_handle.size + 5)
+        block_data = self._read_from(
+            block_handle.offset, block_handle.size + BLOCK_TRAILER_LENGTH)
         # Parse block trailer (last 5 bytes: 1 byte compression type + 4 bytes CRC32)
-        if len(block_data) < 5:
+        if len(block_data) < BLOCK_TRAILER_LENGTH:
             raise ValueError("Block data too short to contain trailer")
 
-        trailer_offset = len(block_data) - 5
+        trailer_offset = len(block_data) - BLOCK_TRAILER_LENGTH
         compression_type = block_data[trailer_offset]
-        crc32_value = struct.unpack('<I', block_data[trailer_offset + 1:trailer_offset + 5])[0]
+        crc32_value = struct.unpack(
+            '<I',
+            block_data[trailer_offset + 1:trailer_offset + BLOCK_TRAILER_LENGTH])[0]
 
         # Extract block data (without trailer)
         block_bytes = block_data[:trailer_offset]
 
         # Verify CRC32
-        actual_crc32 = self.crc32c(block_bytes, compression_type)
+        actual_crc32 = crc32c(block_bytes, compression_type)
         if actual_crc32 != crc32_value:
             raise ValueError(f"CRC32 mismatch: expected {crc32_value}, got {actual_crc32}")
 
-        # Decompress if needed
-        if compression_type == 1:  # ZSTD
-            import zstandard as zstd
-            from io import BytesIO
-            decompressor = zstd.ZstdDecompressor()
-            memory_input = MemorySliceInput(block_bytes)
-            expected_len = memory_input.read_var_len_int()
-            compressed = block_bytes[memory_input.position():]
-            with decompressor.stream_reader(BytesIO(compressed)) as reader:
-                block_bytes = reader.read()
-            if len(block_bytes) != expected_len:
-                raise ValueError("Corrupted data, decompression failed.")
-        elif compression_type != 0:  # Not NONE
-            raise ValueError(f"Compression type {compression_type} not supported")
+        block_bytes = decompress_block(block_bytes, compression_type)
 
         return BlockReader.create(block_bytes, self.comparator)
 
@@ -165,27 +173,6 @@ class SstFileReader:
             read_block,
             self.index_block.iterator())
 
-    @staticmethod
-    def crc32c(bytes_data: bytes, compression_type_id: int) -> int:
-        """
-        Calculate CRC32 checksum for the given bytes and compression type.
-
-        Args:
-            bytes_data: The byte array to calculate checksum for
-            compression_type_id: The persistent ID of the compression type (0-255)
-
-        Returns:
-            The CRC32 checksum value
-        """
-        # Calculate CRC32 for the data bytes
-        crc_value = zlib.crc32(bytes_data)
-
-        # Update with compression type ID (lower 8 bits only)
-        crc_value = zlib.crc32(bytes([compression_type_id & 0xFF]), crc_value)
-
-        # Return as unsigned 32-bit integer
-        return crc_value & 0xFFFFFFFF
-    
     def close(self) -> None:
         """Close the reader and release resources."""
         # No resources to release in this implementation

@@ -19,8 +19,8 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.format.parquet.ColumnConfigParser;
-import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
@@ -31,37 +31,47 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
-public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
+public class RowDataParquetBuilder implements MetadataParquetBuilder<InternalRow> {
 
     private final RowType rowType;
     private final Configuration conf;
-    @Nullable private RowType shreddingSchemas;
 
     public RowDataParquetBuilder(RowType rowType, Options options) {
         this.rowType = rowType;
         this.conf = new Configuration(false);
-        this.shreddingSchemas = VariantUtils.shreddingSchemasFromOptions(options);
         options.toMap().forEach(conf::set);
     }
 
-    public RowDataParquetBuilder withShreddingSchemas(RowType shreddingSchemas) {
-        this.shreddingSchemas = shreddingSchemas;
-        return this;
+    private RowDataParquetBuilder(RowType rowType, Configuration conf) {
+        this.rowType = rowType;
+        this.conf = conf;
+    }
+
+    public RowDataParquetBuilder withRowType(RowType rowType) {
+        return new RowDataParquetBuilder(rowType, conf);
     }
 
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
+        return createWriter(out, compression, HashMap::new);
+    }
+
+    @Override
+    public ParquetWriter<InternalRow> createWriter(
+            OutputFile out, String compression, Supplier<Map<String, byte[]>> metadataSupplier)
+            throws IOException {
         ParquetRowDataBuilder builder =
-                new ParquetRowDataBuilder(out, rowType, shreddingSchemas)
+                new ParquetRowDataBuilder(out, rowType)
+                        .withMetadataSupplier(metadataSupplier)
                         .withConf(conf)
-                        .withCompressionCodec(
-                                CompressionCodecName.fromConf(getCompression(compression)))
+                        .withCompressionCodec(getCompressionCodec(getCompression(compression)))
                         .withRowGroupSize(
                                 conf.getLong(
                                         ParquetOutputFormat.BLOCK_SIZE,
@@ -96,8 +106,28 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                         .withBloomFilterEnabled(
                                 conf.getBoolean(
                                         ParquetOutputFormat.BLOOM_FILTER_ENABLED,
-                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED));
+                                        ParquetProperties.DEFAULT_BLOOM_FILTER_ENABLED))
+                        .withMinRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MINIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withMaxRowCountForPageSizeCheck(
+                                conf.getInt(
+                                        ParquetOutputFormat.MAX_ROW_COUNT_FOR_PAGE_SIZE_CHECK,
+                                        ParquetProperties.DEFAULT_MAXIMUM_RECORD_COUNT_FOR_CHECK))
+                        .withStatisticsTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.STATISTICS_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_STATISTICS_TRUNCATE_LENGTH))
+                        .withColumnIndexTruncateLength(
+                                conf.getInt(
+                                        ParquetOutputFormat.COLUMN_INDEX_TRUNCATE_LENGTH,
+                                        ParquetProperties.DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH));
         new ColumnConfigParser()
+                .withColumnConfig(
+                        ParquetOutputFormat.COMPRESSION,
+                        key -> getCompressionCodec(conf.get(key)),
+                        builder::withCompressionCodec)
                 .withColumnConfig(
                         ParquetOutputFormat.ENABLE_DICTIONARY,
                         key -> conf.getBoolean(key, false),
@@ -120,5 +150,12 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     public String getCompression(String compression) {
         return conf.get("parquet.compression", compression);
+    }
+
+    private CompressionCodecName getCompressionCodec(String compression) {
+        if (HadoopCompressionType.NONE.value().equalsIgnoreCase(compression)) {
+            return CompressionCodecName.UNCOMPRESSED;
+        }
+        return CompressionCodecName.fromConf(compression);
     }
 }

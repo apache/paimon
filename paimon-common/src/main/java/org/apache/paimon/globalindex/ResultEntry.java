@@ -24,7 +24,10 @@ import javax.annotation.Nullable;
 public class ResultEntry {
 
     private final String fileName;
+
+    /** Total logical rows processed by the writer, including null/skipped rows. */
     private final long rowCount;
+
     @Nullable private final byte[] meta;
 
     public ResultEntry(String fileName, long rowCount, @Nullable byte[] meta) {

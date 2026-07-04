@@ -26,8 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.source.VectorSearchBuilderTest;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -52,20 +50,22 @@ public class LanceVectorSearchTest extends VectorSearchBuilderTest {
 
     @Override
     protected Schema schemaDefault() {
-        return Schema.newBuilder()
-                .column("id", DataTypes.INT())
-                .column("vec", new ArrayType(DataTypes.FLOAT()))
-                .option(CoreOptions.BUCKET.key(), "-1")
-                .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
-                .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .option(CoreOptions.FILE_FORMAT.key(), "lance")
-                .option("test.vector.dimension", "2")
-                .option("test.vector.metric", "l2")
-                .build();
+        return vectorSchemaBuilder("vec").build();
+    }
+
+    @Override
+    protected Schema.Builder withVectorSchemaOptions(Schema.Builder builder) {
+        return super.withVectorSchemaOptions(builder)
+                .option(CoreOptions.FILE_FORMAT.key(), "lance");
     }
 
     @Disabled("Cosine metric uses Tantivy index which requires Hadoop dependencies")
     @Test
     @Override
     public void testVectorSearchWithCosineMetric() {}
+
+    @Disabled("Requires Hadoop dependencies")
+    @Test
+    @Override
+    public void testVectorSearchFullModeScansUnindexedData() {}
 }

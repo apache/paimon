@@ -616,6 +616,17 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCopyWithLatestSchemaPicksUpAlteredOptions() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+
+        schemaManager.commitChanges(SchemaChange.setOption("my-custom-key", "my-custom-value"));
+
+        FileStoreTable updated = table.copyWithLatestSchema();
+        assertThat(updated.schema().options()).containsEntry("my-custom-key", "my-custom-value");
+    }
+
+    @Test
     public void testConsumerIdNotBlank() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(

@@ -23,8 +23,9 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexer;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -147,7 +148,45 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         assertThat(result.size()).isLessThanOrEqualTo(3);
     }
 
+    @Test
+    public void testVectorSearchWithOptions() throws Exception {
+        createVectorTable(
+                "T4",
+                "'"
+                        + TestVectorGlobalIndexer.OPT_REQUIRED_OPTION_KEY
+                        + "' = 'ivf.nprobe', "
+                        + "'"
+                        + TestVectorGlobalIndexer.OPT_REQUIRED_OPTION_VALUE
+                        + "' = '16'");
+        FileStoreTable table = paimonTable("T4");
+
+        float[][] vectors = {
+            {1.0f, 0.0f}, // row 0
+            {0.0f, 1.0f}, // row 1
+        };
+
+        writeVectors(table, vectors);
+        buildAndCommitVectorIndex(table, vectors);
+
+        List<Row> result =
+                sql(
+                        "CALL sys.vector_search("
+                                + "`table` => 'default.T4', "
+                                + "vector_column => 'vec', "
+                                + "query_vector => '1.0,0.0', "
+                                + "top_k => 2, "
+                                + "options => 'ivf.nprobe=16')");
+
+        assertThat(result).isNotEmpty();
+        assertThat(result.size()).isLessThanOrEqualTo(2);
+    }
+
     private void createVectorTable(String tableName) {
+        createVectorTable(tableName, "");
+    }
+
+    private void createVectorTable(String tableName, String extraOptions) {
+        String formattedExtraOptions = extraOptions.isEmpty() ? "" : ", " + extraOptions;
         sql(
                 "CREATE TABLE %s ("
                         + "id INT, "
@@ -158,8 +197,9 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                         + "'data-evolution.enabled' = 'true', "
                         + "'test.vector.dimension' = '%d', "
                         + "'test.vector.metric' = 'l2'"
+                        + "%s"
                         + ")",
-                tableName, DIMENSION);
+                tableName, DIMENSION, formattedExtraOptions);
     }
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
@@ -178,15 +218,15 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
         Options options = table.coreOptions().toConfiguration();
         DataField vectorField = table.rowType().getField(VECTOR_FIELD);
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 TestVectorGlobalIndexerFactory.IDENTIFIER,
                                 vectorField,
                                 options);
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
         List<ResultEntry> entries = writer.finish();
 

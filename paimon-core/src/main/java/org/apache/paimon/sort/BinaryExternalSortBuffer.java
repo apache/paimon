@@ -59,7 +59,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     private final List<ChannelWithMeta> spillChannelIDs;
     private final MemorySize maxDiskSize;
 
-    private int numRecords = 0;
+    private long numRecords = 0;
 
     public BinaryExternalSortBuffer(
             BinaryRowSerializer serializer,
@@ -122,7 +122,18 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public int size() {
-        return numRecords;
+        if (numRecords > Integer.MAX_VALUE) {
+            throw new RuntimeException(
+                    "numRecords "
+                            + numRecords
+                            + " exceeds Integer.MAX_VALUE, use isEmpty() instead of size().");
+        }
+        return (int) numRecords;
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return numRecords == 0;
     }
 
     @Override
@@ -178,7 +189,11 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             }
             if (inMemorySortBuffer.isEmpty()) {
                 // did not fit in a fresh buffer, must be large...
-                throw new IOException("The record exceeds the maximum size of a sort buffer.");
+                throw new IOException(
+                        "The record exceeds the maximum size of a Paimon write sort buffer. "
+                                + "A single serialized record cannot fit into an empty write buffer. "
+                                + "Please check whether the input contains an oversized row, "
+                                + "or increase the table option 'write-buffer-size'.");
             } else {
                 spill();
 

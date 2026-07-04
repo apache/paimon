@@ -26,11 +26,13 @@ import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParserUtils.withOrigin
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser._
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.command.{CreateTableLikeCommand => SparkCreateTableLikeCommand}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -99,6 +101,13 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     ShowTagsCommand(typedVisit[Seq[String]](ctx.multipartIdentifier))
   }
 
+  /** Create a CREATE TABLE LIKE logical command. */
+  override def visitCreateTableLike(ctx: CreateTableLikeContext): LogicalPlan = withOrigin(ctx) {
+    sparkCreateTableLikeCommand(ctx).copy(
+      targetTable = toTableIdentifier(typedVisit[Seq[String]](ctx.target)),
+      sourceTable = toTableIdentifier(typedVisit[Seq[String]](ctx.source)))
+  }
+
   /** Create a CREATE OR REPLACE TAG logical command. */
   override def visitCreateOrReplaceTag(ctx: CreateOrReplaceTagContext): CreateOrReplaceTagCommand =
     withOrigin(ctx) {
@@ -163,7 +172,15 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
       val fileFormat = buildFileFormat(ctx.fileFormatClause())
       val pattern = Option(ctx.patternClause()).map(p => unquoteString(p.STRING().getText))
       val force = Option(ctx.forceClause()).exists(_.booleanValue().TRUE() != null)
-      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force)
+      val onError = Option(ctx.onErrorClause())
+        .map {
+          clause =>
+            if (clause.CONTINUE() != null) OnErrorMode.Continue
+            else if (clause.SKIP_FILE() != null) OnErrorMode.SkipFile
+            else OnErrorMode.AbortStatement
+        }
+        .getOrElse(OnErrorMode.AbortStatement)
+      logical.CopyIntoTableCommand(table, columns, sourcePath, fileFormat, pattern, force, onError)
     }
 
   /** Create a COPY INTO LOCATION (export) logical command. */
@@ -173,7 +190,46 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = typedVisit[Seq[String]](ctx.multipartIdentifier)
     val fileFormat = buildFileFormat(ctx.fileFormatClause())
     val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
-    logical.CopyIntoLocationCommand(targetPath, table, fileFormat, overwrite)
+    logical.CopyIntoLocationCommand(
+      targetPath,
+      logical.CopyIntoLocationSource.TableName(table),
+      fileFormat,
+      overwrite)
+  }
+
+  /** Create a COPY INTO LOCATION FROM (query) (export) logical command. */
+  override def visitCopyIntoLocationFromQuery(
+      ctx: CopyIntoLocationFromQueryContext): logical.CopyIntoLocationCommand = withOrigin(ctx) {
+    val targetPath = unquoteString(ctx.targetPath.getText)
+    val query = extractParenBlockInner(ctx.query)
+    val fileFormat = buildFileFormat(ctx.fileFormatClause())
+    val overwrite = Option(ctx.overwriteClause()).exists(_.booleanValue().TRUE() != null)
+    logical.CopyIntoLocationCommand(
+      targetPath,
+      logical.CopyIntoLocationSource.Query(query),
+      fileFormat,
+      overwrite)
+  }
+
+  /**
+   * Extract the raw subquery text inside a [[ParenBlockContext]], i.e. the `SELECT ...` between the
+   * outer parentheses of `FROM (SELECT ...)`. The text is taken verbatim from the original input
+   * stream (not unquoted) so that the inline query is later re-parsed exactly as the user wrote it.
+   */
+  private def extractParenBlockInner(ctx: ParenBlockContext): String = {
+    val open = ctx.getStart.getStartIndex // '('
+    val close = ctx.getStop.getStopIndex // ')'
+    val inner =
+      if (close - 1 < open + 1) {
+        ""
+      } else {
+        ctx.getStart.getInputStream.getText(Interval.of(open + 1, close - 1)).trim
+      }
+    if (inner.isEmpty) {
+      throw new IllegalArgumentException(
+        "COPY INTO <location> FROM (<query>) requires a non-empty query")
+    }
+    inner
   }
 
   private def buildFileFormat(ctx: FileFormatClauseContext): CopyFileFormat = {
@@ -252,6 +308,50 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   private def toBuffer[T](list: java.util.List[T]) = list.asScala
 
   private def toSeq[T](list: java.util.List[T]) = toBuffer(list)
+
+  private def toTableIdentifier(identifier: Seq[String]): TableIdentifier = {
+    identifier match {
+      case Seq(table) =>
+        TableIdentifier(table)
+      case Seq(database, table) =>
+        TableIdentifier(table, Some(database))
+      case parts =>
+        TableIdentifier(
+          parts.last,
+          Some(parts.slice(1, parts.length - 1).mkString(".")),
+          Some(parts.head))
+    }
+  }
+
+  private def sparkCreateTableLikeCommand(
+      ctx: CreateTableLikeContext): SparkCreateTableLikeCommand = {
+    delegate.parsePlan(createSparkCreateTableLikeSql(ctx)) match {
+      case command: SparkCreateTableLikeCommand => command
+      case plan =>
+        throw new UnsupportedOperationException(
+          s"Expected Spark CREATE TABLE LIKE command, but got ${plan.nodeName}.")
+    }
+  }
+
+  private def createSparkCreateTableLikeSql(ctx: CreateTableLikeContext): String = {
+    val stream = ctx.getStart.getInputStream
+    val baseStart = ctx.getStart.getStartIndex
+    val baseStop = ctx.getStop.getStopIndex
+    val targetStart = ctx.target.getStart.getStartIndex
+    val targetStop = ctx.target.getStop.getStopIndex
+    val sourceStart = ctx.source.getStart.getStartIndex
+    val sourceStop = ctx.source.getStop.getStopIndex
+
+    val prefix = stream.getText(Interval.of(baseStart, targetStart - 1))
+    val middle = stream.getText(Interval.of(targetStop + 1, sourceStart - 1))
+    val suffix = if (sourceStop < baseStop) {
+      stream.getText(Interval.of(sourceStop + 1, baseStop))
+    } else {
+      ""
+    }
+
+    prefix + "__paimon_create_like_target" + middle + "__paimon_create_like_source" + suffix
+  }
 
   private def reconstructSqlString(ctx: ParserRuleContext): String = {
     toBuffer(ctx.children)

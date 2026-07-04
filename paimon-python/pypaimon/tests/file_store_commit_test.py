@@ -40,6 +40,8 @@ class TestFileStoreCommit(unittest.TestCase):
         self.mock_table.current_branch.return_value = 'main'
         self.mock_table.table_path = '/test/table/path'
         self.mock_table.file_io = Mock()
+        self.mock_table.options.manifest_target_size.return_value = 8 * 1024 * 1024
+        self.mock_table.options.manifest_merge_min_count.return_value = 30
 
         # Mock snapshot commit
         self.mock_snapshot_commit = Mock()
@@ -417,7 +419,7 @@ class TestFileStoreCommit(unittest.TestCase):
         snapshot_commit.commit.return_value = True
         file_store_commit.snapshot_commit = snapshot_commit
 
-        file_store_commit._write_manifest_file = Mock(return_value=Mock())
+        file_store_commit._write_manifest_files = Mock(return_value=[Mock()])
         file_store_commit._generate_partition_statistics = Mock(return_value=[])
         file_store_commit.manifest_list_manager.read_all.return_value = []
 
@@ -435,6 +437,7 @@ class TestFileStoreCommit(unittest.TestCase):
             retry_result=None,
             commit_kind="APPEND",
             commit_entries=[commit_entry],
+            changelog_entries=[],
             commit_identifier=11,
             latest_snapshot=latest_snapshot
         )
@@ -489,7 +492,7 @@ class TestFileStoreCommit(unittest.TestCase):
                           file=make_file("f2.parquet")),
         ]
 
-        result = file_store_commit._write_manifest_file(entries, "manifest-test")
+        result = file_store_commit._write_manifest_files(entries, "manifest-test")
         self.assertIsNotNone(result)
 
     @staticmethod

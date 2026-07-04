@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
@@ -101,6 +102,8 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -196,6 +199,7 @@ public class SchemaManager implements Serializable {
                 }
             }
 
+            schema = applyDirectives(schema);
             TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
@@ -317,14 +321,18 @@ public class SchemaManager implements Serializable {
         for (SchemaChange change : changes) {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
-                if (hasSnapshots.get()) {
-                    checkAlterTableOption(
-                            oldOptions,
-                            setOption.key(),
-                            oldOptions.get(setOption.key()),
-                            setOption.value());
+                String oldValue = oldOptions.get(setOption.key());
+                String newValue = setOption.value();
+                boolean unchanged =
+                        Objects.equals(oldValue, newValue)
+                                || isUnchangedNormalizedKey(
+                                        setOption.key(), oldValue, newValue, oldTableSchema);
+                if (hasSnapshots.get() && !unchanged) {
+                    checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
-                newOptions.put(setOption.key(), setOption.value());
+                if (!unchanged) {
+                    newOptions.put(setOption.key(), setOption.value());
+                }
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
                 if (hasSnapshots.get()) {
@@ -342,8 +350,27 @@ public class SchemaManager implements Serializable {
                         "Column %s cannot specify NOT NULL in the %s table.",
                         String.join(".", addColumn.fieldNames()),
                         lazyIdentifier.get().getFullName());
+
+                ConvertedColumn converted =
+                        applyAddColumnDirective(
+                                addColumn.description(),
+                                addColumn.fieldNames()[0],
+                                addColumn.dataType(),
+                                newOptions);
+                DataType requestedDataType = addColumn.dataType();
+                String effectiveComment = addColumn.description();
+                if (converted != null) {
+                    Preconditions.checkArgument(
+                            addColumn.fieldNames().length == 1,
+                            "Comment directive cannot be used on a nested column %s.",
+                            String.join(".", addColumn.fieldNames()));
+                    requestedDataType = converted.type();
+                    effectiveComment = converted.comment();
+                }
+
                 int id = highestFieldId.incrementAndGet();
-                DataType dataType = ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
+                DataType dataType = ReassignFieldId.reassign(requestedDataType, highestFieldId);
+                String storedComment = effectiveComment;
                 new NestedColumnModifier(addColumn.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -352,8 +379,7 @@ public class SchemaManager implements Serializable {
                                     Catalog.ColumnNotExistException {
                         assertColumnNotExists(newFields, fieldName, lazyIdentifier);
 
-                        DataField dataField =
-                                new DataField(id, fieldName, dataType, addColumn.description());
+                        DataField dataField = new DataField(id, fieldName, dataType, storedComment);
 
                         // key: name ; value : index
                         Map<String, Integer> map = new HashMap<>();
@@ -435,6 +461,16 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
                 dropColumnValidation(oldTableSchema, drop);
+                if (drop.fieldNames().length == 1) {
+                    String dropName = drop.fieldNames()[0];
+                    newFields.stream()
+                            .filter(f -> f.name().equals(dropName))
+                            .findFirst()
+                            .ifPresent(
+                                    f ->
+                                            ColumnDirectiveUtils.removeDroppedDirectiveOptions(
+                                                    dropName, f.type().getTypeRoot(), newOptions));
+                }
                 new NestedColumnModifier(drop.fieldNames(), lazyIdentifier) {
                     @Override
                     protected void updateLastColumn(
@@ -451,6 +487,8 @@ public class SchemaManager implements Serializable {
                 UpdateColumnType update = (UpdateColumnType) change;
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
+                assertNotChangingBlobColumnType(
+                        newFields, update.fieldNames(), update.newDataType());
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -476,7 +514,7 @@ public class SchemaManager implements Serializable {
                                             && CastExecutors.resolve(sourceRootType, targetRootType)
                                                     != null,
                                     String.format(
-                                            "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                            "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
                             return new DataField(
                                     field.id(),
@@ -575,14 +613,17 @@ public class SchemaManager implements Serializable {
                         applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
-        return new TableSchema(
-                oldTableSchema.id() + 1,
-                newSchema.fields(),
-                highestFieldId.get(),
-                newSchema.partitionKeys(),
-                newSchema.primaryKeys(),
-                newSchema.options(),
-                newSchema.comment());
+        TableSchema newTableSchema =
+                new TableSchema(
+                        oldTableSchema.id() + 1,
+                        newSchema.fields(),
+                        highestFieldId.get(),
+                        newSchema.partitionKeys(),
+                        newSchema.primaryKeys(),
+                        newSchema.options(),
+                        newSchema.comment());
+        SchemaValidation.validateTableSchema(newTableSchema);
+        return newTableSchema;
     }
 
     // gets the rootType at the defined depth
@@ -716,22 +757,33 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /**
+     * Merge {@code rowType} into the current schema (via {@link SchemaMergingUtils#mergeSchemas})
+     * and persist the result. Returns {@code true} if the schema changed and was committed, {@code
+     * false} if the merge was a no-op. See {@code SchemaMergingUtils} for how {@code typeWidening}
+     * / {@code allowExplicitCast} drive existing-column type evolution.
+     */
     public boolean mergeSchema(
             RowType rowType,
+            boolean typeWidening,
             boolean allowExplicitCast,
+            boolean caseSensitive,
             @Nullable SchemaModification schemaModification) {
         TableSchema current =
                 latest().orElseThrow(
                                 () ->
                                         new RuntimeException(
                                                 "It requires that the current schema to exist when calling 'mergeSchema'"));
-        TableSchema update = SchemaMergingUtils.mergeSchemas(current, rowType, allowExplicitCast);
+        TableSchema update =
+                SchemaMergingUtils.mergeSchemas(
+                        current, rowType, typeWidening, allowExplicitCast, caseSensitive);
         if (current.equals(update)) {
             return false;
         }
         try {
             if (schemaModification != null) {
-                List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(current, update);
+                List<SchemaChange> changes =
+                        SchemaMergingUtils.diffSchemaChanges(current, update, caseSensitive);
                 schemaModification.alterSchema(changes);
                 return true;
             } else {
@@ -920,6 +972,28 @@ public class SchemaManager implements Serializable {
                 throw new UnsupportedOperationException(
                         String.format("Cannot rename BLOB column: [%s]", fieldName));
             }
+        }
+    }
+
+    private static void assertNotChangingBlobColumnType(
+            List<DataField> fields, String[] fieldNames, DataType newType) {
+        if (fieldNames.length > 1) {
+            return;
+        }
+        String fieldName = fieldNames[0];
+        for (DataField field : fields) {
+            if (!field.name().equals(fieldName)) {
+                continue;
+            }
+            boolean wasBlob = field.type().is(DataTypeRoot.BLOB);
+            boolean willBeBlob = newType.is(DataTypeRoot.BLOB);
+            if (wasBlob || willBeBlob) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change column type involving BLOB: [%s] %s -> %s",
+                                fieldName, field.type(), newType));
+            }
+            return;
         }
     }
 
@@ -1182,6 +1256,35 @@ public class SchemaManager implements Serializable {
         for (Long id : toBeDeleted) {
             fileIO.delete(toSchemaPath(id), false);
         }
+    }
+
+    /**
+     * Checks whether a key whose old value is null actually hasn't changed. This handles keys like
+     * 'primary-key' and 'partition' that are stripped from options during schema normalization and
+     * stored in dedicated schema fields instead.
+     */
+    public static boolean isUnchangedNormalizedKey(
+            String key,
+            @Nullable String oldValue,
+            @Nullable String newValue,
+            TableSchema tableSchema) {
+        if (oldValue != null || newValue == null) {
+            return false;
+        }
+        if (CoreOptions.PRIMARY_KEY.key().equals(key)) {
+            return normalizeKeyList(newValue).equals(tableSchema.primaryKeys());
+        }
+        if (CoreOptions.PARTITION.key().equals(key)) {
+            return normalizeKeyList(newValue).equals(tableSchema.partitionKeys());
+        }
+        return false;
+    }
+
+    private static List<String> normalizeKeyList(String value) {
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 
     public static void checkAlterTableOption(

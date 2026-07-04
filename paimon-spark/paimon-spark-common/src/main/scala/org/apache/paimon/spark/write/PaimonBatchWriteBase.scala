@@ -18,12 +18,15 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
+import org.apache.paimon.spark.SparkTypeUtils
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{FILE_PATH, ROW_ID, SEQUENCE_NUMBER}
+import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, CommitMessageImpl}
 
 import org.apache.spark.sql.PaimonSparkSession
@@ -53,7 +56,8 @@ abstract class PaimonBatchWriteBase(
     val writeSchema: StructType,
     val dataSchema: StructType,
     val overwritePartitions: Option[Map[String, String]],
-    val copyOnWriteScan: Option[PaimonCopyOnWriteScan])
+    val copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    operationType: Option[Snapshot.Operation] = None)
   extends WriteHelper
   with Serializable {
 
@@ -67,16 +71,44 @@ abstract class PaimonBatchWriteBase(
     builder
   }
 
+  private val writeRowTracking: Boolean =
+    coreOptions.rowTrackingEnabled() && copyOnWriteScan.isDefined
+
+  private lazy val rtPaimonWriteType =
+    SpecialFields.rowTypeWithRowTracking(table.rowType(), false, true)
+
+  private lazy val rtWriteSchema =
+    SparkTypeUtils.fromPaimonRowType(rtPaimonWriteType)
+
+  private lazy val rtMetadataSchema =
+    StructType(Seq(FILE_PATH, ROW_ID, SEQUENCE_NUMBER).map(_.toStructField))
+
   protected def createPaimonDataWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     (_: Int, _: Long) =>
       {
-        PaimonV2DataWriter(
-          batchWriteBuilder,
-          writeSchema,
-          dataSchema,
-          coreOptions,
-          catalogContextForBlobDescriptor)
+        if (writeRowTracking) {
+          createPaimonMetadataAwareDataWriter()
+        } else {
+          PaimonV2DataWriter(
+            batchWriteBuilder,
+            writeSchema,
+            dataSchema,
+            coreOptions,
+            catalogContextForBlobDescriptor)
+        }
       }
+  }
+
+  private def createPaimonMetadataAwareDataWriter(): PaimonV2DataWriter = {
+    new PaimonV2MetadataAwareDataWriter(
+      batchWriteBuilder,
+      writeSchema,
+      rtWriteSchema,
+      dataSchema,
+      rtMetadataSchema,
+      coreOptions,
+      catalogContextForBlobDescriptor,
+      rtPaimonWriteType)
   }
 
   protected def commitMessages(messages: Array[WriterCommitMessage]): Unit = {
@@ -84,6 +116,9 @@ abstract class PaimonBatchWriteBase(
     logInfo(s"Committing to table ${table.name()}")
     val batchTableCommit = batchWriteBuilder.newCommit()
     batchTableCommit.withMetricRegistry(metricRegistry)
+    val operation = operationType.getOrElse(
+      if (overwritePartitions.isDefined) Snapshot.Operation.OVERWRITE else Snapshot.Operation.WRITE)
+    batchTableCommit.withOperation(operation)
     val addCommitMessage = WriteTaskResult.merge(messages)
     val deletedCommitMessage = copyOnWriteScan match {
       case Some(scan) => buildDeletedCommitMessage(scan.scannedFiles)

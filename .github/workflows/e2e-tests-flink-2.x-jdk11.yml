@@ -20,6 +20,12 @@ name: End to End Tests Flink 2.x on JDK 11
 
 on:
   push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'paimon-python/**'
+      - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
   pull_request:
     paths-ignore:
       - 'docs/**'
@@ -31,6 +37,10 @@ on:
 env:
   JDK_VERSION: 11
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build_test:

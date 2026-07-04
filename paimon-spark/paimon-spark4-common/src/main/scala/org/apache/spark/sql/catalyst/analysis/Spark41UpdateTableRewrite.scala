@@ -18,7 +18,7 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
+import org.apache.paimon.spark.catalyst.analysis.PaimonAssignmentUtils
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, EqualNullSafe, Expression, If, Literal, MetadataAttribute, Not, SubqueryExpression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
@@ -31,59 +31,45 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, Extr
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
- * Spark 4.1-only Resolution-batch rule that rewrites UPDATE plans targeting pure append-only Paimon
- * tables (see [[PureAppendOnlyScope]] for the scope) into the V2 `ReplaceData` plan — the same form
- * Spark's built-in `RewriteUpdateTable` produces for `SupportsRowLevelOperations` tables.
+ * Spark 4.1-only Resolution-batch rule that rewrites UPDATE on pure append-only Paimon tables (see
+ * [[PureAppendOnlyScope]]) into a V2 `ReplaceData` plan, mirroring Spark's built-in
+ * `RewriteUpdateTable`.
  *
- * Why this rule exists: Spark 4.1 moved `RewriteUpdateTable` into the main Resolution batch AND
- * implemented its `apply` with `plan resolveOperators { ... }`. `AnalysisHelper.resolveOperators*`
- * short-circuits on already-`analyzed` plans, so by the time the rewrite would run the append-only
- * `UpdateTable` node has transitioned to `analyzed=true` and the rewrite silently skips. The
- * `UpdateTable` then falls through to the physical planner which rejects it with
- * `UNSUPPORTED_FEATURE.TABLE_OPERATION`.
+ * In Spark 4.1, `RewriteUpdateTable` runs in the Resolution batch via `resolveOperators`, which
+ * short-circuits on `analyzed=true` plans — by the time it would fire, the `UpdateTable` is already
+ * marked analyzed and silently skipped, so the planner rejects it with
+ * `UNSUPPORTED_FEATURE.TABLE_OPERATION`. We intercept via `transformDown` under
+ * `allowInvokingTransformsInAnalyzer` and inline `buildReplaceDataPlan` /
+ * `buildReplaceDataWithUnionPlan`. The class sits in `org.apache.spark.sql.catalyst.analysis` to
+ * reach the package-private `RowLevelOperationTable` / `ReplaceData` types and the protected
+ * helpers on `RewriteRowLevelCommand`.
  *
- * Firing this rule in the Resolution batch via `transformDown` guarded by
- * `AnalysisHelper.allowInvokingTransformsInAnalyzer` intercepts the plan before the analyzed flag
- * traps Spark's own rule. The body is a near-verbatim transcription of
- * `RewriteUpdateTable.buildReplaceDataPlan` / `buildReplaceDataWithUnionPlan` so the result goes
- * through Paimon's V2 row-level write path (`PaimonSparkCopyOnWriteOperation` ->
- * `PaimonV2WriteBuilder` -> `PaimonBatchWrite`) exactly like Spark would have produced. The class
- * lives in `org.apache.spark.sql.catalyst.analysis` so it can reference the package-private
- * `RowLevelOperationTable` / `ReplaceData` types and the protected helpers on
- * `RewriteRowLevelCommand`.
+ * We fire before `ResolveAssignments`, so `u.aligned` is `false`; the rule pre-aligns via
+ * `PaimonAssignmentUtils.alignUpdateAssignments` before building the plan.
  *
- * One subtlety: Spark's `RewriteUpdateTable` guards on `u.aligned`, which is set by its
- * `ResolveAssignments` rule running earlier in the Resolution batch. Because we fire before that
- * alignment has taken effect, `u.aligned` is always `false` for us. The rule therefore mixes in
- * Paimon's `AssignmentAlignmentHelper` and aligns assignments itself before invoking
- * `buildReplaceDataPlan`, which expects one assignment per target data column.
- *
- * Tables with row-tracking / data-evolution / deletion-vectors still route through Spark's V2 path
- * (which handles them correctly). Primary-key tables fall under Paimon's existing postHoc rule.
- * DELETE is handled by [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
+ * Row-tracking-only tables use the same V2 copy-on-write rewrite. PK / DE / DV tables go through
+ * the postHoc V1 rule because they do not expose `SupportsRowLevelOperations`. DELETE is handled by
+ * [[Spark41DeleteMetadataRestore]]; MERGE by [[Spark41MergeIntoRewrite]].
  */
-object Spark41UpdateTableRewrite
-  extends RewriteRowLevelCommand
-  with AssignmentAlignmentHelper
-  with PureAppendOnlyScope {
+object Spark41UpdateTableRewrite extends RewriteRowLevelCommand with PureAppendOnlyScope {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     if (org.apache.spark.SPARK_VERSION < "4.1") return plan
     AnalysisHelper.allowInvokingTransformsInAnalyzer {
       plan.transformDown {
         case u @ UpdateTable(aliasedTable, assignments, cond)
-            if u.resolved && u.rewritable && targetsPureAppendOnly(aliasedTable) =>
+            if u.resolved && u.rewritable && targetsV2CopyOnWriteTable(aliasedTable) =>
           EliminateSubqueryAliases(aliasedTable) match {
             case r @ ExtractV2Table(tbl: SupportsRowLevelOperations) =>
               val table = buildOperationTable(tbl, UPDATE, CaseInsensitiveStringMap.empty())
               val updateCond = cond.getOrElse(TrueLiteral)
-              // Spark's `RewriteUpdateTable` relies on `ResolveAssignments` having aligned
-              // `u.assignments` to the full target output first, but that rule fires later in
-              // the Resolution batch than ours, so `u.aligned` is still `false` when we see the
-              // plan. Align manually with Paimon's `AssignmentAlignmentHelper` (same helper
-              // the postHoc `PaimonUpdateTable` rule uses for its V1 fallback) before building
-              // the `ReplaceData` plan, which expects one assignment per target data column.
-              val alignedAssignments = alignAssignments(r.output, assignments)
+              // `ResolveAssignments` fires later in the batch, so `u.aligned` is still false.
+              // Pre-align via the same utility the postHoc V1 fallback uses.
+              val alignedAssignments = PaimonAssignmentUtils.alignUpdateAssignments(
+                r.output,
+                assignments,
+                fromStar = false,
+                mergeSchemaEnabled = false)
               if (SubqueryExpression.hasSubquery(updateCond)) {
                 buildReplaceDataWithUnionPlan(r, table, alignedAssignments, updateCond)
               } else {
@@ -96,13 +82,8 @@ object Spark41UpdateTableRewrite
     }
   }
 
-  /* ------------------------------------------------------------------------------------------- *
-   * Near-verbatim replicas of `RewriteUpdateTable`'s private `buildReplaceDataPlan` /
-   * `buildReplaceDataWithUnionPlan` / `buildReplaceDataUpdateProjection`. Kept in lockstep with
-   * the Spark 4.1.1 implementation so the produced `ReplaceData` shape matches Spark's and reuses
-   * Paimon's existing V2 write path.
-   * ------------------------------------------------------------------------------------------- */
-
+  // Mirrors Spark 4.1.1 `RewriteUpdateTable.{buildReplaceDataPlan, buildReplaceDataWithUnionPlan,
+  // buildReplaceDataUpdateProjection}`.
   private def buildReplaceDataPlan(
       relation: DataSourceV2Relation,
       operationTable: RowLevelOperationTable,

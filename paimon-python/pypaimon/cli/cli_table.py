@@ -86,7 +86,7 @@ def cmd_table_read(args):
     # When both select and where are specified, ensure where-referenced fields
     # are included in the projection so the filter can work correctly.
     if user_columns and where_clause:
-        from pypaimon.cli.where_parser import extract_fields_from_where
+        from pypaimon.common.where_parser import extract_fields_from_where
         where_fields = extract_fields_from_where(where_clause, available_fields)
         user_column_set = set(user_columns)
         extra_where_columns = [f for f in where_fields if f not in user_column_set]
@@ -97,7 +97,7 @@ def cmd_table_read(args):
 
     # Apply where filter if specified
     if where_clause:
-        from pypaimon.cli.where_parser import parse_where_clause
+        from pypaimon.common.where_parser import parse_where_clause
         try:
             predicate = parse_where_clause(where_clause, table.table_schema.fields)
             if predicate:
@@ -191,7 +191,7 @@ def cmd_table_explain(args):
 
     where_clause = getattr(args, 'where', None)
     if where_clause:
-        from pypaimon.cli.where_parser import parse_where_clause
+        from pypaimon.common.where_parser import parse_where_clause
         try:
             predicate = parse_where_clause(where_clause, table.table_schema.fields)
             if predicate:
@@ -271,15 +271,13 @@ def cmd_table_full_text_search(args):
         print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Build full-text search
-    text_column = args.column
-    query_text = args.query
     limit = args.limit
 
     try:
+        from pypaimon.globalindex.full_text_query import FullTextQuery
+
         builder = table.new_full_text_search_builder()
-        builder.with_text_column(text_column)
-        builder.with_query_text(query_text)
+        builder.with_query(FullTextQuery.from_json(args.query))
         builder.with_limit(limit)
         result = builder.execute_local()
     except Exception as e:
@@ -1072,14 +1070,9 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     fts_parser.add_argument(
-        '--column', '-c',
-        required=True,
-        help='Text column to search on'
-    )
-    fts_parser.add_argument(
         '--query', '-q',
         required=True,
-        help='Query text to search for'
+        help='LanceDB-style full-text query JSON to search for'
     )
     fts_parser.add_argument(
         '--limit', '-l',

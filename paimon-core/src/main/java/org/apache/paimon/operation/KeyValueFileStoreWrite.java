@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -151,6 +152,29 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         schema,
                         recordLevelExpire,
                         cacheManager);
+        if (options.writeOnly()
+                && options.writeSequenceNumberInitMode()
+                        == CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
+            super.withIgnorePreviousFiles(true);
+            LOG.info(
+                    "Enable ignoring previous files for write-only snapshot sequence number initialization of table {}.",
+                    tableName);
+        }
+    }
+
+    @Override
+    protected boolean ignorePreviousFilesForWriter(
+            BinaryRow partition,
+            int bucket,
+            @Nullable Snapshot latestSnapshot,
+            boolean ignorePreviousFiles) {
+        if (options.writeOnly()
+                && options.writeSequenceNumberInitMode()
+                        == CoreOptions.SequenceNumberInitMode.SNAPSHOT) {
+            return latestSnapshot == null
+                    || SequenceSnapshotProperties.maxSequenceNumber(latestSnapshot).isPresent();
+        }
+        return ignorePreviousFiles;
     }
 
     @Override
@@ -178,7 +202,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable BucketedDvMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            boolean ignorePreviousFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Creating merge tree writer for partition {} bucket {} from restored files {}",
@@ -192,7 +217,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         CompactManager compactManager =
                 compactManagerFactory.create(
-                        partition, bucket, compactExecutor, restoreFiles, dvMaintainer);
+                        partition,
+                        bucket,
+                        compactExecutor,
+                        restoreFiles,
+                        dvMaintainer,
+                        ignorePreviousFiles);
 
         return new MergeTreeWriter(
                 options.writeBufferSpillable(),

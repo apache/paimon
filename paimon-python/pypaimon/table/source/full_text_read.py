@@ -18,15 +18,29 @@
 """Full-text read to read index files."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from concurrent.futures import wait
+from typing import Dict, List
 
+from pypaimon.globalindex.full_text_query import (
+    BooleanQuery,
+    BoostQuery,
+    FullTextQuery,
+    MatchQuery,
+    MultiMatchQuery,
+    PhraseQuery,
+)
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
-from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
+from pypaimon.globalindex.vector_search_result import (
+    DictBasedScoredIndexResult,
+    ScoredGlobalIndexResult,
+)
+from pypaimon.table.source import global_index_live_row_filter
 from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 class FullTextRead(ABC):
@@ -47,24 +61,105 @@ class FullTextReadImpl(FullTextRead):
         self,
         table: 'FileStoreTable',
         limit: int,
-        text_column: 'DataField',
-        query_text: str
+        text_column,
+        query: FullTextQuery,
+        partition_filter=None,
     ):
         self._table = table
         self._limit = limit
-        self._text_column = text_column
-        self._query_text = query_text
+        self._text_columns = text_column if isinstance(text_column, list) else [text_column]
+        self._query = query
+        self._partition_filter = partition_filter
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
         if not splits:
             return GlobalIndexResult.create_empty()
 
-        merged_scores = {}
+        splits_by_column: Dict[str, List[FullTextSearchSplit]] = {}
         for split in splits:
-            split_result = self._eval(
+            splits_by_column.setdefault(split.column_name, []).append(split)
+        live_rows = global_index_live_row_filter.live_rows(
+            self._table, self._partition_filter)
+        return self._eval_query(
+            self._query, splits_by_column, live_rows).top_k(self._limit)
+
+    def _eval_query(
+            self,
+            query: FullTextQuery,
+            splits_by_column: Dict[str, List[FullTextSearchSplit]],
+            live_rows
+    ) -> ScoredGlobalIndexResult:
+        if isinstance(query, MatchQuery):
+            return self._eval_column_query(
+                query, query.column, splits_by_column, live_rows)
+        if isinstance(query, PhraseQuery):
+            return self._eval_column_query(
+                query, query.column, splits_by_column, live_rows)
+        if isinstance(query, MultiMatchQuery):
+            results = []
+            for column, boost in zip(query.columns, query.boosts):
+                match = MatchQuery(
+                    query.query, column, boost=boost, operator=query.operator)
+                results.append(
+                    self._eval_column_query(match, column, splits_by_column, live_rows))
+            return _or(results).top_k(self._limit)
+        if isinstance(query, BoostQuery):
+            positive = self._eval_query(query.positive, splits_by_column, live_rows)
+            negative = self._eval_query(query.negative, splits_by_column, live_rows)
+            return _boost(positive, negative, query.negative_boost)
+        if isinstance(query, BooleanQuery):
+            result = None
+            for child in query.must():
+                child_result = self._eval_query(child, splits_by_column, live_rows)
+                result = child_result if result is None else _and(result, child_result)
+
+            should_results = []
+            for child in query.should():
+                should_results.append(
+                    self._eval_query(child, splits_by_column, live_rows))
+            if should_results:
+                should_result = _or(should_results)
+                result = should_result if result is None else _and_with_bonus(
+                    result, should_result)
+
+            if result is None:
+                return ScoredGlobalIndexResult.create_empty()
+            for child in query.must_not():
+                result = _and_not(
+                    result, self._eval_query(child, splits_by_column, live_rows))
+            return result
+        raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
+
+    def _eval_column_query(
+            self,
+            query: FullTextQuery,
+            column: str,
+            splits_by_column: Dict[str, List[FullTextSearchSplit]],
+            live_rows
+    ) -> ScoredGlobalIndexResult:
+        splits = splits_by_column.get(column, [])
+        if not splits:
+            return ScoredGlobalIndexResult.create_empty()
+        futures = []
+        for split in splits:
+            include_row_ids = global_index_live_row_filter.for_range(
+                live_rows, split.row_range_start, split.row_range_end)
+            if include_row_ids is not None and include_row_ids.is_empty():
+                continue
+            futures.append(self._eval(
                 split.row_range_start, split.row_range_end,
-                split.full_text_index_files
-            )
+                split.full_text_index_files,
+                query,
+                include_row_ids,
+            ))
+        if not futures:
+            return ScoredGlobalIndexResult.create_empty()
+
+        wait(futures)
+
+        merged_scores = {}
+        for future in futures:
+            split_result = future.result()
             if split_result is not None:
                 score_getter = split_result.score_getter()
                 for row_id in split_result.results():
@@ -73,8 +168,8 @@ class FullTextReadImpl(FullTextRead):
 
         return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
-    def _eval(self, row_range_start, row_range_end, full_text_index_files
-              ) -> Optional[GlobalIndexResult]:
+    def _eval(self, row_range_start, row_range_end, full_text_index_files,
+              query, include_row_ids):
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
@@ -83,7 +178,8 @@ class FullTextReadImpl(FullTextRead):
                 GlobalIndexIOMeta(
                     file_name=index_file.file_name,
                     file_size=index_file.file_size,
-                    metadata=meta.index_meta
+                    metadata=meta.index_meta,
+                    external_path=index_file.external_path,
                 )
             )
 
@@ -97,16 +193,73 @@ class FullTextReadImpl(FullTextRead):
         )
 
         full_text_search = FullTextSearch(
-            query_text=self._query_text,
-            limit=self._limit,
-            field_name=self._text_column.name
+            query=query,
+            limit=_candidate_limit(row_range_start, row_range_end),
         )
+        if include_row_ids is not None:
+            full_text_search = full_text_search.with_include_row_ids(include_row_ids)
 
-        try:
-            offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
-            return offset_reader.visit_full_text_search(full_text_search)
-        finally:
-            reader.close()
+        offset_reader = OffsetGlobalIndexReader(reader, row_range_start, row_range_end)
+        future = offset_reader.visit_full_text_search(full_text_search)
+        future.add_done_callback(lambda _: reader.close())
+        return future
+
+
+def _and(left: ScoredGlobalIndexResult, right: ScoredGlobalIndexResult):
+    bitmap = RoaringBitmap64.and_(left.results(), right.results())
+    left_score = left.score_getter()
+    right_score = right.score_getter()
+    return ScoredGlobalIndexResult.create(
+        bitmap,
+        lambda row_id: (left_score(row_id) or 0.0) + (right_score(row_id) or 0.0),
+    )
+
+
+def _or(results: List[ScoredGlobalIndexResult]):
+    scores = {}
+    for result in results:
+        score_getter = result.score_getter()
+        for row_id in result.results():
+            scores[row_id] = scores.get(row_id, 0.0) + (score_getter(row_id) or 0.0)
+    return DictBasedScoredIndexResult(scores)
+
+
+def _and_with_bonus(base: ScoredGlobalIndexResult, bonus: ScoredGlobalIndexResult):
+    bitmap = base.results()
+    base_score = base.score_getter()
+    bonus_score = bonus.score_getter()
+    bonus_rows = bonus.results()
+    return ScoredGlobalIndexResult.create(
+        bitmap,
+        lambda row_id: (
+            (base_score(row_id) or 0.0)
+            + ((bonus_score(row_id) or 0.0) if bonus_rows.contains(row_id) else 0.0)
+        ),
+    )
+
+
+def _and_not(left: ScoredGlobalIndexResult, right: ScoredGlobalIndexResult):
+    bitmap = RoaringBitmap64.remove_all(left.results(), right.results())
+    return ScoredGlobalIndexResult.create(bitmap, left.score_getter())
+
+
+def _boost(
+        positive: ScoredGlobalIndexResult,
+        negative: ScoredGlobalIndexResult,
+        negative_boost: float):
+    positive_score = positive.score_getter()
+    negative_rows = negative.results()
+    return ScoredGlobalIndexResult.create(
+        positive.results(),
+        lambda row_id: (
+            (positive_score(row_id) or 0.0)
+            * (negative_boost if negative_rows.contains(row_id) else 1.0)
+        ),
+    )
+
+
+def _candidate_limit(row_range_start: int, row_range_end: int) -> int:
+    return row_range_end - row_range_start + 1
 
 
 def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list):

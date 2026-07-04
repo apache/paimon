@@ -19,9 +19,10 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.CoreOptions.ChangelogProducer
+import org.apache.paimon.Snapshot
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
-import org.apache.paimon.spark.commands.SchemaHelper
+import org.apache.paimon.spark.commands.SchemaEvolutionHelper
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
 import org.apache.paimon.table.FileStoreTable
@@ -41,13 +42,13 @@ class PaimonV2Write(
     overwritePartitions: Option[Map[String, String]],
     copyOnWriteScan: Option[PaimonCopyOnWriteScan],
     dataSchema: StructType,
-    options: Options
+    options: Options,
+    operationType: Option[Snapshot.Operation] = None
 ) extends Write
   with RequiresDistributionAndOrdering
-  with SchemaHelper
+  with SchemaEvolutionHelper
   with Logging {
 
-  private val writeSchema = mergeSchema(dataSchema, options)
   private val writeRequirement = PaimonWriteRequirement(table)
 
   override def requiredDistribution(): Distribution = {
@@ -63,12 +64,15 @@ class PaimonV2Write(
   }
 
   override def toBatch: BatchWrite = {
+    // Commit the evolved schema at execution (not at planning), then write to the evolved table.
+    val writeSchema = mergeSchema(dataSchema, options)
     SparkShimLoader.shim.createPaimonBatchWrite(
       table,
       writeSchema,
       dataSchema,
       overwritePartitions,
-      copyOnWriteScan)
+      copyOnWriteScan,
+      operationType)
   }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {

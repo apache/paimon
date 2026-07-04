@@ -18,13 +18,16 @@
 
 package org.apache.spark.sql.paimon.shims
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.data.variant.Variant
+import org.apache.paimon.function.{Function => PaimonFunction}
 import org.apache.paimon.spark.data.{SparkArrayData, SparkInternalRow}
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
 import org.apache.paimon.table.{FileStoreTable, FormatTable}
 import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -127,7 +130,8 @@ trait SparkShim {
       writeSchema: StructType,
       dataSchema: StructType,
       overwritePartitions: Option[Map[String, String]],
-      copyOnWriteScan: Option[PaimonCopyOnWriteScan]): BatchWrite
+      copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+      operationType: Option[Snapshot.Operation]): BatchWrite
 
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
@@ -159,15 +163,23 @@ trait SparkShim {
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
 
+  // Spark 3.4 added `notMatchedBySourceActions` to `MergeIntoTable`. On 3.2/3.3 the field doesn't
+  // exist on the AST, so this returns `Seq.empty`. Lets `paimon-spark-common` (which compiles
+  // against 3.5/4.1) reference NMBS via a single accessor that works on all minor versions.
+  def notMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction]
+
+  // Per-version shim: Spark 4.1 added a 3rd `fromStar: Boolean = false` field. A 2-arg call site
+  // compiled against 4.1 emits an `apply$default$3()` lookup absent on 4.0. Paimon tracks star
+  // intent via [[PaimonMergeActionTags]], so `fromStar` stays unused here.
+  def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
+
+  def createInsertAction(condition: Option[Expression], assignments: Seq[Assignment]): InsertAction
+
   def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
       output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
       : DataSourceV2Relation
-
-  def copyUpdateAction(action: UpdateAction, assignments: Seq[Assignment]): UpdateAction
-
-  def copyInsertAction(action: InsertAction, assignments: Seq[Assignment]): InsertAction
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.
@@ -230,4 +242,19 @@ trait SparkShim {
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType
+
+  // SQL UDFs (`CREATE FUNCTION ... RETURN ...`) are Spark 4.0+; the spark3 shim no-ops these.
+
+  /** Parser-stage rule rewriting a Paimon-catalog `CreateUserDefinedFunction` into a create command. */
+  def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan]
+
+  /**
+   * Resolve a Paimon SQL function reference into a Spark `SQLFunctionExpression` (Spark inlines
+   * it).
+   */
+  def resolvePaimonSQLFunction(
+      funcIdent: FunctionIdentifier,
+      function: PaimonFunction,
+      arguments: Seq[Expression],
+      parser: ParserInterface): Expression
 }

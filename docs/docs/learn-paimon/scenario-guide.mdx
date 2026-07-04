@@ -43,8 +43,8 @@ configurations that are suited for different scenarios.
 | High-frequency point queries on key | Append Table | `bucket = N, bucket-key = col` |
 | Queue-like ordered streaming | Append Table | `bucket = N, bucket-key = col` |
 | Large-scale OLAP with ad-hoc queries | Append Table | Incremental Clustering |
-| Store images / videos / documents | Append Table (Blob) | `blob-field`, Data Evolution enabled |
-| AI vector search / RAG | Append Table (Vector) | `VECTOR` type, Global Index (DiskANN) |
+| Store images / videos / documents | Append Table (Blob) | `__BLOB_FIELD` comment, Data Evolution enabled |
+| AI vector search / RAG | Append Table (Vector) | `VECTOR` type, Vector Global Index |
 | AI feature engineering & column evolution | Append Table | `data-evolution.enabled = true` |
 | Python AI pipeline (Ray / PyTorch) | Append Table | PyPaimon SDK |
 
@@ -287,6 +287,10 @@ SELECT * FROM product_logs WHERE product_id IN (1, 2, 3);
 
 See [Bucketed Append — Data Skipping](../append-table/bucketed#data-skipping).
 
+If queries also frequently filter on columns other than the `bucket-key` and ordered streaming is not required, you can
+enable [Incremental Clustering](../append-table/incremental-clustering) on the bucketed append table by setting
+`bucket-append-ordered = false`.
+
 **Bucketed Join Bonus:** If two bucketed tables share the same `bucket-key` and bucket count, Spark can join them
 **without shuffle**, significantly accelerating batch join queries:
 
@@ -330,7 +334,7 @@ See [Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
 | Mode | Config | Data Skipping | Bucketed Join | Ordered Streaming | Incremental Clustering |
 |---|---|---|---|---|---|
 | Unaware-Bucket (default) | No bucket config | Via min-max / file index | No | No | Yes |
-| Bucketed | `bucket = N, bucket-key = col` | **Bucket-key filter pushdown** | Yes | Yes | No |
+| Bucketed | `bucket = N, bucket-key = col` | **Bucket-key filter pushdown** | Yes | Yes, unless `bucket-append-ordered = false` | Yes, requires `bucket-append-ordered = false` |
 
 ---
 
@@ -338,7 +342,7 @@ See [Bucketed Streaming](../append-table/bucketed#bucketed-streaming).
 
 Paimon is a multimodal lakehouse for AI. You can keep multimodal data, metadata, and embeddings in the same table and
 query them via vector search, full-text search, or SQL. All multimodal features are built on top of Append Tables with
-[Data Evolution](../append-table/data-evolution) mode enabled.
+[Data Evolution](../multimodal-table/data-evolution) mode enabled.
 
 ### Scenario 8: Storing Multimodal Data (Blob Table)
 
@@ -356,11 +360,10 @@ CREATE TABLE image_table (
     id INT,
     name STRING,
     label STRING,
-    image BYTES
+    image BYTES COMMENT '__BLOB_FIELD'
 ) WITH (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -373,11 +376,10 @@ CREATE TABLE image_table (
     id INT,
     name STRING,
     label STRING,
-    image BINARY
+    image BINARY COMMENT '__BLOB_FIELD'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image'
+    'data-evolution.enabled' = 'true'
 );
 ```
 
@@ -385,30 +387,12 @@ CREATE TABLE image_table (
 
 </Tabs>
 
-**Why:** The [Blob Storage](../append-table/blob) separates large binary data into dedicated `.blob` files
+**Why:** The [Blob Storage](../multimodal-table/blob) separates large binary data into dedicated `.blob` files
 while metadata stays in standard columnar files (Parquet/ORC). This means:
 
 - `SELECT id, name, label FROM image_table` does **not** load any blob data — very fast.
 - Blob data supports streaming reads for large objects (videos, model weights) without loading entire files into memory.
 - Supports multiple input methods: local files, HTTP URLs, InputStreams, and byte arrays.
-
-**For external storage (e.g., blobs already in S3):**
-
-```sql
-CREATE TABLE video_table (
-    id INT,
-    title STRING,
-    video BYTES
-) WITH (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-descriptor-field' = 'video',
-    'blob-external-storage-field' = 'video',
-    'blob-external-storage-path' = 's3://my-bucket/paimon-blobs/'
-);
-```
-
-This stores only descriptor references inline, while the actual blob data resides in external storage.
 
 ### Scenario 9: Vector Search / RAG Applications
 
@@ -426,13 +410,11 @@ CREATE TABLE doc_embeddings (
     doc_id INT,
     title STRING,
     content STRING,
-    embedding ARRAY<FLOAT>
+    embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;768'
 ) TBLPROPERTIES (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true',
-    'vector-field' = 'embedding',
-    'field.embedding.vector-dim' = '768',
     'vector.file.format' = 'lance'
 );
 ```
@@ -462,21 +444,19 @@ Schema schema = Schema.newBuilder()
 **Build the vector index and search:**
 
 ```sql
--- Build DiskANN vector index
+-- Build IVF-PQ vector index
 CALL sys.create_global_index(
     table => 'db.doc_embeddings',
     index_column => 'embedding',
-    index_type => 'lumina',
-    options => 'lumina.index.dimension=768'
+    index_type => 'ivf-pq',
+    options => 'vector.distance.metric=cosine,vector.nlist=256,vector.pq.m=16'
 );
 
 -- Search for top-5 nearest neighbors
 SELECT * FROM vector_search('doc_embeddings', 'embedding', array(0.1f, 0.2f, ...), 5);
 ```
 
-The legacy index type `lumina-vector-ann` is still accepted for existing tables and SQL compatibility.
-
-**Why:** The [Global Index](../append-table/global-index) with DiskANN provides high-performance ANN search.
+**Why:** The [Global Index](../multimodal-table/global-index) with vector indexes provides high-performance ANN search.
 Vector data is stored in dedicated `.vector.lance` files optimized for dense vectors, while scalar columns stay in
 Parquet. You can also build a **BTree Index** on scalar columns for efficient filtering:
 
@@ -524,12 +504,71 @@ ON t.user_id = s.user_id
 WHEN MATCHED THEN UPDATE SET t.embedding = s.embedding;
 ```
 
-**Why:** [Data Evolution](../append-table/data-evolution) mode writes only the updated columns to new files
+**Why:** [Data Evolution](../multimodal-table/data-evolution) mode writes only the updated columns to new files
 and merges them at read time. This is ideal for:
 
 - Adding new feature columns and backfilling data without rewriting the entire table.
 - Iterative ML feature engineering — add, update, or refine features as your model evolves.
 - Reducing I/O cost and storage overhead for frequent partial column updates.
+
+#### Distributed Feature Backfill with Ray
+
+For pipelines that derive features from large payloads, keep the payload in Blob columns and update only the derived
+feature columns. Ray can read the records to process, run distributed computation, and call PyPaimon's Ray `merge_into`
+to write feature values back to the data-evolution table. The example assumes the target table has a key column `id`,
+a Blob column `payload`, and a non-Blob feature column `feature` to update.
+
+```python
+import ray
+from pypaimon.ray import read_paimon, merge_into, WhenMatched, source_col
+
+catalog_options = {"warehouse": "/path/to/warehouse"}
+target = "db.item_features"
+num_partitions = 1024
+
+# Keys selected by an upstream job. This can also come from another Paimon table,
+# Parquet files, or any Ray Dataset.
+records_to_process = ray.data.read_parquet("/path/to/records-to-process/")
+
+# Read only the columns needed for this job.
+target_rows = read_paimon(
+    target,
+    catalog_options=catalog_options,
+    projection=["id", "payload"],
+)
+
+selected = records_to_process.join(
+    target_rows,
+    join_type="inner",
+    num_partitions=num_partitions,
+    on=["id"],
+)
+
+def compute_feature(batch):
+    # Call your model service here. This example only keeps the shape simple.
+    payloads = batch["payload"].to_pylist()
+    return {
+        "id": batch["id"].to_pylist(),
+        "new_feature": [len(v) if v is not None else 0 for v in payloads],
+    }
+
+updates = selected.map_batches(compute_feature, batch_format="pyarrow")
+
+merge_into(
+    target=target,
+    source=updates,
+    catalog_options=catalog_options,
+    on=["id"],
+    when_matched=[
+        WhenMatched(update={"feature": source_col("new_feature")})
+    ],
+    num_partitions=num_partitions,
+)
+```
+
+`merge_into` rewrites only the matched non-Blob columns. Existing Blob files stay unchanged, so the source dataset does
+not need to carry Blob columns when it only updates feature fields. For very large key lists, tune Ray resources and
+`num_partitions`; selecting target rows is still a distributed join.
 
 ### Scenario 11: Python AI Pipeline (PyPaimon)
 
@@ -610,8 +649,8 @@ Do you need upsert / update / delete?
     │   → bucket = N, bucket-key = col (Bucketed Append)
     │
     └── AI / Multimodal scenarios? → Enable Data Evolution
-        ├── Store images / videos / docs? → Blob Table (blob-field)
-        ├── Vector search / RAG? → VECTOR type + Global Index (DiskANN)
+        ├── Store images / videos / docs? → Blob Table (__BLOB_FIELD comment)
+        ├── Vector search / RAG? → VECTOR type + Vector Global Index
         ├── Feature engineering? → Data Evolution (MERGE INTO partial columns)
         └── Python pipeline? → PyPaimon (Ray / PyTorch / Pandas)
 ```

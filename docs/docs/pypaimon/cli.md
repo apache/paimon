@@ -461,7 +461,10 @@ Output:
   4  Data lake platforms like Paimon handle large-...
 ```
 
-**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index](../append-table/global-index) for how to create full-text indexes.
+**Note:** The table must have a Tantivy full-text index built on the target column. PyPaimon uses
+the tokenizer settings stored in the index metadata; ngram full-text indexes require a `tantivy-py`
+package with custom tokenizer support, and jieba full-text indexes require the Python `jieba`
+package. See [Global Index](../multimodal-table/global-index) for how to create full-text indexes.
 
 ### Table Drop
 
@@ -584,6 +587,66 @@ paimon table alter mydb.users alter-column -n age -t BIGINT -c 'User age in year
 
 ```shell
 paimon table alter mydb.users update-comment -c "Updated user information table"
+```
+
+## Tag Commands
+
+Manage tags (named snapshots) on a table. Tags are useful for time travel and pinning a snapshot for later access.
+
+```shell
+paimon tag <create|list|get|delete> mydb.users ...
+```
+
+#### Tag Create
+
+```shell
+# Tag the latest snapshot
+paimon tag create mydb.users v1
+
+# Tag a specific snapshot
+paimon tag create mydb.users v1 --snapshot-id 3
+
+# Do not error if the tag already exists
+paimon tag create mydb.users v1 --ignore-if-exists
+```
+
+Options:
+- `--snapshot-id, -s`: Snapshot id to tag (default: the latest snapshot)
+- `--ignore-if-exists, -i`: Do not raise an error if the tag already exists
+
+#### Tag List
+
+```shell
+# List all tags
+paimon tag list mydb.users
+
+# Only tags with a name prefix
+paimon tag list mydb.users --prefix prod_
+
+# JSON output
+paimon tag list mydb.users --format json
+```
+
+Options:
+- `--prefix, -p`: Only list tags whose name starts with this prefix
+- `--format, -f`: Output format, `table` (default) or `json`
+
+#### Tag Get
+
+```shell
+paimon tag get mydb.users v1
+
+# JSON output
+paimon tag get mydb.users v1 --format json
+```
+
+Options:
+- `--format, -f`: Output format, `table` (default) or `json`
+
+#### Tag Delete
+
+```shell
+paimon tag delete mydb.users v1
 ```
 
 ## Database Commands
@@ -782,3 +845,57 @@ SQL statements end with `;` and can span multiple lines. The continuation prompt
 | `exit` / `quit` | Exit the REPL |
 
 For more details on SQL syntax and the Python API, see [SQL Query](./sql).
+
+## Branch Commands
+
+Manage branches on a table. Branches are independent lines of a table that can be created from the current state or from a tag, and later fast-forwarded back into main.
+
+```shell
+paimon branch <create|list|delete|rename|fast-forward> mydb.users ...
+```
+
+### Branch Create
+
+```shell
+# Create a branch from the current state
+paimon branch create mydb.users b1
+
+# Create a branch from an existing tag
+paimon branch create mydb.users b1 --tag v1
+```
+
+Options:
+- `--tag, -t`: Create the branch from this tag (default: current state)
+
+### Branch List
+
+```shell
+# List all branches
+paimon branch list mydb.users
+
+# JSON output
+paimon branch list mydb.users --format json
+```
+
+Options:
+- `--format, -f`: Output format, `table` (default) or `json`
+
+### Branch Delete
+
+```shell
+paimon branch delete mydb.users b1
+```
+
+### Branch Rename
+
+```shell
+paimon branch rename mydb.users b1 b2
+```
+
+### Branch Fast-Forward
+
+Fast-forward the main branch to the given branch (main adopts the branch's snapshots).
+
+```shell
+paimon branch fast-forward mydb.users b1
+```

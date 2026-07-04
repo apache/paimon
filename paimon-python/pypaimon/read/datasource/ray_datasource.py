@@ -124,6 +124,7 @@ class RayDatasource(Datasource):
         table = self._split_provider.table()
         predicate = self._split_provider.predicate()
         read_type = self._split_provider.read_type()
+        nested_name_paths = self._split_provider.nested_name_paths()
         splits = self._split_provider.splits()
         limit = self._split_provider.limit()
         if not splits:
@@ -148,11 +149,17 @@ class RayDatasource(Datasource):
                 read_type=read_type,
                 schema=schema,
                 limit=limit,
+                nested_name_paths=nested_name_paths,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
+            # nested_name_paths must be forwarded so a nested-leaf projection
+            # widens to the parent struct and extracts the leaves; without it
+            # the worker treats the flattened leaf names as missing top-level
+            # columns and reads every projected leaf as NULL.
             worker_table_read = TableRead(
-                table, predicate, read_type, limit=limit)
+                table, predicate, read_type, limit=limit,
+                nested_name_paths=nested_name_paths)
 
             batch_reader = worker_table_read.to_arrow_batch_reader(splits)
             has_data = False
@@ -179,6 +186,7 @@ class RayDatasource(Datasource):
             read_type=read_type,
             schema=schema,
             limit=limit,
+            nested_name_paths=nested_name_paths,
         )
 
         read_tasks = []
@@ -230,6 +238,7 @@ class RayDatasource(Datasource):
             metadata = BlockMetadata(**metadata_kwargs)
 
             read_fn = partial(get_read_task, chunk_splits)
+            read_fn.__name__ = "read_paimon_table"
             read_task_kwargs = {
                 'read_fn': read_fn,
                 'metadata': metadata,

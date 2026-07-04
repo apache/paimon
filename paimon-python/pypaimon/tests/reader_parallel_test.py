@@ -282,13 +282,13 @@ class ParallelReaderAppendOnlyTest(unittest.TestCase):
         call_counter = {'n': 0}
         lock = threading.Lock()
 
-        def flaky(self_, split):
+        def flaky(self_, split, blob_parallelism=1):
             with lock:
                 call_counter['n'] += 1
                 idx = call_counter['n']
             if idx == 2:
                 raise RuntimeError("simulated reader failure")
-            return original_create(self_, split)
+            return original_create(self_, split, blob_parallelism)
 
         with mock.patch.object(TableRead, '_create_split_read', flaky):
             read = rb.new_read()

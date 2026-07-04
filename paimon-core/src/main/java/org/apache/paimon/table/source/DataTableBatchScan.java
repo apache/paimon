@@ -52,6 +52,12 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataTableBatchScan.class);
 
+    /** Validates {@link CoreOptions#SCAN_BUCKET} for primary-key fixed-bucket tables. */
+    public static void validateScanBucketOption(
+            TableSchema schema, CoreOptions coreOptions, int bucket) {
+        AbstractDataTableScan.validateScanBucketOption(schema, coreOptions, bucket);
+    }
+
     private StartingScanner startingScanner;
     private boolean hasNext;
 
@@ -91,8 +97,8 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        // Record it; applyPushDownLimit pushes the file-store limit only when safe.
         this.pushDownLimit = limit;
-        snapshotReader.withLimit(limit);
         return this;
     }
 
@@ -138,9 +144,14 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownLimit() {
-        if (pushDownLimit == null || snapshotReader.hasNonPartitionFilter()) {
+        // A read-time filter (WHERE or auth) drops rows after scanning, so only push the limit down
+        // when neither is present.
+        if (pushDownLimit == null
+                || snapshotReader.hasNonPartitionFilter()
+                || authHasNonPartitionFilter) {
             return Optional.empty();
         }
+        snapshotReader.withLimit(pushDownLimit);
 
         StartingScanner.Result result = startingScanner.scan(snapshotReader);
         if (!(result instanceof ScannedResult)) {
@@ -177,10 +188,13 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     }
 
     private Optional<StartingScanner.Result> applyPushDownTopN() {
+        // A read-time filter (WHERE or auth) drops rows after split pruning, so split-level TopN
+        // pruning could keep too few splits. Skip it when either is present.
         if (topN == null
                 || pushDownLimit != null
-                || !schema.primaryKeys().isEmpty()
-                || options().deletionVectorsEnabled()) {
+                || snapshotReader.hasNonPartitionFilter()
+                || authHasNonPartitionFilter
+                || !schema.primaryKeys().isEmpty()) {
             return Optional.empty();
         }
 

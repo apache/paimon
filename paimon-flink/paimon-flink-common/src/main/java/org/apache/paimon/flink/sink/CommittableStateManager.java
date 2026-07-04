@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
-
 import java.io.Serializable;
 import java.util.List;
 
@@ -30,9 +27,8 @@ import java.util.List;
  */
 public interface CommittableStateManager<GlobalCommitT> extends Serializable {
 
-    void initializeState(StateInitializationContext context, Committer<?, GlobalCommitT> committer)
+    void initializeState(Committer.Context context, Committer<?, GlobalCommitT> committer)
             throws Exception;
 
-    void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
-            throws Exception;
+    void snapshotState(List<GlobalCommitT> committables) throws Exception;
 }

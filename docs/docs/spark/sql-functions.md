@@ -96,7 +96,7 @@ SELECT sys.descriptor_to_string(content) FROM t WHERE id = '1';
 
 ## User-defined Function
 
-Paimon Spark supports two types of user-defined functions: lambda functions and file-based functions.
+Paimon Spark supports three types of user-defined functions: lambda functions, file-based functions, and SQL functions.
 
 This feature currently only supports the REST catalog.
 
@@ -151,4 +151,35 @@ DESCRIBE FUNCTION [EXTENDED] <mydb>.simple_udf;
 
 -- Drop Function
 DROP [TEMPORARY] FUNCTION <mydb>.simple_udf;
+```
+
+### SQL Function
+
+Define reusable scalar functions with a pure SQL body. The definition is persisted in the Paimon catalog.
+
+This feature requires Spark 4.0 or higher. Table functions (`RETURNS TABLE(...)`) are not supported yet.
+
+**Example**
+
+```sql
+-- Create Function (expression body)
+CREATE FUNCTION area(width DOUBLE, height DOUBLE)
+RETURNS DOUBLE
+RETURN width * height;
+
+-- Create Function (query body)
+CREATE FUNCTION dept_total(d INT) RETURNS INT
+RETURN SELECT SUM(salary) FROM emp WHERE dept_id = d;
+
+-- Parameter with DEFAULT value
+CREATE FUNCTION addd(x INT, y INT DEFAULT 10) RETURNS INT RETURN x + y;
+
+-- Create or Replace / If Not Exists
+CREATE OR REPLACE FUNCTION inc(x INT) RETURNS INT RETURN x + 100;
+CREATE FUNCTION IF NOT EXISTS inc(x INT) RETURNS INT RETURN x + 1;
+
+-- Describe / Show / Drop Function
+DESCRIBE FUNCTION [EXTENDED] area;
+SHOW USER FUNCTIONS;
+DROP FUNCTION [IF EXISTS] area;
 ```

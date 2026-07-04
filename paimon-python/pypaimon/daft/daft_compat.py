@@ -45,16 +45,26 @@ def _parse_daft_version() -> tuple[int, ...]:
 
 
 def has_file_range_reads() -> bool:
-    """True if the installed Daft supports File offset/length (>= 0.7.11)."""
+    """True if the installed Daft supports File range metadata (>= 0.7.11)."""
     return _parse_daft_version() >= (0, 7, 11)
 
 
+def file_range_position_field() -> str:
+    """Return Daft File's physical position field name."""
+    return "position" if _parse_daft_version() >= (0, 7, 15) else "offset"
+
+
+def file_range_size_field() -> str:
+    """Return Daft File's physical size field name."""
+    return "size" if _parse_daft_version() >= (0, 7, 15) else "length"
+
+
 def require_file_range_reads(feature: str = "BLOB columns") -> None:
-    """Raise if Daft is too old for File offset/length support (requires >= 0.7.11)."""
+    """Raise if Daft is too old for File range metadata support."""
     if not has_file_range_reads():
         v = ".".join(str(x) for x in _parse_daft_version())
         raise NotImplementedError(
-            f"{feature} require daft >= 0.7.11 (File offset/length support), "
+            f"{feature} require daft >= 0.7.11 (File range metadata support), "
             f"but found {v}. "
             f"Please upgrade: pip install 'daft>=0.7.11'"
         )

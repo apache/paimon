@@ -57,7 +57,21 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "Table with PK",
+    "label": "Append Table",
+    "collapsed": true,
+    "link": {
+      type: "doc",
+      "id": "append-table/index"
+    },
+    "items": [
+      "append-table/incremental-clustering",
+      "append-table/bucketed",
+      "append-table/row-tracking"
+    ]
+  },
+  {
+    type: "category",
+    "label": "PrimaryKey Table",
     "collapsed": true,
     "link": {
       type: "doc",
@@ -90,20 +104,32 @@ const sidebars = {
   },
   {
     type: "category",
-    "label": "Table w/o PK",
+    "label": "Multimodal Table",
     "collapsed": true,
     "link": {
       type: "doc",
-      "id": "append-table/index"
+      "id": "multimodal-table/index"
     },
     "items": [
-      "append-table/incremental-clustering",
-      "append-table/bucketed",
-      "append-table/row-tracking",
-      "append-table/data-evolution",
-      "append-table/blob",
-      "append-table/vector",
-      "append-table/global-index"
+      "multimodal-table/data-evolution",
+      "multimodal-table/blob",
+      "multimodal-table/vector",
+      {
+        type: "category",
+        "label": "Global Index",
+        "collapsed": true,
+        "link": {
+          type: "doc",
+          "id": "multimodal-table/global-index"
+        },
+        "items": [
+          "multimodal-table/global-index/btree",
+          "multimodal-table/global-index/bitmap",
+          "multimodal-table/global-index/vector",
+          "multimodal-table/global-index/full-text",
+          "multimodal-table/global-index/hybrid-search"
+        ]
+      }
     ]
   },
   {
@@ -161,12 +187,12 @@ const sidebars = {
     },
     "items": [
       "pypaimon/python-api",
+      "pypaimon/multimodal-api",
       "pypaimon/manage-tags",
       "pypaimon/ray-data",
       "pypaimon/daft",
       "pypaimon/pytorch",
       "pypaimon/data-evolution",
-      "pypaimon/global-index",
       "pypaimon/system-tables",
       "pypaimon/fuse-support",
       "pypaimon/pyjindosdk-support",
@@ -290,7 +316,8 @@ const sidebars = {
     "items": [
       "project/download",
       "project/contributing",
-      "project/committer"
+      "project/committer",
+      "project/security"
     ]
   },
   {

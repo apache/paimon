@@ -19,10 +19,12 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
+import org.apache.paimon.Snapshot
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.ReplacePaimonFunctions
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.write.PaimonWriteOptions
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -41,7 +43,7 @@ case class WriteIntoPaimonTable(
     batchId: Option[Long] = None)
   extends RunnableCommand
   with ExpressionHelper
-  with SchemaHelper
+  with SchemaEvolutionHelper
   with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -49,7 +51,7 @@ case class WriteIntoPaimonTable(
       PaimonUtils.createDataset(
         sparkSession,
         ReplacePaimonFunctions(sparkSession)(_data.queryExecution.analyzed))
-    val data = mergeSchema(sparkSession, replacedData, options)
+    mergeSchema(sparkSession, replacedData, options)
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object
@@ -60,8 +62,17 @@ case class WriteIntoPaimonTable(
     if (overwritePartition != null) {
       writer.writeBuilder.withOverwrite(overwritePartition.asJava)
     }
-    val commitMessages = writer.write(data)
-    writer.commit(commitMessages)
+    val operation = Option(options.get(PaimonWriteOptions.OPERATION_OPTION))
+      .map(Snapshot.Operation.valueOf)
+      .getOrElse {
+        if (overwritePartition != null || dynamicPartitionOverwriteMode) {
+          Snapshot.Operation.OVERWRITE
+        } else {
+          Snapshot.Operation.WRITE
+        }
+      }
+    val commitMessages = writer.write(replacedData)
+    writer.commit(commitMessages, operation)
 
     Seq.empty
   }

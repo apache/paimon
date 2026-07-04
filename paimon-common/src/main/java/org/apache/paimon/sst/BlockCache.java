@@ -20,6 +20,7 @@ package org.apache.paimon.sst;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CacheManager.SegmentContainer;
@@ -28,10 +29,10 @@ import org.apache.paimon.utils.IOUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 /** Cache for block reading. */
@@ -46,13 +47,19 @@ public class BlockCache implements Closeable {
         this.filePath = filePath;
         this.input = input;
         this.cacheManager = cacheManager;
-        this.blocks = new HashMap<>();
+        this.blocks = new ConcurrentHashMap<>();
     }
 
     private byte[] readFrom(long offset, int length) throws IOException {
         byte[] buffer = new byte[length];
-        input.seek(offset);
-        IOUtils.readFully(input, buffer);
+        if (input instanceof VectoredReadable) {
+            ((VectoredReadable) input).preadFully(offset, buffer, 0, length);
+        } else {
+            synchronized (input) {
+                input.seek(offset);
+                IOUtils.readFully(input, buffer);
+            }
+        }
         return buffer;
     }
 

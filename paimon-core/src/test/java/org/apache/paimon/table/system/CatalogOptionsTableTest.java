@@ -55,6 +55,7 @@ public class CatalogOptionsTableTest extends TableTestBase {
     public void before() throws Exception {
         catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.TABLE_TYPE, CatalogTableType.MANAGED);
+        catalogOptions.set(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED, true);
         catalogOptions.set("table-default.scan.infer-parallelism", "false");
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempDir.toUri().toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));

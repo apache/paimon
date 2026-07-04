@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
@@ -29,27 +30,28 @@ import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -59,22 +61,24 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createShardIndexedSplits;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.filterEntriesBefore;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.findMinNonIndexableRowId;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.rowRangesAfter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.unindexedRowRanges;
 import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
 import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
 import static org.apache.paimon.io.DataIncrement.indexIncrement;
@@ -100,14 +104,16 @@ public class GenericIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        buildIndexAndExecute(
+        buildIndexAndExecuteInternal(
                 env,
                 table,
                 indexColumn,
+                Collections.emptyList(),
                 indexType,
                 partitionPredicate,
                 userOptions,
-                NO_MAX_INDEXED_ROW_ID);
+                NO_MAX_INDEXED_ROW_ID,
+                true);
     }
 
     public static void buildIndexAndExecute(
@@ -119,16 +125,84 @@ public class GenericIndexTopoBuilder {
             Options userOptions,
             long maxIndexedRowId)
             throws Exception {
+        buildIndexAndExecuteInternal(
+                env,
+                table,
+                indexColumn,
+                Collections.emptyList(),
+                indexType,
+                partitionPredicate,
+                userOptions,
+                maxIndexedRowId,
+                false);
+    }
+
+    public static void buildIndexAndExecute(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            List<String> extraColumns,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        buildIndexAndExecuteInternal(
+                env,
+                table,
+                indexColumn,
+                extraColumns,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                NO_MAX_INDEXED_ROW_ID,
+                true);
+    }
+
+    public static void buildIndexAndExecute(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            List<String> extraColumns,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions,
+            long maxIndexedRowId)
+            throws Exception {
+        buildIndexAndExecuteInternal(
+                env,
+                table,
+                indexColumn,
+                extraColumns,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                maxIndexedRowId,
+                false);
+    }
+
+    private static void buildIndexAndExecuteInternal(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            List<String> extraColumns,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions,
+            long maxIndexedRowId,
+            boolean autoIncremental)
+            throws Exception {
         boolean hasIndexToBuild =
-                buildIndex(
+                buildIndexInternal(
                         env,
                         () -> new GenericGlobalIndexBuilder(table),
                         table,
                         indexColumn,
+                        extraColumns,
                         indexType,
                         partitionPredicate,
                         userOptions,
-                        maxIndexedRowId);
+                        maxIndexedRowId,
+                        autoIncremental);
         if (hasIndexToBuild) {
             env.execute("Create " + indexType + " global index for table: " + table.name());
         } else {
@@ -145,15 +219,40 @@ public class GenericIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        return buildIndex(
+        return buildIndexInternal(
                 env,
                 indexBuilderSupplier,
                 table,
                 indexColumn,
+                Collections.emptyList(),
                 indexType,
                 partitionPredicate,
                 userOptions,
-                NO_MAX_INDEXED_ROW_ID);
+                NO_MAX_INDEXED_ROW_ID,
+                true);
+    }
+
+    public static boolean buildIndex(
+            StreamExecutionEnvironment env,
+            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions,
+            long maxIndexedRowId)
+            throws Exception {
+        return buildIndexInternal(
+                env,
+                indexBuilderSupplier,
+                table,
+                indexColumn,
+                Collections.emptyList(),
+                indexType,
+                partitionPredicate,
+                userOptions,
+                maxIndexedRowId,
+                false);
     }
 
     /**
@@ -167,10 +266,36 @@ public class GenericIndexTopoBuilder {
             Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
             FileStoreTable table,
             String indexColumn,
+            List<String> extraColumns,
             String indexType,
             PartitionPredicate partitionPredicate,
             Options userOptions,
             long maxIndexedRowId)
+            throws Exception {
+        return buildIndexInternal(
+                env,
+                indexBuilderSupplier,
+                table,
+                indexColumn,
+                extraColumns,
+                indexType,
+                partitionPredicate,
+                userOptions,
+                maxIndexedRowId,
+                false);
+    }
+
+    private static boolean buildIndexInternal(
+            StreamExecutionEnvironment env,
+            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            String indexColumn,
+            List<String> extraColumns,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions,
+            long maxIndexedRowId,
+            boolean autoIncremental)
             throws Exception {
         GenericGlobalIndexBuilder indexBuilder = indexBuilderSupplier.get();
         if (partitionPredicate != null) {
@@ -184,52 +309,64 @@ public class GenericIndexTopoBuilder {
                 env,
                 table,
                 indexColumn,
+                extraColumns,
                 indexType,
                 userOptions,
                 entries,
                 deletedIndexEntries,
-                maxIndexedRowId);
+                partitionPredicate,
+                indexBuilder.scanSnapshot(),
+                maxIndexedRowId,
+                autoIncremental);
     }
 
     /**
      * Builds the Flink topology for global index creation from pre-scanned entries. Supports both
-     * full builds ({@code maxIndexedRowId = NO_MAX_INDEXED_ROW_ID}) and incremental builds where
-     * rows up to {@code maxIndexedRowId} are skipped.
+     * full builds and incremental builds where already indexed row ranges are skipped.
      *
-     * @param maxIndexedRowId the maximum row ID already indexed; use {@link #NO_MAX_INDEXED_ROW_ID}
-     *     for a full build
      * @return {@code true} if a Flink topology was built, {@code false} if nothing to index
      */
     private static boolean buildTopology(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
+            List<String> extraColumns,
             String indexType,
             Options userOptions,
             List<ManifestEntry> entries,
             List<IndexManifestEntry> deletedIndexEntries,
-            long maxIndexedRowId)
+            PartitionPredicate partitionPredicate,
+            @Nullable Snapshot scanSnapshot,
+            long maxIndexedRowId,
+            boolean autoIncremental)
             throws Exception {
+        // The primary column followed by the extra columns, in index order.
+        List<String> indexColumns = new ArrayList<>(1 + extraColumns.size());
+        indexColumns.add(indexColumn);
+        indexColumns.addAll(extraColumns);
+
         long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
         LOG.info(
-                "Scanned {} files ({} rows) across {} partitions for {} index on column '{}'"
-                        + (maxIndexedRowId >= 0 ? ", maxIndexedRowId={}." : "."),
+                "Scanned {} files ({} rows) across {} partitions for {} index on columns '{}'.",
                 entries.size(),
                 totalRowCount,
                 entries.stream().map(ManifestEntry::partition).distinct().count(),
                 indexType,
-                indexColumn,
-                maxIndexedRowId);
+                indexColumns);
 
         long minNonIndexableRowId =
-                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumn);
+                findMinNonIndexableRowId(table.schemaManager(), entries, indexColumns);
         entries = filterEntriesBefore(entries, minNonIndexableRowId);
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
-        // Project indexColumn + _ROW_ID so we can read the actual row ID from data
-        List<String> readColumns = new ArrayList<>();
-        readColumns.add(indexColumn);
+        List<DataField> extraFields =
+                extraColumns.stream().map(rowType::getField).collect(Collectors.toList());
+        List<DataField> indexedFields = new ArrayList<>(1 + extraFields.size());
+        indexedFields.add(indexField);
+        indexedFields.addAll(extraFields);
+        // Project indexColumns + _ROW_ID so we can read the actual row ID from data
+        List<String> readColumns = new ArrayList<>(indexColumns);
         readColumns.add(SpecialFields.ROW_ID.name());
         RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
@@ -240,9 +377,33 @@ public class GenericIndexTopoBuilder {
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
+        List<Range> rowRangesToBuild = null;
+        if (deletedIndexEntries.isEmpty()) {
+            if (autoIncremental) {
+                Snapshot snapshot =
+                        scanSnapshot == null
+                                ? table.snapshotManager().latestSnapshot()
+                                : scanSnapshot;
+                rowRangesToBuild =
+                        unindexedRowRanges(
+                                table, snapshot, indexType, indexedFields, partitionPredicate);
+                LOG.info("Automatically selected unindexed row ranges: {}.", rowRangesToBuild);
+            } else if (maxIndexedRowId != NO_MAX_INDEXED_ROW_ID) {
+                rowRangesToBuild = rowRangesAfter(maxIndexedRowId);
+                LOG.info(
+                        "Selected row ranges after maxIndexedRowId={}: {}.",
+                        maxIndexedRowId,
+                        rowRangesToBuild);
+            }
+            if (rowRangesToBuild != null && rowRangesToBuild.isEmpty()) {
+                LOG.info("No unindexed row ranges found, nothing to index.");
+                return false;
+            }
+        }
+
         // Compute shard tasks at file level from the provided entries
-        List<ShardTask> shardTasks =
-                computeShardTasks(table, entries, rowsPerShard, maxIndexedRowId);
+        List<IndexedSplit> shardTasks =
+                computeShardTasks(table, entries, rowsPerShard, rowRangesToBuild);
         if (shardTasks.isEmpty()) {
             LOG.info("No shard tasks generated, nothing to index.");
             return false;
@@ -261,11 +422,11 @@ public class GenericIndexTopoBuilder {
         // Build Flink topology
         ReadBuilder readBuilder = table.newReadBuilder().withReadType(projectedRowType);
 
-        DataStream<ShardTask> source =
+        DataStream<IndexedSplit> source =
                 StreamExecutionEnvironmentUtils.fromData(
                                 env,
-                                new JavaTypeInfo<>(ShardTask.class),
-                                shardTasks.toArray(new ShardTask[0]))
+                                new JavaTypeInfo<>(IndexedSplit.class),
+                                shardTasks.toArray(new IndexedSplit[0]))
                         .name("Generic Index Source")
                         .setParallelism(1);
 
@@ -278,6 +439,7 @@ public class GenericIndexTopoBuilder {
                                         table,
                                         indexType,
                                         indexField,
+                                        extraFields,
                                         projectedRowType,
                                         mergedOptions))
                         .setParallelism(parallelism);
@@ -298,195 +460,25 @@ public class GenericIndexTopoBuilder {
         return true;
     }
 
-    /**
-     * Find the minimum firstRowId among files whose schema does not contain the index column. Files
-     * at or beyond this rowId cannot be indexed because the column was added later via ALTER TABLE.
-     *
-     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the column
-     */
-    static long findMinNonIndexableRowId(
-            SchemaManager schemaManager, List<ManifestEntry> entries, String indexColumn) {
-        Map<Long, Boolean> schemaContainsColumn = new HashMap<>();
-        long minRowId = Long.MAX_VALUE;
-        for (ManifestEntry entry : entries) {
-            long sid = entry.file().schemaId();
-            boolean contains =
-                    schemaContainsColumn.computeIfAbsent(
-                            sid, id -> schemaManager.schema(id).fieldNames().contains(indexColumn));
-            if (!contains && entry.file().firstRowId() != null) {
-                minRowId = Math.min(minRowId, entry.file().nonNullFirstRowId());
-            }
-        }
-        return minRowId;
-    }
-
-    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
-    static List<ManifestEntry> filterEntriesBefore(
-            List<ManifestEntry> entries, long boundaryRowId) {
-        if (boundaryRowId == Long.MAX_VALUE) {
-            return entries;
-        }
-        List<ManifestEntry> result = new ArrayList<>();
-        for (ManifestEntry entry : entries) {
-            if (entry.file().firstRowId() != null
-                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
-                result.add(entry);
-            }
-        }
-        LOG.info(
-                "Filtered {} files at or beyond rowId {}, {} files remain.",
-                entries.size() - result.size(),
-                boundaryRowId,
-                result.size());
-        return result;
-    }
-
-    /**
-     * Compute shard tasks for a full build (no rows to skip).
-     *
-     * @see #computeShardTasks(FileStoreTable, List, long, long)
-     */
-    static List<ShardTask> computeShardTasks(
+    static List<IndexedSplit> computeShardTasks(
             FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
-        return computeShardTasks(table, entries, rowsPerShard, NO_MAX_INDEXED_ROW_ID);
+        return createShardIndexedSplits(table, entries, rowsPerShard);
     }
 
-    /**
-     * Compute shard tasks at file level from the given manifest entries. Each shard only contains
-     * the files whose row ID ranges overlap with its shard range. A file spanning multiple shard
-     * boundaries is included in each overlapping shard.
-     *
-     * <p>When {@code maxIndexedRowId >= 0}, each shard's effective start is advanced past {@code
-     * maxIndexedRowId}, skipping fully-indexed shards entirely. This enables incremental index
-     * building where only new (un-indexed) rows are processed.
-     *
-     * @param maxIndexedRowId the maximum row ID already indexed; use {@link #NO_MAX_INDEXED_ROW_ID}
-     *     for a full build
-     */
-    static List<ShardTask> computeShardTasks(
+    static List<IndexedSplit> computeShardTasks(
             FileStoreTable table,
             List<ManifestEntry> entries,
             long rowsPerShard,
             long maxIndexedRowId) {
-        // Group by partition (bucket is always 0 for unaware-bucket tables)
-        Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
-                entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
-
-        List<ShardTask> tasks = new ArrayList<>();
-
-        for (Map.Entry<BinaryRow, List<ManifestEntry>> partitionEntry :
-                entriesByPartition.entrySet()) {
-            BinaryRow partition = partitionEntry.getKey();
-            String partBucketPath = table.store().pathFactory().bucketPath(partition, 0).toString();
-
-            // Assign files to shards by row ID range
-            Map<Long, List<DataFileMeta>> filesByShard = new LinkedHashMap<>();
-            for (ManifestEntry entry : partitionEntry.getValue()) {
-                DataFileMeta file = entry.file();
-                if (file.firstRowId() == null) {
-                    LOG.warn(
-                            "Skipping file '{}' in partition {} because it has no row ID. "
-                                    + "This file will NOT be indexed. "
-                                    + "Ensure row tracking is enabled for the table.",
-                            file.fileName(),
-                            partition);
-                    continue;
-                }
-                Range fileRange = file.nonNullRowIdRange();
-                long startShardId = fileRange.from / rowsPerShard;
-                long endShardId = fileRange.to / rowsPerShard;
-
-                for (long shardId = startShardId; shardId <= endShardId; shardId++) {
-                    long shardStartRowId = shardId * rowsPerShard;
-                    filesByShard.computeIfAbsent(shardStartRowId, k -> new ArrayList<>()).add(file);
-                }
-            }
-
-            // Create ShardTask for each shard group
-            for (Map.Entry<Long, List<DataFileMeta>> shardEntry : filesByShard.entrySet()) {
-                long shardStart = shardEntry.getKey();
-                long shardEnd = shardStart + rowsPerShard - 1;
-                List<DataFileMeta> shardFiles = shardEntry.getValue();
-                if (shardFiles.isEmpty()) {
-                    continue;
-                }
-
-                // For incremental builds, advance past already-indexed rows
-                long effectiveStart =
-                        maxIndexedRowId >= 0
-                                ? Math.max(shardStart, maxIndexedRowId + 1)
-                                : shardStart;
-                if (effectiveStart > shardEnd) {
-                    continue; // entire shard already indexed
-                }
-
-                shardFiles.sort(Comparator.comparingLong(DataFileMeta::nonNullFirstRowId));
-
-                // Group contiguous files; gaps produce separate tasks
-                List<DataFileMeta> currentGroup = new ArrayList<>();
-                long currentGroupEnd = -1;
-
-                for (DataFileMeta file : shardFiles) {
-                    long fileStart = file.nonNullFirstRowId();
-                    long fileEnd = fileStart + file.rowCount() - 1;
-
-                    if (currentGroup.isEmpty()) {
-                        currentGroup.add(file);
-                        currentGroupEnd = fileEnd;
-                    } else if (fileStart <= currentGroupEnd + 1) {
-                        currentGroup.add(file);
-                        currentGroupEnd = Math.max(currentGroupEnd, fileEnd);
-                    } else {
-                        tasks.add(
-                                createShardTask(
-                                        currentGroup,
-                                        effectiveStart,
-                                        shardEnd,
-                                        partition,
-                                        partBucketPath));
-                        currentGroup = new ArrayList<>();
-                        currentGroup.add(file);
-                        currentGroupEnd = fileEnd;
-                    }
-                }
-                if (!currentGroup.isEmpty()) {
-                    tasks.add(
-                            createShardTask(
-                                    currentGroup,
-                                    effectiveStart,
-                                    shardEnd,
-                                    partition,
-                                    partBucketPath));
-                }
-            }
-        }
-        return tasks;
+        return computeShardTasks(table, entries, rowsPerShard, rowRangesAfter(maxIndexedRowId));
     }
 
-    private static ShardTask createShardTask(
-            List<DataFileMeta> files,
-            long effectiveStart,
-            long shardEnd,
-            BinaryRow partition,
-            String bucketPath) {
-        long groupMinRowId = files.get(0).nonNullFirstRowId();
-        long groupMaxRowId =
-                files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().getAsLong();
-
-        // Clamp to effective boundaries
-        long rangeFrom = Math.max(groupMinRowId, effectiveStart);
-        long rangeTo = Math.min(groupMaxRowId, shardEnd);
-
-        DataSplit dataSplit =
-                DataSplit.builder()
-                        .withPartition(partition)
-                        .withBucket(0)
-                        .withDataFiles(files)
-                        .withBucketPath(bucketPath)
-                        .rawConvertible(false)
-                        .build();
-
-        return new ShardTask(dataSplit, new Range(rangeFrom, rangeTo));
+    static List<IndexedSplit> computeShardTasks(
+            FileStoreTable table,
+            List<ManifestEntry> entries,
+            long rowsPerShard,
+            @Nullable List<Range> rowRangesToBuild) {
+        return createShardIndexedSplits(table, entries, rowsPerShard, rowRangesToBuild);
     }
 
     private static List<Committable> createDeleteCommittables(
@@ -522,26 +514,13 @@ public class GenericIndexTopoBuilder {
                 .setMaxParallelism(1);
     }
 
-    /** Serializable descriptor for one shard's work. Each shard has its own DataSplit and Range. */
-    static class ShardTask implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        final DataSplit split;
-        final Range shardRange;
-
-        ShardTask(DataSplit split, Range shardRange) {
-            this.split = split;
-            this.shardRange = shardRange;
-        }
-    }
-
     /**
-     * Operator that receives a {@link ShardTask}, reads data from its split, builds the index, and
-     * emits a {@link Committable}. Each shard's split contains only the files relevant to this
+     * Operator that receives an {@link IndexedSplit}, reads data from its split, builds the index,
+     * and emits a {@link Committable}. Each shard's split contains only the files relevant to this
      * shard, so no redundant I/O occurs.
      */
     private static class BuildIndexOperator
-            extends BoundedOneInputOperator<ShardTask, Committable> {
+            extends BoundedOneInputOperator<IndexedSplit, Committable> {
 
         private static final long serialVersionUID = 1L;
 
@@ -549,24 +528,30 @@ public class GenericIndexTopoBuilder {
         private final FileStoreTable table;
         private final String indexType;
         private final DataField indexField;
+        private final List<DataField> extraFields;
         private final RowType projectedRowType;
         private final Options mergedOptions;
 
         private transient TableRead tableRead;
-        private transient InternalRow.FieldGetter indexFieldGetter;
+        private transient List<DataField> indexedFields;
+        private transient InternalRow.FieldGetter[] indexFieldGetters;
         private transient int rowIdFieldIndex;
+        private transient boolean multiColumn;
+        private transient ProjectedRow writerProjection;
 
         BuildIndexOperator(
                 ReadBuilder readBuilder,
                 FileStoreTable table,
                 String indexType,
                 DataField indexField,
+                List<DataField> extraFields,
                 RowType projectedRowType,
                 Options mergedOptions) {
             this.readBuilder = readBuilder;
             this.table = table;
             this.indexType = indexType;
             this.indexField = indexField;
+            this.extraFields = extraFields;
             this.projectedRowType = projectedRowType;
             this.mergedOptions = mergedOptions;
         }
@@ -575,34 +560,54 @@ public class GenericIndexTopoBuilder {
         public void open() throws Exception {
             super.open();
             this.tableRead = readBuilder.newRead();
-            this.indexFieldGetter =
-                    InternalRow.createFieldGetter(
-                            indexField.type(), projectedRowType.getFieldIndex(indexField.name()));
+            // The primary column followed by the extra columns, in index order. Field getters and
+            // the writer projection both need the full ordered list.
+            this.indexedFields = new ArrayList<>(1 + extraFields.size());
+            indexedFields.add(indexField);
+            indexedFields.addAll(extraFields);
+            this.indexFieldGetters = new InternalRow.FieldGetter[indexedFields.size()];
+            for (int i = 0; i < indexedFields.size(); i++) {
+                DataField field = indexedFields.get(i);
+                indexFieldGetters[i] =
+                        InternalRow.createFieldGetter(
+                                field.type(), projectedRowType.getFieldIndex(field.name()));
+            }
             this.rowIdFieldIndex = projectedRowType.getFieldIndex(SpecialFields.ROW_ID.name());
+            this.multiColumn = !extraFields.isEmpty();
+            if (multiColumn) {
+                int[] projection = new int[indexedFields.size()];
+                for (int i = 0; i < indexedFields.size(); i++) {
+                    projection[i] = projectedRowType.getFieldIndex(indexedFields.get(i).name());
+                }
+                this.writerProjection = ProjectedRow.from(projection);
+            }
         }
 
         @Override
-        public void processElement(StreamRecord<ShardTask> element) throws Exception {
-            ShardTask task = element.getValue();
-            BinaryRow partition = task.split.partition();
+        public void processElement(StreamRecord<IndexedSplit> element) throws Exception {
+            IndexedSplit task = element.getValue();
+            checkArgument(
+                    task.rowRanges().size() == 1,
+                    "Each generic global index task should contain exactly one row range.");
+            Range shardRange = task.rowRanges().get(0);
+            BinaryRow partition = task.dataSplit().partition();
 
             LOG.info(
                     "Building {} index for partition={}, shardRange=[{}, {}], files={}.",
                     indexType,
                     partition,
-                    task.shardRange.from,
-                    task.shardRange.to,
-                    task.split.dataFiles().size());
+                    shardRange.from,
+                    shardRange.to,
+                    task.dataSplit().dataFiles().size());
             long startTime = System.currentTimeMillis();
 
-            GlobalIndexSingletonWriter indexWriter =
-                    (GlobalIndexSingletonWriter)
-                            createIndexWriter(table, indexType, indexField, mergedOptions);
+            GlobalIndexWriter indexWriter =
+                    createIndexWriter(table, indexType, indexField, extraFields, mergedOptions);
 
             try {
-                long rowsWritten = 0;
+                long rowsSeen = 0;
                 long lastRowId = Long.MIN_VALUE;
-                try (RecordReader<InternalRow> reader = tableRead.createReader(task.split);
+                try (RecordReader<InternalRow> reader = tableRead.createReader(task.dataSplit());
                         CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
                     while (iter.hasNext()) {
                         InternalRow row = iter.next();
@@ -616,47 +621,53 @@ public class GenericIndexTopoBuilder {
                                                     + "This may indicate corrupted data files.",
                                             lastRowId,
                                             currentRowId,
-                                            task.shardRange.from,
-                                            task.shardRange.to));
+                                            shardRange.from,
+                                            shardRange.to));
                         }
                         lastRowId = currentRowId;
 
-                        if (currentRowId > task.shardRange.to) {
+                        if (currentRowId > shardRange.to) {
                             break;
                         }
                         // Only write rows within this shard's range
-                        if (currentRowId >= task.shardRange.from) {
-                            Object fieldData = indexFieldGetter.getFieldOrNull(row);
-                            if (fieldData == null) {
-                                LOG.info(
-                                        "Null vector at rowId={}, stopping shard [{}, {}].",
-                                        currentRowId,
-                                        task.shardRange.from,
-                                        task.shardRange.to);
-                                break;
+                        if (currentRowId >= shardRange.from) {
+                            long rowId = currentRowId - shardRange.from;
+                            if (multiColumn) {
+                                ((GlobalIndexMultiColumnWriter) indexWriter)
+                                        .write(rowId, writerProjection.replaceRow(row));
+                            } else {
+                                Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
+                                ((GlobalIndexSingleColumnWriter) indexWriter)
+                                        .write(fieldData, rowId);
                             }
-                            indexWriter.write(fieldData);
-                            rowsWritten++;
+                            rowsSeen++;
                         }
                     }
                 }
 
                 List<ResultEntry> resultEntries = indexWriter.finish();
+                if (!resultEntries.isEmpty() && resultEntries.get(0).rowCount() != rowsSeen) {
+                    LOG.warn(
+                            "rowCount mismatch: writer reported {} but caller saw {} rows",
+                            resultEntries.get(0).rowCount(),
+                            rowsSeen);
+                }
                 long elapsed = System.currentTimeMillis() - startTime;
                 LOG.info(
-                        "Finished shard [{}, {}]: wrote {} rows, "
+                        "Finished shard [{}, {}]: saw {} rows, "
                                 + "produced {} result entries in {} ms.",
-                        task.shardRange.from,
-                        task.shardRange.to,
-                        rowsWritten,
+                        shardRange.from,
+                        shardRange.to,
+                        rowsSeen,
                         resultEntries.size(),
                         elapsed);
 
-                if (rowsWritten == 0) {
+                if (resultEntries.isEmpty()) {
                     LOG.warn(
-                            "Shard [{}, {}] produced 0 rows, skipping index flush.",
-                            task.shardRange.from,
-                            task.shardRange.to);
+                            "Shard [{}, {}] produced no index (all null or empty), "
+                                    + "skipping index flush.",
+                            shardRange.from,
+                            shardRange.to);
                     return;
                 }
 
@@ -664,8 +675,8 @@ public class GenericIndexTopoBuilder {
                         flushIndex(
                                 table,
                                 partition,
-                                task.shardRange,
-                                indexField,
+                                shardRange,
+                                indexedFields,
                                 indexType,
                                 resultEntries);
                 output.collect(
@@ -689,7 +700,7 @@ public class GenericIndexTopoBuilder {
             FileStoreTable table,
             BinaryRow partition,
             Range rowRange,
-            DataField indexField,
+            List<DataField> indexFields,
             String indexType,
             List<ResultEntry> resultEntries)
             throws IOException {
@@ -699,14 +710,14 @@ public class GenericIndexTopoBuilder {
                         table.store().pathFactory().globalIndexFileFactory(),
                         table.coreOptions(),
                         rowRange,
-                        indexField.id(),
+                        indexFields,
                         indexType,
                         resultEntries);
         return new CommitMessageImpl(
                 partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement());
     }
 
-    private static void closeWriterQuietly(GlobalIndexSingletonWriter writer) {
+    private static void closeWriterQuietly(GlobalIndexWriter writer) {
         if (writer instanceof Closeable) {
             try {
                 ((Closeable) writer).close();

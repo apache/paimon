@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.{Blob, BlobDescriptor}
+import org.apache.paimon.data.{Blob, BlobDescriptor, BlobViewStruct}
 import org.apache.paimon.fs.{IsolatedDirectoryFileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
@@ -237,6 +237,81 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: forward blob view reference with dynamic option") {
+    withTable(
+      "upstream_blob_view_forward",
+      "first_downstream_blob_view",
+      "second_downstream_blob_view") {
+      sql(
+        "CREATE TABLE upstream_blob_view_forward (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO upstream_blob_view_forward VALUES " +
+          "(1, 'row1', X'48656C6C6F'), " +
+          "(2, 'row2', X'5945')")
+
+      val upstreamFullName = s"$dbName0.upstream_blob_view_forward"
+      sql(
+        "CREATE TABLE first_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+      sql(
+        s"INSERT INTO first_downstream_blob_view " +
+          s"SELECT id, name, sys.blob_view('$upstreamFullName', 'picture', _ROW_ID) " +
+          s"FROM `upstream_blob_view_forward$$row_tracking`")
+
+      sql(
+        "CREATE TABLE second_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+
+      val preserveFirstReferenceOption =
+        s"spark.paimon.paimon.$dbName0.first_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      val preserveSecondReferenceOption =
+        s"spark.paimon.paimon.$dbName0.second_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      withSparkSQLConf(preserveFirstReferenceOption -> "false") {
+        sql(
+          "INSERT INTO second_downstream_blob_view " +
+            "SELECT id, label, image_ref FROM first_downstream_blob_view")
+
+        checkAnswer(
+          sql("SELECT * FROM second_downstream_blob_view ORDER BY id"),
+          Seq(
+            Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+            Row(2, "row2", Array[Byte](89, 69)))
+        )
+
+        withSparkSQLConf(preserveSecondReferenceOption -> "false") {
+          val originalReferences =
+            sql("SELECT image_ref FROM first_downstream_blob_view ORDER BY id").collect()
+          val forwardedReferences =
+            sql("SELECT image_ref FROM second_downstream_blob_view ORDER BY id").collect()
+
+          assert(forwardedReferences.length == originalReferences.length)
+          forwardedReferences.zip(originalReferences).foreach {
+            case (forwarded, original) =>
+              val originalReference = original.getAs[Array[Byte]](0)
+              val forwardedReference = forwarded.getAs[Array[Byte]](0)
+              assert(util.Arrays.equals(originalReference, forwardedReference))
+              assert(BlobViewStruct.deserialize(forwardedReference).identifier().getFullName ==
+                upstreamFullName)
+          }
+        }
+      }
+    }
+  }
+
   test("Blob: test write blob descriptor from external storage") {
     val catalogName = "isolated_paimon"
     val databaseName = "external_blob_db"
@@ -355,56 +430,6 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Blob: merge-into rejects updating raw-data BLOB column") {
-    withTable("s", "t") {
-      sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
-        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
-      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
-
-      sql("CREATE TABLE s (id INT, picture BINARY)")
-      sql("INSERT INTO s VALUES (1, X'4E4557')")
-
-      val e = intercept[UnsupportedOperationException] {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
-              |""".stripMargin)
-      }
-      assert(e.getMessage.contains("raw-data BLOB"))
-    }
-  }
-
-  test("Blob: merge-into updates non-blob column on raw blob table with split blob files") {
-    withTable("s", "t") {
-      sql(
-        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
-          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
-          "'blob-field'='picture', 'blob.target-file-size'='1 b')")
-      sql(
-        "INSERT INTO t VALUES " +
-          "(1, 'name1', X'48656C6C6F'), " +
-          "(2, 'name2', X'5945'), " +
-          "(3, 'name3', X'414243')")
-
-      sql("CREATE TABLE s (id INT, name STRING)")
-      sql("INSERT INTO s VALUES (1, 'updated_name1')")
-
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED THEN UPDATE SET t.name = s.name
-            |""".stripMargin)
-
-      checkAnswer(
-        sql("SELECT id, name FROM t ORDER BY id"),
-        Seq(Row(1, "updated_name1"), Row(2, "name2"), Row(3, "name3"))
-      )
-    }
-  }
-
   test("Blob: self merge reads raw blob column to update non-blob column") {
     withTable("t") {
       sql(
@@ -454,38 +479,6 @@ class BlobTestBase extends PaimonSparkTestBase {
       sql("INSERT INTO s VALUES (1, 'updated_name1')")
 
       // Update only the 'name' column — should succeed for descriptor-based blob table
-      sql("""
-            |MERGE INTO t
-            |USING s
-            |ON t.id = s.id
-            |WHEN MATCHED THEN UPDATE SET t.name = s.name
-            |""".stripMargin)
-
-      checkAnswer(
-        sql("SELECT id, name FROM t ORDER BY id"),
-        Seq(Row(1, "updated_name1"), Row(2, "name2"))
-      )
-    }
-  }
-
-  test("Blob: merge-into updates descriptor blob column with external storage end-to-end") {
-    withTable("s", "t") {
-      val externalStoragePath = tempDBDir.getCanonicalPath + "/external-storage-blob-merge-path"
-      sql(
-        s"CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
-          s"('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
-          s"'blob-field'='picture', 'blob-descriptor-field'='picture', " +
-          s"'blob-external-storage-field'='picture', " +
-          s"'blob-external-storage-path'='$externalStoragePath')")
-
-      // Insert initial row (writes raw data to external storage and stores descriptor bytes)
-      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
-      sql("INSERT INTO t VALUES (2, 'name2', X'5945')")
-
-      sql("CREATE TABLE s (id INT, name STRING)")
-      sql("INSERT INTO s VALUES (1, 'updated_name1')")
-
-      // Update the 'name' column via MERGE INTO
       sql("""
             |MERGE INTO t
             |USING s

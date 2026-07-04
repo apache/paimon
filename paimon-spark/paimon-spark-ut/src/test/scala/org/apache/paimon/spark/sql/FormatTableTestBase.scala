@@ -245,6 +245,17 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test("Format table: csv with empty quote-character should fail") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.format-table.implementation" -> "paimon") {
+        val error = intercept[IllegalArgumentException] {
+          sql("CREATE TABLE t (f0 INT, f1 STRING) USING CSV OPTIONS ('csv.quote-character' '')")
+        }
+        assert(error.getMessage.contains("csv.quote-character must not be empty"))
+      }
+    }
+  }
+
   test("Format table: format table and spark table props recognize") {
     val paimonFormatTblProps =
       """
@@ -426,6 +437,89 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
 
       val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "fact_table")
       assert(filteredSplits.size == 2)
+    }
+  }
+
+  test("Paimon format table: runtime filter combined with pushed-down partition filter") {
+    withTable("dwd_fact", "dim_date") {
+      sql("""
+            |CREATE TABLE dwd_fact (id INT, amount DOUBLE, dt STRING, hour STRING)
+            |USING PARQUET
+            |TBLPROPERTIES ('format-table.implementation'='paimon')
+            |PARTITIONED BY (dt, hour)
+            |""".stripMargin)
+      sql("""
+            |CREATE TABLE dim_date (dt STRING, name STRING)
+            |USING PARQUET
+            |TBLPROPERTIES ('format-table.implementation'='paimon')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO dwd_fact VALUES
+            |(1, 10.0, '20260622', '00'),
+            |(2, 20.0, '20260622', '01'),
+            |(3, 30.0, '20260621', '00'),
+            |(4, 40.0, '20260620', '23')
+            |""".stripMargin)
+      sql("INSERT INTO dim_date VALUES ('20260622', 'today')")
+
+      val df = sql("""
+                     |SELECT f.id, f.dt, f.hour, d.name
+                     |FROM dwd_fact f
+                     |JOIN dim_date d ON f.dt = d.dt
+                     |WHERE f.dt >= '20260620'
+                     |ORDER BY f.id
+                     |""".stripMargin)
+
+      checkAnswer(df, Seq(Row(1, "20260622", "00", "today"), Row(2, "20260622", "01", "today")))
+
+      // Static pushdown (dt >= '20260620') alone keeps all 4 partitions; the runtime filter on dt
+      // prunes the scan down to the two partitions of dt='20260622'.
+      val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "dwd_fact")
+      assert(filteredSplits.size == 2)
+    }
+  }
+
+  for (onlyValueInPath <- Seq(false, true)) {
+    val suffix = if (onlyValueInPath) " (partition-path-only-value)" else ""
+    test(s"Paimon format table: OR cross-field partition pruning$suffix") {
+      withTable("dwd_fact") {
+        val props =
+          if (onlyValueInPath) {
+            "'format-table.implementation'='paimon', 'format-table.partition-path-only-value'='true'"
+          } else {
+            "'format-table.implementation'='paimon'"
+          }
+        sql(s"""
+               |CREATE TABLE dwd_fact (id INT, amount DOUBLE, dt STRING, hour STRING)
+               |USING PARQUET
+               |TBLPROPERTIES ($props)
+               |PARTITIONED BY (dt, hour)
+               |""".stripMargin)
+
+        sql("""
+              |INSERT INTO dwd_fact VALUES
+              |(1, 10.0, '20260625', '10'),
+              |(2, 20.0, '20260625', '18'),
+              |(3, 30.0, '20260624', '20'),
+              |(4, 40.0, '20260624', '08'),
+              |(5, 50.0, '20260101', '10')
+              |""".stripMargin)
+
+        val df =
+          sql("""
+                |SELECT id, dt, hour FROM dwd_fact
+                |WHERE (dt = '20260625' AND hour < '16') OR (dt = '20260624' AND hour >= '16')
+                |ORDER BY id
+                |""".stripMargin)
+
+        checkAnswer(df, Seq(Row(1, "20260625", "10"), Row(3, "20260624", "20")))
+
+        // The cross-field OR is pushed down as a partition filter, so only the two matching
+        // partitions produce splits. (Pruning effectiveness is covered by FormatTableScanTest.)
+        val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "dwd_fact")
+        assert(filteredSplits.size == 2)
+      }
     }
   }
 

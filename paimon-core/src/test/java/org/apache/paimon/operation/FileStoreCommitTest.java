@@ -31,16 +31,22 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -50,13 +56,20 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -70,6 +83,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -183,6 +197,63 @@ public class FileStoreCommitTest {
         LocalFileIO.create().delete(latest, false);
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestId);
+    }
+
+    @Test
+    public void testWriteOnlySnapshotSequenceCommitChecksRescaledBucketNumber() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.WRITE_SEQUENCE_NUMBER_INIT_MODE.key(), "snapshot");
+        options.put(CoreOptions.BUCKET.key(), "2");
+        options.put(CoreOptions.BUCKET_KEY.key(), "orderId");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition =
+                gen.getPartition(gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "first"));
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(
+                            commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 2, 0)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            0,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            null,
+                                            false,
+                                            null)
+                                    .isSuccess())
+                    .isTrue();
+        }
+        assertThat(store.snapshotManager().latestSnapshot().properties())
+                .containsKey(SequenceSnapshotProperties.MAX_SEQUENCE_NUMBER);
+
+        Map<String, String> rescaledOptions = new HashMap<>(options);
+        rescaledOptions.put(CoreOptions.BUCKET.key(), "4");
+        TestAppendFileStore rescaledStore =
+                TestAppendFileStore.createAppendStore(tempDir, rescaledOptions);
+        try (FileStoreCommitImpl commit = rescaledStore.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.tryCommitOnce(
+                                            null,
+                                            Collections.singletonList(addFile(partition, 1, 4, 1)),
+                                            Collections.emptyList(),
+                                            Collections.emptyList(),
+                                            1,
+                                            null,
+                                            new HashMap<>(),
+                                            Snapshot.CommitKind.APPEND,
+                                            false,
+                                            rescaledStore.snapshotManager().latestSnapshot(),
+                                            false,
+                                            null))
+                    .hasMessageContaining("new bucket num 4")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
     }
 
     @Test
@@ -807,7 +878,7 @@ public class FileStoreCommitTest {
         ArrayList<DataField> newFields =
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         newFields.add(new DataField(-1, "newField", DataTypes.INT()));
-        store.mergeSchema(new RowType(false, newFields), true);
+        store.mergeSchema(new RowType(false, newFields), true, true, true);
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isEmpty();
@@ -887,6 +958,147 @@ public class FileStoreCommitTest {
         assertThat(dvs.size()).isEqualTo(2);
         assertThat(dvs.get("f1").isDeleted(3)).isTrue();
         assertThat(dvs.get("f2").isDeleted(3)).isTrue();
+    }
+
+    @Test
+    public void testRollbackToAsLatestFileLevelDeleteIsVisibleToStreaming() throws Exception {
+        // Contrast with the DV-only case: when a rollback removes whole data files, the delete is
+        // file-level (FileKind.DELETE) and IS visible to streaming readers, no DV needed.
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1 (target): f1
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2 (latest): add f2
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f2")));
+
+        // roll back to snapshot 1 — f2 must be removed
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+
+        // f2 is retracted (before side) — the file-level delete is visible to streaming
+        assertThat(splits).isNotEmpty();
+        IncrementalSplit split = (IncrementalSplit) splits.get(0);
+        boolean f2Retracted = split.beforeFiles().stream().anyMatch(f -> f.fileName().equals("f2"));
+        assertThat(f2Retracted).isTrue();
+    }
+
+    @Test
+    public void testNormalDeletionVectorDeleteIsInvisibleToStreamingDelta() throws Exception {
+        // Baseline (no rollback involved): without a changelog producer, a plain DV-only delete
+        // produces an empty data delta, so the streaming delta read sees no change at all. DV
+        // deletes are only streamable via a changelog producer, not via the delta/overwrite path.
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+
+        // snapshot 2: a DV-only delete on f1 (data file unchanged, only an index increment)
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        Snapshot dvDelete = store.snapshotManager().latestSnapshot();
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(dvDelete).readChanges().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testRollbackToAsLatestDeletionVectorChangeIsInvisibleToStreaming()
+            throws Exception {
+        // A DV-only rollback changes only the index manifest (the data files are identical), so it
+        // produces an empty data delta and is invisible to streaming readers — consistent with a
+        // plain DV delete, which is also invisible to streaming (DV deletes are only streamable via
+        // a changelog producer, not via the delta/overwrite path).
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        TestAppendFileStore store = TestAppendFileStore.createAppendStore(tempDir, options);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: data file f1, no deletion vectors (the rollback target)
+        store.commit(store.writeDataFiles(partition, 0, Collections.singletonList("f1")));
+        Snapshot target = store.snapshotManager().latestSnapshot();
+
+        // snapshot 2: DV-only change — add a deletion vector for f1, data file unchanged
+        store.commit(
+                store.writeDVIndexFiles(
+                        partition, 0, Collections.singletonMap("f1", Arrays.asList(1, 3))));
+        // sanity check: f1 really has a deletion vector now
+        assertThat(store.scanDVIndexFiles(partition, 0)).isNotEmpty();
+
+        // snapshot 3: roll back to snapshot 1
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThat(commit.rollbackToAsLatest(target)).isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+
+        // The rollback's data delta is empty, so the streaming change read produces no splits — the
+        // DV-only rollback is invisible to streaming (batch / time-travel reads remain correct
+        // since
+        // the snapshot points to the target's index manifest).
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        List<Split> splits =
+                table.newSnapshotReader().withSnapshot(rolledBack).readChanges().splits();
+        assertThat(splits).isEmpty();
+    }
+
+    @Test
+    public void testExpireSnapshotsKeepsFilesRestoredByRollbackToAsLatest() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        KeyValue original = gen.nextInsert("20201110", 10, 1L, new int[] {1, 1}, "original");
+        KeyValue replacement = gen.nextInsert("20201111", 11, 2L, new int[] {2, 2}, "replacement");
+        KeyValue retainedBeforeRollback =
+                gen.nextInsert("20201112", 12, 3L, new int[] {3, 3}, "retained");
+
+        Snapshot target =
+                store.commitData(Collections.singletonList(original), gen::getPartition, kv -> 0)
+                        .get(0);
+        String root = TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        FileStoreTable table = FileStoreTableFactory.create(store.fileIO(), new Path(root));
+        table.tagManager()
+                .createTag(
+                        target, "expiring-target", Duration.ZERO, Collections.emptyList(), false);
+        String protectionTag = "rollback-to-as-latest-" + target.id() + "-" + UUID.randomUUID();
+        table.tagManager().createTag(target, protectionTag, null, Collections.emptyList(), false);
+        store.overwriteData(
+                Collections.singletonList(replacement),
+                gen::getPartition,
+                kv -> 0,
+                Collections.emptyMap());
+        store.commitData(
+                Collections.singletonList(retainedBeforeRollback), gen::getPartition, kv -> 0);
+
+        try (TableCommitImpl commit = table.newCommit("rollback-to-as-latest-test")) {
+            assertThat(commit.rollbackToAsLatest(table.tagManager().getOrThrow(protectionTag)))
+                    .isTrue();
+        }
+        Snapshot rolledBack = store.snapshotManager().latestSnapshot();
+        assertThat(table.tagManager().tags().get(target))
+                .contains("expiring-target")
+                .contains(protectionTag);
+
+        ((ExpireSnapshotsImpl) store.newExpire(1, 1, Long.MAX_VALUE)).expireUntil(1, 3);
+
+        List<KeyValue> actual = store.readKvsFromSnapshot(rolledBack.id());
+        assertThat(store.toKvMap(actual))
+                .isEqualTo(store.toKvMap(Collections.singletonList(original)));
     }
 
     @Test
@@ -1009,6 +1221,48 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testGlobalIndexCommitChecksExistingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        assertThat(dataSnapshot.nextRowId()).isEqualTo(1L);
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            commit.commit(indexCommittable(partition, "existing-index", 0, 0), false);
+        }
+
+        Snapshot latest = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latest.indexManifest()).isNotNull();
+    }
+
+    @Test
+    public void testGlobalIndexCommitFailsForMissingRowIds() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+
+        List<KeyValue> keyValues = generateDataList(1);
+        BinaryRow partition = gen.getPartition(keyValues.get(0));
+        Snapshot dataSnapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
+        long missingRowId = checkNotNull(dataSnapshot.nextRowId());
+
+        try (FileStoreCommitImpl commit = store.newCommit()) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.commit(
+                                            indexCommittable(
+                                                    partition,
+                                                    "missing-index",
+                                                    missingRowId,
+                                                    missingRowId),
+                                            false))
+                    .hasMessageContaining("Global index row ID existence conflict")
+                    .hasMessageContaining("missing-index")
+                    .hasMessageContaining("[" + missingRowId + ", " + missingRowId + "]");
+        }
+    }
+
+    @Test
     public void testCommitTwiceWithDifferentKind() throws Exception {
         TestFileStore store = createStore(false);
         try (FileStoreCommitImpl commit = store.newCommit()) {
@@ -1029,7 +1283,8 @@ public class FileStoreCommitTest {
                     null);
             // Compact
             commit.tryCommitOnce(
-                    RetryCommitResult.forCommitFail(firstLatest, Collections.emptyList(), null),
+                    RetryCommitResult.forCommitFail(
+                            firstLatest, Collections.emptyList(), null, null),
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyList(),
@@ -1080,8 +1335,433 @@ public class FileStoreCommitTest {
         assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
     }
 
+    @Test
+    public void testCommitRetryReusePreviousManifestMergeResultWhenBeforeStillExists()
+            throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1"));
+
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                kv -> 0);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211111", 9, 2L, null, "b")),
+                gen::getPartition,
+                kv -> 0);
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        false,
+                        conflictAttempts(Collections.emptyList()));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-reuse-merge", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.firstAttemptBaseManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(3);
+    }
+
+    @Test
+    public void testCommitRetrySkipsManifestMergeWhenBeforeExistsNonContiguously()
+            throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1"));
+
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                kv -> 0);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211111", 9, 2L, null, "b")),
+                gen::getPartition,
+                kv -> 0);
+
+        AtomicReference<ManifestCommittable> conflictCommittableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211112", 10, 4L, null, "d")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                22L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> conflictCommittableRef.set(committable));
+        List<ManifestEntry> conflictDeltaFiles =
+                tableFilesFrom(checkNotNull(conflictCommittableRef.get()), store.options());
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        false,
+                        conflictAttempts(conflictDeltaFiles));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-skip-non-contiguous", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.conflictBaseManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(4);
+    }
+
+    @Test
+    public void testCommitRetrySkipsManifestMergeWhenPreviousMergeCannotBeReused()
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1");
+        TestFileStore store = createStore(false, options);
+
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                kv -> 0);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211111", 9, 2L, null, "b")),
+                gen::getPartition,
+                kv -> 0);
+
+        Snapshot latestBeforeRetry = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(store.manifestListFactory().create().readDataManifests(latestBeforeRetry))
+                .hasSize(2);
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        true,
+                        conflictAttempts(Collections.emptyList()));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-reuse-merge", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(snapshotCommit.conflictBaseManifests()).hasSize(2);
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.conflictBaseManifests());
+        assertThat(finalBaseManifests).isNotEqualTo(snapshotCommit.firstAttemptBaseManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(3);
+    }
+
+    @Test
+    public void testCommitRetrySkipsManifestMergeAcrossMultipleRetries() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1"));
+
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                kv -> 0);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211111", 9, 2L, null, "b")),
+                gen::getPartition,
+                kv -> 0);
+
+        AtomicReference<ManifestCommittable> firstConflictCommittableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211112", 10, 4L, null, "d")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                22L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> firstConflictCommittableRef.set(committable));
+        List<ManifestEntry> firstConflictDeltaFiles =
+                tableFilesFrom(checkNotNull(firstConflictCommittableRef.get()), store.options());
+
+        AtomicReference<ManifestCommittable> secondConflictCommittableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211113", 11, 5L, null, "e")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                24L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> secondConflictCommittableRef.set(committable));
+        List<ManifestEntry> secondConflictDeltaFiles =
+                tableFilesFrom(checkNotNull(secondConflictCommittableRef.get()), store.options());
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        false,
+                        conflictAttempts(firstConflictDeltaFiles, secondConflictDeltaFiles));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-reuse-multiple", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.conflictBaseManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(5);
+    }
+
+    @Test
+    public void testCommitRetryFromEmptyTableWithConcurrentFirstSnapshot() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1"));
+
+        AtomicReference<ManifestCommittable> conflictCommittableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211112", 10, 4L, null, "d")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                22L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> conflictCommittableRef.set(committable));
+        List<ManifestEntry> conflictDeltaFiles =
+                tableFilesFrom(checkNotNull(conflictCommittableRef.get()), store.options());
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        false,
+                        conflictAttempts(conflictDeltaFiles));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-reuse-empty-table", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.conflictDeltaManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(2);
+    }
+
+    @Test
+    public void testCommitRetrySkipsManifestMergePreservesDeleteOrder() throws Exception {
+        TestFileStore store =
+                createStore(
+                        false,
+                        Collections.singletonMap(
+                                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1"));
+
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211110", 8, 1L, null, "a")),
+                gen::getPartition,
+                kv -> 0);
+        store.commitData(
+                Collections.singletonList(gen.nextInsert("20211111", 9, 2L, null, "b")),
+                gen::getPartition,
+                kv -> 0);
+
+        Snapshot latestBeforeRetry = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> manifestsBeforeRetry =
+                store.manifestListFactory().create().readDataManifests(latestBeforeRetry);
+        assertThat(manifestsBeforeRetry).hasSize(2);
+        ManifestEntry firstEntry =
+                store.manifestFileFactory()
+                        .create()
+                        .read(manifestsBeforeRetry.get(0).fileName())
+                        .get(0);
+        ManifestEntry deleteFirstEntry =
+                ManifestEntry.create(
+                        FileKind.DELETE,
+                        firstEntry.partition(),
+                        firstEntry.bucket(),
+                        firstEntry.totalBuckets(),
+                        firstEntry.file());
+
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        store.commitDataImpl(
+                Collections.singletonList(gen.nextInsert("20211110", 9, 3L, null, "c")),
+                gen::getPartition,
+                value -> 0,
+                false,
+                23L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ConflictingSnapshotCommit snapshotCommit =
+                new ConflictingSnapshotCommit(
+                        new RenamingSnapshotCommit(store.snapshotManager(), Lock.empty()),
+                        store.snapshotManager(),
+                        store.manifestListFactory().create(),
+                        store.manifestFileFactory().create(),
+                        false,
+                        conflictAttempts(Collections.singletonList(deleteFirstEntry)));
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(store, "retry-reuse-delete-order", snapshotCommit)) {
+            commit.commit(checkNotNull(committableRef.get()), false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        List<ManifestFileMeta> finalBaseManifests =
+                store.manifestListFactory()
+                        .create()
+                        .read(
+                                latestSnapshot.baseManifestList(),
+                                latestSnapshot.baseManifestListSize());
+        assertThat(finalBaseManifests)
+                .containsExactlyElementsOf(snapshotCommit.conflictBaseManifests());
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id()))
+                .extracting(kv -> kv.value().getString(6).toString())
+                .containsExactlyInAnyOrder("b", "c");
+    }
+
     private FileStoreCommitImpl newCommitWithSnapshotCommit(
             TestFileStore store, String commitUser, SnapshotCommit snapshotCommit) {
+        return newCommitWithSnapshotCommit(
+                store,
+                commitUser,
+                snapshotCommit,
+                store.options(),
+                store.options().dataEvolutionEnabled());
+    }
+
+    private ManifestEntry addFile(
+            BinaryRow partition, int bucket, int totalBuckets, long maxSequenceNumber) {
+        return ManifestEntry.create(
+                FileKind.ADD,
+                partition,
+                bucket,
+                totalBuckets,
+                DataFileMeta.forAppend(
+                        String.format("test-%d.orc", maxSequenceNumber),
+                        1,
+                        1,
+                        EMPTY_STATS,
+                        maxSequenceNumber,
+                        maxSequenceNumber,
+                        0,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null));
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store,
+            String commitUser,
+            SnapshotCommit snapshotCommit,
+            CoreOptions options,
+            boolean dataEvolutionEnabled) {
         String tableName = store.options().path().getName();
         return new FileStoreCommitImpl(
                 snapshotCommit,
@@ -1090,7 +1770,7 @@ public class FileStoreCommitTest {
                 tableName,
                 commitUser,
                 store.partitionType(),
-                store.options(),
+                options,
                 store.pathFactory(),
                 store.snapshotManager(),
                 store.manifestFileFactory(),
@@ -1109,13 +1789,206 @@ public class FileStoreCommitTest {
                                 store.pathFactory(),
                                 store.newKeyComparator(),
                                 store.bucketMode(),
-                                store.options().deletionVectorsEnabled(),
-                                store.options().dataEvolutionEnabled(),
-                                store.options().pkClusteringOverride(),
+                                options.deletionVectorsEnabled(),
+                                dataEvolutionEnabled,
+                                options.pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
                                 scanner),
                 null);
+    }
+
+    private ManifestCommittable indexCommittable(
+            BinaryRow partition, String fileName, long rowRangeStart, long rowRangeEnd) {
+        ManifestCommittable committable = new ManifestCommittable(0);
+        committable.addFileCommittable(
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(
+                                Collections.singletonList(
+                                        new IndexFileMeta(
+                                                "btree",
+                                                fileName,
+                                                1,
+                                                1,
+                                                new GlobalIndexMeta(
+                                                        rowRangeStart, rowRangeEnd, 0, null, null),
+                                                null))),
+                        CompactIncrement.emptyIncrement()));
+        return committable;
+    }
+
+    private static List<ManifestEntry> tableFilesFrom(
+            ManifestCommittable committable, CoreOptions options) {
+        ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
+        committable.fileCommittables().forEach(changes::collect);
+        return new ArrayList<>(changes.appendTableFiles);
+    }
+
+    @SafeVarargs
+    private static List<List<ManifestEntry>> conflictAttempts(List<ManifestEntry>... attempts) {
+        return Arrays.asList(attempts);
+    }
+
+    private static class ConflictingSnapshotCommit implements SnapshotCommit {
+
+        private final SnapshotCommit delegate;
+        private final SnapshotManager snapshotManager;
+        private final ManifestList manifestList;
+        private final ManifestFile manifestFile;
+        private final boolean mergeConflictManifests;
+        private final List<List<ManifestEntry>> conflictDeltaFilesByAttempt;
+        private int commitAttempt = 0;
+        private final List<List<ManifestFileMeta>> attemptBaseManifests;
+        private final List<List<ManifestFileMeta>> conflictDeltaManifestsByAttempt;
+        private List<ManifestFileMeta> conflictBaseManifests;
+
+        private ConflictingSnapshotCommit(
+                SnapshotCommit delegate,
+                SnapshotManager snapshotManager,
+                ManifestList manifestList,
+                ManifestFile manifestFile,
+                boolean mergeConflictManifests,
+                List<List<ManifestEntry>> conflictDeltaFilesByAttempt) {
+            this.delegate = delegate;
+            this.snapshotManager = snapshotManager;
+            this.manifestList = manifestList;
+            this.manifestFile = manifestFile;
+            this.mergeConflictManifests = mergeConflictManifests;
+            this.conflictDeltaFilesByAttempt = conflictDeltaFilesByAttempt;
+            this.attemptBaseManifests = new ArrayList<>();
+            this.conflictDeltaManifestsByAttempt = new ArrayList<>();
+        }
+
+        @Override
+        public boolean commit(
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception {
+            if (commitAttempt >= conflictDeltaFilesByAttempt.size()) {
+                return delegate.commit(snapshot, branch, statistics);
+            }
+
+            List<ManifestEntry> conflictDeltaFiles = conflictDeltaFilesByAttempt.get(commitAttempt);
+            commitAttempt++;
+            attemptBaseManifests.add(
+                    manifestList.read(
+                            snapshot.baseManifestList(), snapshot.baseManifestListSize()));
+
+            Snapshot previousSnapshot =
+                    snapshot.id() == Snapshot.FIRST_SNAPSHOT_ID
+                            ? null
+                            : snapshotManager.snapshot(snapshot.id() - 1);
+            List<ManifestFileMeta> previousManifests =
+                    previousSnapshot == null
+                            ? Collections.emptyList()
+                            : manifestList.readDataManifests(previousSnapshot);
+            conflictBaseManifests =
+                    mergeConflictManifests
+                            ? rewriteManifests(previousManifests)
+                            : previousManifests;
+            List<ManifestFileMeta> conflictNewManifests =
+                    conflictDeltaFiles.isEmpty()
+                            ? Collections.emptyList()
+                            : manifestFile.write(conflictDeltaFiles);
+            conflictDeltaManifestsByAttempt.add(conflictNewManifests);
+            boolean putConflictNewManifestsInBase =
+                    !mergeConflictManifests
+                            && !conflictNewManifests.isEmpty()
+                            && !previousManifests.isEmpty();
+            if (putConflictNewManifestsInBase) {
+                conflictBaseManifests = new ArrayList<>();
+                conflictBaseManifests.add(previousManifests.get(0));
+                conflictBaseManifests.addAll(conflictNewManifests);
+                conflictBaseManifests.addAll(
+                        previousManifests.subList(1, previousManifests.size()));
+            }
+            Pair<String, Long> conflictBaseManifestList = manifestList.write(conflictBaseManifests);
+            long conflictDeltaRecordCount =
+                    conflictDeltaFiles.stream()
+                            .mapToLong(
+                                    entry ->
+                                            entry.kind() == FileKind.ADD
+                                                    ? entry.file().rowCount()
+                                                    : -entry.file().rowCount())
+                            .sum();
+            Pair<String, Long> conflictDeltaManifestList =
+                    manifestList.write(
+                            putConflictNewManifestsInBase
+                                    ? Collections.emptyList()
+                                    : conflictNewManifests);
+            Snapshot conflictSnapshot =
+                    new Snapshot(
+                            snapshot.id(),
+                            previousSnapshot == null
+                                    ? snapshot.schemaId()
+                                    : previousSnapshot.schemaId(),
+                            conflictBaseManifestList.getLeft(),
+                            conflictBaseManifestList.getRight(),
+                            conflictDeltaManifestList.getLeft(),
+                            conflictDeltaManifestList.getRight(),
+                            null,
+                            null,
+                            previousSnapshot == null ? null : previousSnapshot.indexManifest(),
+                            "conflict-user",
+                            Long.MAX_VALUE,
+                            Snapshot.CommitKind.ANALYZE,
+                            System.currentTimeMillis(),
+                            (previousSnapshot == null ? 0L : previousSnapshot.totalRecordCount())
+                                    + conflictDeltaRecordCount,
+                            conflictDeltaRecordCount,
+                            null,
+                            previousSnapshot == null ? null : previousSnapshot.watermark(),
+                            previousSnapshot == null ? null : previousSnapshot.statistics(),
+                            previousSnapshot == null ? null : previousSnapshot.properties(),
+                            previousSnapshot == null ? null : previousSnapshot.nextRowId());
+            assertThat(delegate.commit(conflictSnapshot, branch, Collections.emptyList())).isTrue();
+            return false;
+        }
+
+        private List<ManifestFileMeta> rewriteManifests(List<ManifestFileMeta> manifests) {
+            if (manifests.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            List<ManifestFileMeta> rewrittenManifests = new ArrayList<>();
+            for (ManifestFileMeta manifest : manifests) {
+                rewrittenManifests.addAll(
+                        manifestFile.write(manifestFile.read(manifest.fileName())));
+            }
+            return rewrittenManifests;
+        }
+
+        private List<ManifestFileMeta> firstAttemptBaseManifests() {
+            return attemptBaseManifests(0);
+        }
+
+        private List<ManifestFileMeta> attemptBaseManifests(int attempt) {
+            assertThat(attemptBaseManifests).hasSizeGreaterThan(attempt);
+            return attemptBaseManifests.get(attempt);
+        }
+
+        private List<ManifestFileMeta> conflictBaseManifests() {
+            return checkNotNull(conflictBaseManifests);
+        }
+
+        private List<ManifestFileMeta> conflictDeltaManifests() {
+            assertThat(conflictDeltaManifestsByAttempt).isNotEmpty();
+            return conflictDeltaManifestsByAttempt.get(conflictDeltaManifestsByAttempt.size() - 1);
+        }
+
+        private List<ManifestFileMeta> conflictDeltaManifests(int attempt) {
+            assertThat(conflictDeltaManifestsByAttempt).hasSizeGreaterThan(attempt);
+            return conflictDeltaManifestsByAttempt.get(attempt);
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
     }
 
     private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
@@ -1153,6 +2026,13 @@ public class FileStoreCommitTest {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
     }
 
+    private TestFileStore createRowTrackingDataEvolutionStore() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return createStore(false, -1, CoreOptions.ChangelogProducer.NONE, options);
+    }
+
     private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }
@@ -1179,14 +2059,18 @@ public class FileStoreCommitTest {
                         ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
+        List<String> primaryKeys =
+                Boolean.parseBoolean(options.get(CoreOptions.ROW_TRACKING_ENABLED.key()))
+                        ? Collections.emptyList()
+                        : TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(new LocalFileIO(), path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
-                                TestKeyValueGenerator.getPrimaryKeys(
-                                        TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                                primaryKeys,
                                 options,
                                 null));
         return new TestFileStore.Builder(

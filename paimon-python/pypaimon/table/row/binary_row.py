@@ -51,6 +51,24 @@ class BinaryRow(InternalRow):
                                                             self.arity),
                                                         index, self.fields[index].type)
 
+    def get_blob(self, pos: int):
+        from pypaimon.table.row.blob import Blob
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        if isinstance(value, Blob):
+            return value
+        raise TypeError(f"Cannot get Blob from {type(value)} at position {pos}")
+
+    def get_vector(self, pos: int):
+        from pypaimon.table.row.vector import Vector
+        value = self.get_field(pos)
+        if value is None:
+            return None
+        if isinstance(value, Vector):
+            return value
+        raise TypeError(f"Cannot get Vector from {type(value)} at position {pos}")
+
     def get_row_kind(self) -> RowKind:
         return self.row_kind
 

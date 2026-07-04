@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
+import org.apache.spark.sql.types.TimestampType
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
@@ -436,6 +437,41 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: REPLACE TABLE AS SELECT from same table preserves data") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      // Self-referencing RTAS: should read old data, not the truncated data
+      sql("CREATE OR REPLACE TABLE t TBLPROPERTIES ('bucket' = '-1') AS SELECT * FROM t")
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(1, "a") :: Row(2, "b") :: Nil)
+    }
+  }
+
+  test("Paimon DDL: REPLACE TABLE AS SELECT with time travel reads specified snapshot") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id INT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('bucket' = '-1')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'v1')")
+      val snapshotId1 = loadTable("t").snapshotManager().latestSnapshotId()
+      sql("INSERT INTO t VALUES (2, 'v2')")
+
+      // RTAS with VERSION AS OF should read the specified snapshot, not the latest
+      sql(
+        s"CREATE OR REPLACE TABLE t TBLPROPERTIES ('bucket' = '-1') AS SELECT * FROM t VERSION AS OF $snapshotId1")
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(1, "v1") :: Nil)
+    }
+  }
+
   fileFormats.foreach {
     format =>
       test(s"Paimon DDL: create table with char/varchar/string, file.format: $format") {
@@ -612,6 +648,40 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
                 }
               }
             }
+        }
+    }
+  }
+
+  test("Paimon DDL: legacy timestamp mapping") {
+    assume(gteqSpark3_4)
+
+    Seq("orc", "parquet").foreach {
+      format =>
+        withSparkSQLConf("spark.paimon.legacy-timestamp-mapping.enabled" -> "true") {
+          withTimeZone("Asia/Shanghai") {
+            withTable("paimon_tbl") {
+              sql(s"""
+                     |CREATE TABLE paimon_tbl (reported_time timestamp)
+                     |USING paimon
+                     |TBLPROPERTIES ('file.format'='$format')
+                     |""".stripMargin)
+
+              sql("INSERT INTO paimon_tbl VALUES (timestamp'2026-06-30 23:47:51')")
+
+              Assertions.assertEquals(
+                TimestampType,
+                spark.table("paimon_tbl").schema("reported_time").dataType)
+              checkAnswer(
+                sql("""
+                      |SELECT from_unixtime(
+                      |  unix_timestamp(reported_time) + 24 * 3600,
+                      |  'yyyy-MM-dd HH:mm:ss'
+                      |) FROM paimon_tbl
+                      |""".stripMargin),
+                Row("2026-07-01 23:47:51") :: Nil
+              )
+            }
+          }
         }
     }
   }
@@ -860,7 +930,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   test("Paimon DDL: create unsupported table") {
     assert(intercept[Exception] {
       sql("CREATE TABLE t (id INT) USING paimon1")
-    }.getMessage.contains("Provider is not supported: paimon1"))
+    }.getMessage.contains("Provider 'paimon1' is not supported"))
   }
 
   test("Paimon DDL: Drop Partition by partial spec") {

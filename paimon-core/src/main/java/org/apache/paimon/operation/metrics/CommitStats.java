@@ -53,6 +53,7 @@ public class CommitStats {
     private final long generatedSnapshots;
     private final long numPartitionsWritten;
     private final long numBucketsWritten;
+    private final long lastCommittedSnapshotId;
 
     public CommitStats(
             List<ManifestEntry> appendTableFiles,
@@ -61,7 +62,8 @@ public class CommitStats {
             List<ManifestEntry> compactChangelogFiles,
             long commitDuration,
             int generatedSnapshots,
-            int attempts) {
+            int attempts,
+            long lastCommittedSnapshotId) {
         List<ManifestEntry> addedTableFiles =
                 appendTableFiles.stream()
                         .filter(f -> FileKind.ADD.equals(f.kind()))
@@ -110,6 +112,7 @@ public class CommitStats {
         this.duration = commitDuration;
         this.generatedSnapshots = generatedSnapshots;
         this.attempts = attempts;
+        this.lastCommittedSnapshotId = lastCommittedSnapshotId;
     }
 
     @VisibleForTesting
@@ -235,5 +238,10 @@ public class CommitStats {
 
     public long getCompactionOutputFileSize() {
         return compactionOutputFileSize;
+    }
+
+    @VisibleForTesting
+    protected long getLastCommittedSnapshotId() {
+        return lastCommittedSnapshotId;
     }
 }

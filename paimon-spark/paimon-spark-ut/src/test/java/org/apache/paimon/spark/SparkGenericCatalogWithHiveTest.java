@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.TestHiveMetastore;
 
+import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -46,6 +48,85 @@ public class SparkGenericCatalogWithHiveTest {
     @AfterAll
     public static void closeMetastore() throws Exception {
         testHiveMetastore.stop();
+    }
+
+    @Test
+    public void testAddPartitionForFallbackParquetTableWithNamedCatalog(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        Path warehousePath = new Path("file:" + tempDir);
+        String location = tempDir.resolve("parquet_part_tbl_path").toFile().getCanonicalPath();
+        SparkSession spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config(
+                                "spark.sql.catalog.hive_metastore",
+                                SparkGenericCatalog.class.getName())
+                        .config(
+                                "spark.sql.catalog.hive_metastore.catalog.create-underlying-session-catalog",
+                                "true")
+                        .config("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+                        .master("local[2]")
+                        .getOrCreate();
+
+        try {
+            spark.sql("USE hive_metastore");
+            spark.sql("CREATE DATABASE paimon_partition_db");
+            spark.sql("USE paimon_partition_db");
+            spark.sql(
+                    "CREATE EXTERNAL TABLE parquet_part_tbl1 (id INT, name STRING) "
+                            + "USING PARQUET PARTITIONED BY (dt STRING) LOCATION '"
+                            + location
+                            + "'");
+            spark.sql(
+                    "CREATE EXTERNAL TABLE parquet_part_tbl2 (id INT, name STRING) "
+                            + "USING PARQUET PARTITIONED BY (dt STRING) LOCATION '"
+                            + location
+                            + "'");
+            spark.sql(
+                    "INSERT INTO parquet_part_tbl1 PARTITION (dt = '2026-05-29') "
+                            + "VALUES (1, 'a'), (2, 'b')");
+
+            assertThat(
+                            spark.sql(
+                                            "SELECT id, name, dt FROM spark_catalog.paimon_partition_db.parquet_part_tbl2 "
+                                                    + "WHERE dt = '2026-05-29'")
+                                    .collectAsList())
+                    .isEmpty();
+
+            spark.sql(
+                    "ALTER TABLE hive_metastore.paimon_partition_db.parquet_part_tbl2 "
+                            + "ADD PARTITION (dt = '2026-05-29') LOCATION '"
+                            + location
+                            + "/dt=2026-05-29'");
+            assertThat(
+                            spark
+                                    .sql(
+                                            "SHOW PARTITIONS hive_metastore.paimon_partition_db.parquet_part_tbl2")
+                                    .collectAsList().stream()
+                                    .map(Row::toString))
+                    .containsExactly("[dt=2026-05-29]");
+
+            List<Row> rows =
+                    spark.sql(
+                                    "SELECT id, name, dt FROM spark_catalog.paimon_partition_db.parquet_part_tbl2 "
+                                            + "WHERE dt = '2026-05-29' ORDER BY id")
+                            .collectAsList();
+            assertThat(rows.stream().map(Row::toString))
+                    .containsExactly("[1,a,2026-05-29]", "[2,b,2026-05-29]");
+
+            spark.sql(
+                    "ALTER TABLE hive_metastore.paimon_partition_db.parquet_part_tbl2 "
+                            + "DROP PARTITION (dt = '2026-05-29')");
+            assertThat(
+                            spark.sql(
+                                            "SHOW PARTITIONS hive_metastore.paimon_partition_db.parquet_part_tbl2")
+                                    .collectAsList())
+                    .isEmpty();
+        } finally {
+            spark.sql("DROP DATABASE IF EXISTS spark_catalog.paimon_partition_db CASCADE");
+            spark.stop();
+        }
     }
 
     @Test

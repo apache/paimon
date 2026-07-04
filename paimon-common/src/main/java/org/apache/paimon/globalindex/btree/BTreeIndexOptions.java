@@ -55,10 +55,19 @@ public class BTreeIndexOptions {
                     .defaultValue(0.1)
                     .withDescription("The high priority pool ratio to use for BTreeIndex");
 
+    public static final ConfigOption<MemorySize> BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE =
+            ConfigOptions.key("btree-index.fallback-scan-max-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "The maximum total BTree global index file size to allow fallback "
+                                    + "index scans for predicates that cannot use direct lookup. "
+                                    + "Set to 0 bytes to disable fallback scans.");
+
     public static final ConfigOption<Long> BTREE_INDEX_RECORDS_PER_RANGE =
             ConfigOptions.key("btree-index.records-per-range")
                     .longType()
-                    .defaultValue(1000_000L)
+                    .defaultValue(10_000_000L)
                     .withDescription("The expected number of records per BTree Index File.");
 
     public static final ConfigOption<Integer> BTREE_INDEX_BUILD_MAX_PARALLELISM =

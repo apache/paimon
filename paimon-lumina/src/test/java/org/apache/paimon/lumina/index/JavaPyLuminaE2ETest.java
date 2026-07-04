@@ -25,8 +25,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
-import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
@@ -170,16 +169,16 @@ public class JavaPyLuminaE2ETest {
         DataField embeddingField = table.rowType().getField("embedding");
         Options indexOptions = table.coreOptions().toConfiguration();
 
-        GlobalIndexSingletonWriter writer =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 LuminaVectorGlobalIndexerFactory.IDENTIFIER,
                                 embeddingField,
                                 indexOptions);
 
-        for (float[] vec : vectors) {
-            writer.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            writer.write(vectors[i], i);
         }
 
         List<ResultEntry> entries = writer.finish();
@@ -280,15 +279,15 @@ public class JavaPyLuminaE2ETest {
 
         // Build Lumina vector index on "embedding".
         DataField embeddingField = table.rowType().getField("embedding");
-        GlobalIndexSingletonWriter vectorWriter =
-                (GlobalIndexSingletonWriter)
+        GlobalIndexSingleColumnWriter vectorWriter =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table,
                                 LuminaVectorGlobalIndexerFactory.IDENTIFIER,
                                 embeddingField,
                                 indexOptions);
-        for (float[] vec : vectors) {
-            vectorWriter.write(vec);
+        for (int i = 0; i < vectors.length; i++) {
+            vectorWriter.write(vectors[i], i);
         }
         List<ResultEntry> vectorEntries = vectorWriter.finish();
         List<IndexFileMeta> vectorIndexFiles =
@@ -303,8 +302,8 @@ public class JavaPyLuminaE2ETest {
 
         // Build BTree global index on "id".
         DataField idField = table.rowType().getField("id");
-        GlobalIndexParallelWriter idWriter =
-                (GlobalIndexParallelWriter)
+        GlobalIndexSingleColumnWriter idWriter =
+                (GlobalIndexSingleColumnWriter)
                         GlobalIndexBuilderUtils.createIndexWriter(
                                 table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, indexOptions);
         for (int i = 0; i < vectors.length; i++) {

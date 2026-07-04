@@ -23,9 +23,26 @@ import org.apache.paimon.spark.leafnode.PaimonLeafCommand
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
 
+/**
+ * The (still unresolved) source to export: either a named table or an inline read-only query. Using
+ * an ADT keeps the two mutually exclusive, so impossible states such as "table name and query both
+ * present" cannot be constructed. The table name is resolved to a catalog/identifier later, during
+ * planning.
+ */
+sealed trait CopyIntoLocationSource
+
+object CopyIntoLocationSource {
+
+  /** Export the named table; `nameParts` is the multipart identifier, unresolved at this point. */
+  case class TableName(nameParts: Seq[String]) extends CopyIntoLocationSource
+
+  /** Export the result of the inline `FROM (<query>)` read-only query. */
+  case class Query(query: String) extends CopyIntoLocationSource
+}
+
 case class CopyIntoLocationCommand(
     targetPath: String,
-    table: Seq[String],
+    source: CopyIntoLocationSource,
     fileFormat: CopyFileFormat,
     overwrite: Boolean)
   extends PaimonLeafCommand {
@@ -37,6 +54,12 @@ case class CopyIntoLocationCommand(
   )
 
   override def simpleString(maxFields: Int): String = {
-    s"CopyIntoLocation: target=$targetPath, source=$table"
+    val sourceDesc = source match {
+      case CopyIntoLocationSource.Query(q) =>
+        val truncated = if (q.length > 100) q.take(100) + "..." else q
+        s"query=$truncated"
+      case CopyIntoLocationSource.TableName(nameParts) => s"table=$nameParts"
+    }
+    s"CopyIntoLocation: target=$targetPath, source=$sourceDesc"
   }
 }

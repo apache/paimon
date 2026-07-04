@@ -268,4 +268,31 @@ public class LookupRemoteFileTableTest extends TableTestBase {
         assertThat(level5.extraFiles()).hasSize(1);
         assertThat(level4.extraFiles()).hasSize(0);
     }
+
+    @Test
+    public void testOverwriteGeneratesRemoteFile() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        options.set(CoreOptions.LOOKUP_REMOTE_FILE_ENABLED, true);
+        Identifier identifier = new Identifier("default", "t");
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new IntType()).getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("f0"),
+                        options.toMap(),
+                        null);
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder().withOverwrite();
+        try (BatchTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            write.write(GenericRow.of(2, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        allShouldHaveRemoteSst(table.newReadBuilder().newScan().plan().splits());
+    }
 }

@@ -271,6 +271,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX));
     }
 
+    @Override
+    public void setTable(FileStoreTable table) {
+        // nothing to do
+    }
+
     private void createMetadata(
             Snapshot snapshot,
             FileChangesCollector fileChangesCollector,
@@ -390,7 +395,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 new IcebergSnapshot(
                         snapshotId,
                         snapshotId,
-                        null,
+                        snapshotId == Snapshot.FIRST_SNAPSHOT_ID ? null : (Long) (snapshotId - 1),
                         System.currentTimeMillis(),
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),

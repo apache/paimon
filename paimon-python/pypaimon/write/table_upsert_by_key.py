@@ -21,8 +21,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import pyarrow as pa
 
 from pypaimon.read.table_read import TableRead
+from pypaimon.table.row.blob import Blob
+from pypaimon.table.row.internal_row import InternalRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.row_utils import require_columns, row_to_named_values
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_write import StreamTableWrite
 
@@ -37,8 +40,8 @@ class TableUpsertByKey:
     Table upsert by one or more user-specified key columns for append-only tables.
 
     For each row in the input Arrow table:
-    - If a row with the same upsert_keys composite value already exists → update that row
-      (in-place rewrite).
+    - If one or more rows with the same upsert_keys composite value already exist →
+      update all of them (in-place rewrite).
     - If no matching row exists → append as a new row.
 
     All upsert_keys must be columns present in both the input data and the table schema.
@@ -96,6 +99,144 @@ class TableUpsertByKey:
             all_commit_messages.extend(msgs)
 
         return all_commit_messages
+
+    def upsert_rows(self, rows, upsert_keys: List[str],
+                    update_cols: Optional[List[str]] = None) -> List[CommitMessage]:
+        row_list = self._normalize_rows(rows)
+        if not row_list:
+            raise ValueError("rows must not be empty.")
+
+        row_items = [
+            (row, row_to_named_values(row, self.table.table_schema.fields))
+            for row in row_list
+        ]
+        for _, values_by_name in row_items:
+            self._validate_row_inputs(values_by_name, upsert_keys, update_cols)
+
+        if update_cols is None or len(update_cols) == len(self.table.field_names):
+            effective_update_cols = None
+        else:
+            effective_update_cols = update_cols
+
+        commit_messages: List[CommitMessage] = []
+        for partition_spec, partition_items in self._group_rows_by_partition(row_items):
+            commit_messages.extend(
+                self._upsert_row_partition(
+                    partition_items,
+                    upsert_keys,
+                    partition_spec,
+                    effective_update_cols,
+                )
+            )
+        return commit_messages
+
+    @staticmethod
+    def _normalize_rows(rows) -> List:
+        if isinstance(rows, InternalRow):
+            return [rows]
+        return list(rows)
+
+    def _group_rows_by_partition(
+            self,
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+    ) -> List[Tuple[Dict[str, Any], List[Tuple[Any, Dict[str, Any]]]]]:
+        if not self.table.partition_keys:
+            return [({}, row_items)]
+
+        partition_to_items: Dict[Tuple[Any, ...], List[Tuple[Any, Dict[str, Any]]]] = {}
+        for item in row_items:
+            _, values_by_name = item
+            part_tuple = tuple(
+                values_by_name[key] for key in self.table.partition_keys
+            )
+            partition_to_items.setdefault(part_tuple, []).append(item)
+
+        return [
+            (dict(zip(self.table.partition_keys, part_tuple)), items)
+            for part_tuple, items in partition_to_items.items()
+        ]
+
+    def _upsert_row_partition(
+            self,
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+            upsert_keys: List[str],
+            partition_spec: Dict[str, Any],
+            update_cols: Optional[List[str]],
+    ) -> List[CommitMessage]:
+        partition_key_set = set(self.table.partition_keys)
+        match_keys = [k for k in upsert_keys if k not in partition_key_set]
+        input_key_tuples = [
+            tuple(values_by_name[k] for k in match_keys)
+            for _, values_by_name in row_items
+        ]
+        for key_tuple in input_key_tuples:
+            for value in key_tuple:
+                if isinstance(value, Blob):
+                    raise ValueError("Blob values are not supported as upsert keys.")
+
+        row_items, input_key_tuples = self._dedup_row_items_last_write_wins(
+            row_items, input_key_tuples, partition_spec)
+
+        key_to_row_ids = self._build_key_to_row_ids_map(
+            match_keys, partition_spec, set(input_key_tuples)
+        )
+
+        matched_items: List[Tuple[Any, Dict[str, Any]]] = []
+        matched_row_ids: List[List[int]] = []
+        new_items: List[Tuple[Any, Dict[str, Any]]] = []
+        for item, key_tuple in zip(row_items, input_key_tuples):
+            if key_tuple in key_to_row_ids:
+                matched_items.append(item)
+                matched_row_ids.append(key_to_row_ids[key_tuple])
+            else:
+                new_items.append(item)
+
+        commit_messages: List[CommitMessage] = []
+        if matched_items:
+            cols_to_update = (
+                list(update_cols)
+                if update_cols is not None
+                else list(self.table.field_names)
+            )
+            for _, values_by_name in matched_items:
+                require_columns(values_by_name, cols_to_update, "upsert_by_key")
+            commit_messages.extend(TableUpdateByRowId(
+                self.table, self.commit_user, self.commit_identifier,
+            ).update_rows_columns(
+                [row for row, _ in matched_items],
+                matched_row_ids,
+                cols_to_update,
+            ))
+
+        if new_items:
+            commit_messages.extend(self._append_rows(new_items))
+
+        return commit_messages
+
+    @staticmethod
+    def _dedup_row_items_last_write_wins(
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+            input_key_tuples: List[_KeyTuple],
+            partition_spec: Dict[str, Any],
+    ) -> Tuple[List[Tuple[Any, Dict[str, Any]]], List[_KeyTuple]]:
+        key_to_last_idx: Dict[_KeyTuple, int] = {}
+        for i, key_tuple in enumerate(input_key_tuples):
+            key_to_last_idx[key_tuple] = i
+
+        if len(key_to_last_idx) == len(input_key_tuples):
+            return row_items, input_key_tuples
+
+        original_count = len(input_key_tuples)
+        dedup_indices = sorted(key_to_last_idx.values())
+        logger.warning(
+            "Deduplicated input rows from %d to %d in partition %s "
+            "(kept last occurrence).",
+            original_count, len(dedup_indices), partition_spec,
+        )
+        return (
+            [row_items[i] for i in dedup_indices],
+            [input_key_tuples[i] for i in dedup_indices],
+        )
 
     # ------------------------------------------------------------------
     # Partition grouping
@@ -168,9 +309,10 @@ class TableUpsertByKey:
             partition_data, input_key_tuples, partition_spec,
         )
 
-        # 3. Scan partition once, keeping only key → _ROW_ID pairs that
-        #    appear in the input (memory ∝ |input|, not |partition|).
-        key_to_row_id = self._build_key_to_row_id_map(
+        # 3. Scan partition once, keeping key → [_ROW_ID, ...] for keys that
+        #    appear in the input (memory ∝ matched existing rows, not the
+        #    whole partition).
+        key_to_row_ids = self._build_key_to_row_ids_map(
             match_keys, partition_spec, set(input_key_tuples),
         )
 
@@ -178,18 +320,26 @@ class TableUpsertByKey:
         matched_indices: List[int] = []
         new_indices: List[int] = []
         for i, key_tuple in enumerate(input_key_tuples):
-            (matched_indices if key_tuple in key_to_row_id else new_indices).append(i)
+            (matched_indices if key_tuple in key_to_row_ids else new_indices).append(i)
 
         logger.info(
             "Upserting partition %s: %d matched, %d new",
             partition_spec, len(matched_indices), len(new_indices),
         )
+        total_updates = sum(
+            len(key_to_row_ids[input_key_tuples[i]]) for i in matched_indices)
+        if total_updates > len(matched_indices):
+            logger.info(
+                "Upsert fan-out in partition %s: %d input rows expand to "
+                "%d row updates", partition_spec,
+                len(matched_indices), total_updates,
+            )
 
         commit_messages: List[CommitMessage] = []
         if matched_indices:
             commit_messages.extend(self._do_updates(
                 partition_data, matched_indices,
-                input_key_tuples, key_to_row_id, update_cols,
+                input_key_tuples, key_to_row_ids, update_cols,
             ))
         if new_indices:
             commit_messages.extend(self._do_appends(partition_data, new_indices))
@@ -274,14 +424,60 @@ class TableUpsertByKey:
         # that partition columns can be stripped first.  The same non-partition
         # key may legally appear in different partitions.
 
-    def _build_key_to_row_id_map(
+    def _validate_row_inputs(
+            self,
+            values_by_name: Dict[str, Any],
+            upsert_keys: List[str],
+            update_cols: Optional[List[str]]):
+        if not self.table.options.data_evolution_enabled():
+            raise ValueError(
+                "upsert_by_key requires 'data-evolution.enabled' = 'true'."
+            )
+
+        if not self.table.options.row_tracking_enabled():
+            raise ValueError(
+                "upsert_by_key requires 'row-tracking.enabled' = 'true'."
+            )
+
+        if not upsert_keys:
+            raise ValueError("upsert_keys must not be empty.")
+
+        for key in upsert_keys:
+            if key not in self.table.field_names:
+                raise ValueError(
+                    f"upsert_key '{key}' is not in table schema fields: {self.table.field_names}"
+                )
+
+        unknown_fields = [
+            field_name
+            for field_name in values_by_name
+            if field_name not in self.table.field_names
+        ]
+        if unknown_fields:
+            raise ValueError(
+                f"upsert_by_key got row field(s) {unknown_fields} "
+                f"that are not in table schema fields: {self.table.field_names}"
+            )
+
+        require_columns(values_by_name, upsert_keys, "upsert_by_key")
+        require_columns(values_by_name, self.table.partition_keys, "upsert_by_key")
+
+        if update_cols is not None:
+            for col in update_cols:
+                if col not in self.table.field_names:
+                    raise ValueError(
+                        f"Column '{col}' in update_cols is not in table schema fields: "
+                        f"{self.table.field_names}"
+                    )
+
+    def _build_key_to_row_ids_map(
             self,
             match_keys: List[str],
             partition_spec: Optional[Dict[str, Any]],
             input_key_set: set,
-    ) -> Dict[_KeyTuple, int]:
+    ) -> Dict[_KeyTuple, List[int]]:
         """
-        Scan the partition in batches and collect key → _ROW_ID only for
+        Scan the partition in batches and collect key → [_ROW_ID, ...] for
         rows whose composite key is in *input_key_set*.
 
         The partition spec (if any) is pushed down as an ``and`` of per-key
@@ -322,7 +518,7 @@ class TableUpsertByKey:
         )
 
         # Stream batches and filter against input_key_set on-the-fly
-        key_to_row_id: Dict[_KeyTuple, int] = {}
+        key_to_row_ids: Dict[_KeyTuple, List[int]] = {}
         row_id_col = SpecialFields.ROW_ID.name
         for batch in table_read.to_arrow_batch_reader(splits):
             batch_key_cols = [batch.column(k).to_pylist() for k in match_keys]
@@ -330,27 +526,28 @@ class TableUpsertByKey:
             for j, row_id in enumerate(batch_row_ids):
                 key_tuple = tuple(col[j] for col in batch_key_cols)
                 if key_tuple in input_key_set:
-                    key_to_row_id[key_tuple] = row_id
+                    key_to_row_ids.setdefault(key_tuple, []).append(row_id)
 
-        return key_to_row_id
+        return key_to_row_ids
 
     def _do_updates(
             self,
             data: pa.Table,
             matched_indices: List[int],
             input_key_tuples: List[_KeyTuple],
-            key_to_row_id: Dict[_KeyTuple, int],
+            key_to_row_ids: Dict[_KeyTuple, List[int]],
             update_cols: Optional[List[str]]
     ) -> List[CommitMessage]:
-        """Update matched rows by rewriting them in-place via
-        :class:`TableUpdateByRowId`."""
-        matched_data = data.take(matched_indices)
-        row_id_array = pa.array(
-            [key_to_row_id[input_key_tuples[i]] for i in matched_indices],
-            type=pa.int64(),
-        )
-        update_data = matched_data.append_column(
-            SpecialFields.ROW_ID.name, row_id_array,
+        """Update matched rows in-place via :class:`TableUpdateByRowId`."""
+        expanded_input_indices: List[int] = []
+        row_ids: List[int] = []
+        for i in matched_indices:
+            for row_id in key_to_row_ids[input_key_tuples[i]]:
+                expanded_input_indices.append(i)
+                row_ids.append(row_id)
+
+        update_data = data.take(expanded_input_indices).append_column(
+            SpecialFields.ROW_ID.name, pa.array(row_ids, type=pa.int64()),
         )
 
         cols_to_update = list(update_cols) if update_cols else list(self.table.field_names)
@@ -387,3 +584,46 @@ class TableUpsertByKey:
             return table_write.prepare_commit(self.commit_identifier)
         finally:
             table_write.close()
+
+    def _append_rows(
+            self,
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+    ) -> List[CommitMessage]:
+        all_ordered_cols = self._append_row_column_names(row_items)
+
+        table_write = StreamTableWrite(self.table, self.commit_user)
+        try:
+            table_write.with_write_type(all_ordered_cols)
+            for row, _ in row_items:
+                table_write.write_row(row)
+            return table_write.prepare_commit(self.commit_identifier)
+        finally:
+            table_write.close()
+
+    def _append_row_column_names(
+            self,
+            row_items: List[Tuple[Any, Dict[str, Any]]],
+    ) -> List[str]:
+        first_field_names = set(row_items[0][1])
+        for _, values_by_name in row_items[1:]:
+            field_names = set(values_by_name)
+            if field_names == first_field_names:
+                continue
+
+            missing_fields = [
+                name for name in self.table.field_names
+                if name in first_field_names and name not in field_names
+            ]
+            extra_fields = [
+                name for name in self.table.field_names
+                if name in field_names and name not in first_field_names
+            ]
+            raise ValueError(
+                "upsert_by_key requires appended rows in the same batch to "
+                "have the same field set. Compared with the first appended "
+                f"row, missing fields: {missing_fields}; "
+                f"extra fields: {extra_fields}."
+            )
+        return [
+            name for name in self.table.field_names if name in first_field_names
+        ]
