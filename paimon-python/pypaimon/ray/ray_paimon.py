@@ -143,6 +143,7 @@ def map_with_blobs(
     fn: Callable,
     *,
     file_io=None,
+    all_blob_columns=None,
     parallelism: int = 64,
     batch_size: Optional[int] = 1024,
     fn_kwargs: Optional[Dict[str, Any]] = None,
@@ -154,8 +155,9 @@ def map_with_blobs(
     ``fn(scalar_batch, blobs, **fn_kwargs)`` receives a ``pyarrow.Table`` of
     non-BLOB columns and a row-aligned ``dict`` of BLOB bytes. Return a small
     Ray-compatible batch; for side-effect-only work, return an empty
-    ``pyarrow.Table`` instead of ``None``. Tune ``batch_size`` for BLOB size and
-    worker memory.
+    ``pyarrow.Table`` instead of ``None``. Call this directly on
+    ``scan().to_ray()`` output, or pass ``file_io`` and ``all_blob_columns``.
+    Tune ``batch_size`` for BLOB size and worker memory.
     """
     _require_ray_data()
 
@@ -191,14 +193,18 @@ def map_with_blobs(
     if ray_remote_args is not None:
         _set_map_batches_remote_args(dataset, kwargs, ray_remote_args)
 
-    all_blob_cols = getattr(dataset, "_paimon_blob_columns", None)
-    if all_blob_cols is not None:
-        all_blob = set(all_blob_cols)
-        invalid = [name for name in blob_cols if name not in all_blob]
-        if invalid:
-            raise ValueError("Column {!r} is not a BLOB column.".format(invalid[0]))
-    else:
-        all_blob_cols = blob_cols
+    all_blob_cols = all_blob_columns
+    if all_blob_cols is None:
+        all_blob_cols = getattr(dataset, "_paimon_blob_columns", None)
+    if all_blob_cols is None:
+        raise ValueError(
+            "map_with_blobs requires all_blob_columns when Dataset lacks "
+            "BLOB metadata.")
+
+    all_blob = set(all_blob_cols)
+    invalid = [name for name in blob_cols if name not in all_blob]
+    if invalid:
+        raise ValueError("Column {!r} is not a BLOB column.".format(invalid[0]))
 
     return dataset.map_batches(
         _map_blob_batch,

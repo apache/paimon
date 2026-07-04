@@ -434,7 +434,9 @@ result_ds = map_with_blobs(ds, blob_cols, process_batch)
 `process_batch` must return a Ray-compatible batch, such as a small
 `pyarrow.Table`. For side-effect-only jobs, return an empty table rather than
 `None`. Avoid returning raw BLOB bytes, which would materialize large payloads
-in Ray's object store.
+in Ray's object store. Call `map_with_blobs` directly on the Dataset returned by
+`to_ray()`; if intermediate Ray transforms drop Dataset metadata, pass `file_io`
+and `all_blob_columns` explicitly.
 
 Optional tuning parameters:
 
