@@ -31,7 +31,6 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -59,16 +58,15 @@ public class FullTextReadImpl implements FullTextRead {
     private final FileStoreTable table;
     @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
-    private final List<DataField> textColumns;
-    private final FullTextQuery query;
+    private final DataField textColumn;
+    private final String query;
 
-    public FullTextReadImpl(
-            FileStoreTable table, int limit, DataField textColumn, FullTextQuery query) {
+    public FullTextReadImpl(FileStoreTable table, int limit, DataField textColumn, String query) {
         this(table, null, limit, Collections.singletonList(textColumn), query);
     }
 
     public FullTextReadImpl(
-            FileStoreTable table, int limit, List<DataField> textColumns, FullTextQuery query) {
+            FileStoreTable table, int limit, List<DataField> textColumns, String query) {
         this(table, null, limit, textColumns, query);
     }
 
@@ -77,11 +75,15 @@ public class FullTextReadImpl implements FullTextRead {
             @Nullable PartitionPredicate partitionFilter,
             int limit,
             List<DataField> textColumns,
-            FullTextQuery query) {
+            String query) {
         this.table = table;
         this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.textColumns = Collections.unmodifiableList(new ArrayList<>(textColumns));
+        if (textColumns.size() != 1) {
+            throw new IllegalArgumentException(
+                    "Full-text search expects exactly one text column, got: " + textColumns);
+        }
+        this.textColumn = textColumns.get(0);
         this.query = query;
     }
 
@@ -95,11 +97,6 @@ public class FullTextReadImpl implements FullTextRead {
 
         int parallelism = table.coreOptions().toConfiguration().get(GLOBAL_INDEX_THREAD_NUM);
         ExecutorService executor = GlobalIndexReadThreadPool.getExecutorService(parallelism);
-
-        Map<String, DataField> fieldsByName = new HashMap<>();
-        for (DataField textColumn : textColumns) {
-            fieldsByName.put(textColumn.name(), textColumn);
-        }
 
         Map<String, List<IndexFullTextSearchSplit>> splitsByColumn = new HashMap<>();
         List<Range> rawRowRanges = new ArrayList<>();
@@ -118,8 +115,6 @@ public class FullTextReadImpl implements FullTextRead {
         RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
         ScoredGlobalIndexResult result =
                 evalQuery(
-                        query,
-                        fieldsByName,
                         splitsByColumn,
                         indexPathFactory,
                         indexFileReader,
@@ -127,23 +122,24 @@ public class FullTextReadImpl implements FullTextRead {
                         liveRows);
         if (!rawRowRanges.isEmpty()) {
             result =
-                    new RawFullTextReadImpl(table, partitionFilter, limit, query, this::evalQuery)
+                    new RawFullTextReadImpl(
+                                    table,
+                                    partitionFilter,
+                                    limit,
+                                    textColumn,
+                                    this::evalQuery)
                             .withRawSearch(
-                                    result, rawRowRanges, fieldsByName, splitsByColumn, executor);
+                                    result, rawRowRanges, splitsByColumn, executor);
         }
         return result.topK(limit);
     }
 
     ScoredGlobalIndexResult evalQuery(
-            FullTextQuery query,
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor) {
         return evalQuery(
-                query,
-                fieldsByName,
                 splitsByColumn,
                 indexPathFactory,
                 indexFileReader,
@@ -152,208 +148,22 @@ public class FullTextReadImpl implements FullTextRead {
     }
 
     private ScoredGlobalIndexResult evalQuery(
-            FullTextQuery query,
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor,
             @Nullable RoaringNavigableMap64 liveRows) {
-        if (canPushDownWholeQuery(query)) {
-            return evalColumnQuery(
-                    query,
-                    query.singleColumn(),
-                    fieldsByName,
-                    splitsByColumn,
-                    indexPathFactory,
-                    indexFileReader,
-                    executor,
-                    liveRows);
-        }
-        if (query instanceof FullTextQuery.Match) {
-            return evalColumnQuery(
-                    query,
-                    ((FullTextQuery.Match) query).column(),
-                    fieldsByName,
-                    splitsByColumn,
-                    indexPathFactory,
-                    indexFileReader,
-                    executor,
-                    liveRows);
-        }
-        if (query instanceof FullTextQuery.Phrase) {
-            return evalColumnQuery(
-                    query,
-                    ((FullTextQuery.Phrase) query).column(),
-                    fieldsByName,
-                    splitsByColumn,
-                    indexPathFactory,
-                    indexFileReader,
-                    executor,
-                    liveRows);
-        }
-        if (query instanceof FullTextQuery.MultiMatch) {
-            return evalMultiMatch(
-                    (FullTextQuery.MultiMatch) query,
-                    fieldsByName,
-                    splitsByColumn,
-                    indexPathFactory,
-                    indexFileReader,
-                    executor,
-                    liveRows);
-        }
-        if (query instanceof FullTextQuery.Boost) {
-            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
-            return boost(
-                    evalQuery(
-                            boost.positive(),
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows),
-                    evalQuery(
-                            boost.negative(),
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows),
-                    boost.negativeBoost());
-        }
-        if (query instanceof FullTextQuery.BooleanQuery) {
-            return evalBoolean(
-                    (FullTextQuery.BooleanQuery) query,
-                    fieldsByName,
-                    splitsByColumn,
-                    indexPathFactory,
-                    indexFileReader,
-                    executor,
-                    liveRows);
-        }
-        throw new IllegalArgumentException("Unsupported full-text query: " + query);
-    }
-
-    private static boolean canPushDownWholeQuery(FullTextQuery query) {
-        return query.columns().size() == 1 && !containsMultiMatch(query);
-    }
-
-    private static boolean containsMultiMatch(FullTextQuery query) {
-        if (query instanceof FullTextQuery.MultiMatch) {
-            return true;
-        }
-        if (query instanceof FullTextQuery.Boost) {
-            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
-            return containsMultiMatch(boost.positive()) || containsMultiMatch(boost.negative());
-        }
-        if (query instanceof FullTextQuery.BooleanQuery) {
-            for (FullTextQuery.Clause clause : ((FullTextQuery.BooleanQuery) query).queries()) {
-                if (containsMultiMatch(clause.query())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private ScoredGlobalIndexResult evalMultiMatch(
-            FullTextQuery.MultiMatch query,
-            Map<String, DataField> fieldsByName,
-            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
-            IndexPathFactory indexPathFactory,
-            GlobalIndexFileReader indexFileReader,
-            ExecutorService executor,
-            @Nullable RoaringNavigableMap64 liveRows) {
-        List<String> columns = query.columns();
-        List<Float> boosts = query.boosts();
-        List<ScoredGlobalIndexResult> results = new ArrayList<>(columns.size());
-        for (int i = 0; i < columns.size(); i++) {
-            FullTextQuery.Match match =
-                    new FullTextQuery.Match(
-                            query.query(),
-                            columns.get(i),
-                            boosts.get(i),
-                            0,
-                            50,
-                            query.operator(),
-                            0);
-            results.add(
-                    evalColumnQuery(
-                            match,
-                            columns.get(i),
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows));
-        }
-        return or(results).topK(limit);
-    }
-
-    private ScoredGlobalIndexResult evalBoolean(
-            FullTextQuery.BooleanQuery query,
-            Map<String, DataField> fieldsByName,
-            Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
-            IndexPathFactory indexPathFactory,
-            GlobalIndexFileReader indexFileReader,
-            ExecutorService executor,
-            @Nullable RoaringNavigableMap64 liveRows) {
-        ScoredGlobalIndexResult result = null;
-        for (FullTextQuery child : query.must()) {
-            ScoredGlobalIndexResult childResult =
-                    evalQuery(
-                            child,
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows);
-            result = result == null ? childResult : and(result, childResult);
-        }
-
-        List<ScoredGlobalIndexResult> shouldResults = new ArrayList<>(query.should().size());
-        for (FullTextQuery child : query.should()) {
-            shouldResults.add(
-                    evalQuery(
-                            child,
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows));
-        }
-        if (!shouldResults.isEmpty()) {
-            ScoredGlobalIndexResult shouldResult = or(shouldResults);
-            result = result == null ? shouldResult : andWithBonus(result, shouldResult);
-        }
-
-        if (result == null) {
-            return ScoredGlobalIndexResult.createEmpty();
-        }
-        for (FullTextQuery child : query.mustNot()) {
-            ScoredGlobalIndexResult childResult =
-                    evalQuery(
-                            child,
-                            fieldsByName,
-                            splitsByColumn,
-                            indexPathFactory,
-                            indexFileReader,
-                            executor,
-                            liveRows);
-            result = andNot(result, childResult);
-        }
-        return result.topK(limit);
+        return evalColumnQuery(
+                textColumn.name(),
+                splitsByColumn,
+                indexPathFactory,
+                indexFileReader,
+                executor,
+                liveRows);
     }
 
     private ScoredGlobalIndexResult evalColumnQuery(
-            FullTextQuery query,
             String column,
-            Map<String, DataField> fieldsByName,
             Map<String, List<IndexFullTextSearchSplit>> splitsByColumn,
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
@@ -363,7 +173,6 @@ public class FullTextReadImpl implements FullTextRead {
         if (columnSplits == null || columnSplits.isEmpty()) {
             return ScoredGlobalIndexResult.createEmpty();
         }
-        DataField textColumn = checkNotNull(fieldsByName.get(column));
 
         IndexFileMeta firstFile = columnSplits.get(0).fullTextIndexFiles().get(0);
         String indexType = firstFile.indexType();
@@ -392,7 +201,6 @@ public class FullTextReadImpl implements FullTextRead {
                             split.rowRangeStart(),
                             split.rowRangeEnd(),
                             split.fullTextIndexFiles(),
-                            query,
                             indexFileReader,
                             executor,
                             GlobalIndexLiveRowFilter.forRange(
@@ -418,7 +226,6 @@ public class FullTextReadImpl implements FullTextRead {
             long rowRangeStart,
             long rowRangeEnd,
             List<IndexFileMeta> fullTextIndexFiles,
-            FullTextQuery query,
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor,
             @Nullable RoaringNavigableMap64 includeRowIds) {
@@ -437,7 +244,10 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexReader reader =
                 globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
         FullTextSearch fullTextSearch =
-                new FullTextSearch(query, candidateLimit(rowRangeStart, rowRangeEnd))
+                new FullTextSearch(
+                                textColumn.name(),
+                                query,
+                                candidateLimit(rowRangeStart, rowRangeEnd))
                         .withIncludeRowIds(includeRowIds);
         return new OffsetGlobalIndexReader(reader, rowRangeStart, rowRangeEnd)
                 .visitFullTextSearch(fullTextSearch)
@@ -447,67 +257,5 @@ public class FullTextReadImpl implements FullTextRead {
     private static int candidateLimit(long rowRangeStart, long rowRangeEnd) {
         long size = rowRangeEnd - rowRangeStart + 1;
         return size > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) size;
-    }
-
-    private static ScoredGlobalIndexResult and(
-            ScoredGlobalIndexResult left, ScoredGlobalIndexResult right) {
-        RoaringNavigableMap64 rowIds = RoaringNavigableMap64.and(left.results(), right.results());
-        return ScoredGlobalIndexResult.create(
-                rowIds,
-                rowId -> left.scoreGetter().score(rowId) + right.scoreGetter().score(rowId));
-    }
-
-    private static ScoredGlobalIndexResult or(List<ScoredGlobalIndexResult> results) {
-        if (results.isEmpty()) {
-            return ScoredGlobalIndexResult.createEmpty();
-        }
-        RoaringNavigableMap64 rowIds = new RoaringNavigableMap64();
-        for (ScoredGlobalIndexResult result : results) {
-            rowIds = RoaringNavigableMap64.or(rowIds, result.results());
-        }
-        final RoaringNavigableMap64 mergedRowIds = rowIds;
-        return ScoredGlobalIndexResult.create(
-                mergedRowIds,
-                rowId -> {
-                    float score = 0.0f;
-                    for (ScoredGlobalIndexResult result : results) {
-                        if (result.results().contains(rowId)) {
-                            score += result.scoreGetter().score(rowId);
-                        }
-                    }
-                    return score;
-                });
-    }
-
-    private static ScoredGlobalIndexResult andWithBonus(
-            ScoredGlobalIndexResult base, ScoredGlobalIndexResult bonus) {
-        RoaringNavigableMap64 rowIds = base.results();
-        return ScoredGlobalIndexResult.create(
-                rowIds,
-                rowId ->
-                        base.scoreGetter().score(rowId)
-                                + (bonus.results().contains(rowId)
-                                        ? bonus.scoreGetter().score(rowId)
-                                        : 0.0f));
-    }
-
-    private static ScoredGlobalIndexResult andNot(
-            ScoredGlobalIndexResult left, ScoredGlobalIndexResult right) {
-        RoaringNavigableMap64 rowIds =
-                RoaringNavigableMap64.or(new RoaringNavigableMap64(), left.results());
-        rowIds.andNot(right.results());
-        return ScoredGlobalIndexResult.create(rowIds, left.scoreGetter());
-    }
-
-    private static ScoredGlobalIndexResult boost(
-            ScoredGlobalIndexResult positive,
-            ScoredGlobalIndexResult negative,
-            float negativeBoost) {
-        RoaringNavigableMap64 rowIds = positive.results();
-        return ScoredGlobalIndexResult.create(
-                rowIds,
-                rowId ->
-                        positive.scoreGetter().score(rowId)
-                                * (negative.results().contains(rowId) ? negativeBoost : 1.0f));
     }
 }

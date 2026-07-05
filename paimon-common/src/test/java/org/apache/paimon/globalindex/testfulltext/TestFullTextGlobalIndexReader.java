@@ -25,9 +25,11 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -115,36 +117,42 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                 Optional.of(ScoredGlobalIndexResult.create(resultBitmap, scoreMap::get)));
     }
 
-    private static float computeScore(String document, FullTextQuery query) {
-        if (query instanceof FullTextQuery.Match) {
-            FullTextQuery.Match match = (FullTextQuery.Match) query;
-            return computeMatchScore(
-                            document, match.terms(), match.operator() == FullTextQuery.Operator.AND)
-                    * match.boost();
+    private static float computeScore(String document, String query) {
+        try {
+            return computeScore(document, JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(query));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid full-text query JSON: " + query, e);
         }
-        if (query instanceof FullTextQuery.Phrase) {
-            FullTextQuery.Phrase phrase = (FullTextQuery.Phrase) query;
-            return document.toLowerCase(Locale.ROOT)
-                            .contains(phrase.terms().toLowerCase(Locale.ROOT))
+    }
+
+    private static float computeScore(String document, JsonNode query) {
+        if (query.has("match")) {
+            JsonNode match = query.get("match");
+            String terms = textValue(match, "query", "terms");
+            boolean requireAllTerms =
+                    "and".equalsIgnoreCase(textValueOrDefault(match, "operator", "Or"));
+            return computeMatchScore(document, terms, requireAllTerms)
+                    * floatValue(match, "boost", 1.0f);
+        }
+        if (query.has("match_phrase") || query.has("phrase")) {
+            JsonNode phrase = query.has("match_phrase") ? query.get("match_phrase") : query.get("phrase");
+            String terms = textValue(phrase, "query", "terms");
+            return document.toLowerCase(Locale.ROOT).contains(terms.toLowerCase(Locale.ROOT))
                     ? 1.0f
                     : 0.0f;
         }
-        if (query instanceof FullTextQuery.Boost) {
-            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
-            float score = computeScore(document, boost.positive());
-            if (computeScore(document, boost.negative()) > 0) {
-                score *= boost.negativeBoost();
+        if (query.has("boost")) {
+            JsonNode boost = query.get("boost");
+            float score = computeScore(document, required(boost, "positive"));
+            if (computeScore(document, required(boost, "negative")) > 0) {
+                score *= floatValue(boost, "negative_boost", floatValue(boost, "negativeBoost", 0.5f));
             }
             return score;
         }
-        if (query instanceof FullTextQuery.MultiMatch) {
-            throw new IllegalArgumentException(
-                    "multi_match is not supported by single-column full-text indexes");
+        if (query.has("boolean")) {
+            return computeBooleanScore(document, query.get("boolean"));
         }
-        if (query instanceof FullTextQuery.BooleanQuery) {
-            return computeBooleanScore(document, (FullTextQuery.BooleanQuery) query);
-        }
-        throw new IllegalArgumentException("Unsupported full-text query: " + query);
+        throw new IllegalArgumentException("Unsupported full-text query JSON: " + query);
     }
 
     private static float computeMatchScore(
@@ -162,28 +170,69 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
         return score;
     }
 
-    private static float computeBooleanScore(String document, FullTextQuery.BooleanQuery query) {
+    private static float computeBooleanScore(String document, JsonNode query) {
         float score = 0;
-        for (FullTextQuery child : query.must()) {
-            float childScore = computeScore(document, child);
-            if (childScore <= 0) {
-                return 0;
-            }
-            score += childScore;
-        }
-        for (FullTextQuery child : query.mustNot()) {
-            if (computeScore(document, child) > 0) {
-                return 0;
-            }
-        }
         float shouldScore = 0;
-        for (FullTextQuery child : query.should()) {
-            shouldScore += computeScore(document, child);
+        int shouldCount = 0;
+        int mustCount = 0;
+        JsonNode clauses = required(query, "queries");
+        for (JsonNode clause : clauses) {
+            String occur;
+            JsonNode child;
+            if (clause.isArray()) {
+                occur = clause.get(0).asText();
+                child = clause.get(1);
+            } else {
+                occur = textValueOrDefault(clause, "occur", "Should");
+                child = required(clause, "query");
+            }
+
+            float childScore = computeScore(document, child);
+            if ("must".equalsIgnoreCase(occur)) {
+                mustCount++;
+                if (childScore <= 0) {
+                    return 0;
+                }
+                score += childScore;
+            } else if ("must_not".equalsIgnoreCase(occur) || "mustnot".equalsIgnoreCase(occur)) {
+                if (childScore > 0) {
+                    return 0;
+                }
+            } else {
+                shouldCount++;
+                shouldScore += childScore;
+            }
         }
-        if (query.must().isEmpty() && !query.should().isEmpty() && shouldScore <= 0) {
+        if (mustCount == 0 && shouldCount > 0 && shouldScore <= 0) {
             return 0;
         }
         return score + shouldScore;
+    }
+
+    private static JsonNode required(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            throw new IllegalArgumentException("Missing full-text query field: " + field);
+        }
+        return value;
+    }
+
+    private static String textValueOrDefault(JsonNode node, String field, String fallback) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? fallback : value.asText();
+    }
+
+    private static String textValue(JsonNode node, String firstField, String secondField) {
+        JsonNode value = node.get(firstField);
+        if (value == null || value.isNull()) {
+            value = required(node, secondField);
+        }
+        return value.asText();
+    }
+
+    private static float floatValue(JsonNode node, String field, float fallback) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? fallback : (float) value.asDouble();
     }
 
     private void ensureLoaded() throws IOException {

@@ -54,7 +54,7 @@ CALL sys.create_global_index(
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'content',
-    index_type => 'tantivy-fulltext'
+    index_type => 'full-text'
 );
 ```
 
@@ -85,7 +85,8 @@ The third argument is an array of full-text route configs created by `named_stru
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `query` | Yes | N/A | LanceDB-style full-text query JSON for this route. |
+| `field`, `text_column`, or `full_text_column` | Yes | N/A | Text column to search. |
+| `query` | Yes | N/A | Full-text query string for this route. |
 | `limit` | No | Final limit | Top K results to retrieve from this text column before ranking. |
 | `weight` | No | `1.0` | Weight for this route when ranking results. |
 | `options` | No | Empty map | Reserved for future full-text search options. Only an empty map is accepted. |
@@ -117,7 +118,8 @@ FROM hybrid_search(
       'options', map('ivf.nprobe', '32'))),
   array(
     named_struct(
-      'query', '{"match":{"column":"content","terms":"paimon search"}}',
+      'field', 'content',
+      'query', '{"match":{"query":"paimon search"}}',
       'limit', 50,
       'weight', 1.0f,
       'options', map())),
@@ -185,7 +187,8 @@ HybridSearchBuilder searchBuilder =
                         2.0f,
                         java.util.Collections.singletonMap("ivf.nprobe", "32"))
                 .addFullTextRoute(
-                        "{\"match\":{\"column\":\"content\",\"terms\":\"paimon search\"}}",
+                        "content",
+                        "{\"match\":{\"query\":\"paimon search\"}}",
                         50,
                         1.0f,
                         java.util.Collections.emptyMap())
@@ -260,7 +263,8 @@ result = (
         options={"ivf.nprobe": "32"},
     )
     .add_full_text_route(
-        '{"match":{"column":"content","terms":"paimon search"}}',
+        "content",
+        '{"match":{"query":"paimon search"}}',
         limit=50,
         weight=1.0,
     )

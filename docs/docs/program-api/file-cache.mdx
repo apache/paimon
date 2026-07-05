@@ -40,7 +40,7 @@ The cache classifies files by type. By default, only `meta` and `global-index` t
 | File Type | Config Name | Examples | Default Cached |
 |-----------|-------------|----------|----------------|
 | META | meta | snapshot, schema, manifest, statistics, tag | Yes |
-| GLOBAL_INDEX | global-index | BTree, Lumina, Tantivy index files | Yes |
+| GLOBAL_INDEX | global-index | BTree, Lumina, full-text index files | Yes |
 | BUCKET_INDEX | bucket-index | Hash, deletion vector index files | No |
 | DATA | data | Data files (ORC, Parquet, etc.) | No |
 | FILE_INDEX | file-index | Data-file level bloom filter, bitmap | No |

@@ -131,8 +131,10 @@ class VectorSearchQueryTest extends AnyFunSuite {
         CreateArray(
           Seq(
             CreateNamedStruct(Seq(
+              Literal("field"),
+              Literal("content"),
               Literal("query"),
-              Literal("""{"match":{"column":"content","terms":"paimon lake","operator":"And"}}"""),
+              Literal("""{"match":{"query":"paimon lake","operator":"And"}}"""),
               Literal("limit"),
               Literal(20),
               Literal("weight"),
@@ -149,8 +151,8 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().size() == 1)
     assert(search.routes().get(0).isFullText)
     assert(search.routes().get(0).fieldName() == "content")
-    assert(search.routes().get(0).fullTextQuery().queryText() == "paimon lake")
-    assert(search.routes().get(0).fullTextQuery().toJson.contains("\"operator\":\"And\""))
+    assert(search.routes().get(0).fullTextQuery() ==
+      """{"match":{"query":"paimon lake","operator":"And"}}""")
     assert(search.routes().get(0).limit() == 20)
     assert(search.routes().get(0).weight() == 1.5f)
   }
@@ -164,8 +166,10 @@ class VectorSearchQueryTest extends AnyFunSuite {
           CreateArray(
             Seq(
               CreateNamedStruct(Seq(
+                Literal("field"),
+                Literal("content"),
                 Literal("query"),
-                Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+                Literal("""{"match":{"query":"paimon lake"}}"""),
                 Literal("options"),
                 CreateMap(Seq(Literal("some.option"), Literal("x")))
               ))
@@ -228,10 +232,13 @@ class VectorSearchQueryTest extends AnyFunSuite {
   test("create full-text search") {
     val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
       innerTable,
-      Seq(Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""), Literal(10)))
+      Seq(
+        Literal("content"),
+        Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+        Literal(10)))
 
-    assert(search.fieldName() == "content")
-    assert(search.query().queryText() == "paimon lake")
+    assert(search.column() == "content")
+    assert(search.query() == """{"match":{"column":"content","terms":"paimon lake"}}""")
     assert(search.limit() == 10)
   }
 
@@ -239,34 +246,31 @@ class VectorSearchQueryTest extends AnyFunSuite {
     val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
       innerTable,
       Seq(
+        Literal("content"),
         Literal("""{"match":{"column":"content","terms":"paimon lake","operator":"And"}}"""),
         Literal(10)))
 
-    assert(search.fieldName() == "content")
-    assert(search.query().queryText() == "paimon lake")
+    assert(search.column() == "content")
+    assert(search.query() == """{"match":{"column":"content","terms":"paimon lake","operator":"And"}}""")
     assert(search.limit() == 10)
-    assert(search.query().toJson.contains("\"operator\":\"And\""))
   }
 
-  test("create multi-column full-text search") {
+  test("create full-text search exposes single column") {
     val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
       innerTable,
       Seq(
-        Literal(
-          """{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0]}}"""),
+        Literal("content"),
+        Literal("""{"match":{"query":"paimon"}}"""),
         Literal(10)))
 
-    assert(search.columns().size() == 2)
-    assert(search.columns().contains("title"))
-    assert(search.columns().contains("content"))
-    assert(search.query().toJson.contains("\"multi_match\""))
+    assert(search.column() == "content")
   }
 
   test("reject full-text search column that does not exist") {
     val exception = intercept[RuntimeException] {
       FullTextSearchQuery(Seq.empty).createFullTextSearch(
         innerTable,
-        Seq(Literal("""{"match":{"column":"missing","terms":"paimon lake"}}"""), Literal(10)))
+        Seq(Literal("missing"), Literal("""{"match":{"query":"paimon lake"}}"""), Literal(10)))
     }
 
     assert(exception.getMessage.contains("Column missing does not exist"))

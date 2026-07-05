@@ -274,10 +274,8 @@ def cmd_table_full_text_search(args):
     limit = args.limit
 
     try:
-        from pypaimon.globalindex.full_text_query import FullTextQuery
-
         builder = table.new_full_text_search_builder()
-        builder.with_query(FullTextQuery.from_json(args.query))
+        builder.with_query(args.field, args.query)
         builder.with_limit(limit)
         result = builder.execute_local()
     except Exception as e:
@@ -1070,9 +1068,14 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     fts_parser.add_argument(
+        '--field', '--column', '-f',
+        required=True,
+        help='Text field to search'
+    )
+    fts_parser.add_argument(
         '--query', '-q',
         required=True,
-        help='LanceDB-style full-text query JSON to search for'
+        help='Full-text query string to search for'
     )
     fts_parser.add_argument(
         '--limit', '-l',

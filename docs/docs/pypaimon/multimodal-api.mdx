@@ -558,8 +558,7 @@ Best practices:
 
 Use `create_index` to create the global indexes used by search APIs. The
 `index_type` argument is required; the multimodal API does not choose a default
-index implementation. The `full-text` alias is normalized to
-`tantivy-fulltext`.
+index implementation. Use `full-text` for full-text indexes.
 
 ```python
 docs.create_index("embedding", index_type="ivf-pq")
@@ -572,8 +571,7 @@ Use `search` for one vector query or one full-text query.
 
 If the table has exactly one vector column, `column` can be omitted for vector
 search. A string query is shorthand for a full-text match query when the table
-has exactly one text column. To target a specific text column, pass a
-`FullTextQuery` object.
+has exactly one text column. To target a specific text column, pass `column`.
 
 Use `pre_filter` to prune search candidates before ranking. Use `where()` to
 filter the rows read from the search result. Both `pre_filter` and `where()`
@@ -599,17 +597,14 @@ matches = (
 ```
 
 ```python
-from pypaimon.globalindex.full_text_query import FullTextQuery
-
-content_query = FullTextQuery.from_dict({
-    "match": {
-        "column": "content",
-        "terms": "paimon vector",
-        "operator": "And",
-    },
-})
-
-matches = docs.search(content_query).limit(10).to_list()
+matches = (
+    docs.search(
+        '{"match":{"query":"paimon vector","operator":"And"}}',
+        column="content",
+    )
+    .limit(10)
+    .to_list()
+)
 ```
 
 ## Search Hybrid
@@ -620,7 +615,7 @@ merged candidates. Create the indexes required by the routes you use.
 Pass route specs to `search_hybrid`. Each route can set its own candidate
 `limit`, `weight`, and vector index `options`. String text routes infer the
 text column when the table has exactly one text column. To target a specific
-text column, pass a `FullTextQuery` object to `pm.text_route`.
+text column, pass `column` to `pm.text_route`.
 
 `pre_filter` is applied before ranking. It accepts a SQL-like predicate string.
 When a hybrid query has a full-text route, `pre_filter` must only reference
@@ -632,7 +627,7 @@ hybrid = (
     docs.search_hybrid(
         [
             pm.vector_route("embedding", query_vector, limit=50),
-            pm.text_route("paimon vector", weight=0.2),
+            pm.text_route("paimon vector", column="content", weight=0.2),
         ],
         pre_filter="dt = '2026-07-01'",
     )
@@ -661,7 +656,7 @@ hybrid = (
                 weight=0.3,
                 limit=50,
             ),
-            pm.text_route("paimon vector", weight=0.2),
+            pm.text_route("paimon vector", column="content", weight=0.2),
         ],
         ranker="weighted_score",
     )

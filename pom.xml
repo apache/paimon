@@ -75,7 +75,7 @@ under the License.
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
         <module>paimon-mosaic</module>
-        <module>paimon-tantivy</module>
+        <module>paimon-full-text</module>
         <module>paimon-vector</module>
     </modules>
 

@@ -198,7 +198,7 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
     protected FullTextSearchBuilder newFullTextSearchBuilder(HybridSearchRoute route) {
         FullTextSearchBuilder fullTextSearchBuilder =
                 table.newFullTextSearchBuilder()
-                        .withQuery(route.fullTextQuery())
+                        .withQuery(route.fieldName(), route.fullTextQuery())
                         .withLimit(route.limit());
         if (partitionFilter != null) {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
