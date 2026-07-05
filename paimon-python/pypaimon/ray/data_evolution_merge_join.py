@@ -584,6 +584,123 @@ def distributed_update_apply(
     return all_msgs, num_updated, action_row_ids
 
 
+def distributed_read_by_row_id(
+    row_ids_ds,
+    table,
+    projection: Sequence[str],
+    *,
+    num_partitions: int,
+    ray_remote_args: Optional[Dict[str, Any]] = None,
+    base_snapshot_id: Optional[int] = None,
+):
+    """Read ``projection`` columns for the row ids in ``row_ids_ds`` (must carry
+    ``_ROW_ID``). Each row id is routed to its owning data file, then only those
+    files -- and only the matched rows -- are read via ``IndexedSplit`` row-range
+    slicing (blob columns resolved). Returns a ``ray.data.Dataset`` of
+    ``(*projection, _ROW_ID)``, or ``None`` when the target is empty. The read-side
+    mirror of ``distributed_update_apply``; the target is never fully scanned.
+    """
+    import numpy as np
+    import uuid
+
+    import ray
+
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.globalindex.indexed_split import IndexedSplit
+    from pypaimon.read.split import DataSplit
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+    from pypaimon.table.special_fields import SpecialFields
+    from pypaimon.utils.range import Range
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    row_id_name = SpecialFields.ROW_ID.name
+    read_cols = list(projection)
+    if row_id_name not in read_cols:
+        read_cols.append(row_id_name)
+
+    # Pin the planner to the caller's base snapshot so row-id routing is stable
+    # even if a concurrent commit lands (mirrors the update path).
+    scan_table = (
+        table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
+        if base_snapshot_id is not None else table
+    )
+    planner = TableUpdateByRowId(
+        scan_table,
+        "_read_by_row_id_planner_" + uuid.uuid4().hex[:8],
+        BATCH_COMMIT_IDENTIFIER,
+    )
+    sorted_first_row_ids = list(planner.first_row_ids)
+    if not sorted_first_row_ids:
+        return None
+
+    # Broadcast the file index once; workers route + read without re-scanning the
+    # manifest (mirrors the update path's precomputed-info ref).
+    precomputed_info_ref = ray.put(planner._snapshot_files_info())
+    frid_col = "_FIRST_ROW_ID"
+    sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
+    valid_ranges = planner.valid_row_id_ranges
+    range_starts = np.asarray([r.from_ for r in valid_ranges], dtype=np.int64)
+    range_ends = np.asarray([r.to for r in valid_ranges], dtype=np.int64)
+
+    def _assign_frid(batch: pa.Table) -> pa.Table:
+        if batch.num_rows == 0:
+            return batch.append_column(frid_col, pa.array([], type=pa.int64()))
+        rid_col = batch.column(row_id_name)
+        if rid_col.null_count:
+            raise ValueError(
+                "_ROW_ID is null; the planner snapshot is stale or the row ids "
+                "come from a different table."
+            )
+        rids = rid_col.to_numpy(zero_copy_only=False)
+        in_range = np.zeros(len(rids), dtype=bool)
+        for s, e in zip(range_starts, range_ends):
+            in_range |= (rids >= s) & (rids <= e)
+        if not in_range.all():
+            bad = rids[~in_range][0]
+            raise ValueError(
+                f"_ROW_ID {bad} does not belong to any valid range "
+                f"{[f'[{r.from_}, {r.to}]' for r in valid_ranges]}; the planner "
+                f"snapshot is stale or the row ids come from a different table."
+            )
+        idx = np.searchsorted(sorted_arr, rids, side="right") - 1
+        return batch.append_column(
+            frid_col, pa.array(sorted_arr[idx], type=pa.int64())
+        )
+
+    captured_table = table
+    captured_read_cols = read_cols
+
+    def _read_group(group: pa.Table) -> pa.Table:
+        if group.num_rows == 0:
+            return group.drop_columns([frid_col])
+        frid = int(group.column(frid_col)[0].as_py())
+        info = ray.get(precomputed_info_ref)
+        owning_split, target_files = info.first_row_id_index[frid]
+        origin_split = DataSplit(
+            files=target_files,
+            partition=owning_split.partition,
+            bucket=owning_split.bucket,
+            raw_convertible=True,
+        )
+        # Read only the matched rows: one discrete [rid, rid] range per row id.
+        # For blob format this becomes native row-index pushdown, so unmatched
+        # rows in the owning file are never materialised. Duplicate row ids are
+        # deduplicated (each matched row is returned once, like SQL ``IN``).
+        wanted = sorted(set(group.column(row_id_name).to_pylist()))
+        indexed = IndexedSplit(origin_split, [Range(r, r) for r in wanted])
+        read = captured_table.new_read_builder().with_projection(
+            captured_read_cols
+        ).new_read()
+        return read.to_arrow([indexed])
+
+    map_kwargs = _map_kwargs(ray_remote_args)
+    with_frid = row_ids_ds.map_batches(_assign_frid, **map_kwargs)
+    group_partitions = max(1, min(len(sorted_first_row_ids), num_partitions))
+    return with_frid.groupby(frid_col, num_partitions=group_partitions).map_groups(
+        _read_group, **map_kwargs
+    )
+
+
 def distributed_delete_apply(
     delete_ds,
     table,

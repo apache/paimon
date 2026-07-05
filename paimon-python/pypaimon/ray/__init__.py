@@ -28,6 +28,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     lit,
 )
 from pypaimon.ray.update_by_row_id import update_by_row_id
+from pypaimon.ray.read_by_row_id import read_by_row_id
 
 __all__ = [
     "read_paimon",
@@ -36,6 +37,7 @@ __all__ = [
     "bucket_join",
     "merge_into",
     "update_by_row_id",
+    "read_by_row_id",
     "WhenMatched",
     "WhenNotMatched",
     "source_col",
