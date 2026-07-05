@@ -570,8 +570,8 @@ ds = read_by_row_id(
 - `row_ids`: a `ray.data.Dataset`, `pyarrow.Table`, or `pandas.DataFrame` carrying the
   target row ids in column `row_id_col`; other columns are ignored. A table-name source
   is not accepted (a table's system `_ROW_ID` is its own and cannot address the target).
-- `projection`: columns to read. Blob columns are resolved to their payloads. Must be
-  non-empty.
+- `projection`: top-level columns to read (nested paths are not supported). Blob columns
+  are resolved to their payloads. Must be non-empty.
 - `row_id_col`: the source column holding the row ids (default `_ROW_ID`); set e.g.
   `row_id_col="row_id"` to consume a `bucket_join` locator directly.
 - `num_partitions`: parallelism for grouping the row ids by target file; defaults to
@@ -587,3 +587,6 @@ ds = read_by_row_id(
 - The row ids must exist in the target's current snapshot; a foreign `_ROW_ID` raises.
 - Deletion-vectors-enabled tables are not supported yet, for the same reason as
   `update_by_row_id`.
+- Prefer a materialized `row_ids` source (a `bucket_join` result already is one): the
+  emptiness check reads one block up front, which would otherwise re-run a lazy source's
+  first block.

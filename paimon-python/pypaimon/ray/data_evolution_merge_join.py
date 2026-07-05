@@ -607,12 +607,10 @@ def distributed_read_by_row_id(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
 ):
-    """Read ``projection`` columns for the row ids in ``row_ids_ds`` (must carry
-    ``_ROW_ID``). Each row id is routed to its owning data file, then only those
-    files -- and only the matched rows -- are read via ``IndexedSplit`` row-range
-    slicing (blob columns resolved). Returns a ``ray.data.Dataset`` of
-    ``(*projection, _ROW_ID)``, or ``None`` when the target is empty. The read-side
-    mirror of ``distributed_update_apply``; the target is never fully scanned.
+    """Read ``projection`` for the ``_ROW_ID``s in ``row_ids_ds``, routing each to its
+    owning file and reading only the matched rows via ``IndexedSplit`` slicing (blob
+    resolved). Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``, or ``None``
+    if the target is empty. Read-side mirror of ``distributed_update_apply``.
     """
     import numpy as np
     import uuid
@@ -635,8 +633,7 @@ def distributed_read_by_row_id(
     # Typed empty block so all output blocks share one schema.
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
-    # Read-only planner: construction only scans the manifest (no writes). Pin to the
-    # base snapshot so routing is stable under concurrent commits (as the update path).
+    # Read-only planner (only scans the manifest); pinned to the base snapshot for stable routing.
     scan_table = (
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
@@ -650,7 +647,6 @@ def distributed_read_by_row_id(
     if not sorted_first_row_ids:
         return None
 
-    # Broadcast the file index once so workers don't re-scan the manifest.
     precomputed_info_ref = ray.put(planner._snapshot_files_info())
     frid_col = "_FIRST_ROW_ID"
     sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
@@ -668,9 +664,15 @@ def distributed_read_by_row_id(
                 "come from a different table."
             )
         rids = rid_col.to_numpy(zero_copy_only=False)
-        in_range = np.zeros(len(rids), dtype=bool)
-        for s, e in zip(range_starts, range_ends):
-            in_range |= (rids >= s) & (rids <= e)
+        # Foreign-id check: valid_ranges are sorted+merged, so one searchsorted finds
+        # the candidate range (O(rows log ranges), like distributed_delete_apply).
+        ridx = np.searchsorted(range_starts, rids, side="right") - 1
+        safe = np.clip(ridx, 0, len(range_starts) - 1)
+        in_range = (
+            (ridx >= 0)
+            & (rids >= range_starts[safe])
+            & (rids <= range_ends[safe])
+        )
         if not in_range.all():
             bad = rids[~in_range][0]
             raise ValueError(
@@ -688,8 +690,6 @@ def distributed_read_by_row_id(
     captured_empty = empty_out
 
     def _read_group(group: pa.Table) -> pa.Table:
-        # Group supplies only row ids; output comes from the fresh read, so frid_col
-        # never leaks.
         if group.num_rows == 0:
             return captured_empty
         frid = int(group.column(frid_col)[0].as_py())
@@ -701,8 +701,7 @@ def distributed_read_by_row_id(
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        # Read only the matched rows (deduped, contiguous ids compressed to ranges);
-        # blob format gets native row-index pushdown, so unmatched rows aren't read.
+        # Only matched rows (deduped, contiguous ids -> ranges); blob gets row-index pushdown.
         wanted = set(group.column(row_id_name).to_pylist())
         indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
         read = captured_table.new_read_builder().with_projection(

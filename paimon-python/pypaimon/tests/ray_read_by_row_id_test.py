@@ -277,6 +277,16 @@ class RayReadByRowIdTest(unittest.TestCase):
         ds = read_by_row_id(target, empty_src, self.catalog_options, projection=["age"])
         self.assertEqual(ds.count(), 0)
 
+    def test_foreign_row_id_raises(self):
+        # A row id outside the target's valid ranges is rejected (surfaces on read).
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [10_000]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        ds = read_by_row_id(target, src, self.catalog_options, projection=["age"])
+        with self.assertRaises(Exception):
+            ds.take_all()
+
     def test_empty_source_non_empty_target_keeps_schema(self):
         # A groupby over zero rows yields zero groups, so the output must still carry
         # the projected schema (projection + _ROW_ID), not be schema-less.

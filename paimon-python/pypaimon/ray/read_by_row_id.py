@@ -17,11 +17,9 @@
 
 """Distributed row-id read on Ray for data-evolution tables.
 
-Read columns (including blob) of a data-evolution table straight from a Ray Dataset
-that carries ``_ROW_ID`` -- no full-target read and no big-table shuffle join. Each
-row id is routed to the data file owning it and only those files (and only the matched
-rows) are read. The read-side mirror of ``update_by_row_id``; pairs with ``bucket_join``,
-which produces the row ids.
+The read-side mirror of ``update_by_row_id``: read columns (including blob) for a set
+of ``_ROW_ID``s by routing each to its owning data file -- no full-target read, no
+shuffle join. Pairs with ``bucket_join``, which produces the row ids.
 """
 
 from typing import Any, Dict, List, Optional
@@ -67,7 +65,7 @@ def read_by_row_id(
     e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator). Each row id is routed
     to the data file owning it and only those files -- and only the matched rows --
     are read, so the target is never fully scanned and there is no join against it.
-    ``projection`` may include blob columns, which are resolved to their payloads.
+    ``projection`` lists top-level columns; blob columns are resolved to their payloads.
     Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
     ``row-tracking.enabled``.
 
@@ -85,7 +83,7 @@ def read_by_row_id(
     _require_ray_join()
     if not projection:
         raise ValueError("projection must be non-empty.")
-    projection = list(dict.fromkeys(projection))  # de-dup, keep order
+    projection = list(dict.fromkeys(projection))
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
@@ -102,7 +100,7 @@ def read_by_row_id(
             f"'{target}'.")
 
     rid = SpecialFields.ROW_ID.name
-    src_rid_col = row_id_col or rid  # source column holding the target row ids
+    src_rid_col = row_id_col or rid
     for col in projection:
         if col != rid and col not in table.field_names:
             raise ValueError(f"projection column {col!r} is not in target '{target}'.")
@@ -116,15 +114,13 @@ def read_by_row_id(
     if src_rid_col not in set(source_ds.schema().names):
         raise ValueError(f"row_ids source is missing the {src_rid_col!r} column.")
 
-    # Route on the row ids alone (int64), renamed to _ROW_ID; drop other columns.
     def _project_rid(batch: pa.Table) -> pa.Table:
         return pa.table({rid: batch.column(src_rid_col).cast(pa.int64())})
 
     rid_ds = source_ds.map_batches(_project_rid, batch_format="pyarrow")
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
-    # Empty source -> typed empty Dataset up front: a zero-row groupby yields no
-    # groups, so the read never runs and the output would otherwise be schema-less.
+    # Empty source -> typed empty Dataset (a zero-row groupby has no schema).
     source_empty = rid_ds.limit(1).count() == 0
 
     base = table.snapshot_manager().get_latest_snapshot()
@@ -145,7 +141,7 @@ def read_by_row_id(
         )
     except Exception as e:
         _reraise_inner(e)
-        raise  # _reraise_inner always raises; keeps result defined for linters
+        raise  # _reraise_inner always raises
     if result is None:
         return _empty_result(table, read_cols)
     return result
