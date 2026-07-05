@@ -85,8 +85,7 @@ public class JavaPyTantivyE2ETest {
         return path != null && !path.isEmpty() && new File(path).isFile();
     }
 
-    java.nio.file.Path tempDir =
-            Paths.get("../../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
+    java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
 
     protected Path warehouse;
 
