@@ -52,6 +52,10 @@ def match_query(terms, operator=None):
     return json.dumps({"match": body}, separators=(",", ":"))
 
 
+def boolean_query(queries):
+    return json.dumps({"boolean": {"queries": queries}}, separators=(",", ":"))
+
+
 class JavaPyReadWriteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1149,12 +1153,19 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(fragment_row_ids, [4])
 
         ngram_and_builder = ngram_table.new_full_text_search_builder()
-        ngram_and_builder.with_query('content', match_query('中文 片段', 'And'))
+        ngram_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('片段'))],
+            ]))
         ngram_and_builder.with_limit(10)
 
         ngram_and_result = ngram_and_builder.execute_local()
         ngram_and_row_ids = sorted(list(ngram_and_result.results()))
-        print(f"Native full-text ngram AND search for '中文 片段': row_ids={ngram_and_row_ids}")
+        print(
+            "Native full-text ngram boolean search for "
+            f"'中文' AND '片段': row_ids={ngram_and_row_ids}")
         self.assertEqual(ngram_and_row_ids, [4])
 
         simple_table = self.catalog.get_table('default.test_native_fulltext_simple')
@@ -1198,12 +1209,19 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(jieba_phrase_row_ids, [3])
 
         jieba_and_builder = jieba_table.new_full_text_search_builder()
-        jieba_and_builder.with_query('content', match_query('中文 自然', 'And'))
+        jieba_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('自然'))],
+            ]))
         jieba_and_builder.with_limit(10)
 
         jieba_and_result = jieba_and_builder.execute_local()
         jieba_and_row_ids = sorted(list(jieba_and_result.results()))
-        print(f"Native full-text jieba AND search for '中文 自然': row_ids={jieba_and_row_ids}")
+        print(
+            "Native full-text jieba boolean search for "
+            f"'中文' AND '自然': row_ids={jieba_and_row_ids}")
         self.assertEqual(jieba_and_row_ids, [3])
 
     def test_read_lumina_vector_index(self):
