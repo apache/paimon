@@ -18,6 +18,7 @@
 
 """MERGE INTO ... USING ... for Paimon data-evolution tables via Ray Datasets."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -46,6 +47,8 @@ from pypaimon.ray.data_evolution_merge_transform import (
 )
 
 __all__ = ["merge_into", "WhenMatched", "WhenNotMatched"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -367,12 +370,19 @@ def _execute_and_commit(
     ray_remote_args, concurrency,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
+    pending_msgs: list = []
+    commit_started = False
 
     update_msgs: list = []
     num_updated = 0
     update_row_ids = []
-    if update_ds is not None:
-        try:
+    delete_msgs: list = []
+    num_deleted = 0
+    delete_row_ids = []
+    num_inserted = 0
+
+    try:
+        if update_ds is not None:
             update_msgs, num_updated, update_row_ids = distributed_update_apply(
                 update_ds, table, update_cols_union,
                 num_partitions=num_partitions,
@@ -383,14 +393,9 @@ def _execute_and_commit(
                 ),
                 collect_row_ids=collect_action_row_ids,
             )
-        except Exception as e:
-            _reraise_inner(e)
+            pending_msgs.extend(update_msgs)
 
-    delete_msgs: list = []
-    num_deleted = 0
-    delete_row_ids = []
-    if delete_ds is not None:
-        try:
+        if delete_ds is not None:
             delete_msgs, num_deleted, delete_row_ids = distributed_delete_apply(
                 delete_ds, table,
                 num_partitions=num_partitions,
@@ -401,34 +406,45 @@ def _execute_and_commit(
                 ),
                 collect_row_ids=collect_action_row_ids,
             )
-        except Exception as e:
-            _reraise_inner(e)
+            pending_msgs.extend(delete_msgs)
 
-    if collect_action_row_ids:
-        _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids)
+        if collect_action_row_ids:
+            _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids)
 
-    all_msgs: list = list(update_msgs) + list(delete_msgs)
-    num_inserted = 0
-    if insert_ds is not None:
-        try:
+        if insert_ds is not None:
             insert_msgs = distributed_write_collect_msgs(
                 insert_ds, table,
                 ray_remote_args=ray_remote_args, concurrency=concurrency,
             )
-        except Exception as e:
-            _reraise_inner(e)
-        num_inserted = sum(
-            f.row_count
-            for m in insert_msgs
-            for f in m.new_files
-            if not DataFileMeta.is_blob_file(f.file_name)
-        )
-        all_msgs.extend(insert_msgs)
-    if all_msgs:
-        wb = table.new_batch_write_builder()
-        tc = wb.new_commit()
-        tc.commit(all_msgs)
-        tc.close()
+            pending_msgs.extend(insert_msgs)
+            num_inserted = sum(
+                f.row_count
+                for m in insert_msgs
+                for f in m.new_files
+                if not DataFileMeta.is_blob_file(f.file_name)
+            )
+
+        all_msgs: list = list(pending_msgs)
+        if all_msgs:
+            table_commit = None
+            try:
+                table_commit = table.new_batch_write_builder().new_commit()
+                commit_started = True
+                table_commit.commit(all_msgs)
+            finally:
+                if table_commit is not None:
+                    try:
+                        table_commit.close()
+                    except Exception as close_error:
+                        logger.warning(
+                            "Failed to close merge_into commit: %s",
+                            close_error,
+                            exc_info=close_error,
+                        )
+    except Exception as e:
+        if not commit_started:
+            _abort_pending_merge_messages(table, pending_msgs)
+        _reraise_inner(e)
 
     # num_matched = rows that passed a matched condition and changed
     return {
@@ -436,6 +452,32 @@ def _execute_and_commit(
         "num_inserted": num_inserted,
         "num_unchanged": 0,
     }
+
+
+def _abort_pending_merge_messages(table, commit_messages) -> None:
+    if not commit_messages:
+        return
+
+    table_commit = None
+    try:
+        table_commit = table.new_batch_write_builder().new_commit()
+        table_commit.abort(commit_messages)
+    except Exception as abort_error:
+        logger.warning(
+            "Failed to abort pending merge_into commit messages: %s",
+            abort_error,
+            exc_info=abort_error,
+        )
+    finally:
+        if table_commit is not None:
+            try:
+                table_commit.close()
+            except Exception as close_error:
+                logger.warning(
+                    "Failed to close merge_into abort commit: %s",
+                    close_error,
+                    exc_info=close_error,
+                )
 
 
 def _normalize_on(on: OnSpec) -> Tuple[List[str], List[str]]:
