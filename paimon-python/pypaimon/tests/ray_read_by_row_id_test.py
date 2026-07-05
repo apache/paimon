@@ -125,6 +125,31 @@ class RayReadByRowIdTest(unittest.TestCase):
         self.assertEqual(rows[0]["id"], 21)
         self.assertEqual(rows[0]["age"], 21)
 
+    def test_reads_across_evolution_split_files(self):
+        # update_by_row_id writes a column delta, splitting a row's range across the
+        # original file and the delta. read_by_row_id must merge them: the updated
+        # column comes from the delta, the untouched column from the original file.
+        from pypaimon.ray import update_by_row_id
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2, 3], "name": ["a", "b", "c"], "age": [10, 20, 30]},
+            schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        update_by_row_id(
+            target,
+            pa.table({"_ROW_ID": [rid[2]], "age": [999]},
+                     schema=pa.schema([("_ROW_ID", pa.int64()), ("age", pa.int32())])),
+            self.catalog_options, update_cols=["age"])
+        ds = read_by_row_id(
+            target,
+            pa.table({"_ROW_ID": [rid[2]]}, schema=pa.schema([("_ROW_ID", pa.int64())])),
+            self.catalog_options, projection=["id", "name", "age"])
+        rows = ds.take_all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], 2)
+        self.assertEqual(rows[0]["name"], "b")     # untouched, from original file
+        self.assertEqual(rows[0]["age"], 999)      # updated, from delta file
+
     def test_reads_blob_column(self):
         blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
         target = self._create(schema=blob_schema)

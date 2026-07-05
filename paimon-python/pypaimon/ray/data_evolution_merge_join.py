@@ -608,6 +608,7 @@ def distributed_read_by_row_id(
     from pypaimon.common.options.core_options import CoreOptions
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.read.split import DataSplit
+    from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.special_fields import SpecialFields
     from pypaimon.utils.range import Range
@@ -617,6 +618,15 @@ def distributed_read_by_row_id(
     read_cols = list(projection)
     if row_id_name not in read_cols:
         read_cols.append(row_id_name)
+
+    # The exact output schema (projection order, then _ROW_ID); used to emit a
+    # correctly-typed empty block if a group is ever empty, so all output blocks
+    # share one schema.
+    full_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    empty_out = pa.schema([
+        (col, pa.int64() if col == row_id_name else full_pa.field(col).type)
+        for col in read_cols
+    ]).empty_table()
 
     # Pin the planner to the caller's base snapshot so row-id routing is stable
     # even if a concurrent commit lands (mirrors the update path).
@@ -669,10 +679,11 @@ def distributed_read_by_row_id(
 
     captured_table = table
     captured_read_cols = read_cols
+    captured_empty = empty_out
 
     def _read_group(group: pa.Table) -> pa.Table:
         if group.num_rows == 0:
-            return group.drop_columns([frid_col])
+            return captured_empty
         frid = int(group.column(frid_col)[0].as_py())
         info = ray.get(precomputed_info_ref)
         owning_split, target_files = info.first_row_id_index[frid]
