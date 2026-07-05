@@ -571,9 +571,12 @@ ds = read_by_row_id(
   target row ids in column `row_id_col`; other columns are ignored. A table-name source
   is not accepted (a table's system `_ROW_ID` is its own and cannot address the target).
 - `projection`: top-level columns to read (nested paths are not supported). Blob columns
-  are resolved to their payloads. Must be non-empty.
+  are resolved to their payloads, unless overridden via `dynamic_options`. Must be non-empty.
 - `row_id_col`: the source column holding the row ids (default `_ROW_ID`); set e.g.
   `row_id_col="row_id"` to consume a `bucket_join` locator directly.
+- `dynamic_options`: read options applied via `table.copy`, e.g.
+  `{"blob-as-descriptor": "true"}` to read blob columns as small `BlobDescriptor` bytes
+  (resolved later with `map_with_blobs`) instead of materializing large payloads here.
 - `num_partitions`: parallelism for grouping the row ids by target file; defaults to
   `max(1, cluster_cpus * 2)`.
 - `ray_remote_args`: Ray remote options applied to the read tasks.
@@ -587,6 +590,6 @@ ds = read_by_row_id(
 - The row ids must exist in the target's current snapshot; a foreign `_ROW_ID` raises.
 - Deletion-vectors-enabled tables are not supported yet, for the same reason as
   `update_by_row_id`.
-- Prefer a materialized `row_ids` source (a `bucket_join` result already is one): the
-  emptiness check reads one block up front, which would otherwise re-run a lazy source's
-  first block.
+- The `row_ids` source is not executed here; it is consumed lazily by the downstream
+  action. A lazy source missing `row_id_col` raises when the read runs (a materialized
+  source raises up front).
