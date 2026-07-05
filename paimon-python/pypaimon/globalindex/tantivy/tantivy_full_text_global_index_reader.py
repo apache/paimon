@@ -282,7 +282,7 @@ class TantivyFullTextGlobalIndexReader(GlobalIndexReader):
             None if include_row_ids is None else include_row_ids.serialize()
         )
         row_ids, scores = self._native_reader.search(
-            full_text_search.query_json(),
+            _native_query_json(full_text_search.query),
             limit=limit,
             filter_bytes=filter_bytes)
         id_to_scores = dict(zip(row_ids, scores))
@@ -380,6 +380,89 @@ def _read_fully(stream, length: int) -> bytes:
         buf.extend(chunk)
         remaining -= len(chunk)
     return bytes(buf)
+
+
+def _native_query_json(query):
+    return json.dumps(_native_query_dict(query), separators=(",", ":"))
+
+
+def _native_query_dict(query):
+    from pypaimon.globalindex.full_text_query import (
+        BooleanQuery,
+        BoostQuery,
+        MatchQuery,
+        MultiMatchQuery,
+        Occur,
+        PhraseQuery,
+    )
+
+    if isinstance(query, MatchQuery):
+        _check_native_match_defaults(query)
+        return {
+            "match": {
+                "column": "text",
+                "terms": query.query,
+                "operator": query.operator.json_value(),
+                "boost": query.boost,
+            }
+        }
+    if isinstance(query, PhraseQuery):
+        return {
+            "match_phrase": {
+                "column": "text",
+                "terms": query.query,
+                "slop": query.slop,
+            }
+        }
+    if isinstance(query, BoostQuery):
+        return {
+            "boost": {
+                "positive": _native_query_dict(query.positive),
+                "negative": _native_query_dict(query.negative),
+                "negative_boost": query.negative_boost,
+            }
+        }
+    if isinstance(query, BooleanQuery):
+        return {
+            "boolean": {
+                "queries": [
+                    [_native_occur(occur), _native_query_dict(child)]
+                    for occur, child in query.queries
+                ]
+            }
+        }
+    if isinstance(query, MultiMatchQuery):
+        raise ValueError(
+            "multi_match is not supported by single-column Tantivy full-text indexes"
+        )
+    raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
+
+
+def _check_native_match_defaults(query):
+    if query.fuzziness not in (None, 0):
+        raise ValueError(
+            "match query fuzziness is not supported by paimon-full-text yet"
+        )
+    if query.max_expansions != 50:
+        raise ValueError(
+            "match query max_expansions is not supported by paimon-full-text yet"
+        )
+    if query.prefix_length != 0:
+        raise ValueError(
+            "match query prefix_length is not supported by paimon-full-text yet"
+        )
+
+
+def _native_occur(occur):
+    from pypaimon.globalindex.full_text_query import Occur
+
+    if occur == Occur.SHOULD:
+        return "Should"
+    if occur == Occur.MUST:
+        return "Must"
+    if occur == Occur.MUST_NOT:
+        return "MustNot"
+    raise ValueError("Unsupported boolean occur: %s" % occur)
 
 
 def _get_string(config, key, default):

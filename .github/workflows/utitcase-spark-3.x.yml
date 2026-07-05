@@ -59,6 +59,9 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
+      - name: Install paimon-full-text Java dependency
+        run: bash .github/workflows/install-paimon-full-text.sh java
+
       - name: Build Spark 3 with ${{ matrix.scala_version }}
         run:  mvn -T 2C -B -ntp clean install -DskipTests -Pspark3,flink1,scala-${{ matrix.scala_version }}
 

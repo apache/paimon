@@ -818,12 +818,58 @@ class TantivyFullTextIndexOptionsTest(unittest.TestCase):
 
         self.assertEqual([7], sorted(list(result.results())))
         self.assertEqual(
-            '{"match":{"column":"content","terms":"paimon","boost":1.0,'
-            '"fuzziness":0,"max_expansions":50,"operator":"Or",'
-            '"prefix_length":0}}',
+            '{"match":{"column":"text","terms":"paimon","operator":"Or","boost":1.0}}',
             calls[0][0])
         self.assertEqual(10, calls[0][1])
         self.assertIsNone(calls[0][2])
+
+    def test_reader_converts_boolean_query_to_native_json(self):
+        from pypaimon.globalindex.full_text_query import BooleanQuery, Occur, PhraseQuery
+        from pypaimon.globalindex.full_text_search import FullTextSearch
+        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
+            TantivyFullTextGlobalIndexReader,
+        )
+
+        calls = []
+
+        class _FakeFullTextIndexReader:
+            def __init__(self, input_):
+                pass
+
+            def search(self, query, limit=10, filter_bytes=None):
+                calls.append(query)
+                return [7], [2.0]
+
+            def close(self):
+                pass
+
+        old_module = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = types.SimpleNamespace(
+            FullTextIndexReader=_FakeFullTextIndexReader)
+        try:
+            reader = TantivyFullTextGlobalIndexReader(
+                _FakeFileIO(),
+                "/unused",
+                [GlobalIndexIOMeta(file_name="ft.index", file_size=1)])
+            try:
+                query = BooleanQuery([
+                    (Occur.MUST, MatchQuery("paimon", "content")),
+                    (Occur.MUST_NOT, PhraseQuery("bad phrase", "content", 2)),
+                ])
+                reader.visit_full_text_search(FullTextSearch(query, 10)).result()
+            finally:
+                reader.close()
+        finally:
+            if old_module is None:
+                sys.modules.pop("paimon_ftindex", None)
+            else:
+                sys.modules["paimon_ftindex"] = old_module
+
+        self.assertEqual(
+            '{"boolean":{"queries":[["Must",{"match":{"column":"text",'
+            '"terms":"paimon","operator":"Or","boost":1.0}}],["MustNot",'
+            '{"match_phrase":{"column":"text","terms":"bad phrase","slop":2}}]]}}',
+            calls[0])
 
     def test_reader_uses_positional_input_adapter(self):
         from pypaimon.globalindex.full_text_search import FullTextSearch

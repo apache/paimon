@@ -24,11 +24,13 @@ on:
       - 'paimon-tantivy/**'
       - 'pom.xml'
       - '.github/workflows/utcase-tantivy.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-tantivy/**'
       - 'pom.xml'
       - '.github/workflows/utcase-tantivy.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -46,12 +48,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Checkout paimon-full-text
-        uses: actions/checkout@v6
-        with:
-          repository: apache/paimon-full-text
-          path: paimon-full-text
-
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v5
         with:
@@ -63,21 +59,14 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-full-text native libraries
+      - name: Install paimon-full-text native dependency
         run: |
-          cd paimon-full-text
-          cargo build --release -p paimon-ftindex-jni -p paimon-ftindex-ffi
-          echo "PAIMON_FTINDEX_JNI_LIB_PATH=${GITHUB_WORKSPACE}/paimon-full-text/target/release/libpaimon_ftindex_jni.so" >> $GITHUB_ENV
-          echo "PAIMON_FTINDEX_LIB_PATH=${GITHUB_WORKSPACE}/paimon-full-text/target/release/libpaimon_ftindex_ffi.so" >> $GITHUB_ENV
-
-      - name: Install paimon-full-text Java dependency
-        run: |
-          mvn -B -ntp -f paimon-full-text/java/pom.xml install -DskipTests
+          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Build and test Tantivy modules
         timeout-minutes: 30
         run: |
           mvn -T 2C -B -ntp clean install -DskipTests
-          mvn -B -ntp verify -pl paimon-tantivy/paimon-tantivy-index -Dcheckstyle.skip=true -Dspotless.check.skip=true
+          mvn -B -ntp verify -pl paimon-tantivy -Dcheckstyle.skip=true -Dspotless.check.skip=true
         env:
           MAVEN_OPTS: -Xmx4096m

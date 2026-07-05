@@ -40,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -76,6 +77,23 @@ public class TantivyFullTextGlobalIndexTest {
         if (fileIO != null) {
             fileIO.delete(indexPath, true);
         }
+    }
+
+    @Test
+    public void testNativeQueryJsonUsesPhysicalTextField() {
+        FullTextQuery query =
+                FullTextQuery.bool(
+                        Arrays.asList(
+                                FullTextQuery.occurMust(FullTextQuery.match("paimon", "content")),
+                                FullTextQuery.occurMustNot(
+                                        FullTextQuery.phrase("bad phrase", "content", 2))));
+
+        assertThat(TantivyFullTextGlobalIndexReader.toNativeQueryJson(query))
+                .isEqualTo(
+                        "{\"boolean\":{\"queries\":[[\"Must\",{\"match\":{\"column\":\"text\","
+                                + "\"terms\":\"paimon\",\"operator\":\"Or\",\"boost\":1.0}}],"
+                                + "[\"MustNot\",{\"match_phrase\":{\"column\":\"text\","
+                                + "\"terms\":\"bad phrase\",\"slop\":2}}]]}}");
     }
 
     private GlobalIndexFileWriter createFileWriter(Path path) {

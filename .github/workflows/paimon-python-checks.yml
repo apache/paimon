@@ -24,11 +24,13 @@ on:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -53,12 +55,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
-      - name: Checkout paimon-full-text
-        uses: actions/checkout@v6
-        with:
-          repository: apache/paimon-full-text
-          path: paimon-full-text
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v5
@@ -94,16 +90,9 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build paimon-full-text native libraries
+      - name: Install paimon-full-text native dependency
         run: |
-          cd paimon-full-text
-          cargo build --release -p paimon-ftindex-jni -p paimon-ftindex-ffi
-          echo "PAIMON_FTINDEX_JNI_LIB_PATH=${GITHUB_WORKSPACE}/paimon-full-text/target/release/libpaimon_ftindex_jni.so" >> $GITHUB_ENV
-          echo "PAIMON_FTINDEX_LIB_PATH=${GITHUB_WORKSPACE}/paimon-full-text/target/release/libpaimon_ftindex_ffi.so" >> $GITHUB_ENV
-
-      - name: Install paimon-full-text Java dependency
-        run: |
-          mvn -B -ntp -f paimon-full-text/java/pom.xml install -DskipTests
+          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Verify Python version
         run: python --version
@@ -152,7 +141,7 @@ jobs:
         if: matrix.python-version != '3.6.15'
         shell: bash
         run: |
-          python -m pip install ./paimon-full-text/python
+          python -m pip install "${PAIMON_FULL_TEXT_DIR}/python"
 
 
       - name: Run lint-python.sh

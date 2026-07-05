@@ -134,7 +134,7 @@ run_batched_java_write_tests() {
     if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         if ! run_maven_test_batch \
             "paimon-tantivy Java write tests" \
-            "paimon-tantivy/paimon-tantivy-index" \
+            "paimon-tantivy" \
             "org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite" \
             -q; then
             result=1
@@ -564,7 +564,7 @@ run_tantivy_fulltext_test() {
         cd "$PROJECT_ROOT"
 
         echo "Running Maven test for JavaPyTantivyE2ETest.testTantivyFullTextIndexWrite..."
-        if mvn test -Dtest=org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite -pl paimon-tantivy/paimon-tantivy-index -q -Drun.e2e.tests=true; then
+        if mvn test -Dtest=org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite -pl paimon-tantivy -q -Drun.e2e.tests=true; then
             echo -e "${GREEN}✓ Java test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java test failed${NC}"

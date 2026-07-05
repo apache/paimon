@@ -1,13 +1,10 @@
-# Paimon Tantivy Index
+# Paimon Tantivy
 
 Full-text search global index for Apache Paimon, powered by [Tantivy](https://github.com/quickwit-oss/tantivy) (a Rust full-text search engine).
 
 ## Overview
 
-This module provides full-text search capabilities for Paimon's Data Evolution (append) tables through the Global Index framework. It consists of two sub-modules:
-
-- **paimon-tantivy-jni**: Rust/JNI bridge that wraps Tantivy's indexing and search APIs as native methods callable from Java.
-- **paimon-tantivy-index**: Java integration layer that implements Paimon's `GlobalIndexer` SPI, handling index building, archive packing, and query execution.
+This module provides full-text search capabilities for Paimon's Data Evolution (append) tables through the Global Index framework. It contains only the Paimon integration layer. Native Tantivy access, JNI, FFI, index archive handling, and query parsing are provided by the separate `paimon-full-text` dependency.
 
 ### Architecture
 
@@ -18,20 +15,13 @@ This module provides full-text search capabilities for Paimon's Data Evolution (
 └──────────────────────┬──────────────────────────────┘
                        │ GlobalIndexer SPI
 ┌──────────────────────▼──────────────────────────────┐
-│              paimon-tantivy-index                     │
-│  TantivyFullTextGlobalIndexWriter  (build index)     │
-│  TantivyFullTextGlobalIndexReader  (search index)    │
+│                 paimon-tantivy                        │
+│  GlobalIndexer SPI / Paimon stream adapters          │
 └──────────────────────┬──────────────────────────────┘
-                       │ JNI
+                       │ Java API
 ┌──────────────────────▼──────────────────────────────┐
-│              paimon-tantivy-jni                       │
-│  TantivyIndexWriter   (write docs via JNI)           │
-│  TantivySearcher      (search via JNI / stream I/O)  │
-└──────────────────────┬──────────────────────────────┘
-                       │ FFI
-┌──────────────────────▼──────────────────────────────┐
-│              Rust (lib.rs + jni_directory.rs)         │
-│  Tantivy index writer / reader / query parser        │
+│              paimon-full-text                         │
+│  JNI / FFI / Tantivy index writer and reader         │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -89,17 +79,17 @@ All integers are **big-endian**.
 ### Write Path
 
 1. `TantivyFullTextGlobalIndexWriter` receives text values via `write(Object)`, one per row.
-2. Each non-null text is passed to `TantivyIndexWriter` (JNI) as `addDocument(rowId, text)`, where `rowId` is a 0-based sequential counter.
-3. On `finish()`, the Tantivy index is committed and all files in the local temp directory are packed into the archive format above.
+2. Each non-null text is passed to `paimon-full-text`'s `FullTextIndexWriter`, where `rowId` is a 0-based sequential counter.
+3. On `finish()`, `paimon-full-text` commits the Tantivy index and packs it into the archive format above.
 4. The archive is written as a single file to Paimon's global index file system.
-5. The local temp directory is deleted.
+5. Temporary native resources are owned and cleaned up by `paimon-full-text`.
 
 ### Read Path
 
 1. `TantivyFullTextGlobalIndexReader` opens the archive file as a `SeekableInputStream`.
-2. The archive header is parsed to build a file layout table (name → offset, length).
-3. A `TantivySearcher` is created with the layout and a `StreamFileInput` callback — Tantivy reads file data on demand via JNI callbacks to `seek()` + `read()` on the stream. No temp files are created.
-4. Search queries are executed via Tantivy's `QueryParser` with BM25 scoring, returning `(rowId, score)` pairs.
+2. The stream is passed to `paimon-full-text`'s `FullTextIndexReader` through a positional read adapter.
+3. Tantivy reads file data on demand through `pread` callbacks backed by Paimon's file IO. No temp files are created in Paimon.
+4. Search queries are converted to the native single-column query JSON and executed with BM25 scoring, returning `(rowId, score)` pairs.
 
 ## Usage
 
