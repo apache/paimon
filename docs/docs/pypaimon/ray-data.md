@@ -590,6 +590,6 @@ ds = read_by_row_id(
 - The row ids must exist in the target's current snapshot; a foreign `_ROW_ID` raises.
 - Deletion-vectors-enabled tables are not supported yet, for the same reason as
   `update_by_row_id`.
-- The `row_ids` source is not executed here; it is consumed lazily by the downstream
-  action. A lazy source missing `row_id_col` raises when the read runs (a materialized
-  source raises up front).
+- For a non-empty target, the `row_ids` source is consumed lazily by the downstream
+  action, not read here. A lazy source missing `row_id_col` raises when the read runs
+  (a materialized source raises up front).
