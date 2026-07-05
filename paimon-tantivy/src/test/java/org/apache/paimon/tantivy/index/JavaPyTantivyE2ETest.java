@@ -46,7 +46,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -91,7 +90,6 @@ public class JavaPyTantivyE2ETest {
 
     @BeforeEach
     public void before() throws Exception {
-        FileIOUtils.deleteDirectoryQuietly(tempDir.resolve("warehouse").toFile());
         Files.createDirectories(tempDir.resolve("warehouse"));
         warehouse = new Path("file://" + tempDir.resolve("warehouse"));
     }
@@ -141,6 +139,10 @@ public class JavaPyTantivyE2ETest {
     private void writeTableWithTantivyIndex(
             String tableName, List<String> contents, String tokenizer) throws Exception {
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+        LocalFileIO fileIO = LocalFileIO.create();
+        if (fileIO.exists(tablePath)) {
+            fileIO.delete(tablePath, true);
+        }
 
         RowType rowType =
                 RowType.of(
@@ -155,7 +157,7 @@ public class JavaPyTantivyE2ETest {
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new SchemaManager(fileIO, tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
