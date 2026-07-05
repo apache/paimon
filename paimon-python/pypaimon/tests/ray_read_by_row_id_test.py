@@ -164,6 +164,36 @@ class RayReadByRowIdTest(unittest.TestCase):
         self.assertEqual(bytes(got[2]["payload"]), payloads[1])
         self.assertEqual(bytes(got[4]["payload"]), payloads[3])
 
+    def test_blob_as_descriptor_via_dynamic_options(self):
+        from pypaimon.ray import map_with_blobs
+        from pypaimon.table.row.blob import BlobDescriptor
+        blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
+        target = self._create(schema=blob_schema)
+        payloads = [bytes([i]) * (i + 3) for i in range(1, 5)]
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2, 3, 4], "payload": pa.array(payloads, pa.large_binary())},
+            schema=blob_schema))
+        rid = self._rowid_by_id(target)
+        src = pa.table({"_ROW_ID": [rid[2], rid[4]]},
+                       schema=pa.schema([("_ROW_ID", pa.int64())]))
+        ds = read_by_row_id(target, ray.data.from_arrow(src), self.catalog_options,
+                            projection=["payload"],
+                            dynamic_options={"blob-as-descriptor": "true"})
+        rows = ds.take_all()
+        self.assertTrue(all(BlobDescriptor.is_blob_descriptor(bytes(r["payload"])) for r in rows))
+
+        tbl = self.catalog.get_table(target)
+
+        def fn(scalar_batch, blobs):
+            return pa.table({"_ROW_ID": scalar_batch.column("_ROW_ID").to_pylist(),
+                             "n": [len(b) if b is not None else 0 for b in blobs["payload"]]})
+
+        res = map_with_blobs(ds, ["payload"], fn, file_io=tbl.file_io,
+                             all_blob_columns=["payload"], batch_size=1)
+        n = {r["_ROW_ID"]: r["n"] for r in res.take_all()}
+        self.assertEqual(n[rid[2]], len(payloads[1]))
+        self.assertEqual(n[rid[4]], len(payloads[3]))
+
     def test_pins_base_snapshot(self):
         import importlib
         m = importlib.import_module("pypaimon.ray.read_by_row_id")

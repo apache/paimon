@@ -55,6 +55,7 @@ def read_by_row_id(
     *,
     projection: List[str],
     row_id_col: Optional[str] = None,
+    dynamic_options: Optional[Dict[str, str]] = None,
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ):
@@ -66,6 +67,10 @@ def read_by_row_id(
     to the data file owning it and only those files -- and only the matched rows --
     are read, so the target is never fully scanned and there is no join against it.
     ``projection`` lists top-level columns; blob columns are resolved to their payloads.
+    ``dynamic_options`` overrides target options for this read (applied via ``table.copy``,
+    the same mechanism a normal read uses) -- e.g. ``{"blob-as-descriptor": "true"}`` returns
+    small ``BlobDescriptor`` bytes instead of materialising large blob payloads here, to be
+    resolved downstream with ``map_with_blobs`` (bounded ``batch_size``).
     Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
     ``row-tracking.enabled``.
 
@@ -87,6 +92,8 @@ def read_by_row_id(
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
+    if dynamic_options:
+        table = table.copy(dynamic_options)
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"read_by_row_id requires 'data-evolution.enabled'='true' on '{target}'.")
