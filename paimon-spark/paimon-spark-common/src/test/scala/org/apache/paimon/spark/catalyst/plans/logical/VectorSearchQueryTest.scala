@@ -131,7 +131,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
         CreateArray(
           Seq(
             CreateNamedStruct(Seq(
-              Literal("field"),
+              Literal("column"),
               Literal("content"),
               Literal("query"),
               Literal("""{"match":{"query":"paimon lake","operator":"And"}}"""),
@@ -167,7 +167,7 @@ class VectorSearchQueryTest extends AnyFunSuite {
           CreateArray(
             Seq(
               CreateNamedStruct(Seq(
-                Literal("field"),
+                Literal("column"),
                 Literal("content"),
                 Literal("query"),
                 Literal("""{"match":{"query":"paimon lake"}}"""),
@@ -214,13 +214,14 @@ class VectorSearchQueryTest extends AnyFunSuite {
           CreateArray(Seq.empty),
           CreateArray(
             Seq(
-              CreateNamedStruct(
-                Seq(
-                  Literal("query"),
-                  Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
-                  Literal("weight"),
-                  Literal(Float.PositiveInfinity)
-                ))
+              CreateNamedStruct(Seq(
+                Literal("column"),
+                Literal("content"),
+                Literal("query"),
+                Literal("""{"match":{"column":"content","terms":"paimon lake"}}"""),
+                Literal("weight"),
+                Literal(Float.PositiveInfinity)
+              ))
             )),
           Literal(5)
         )

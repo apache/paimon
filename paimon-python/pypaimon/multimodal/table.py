@@ -711,7 +711,7 @@ def _normalize_text_route(route, method, schema):
         limit = route.limit
         options = route.options
     elif isinstance(route, Mapping):
-        column = route.get("column") or route.get("text_column") or route.get("field")
+        column = route.get("column")
         query = (
             route.get("query")
             or route.get("text")

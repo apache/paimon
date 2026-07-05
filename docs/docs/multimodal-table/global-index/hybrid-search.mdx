@@ -85,7 +85,7 @@ The third argument is an array of full-text route configs created by `named_stru
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `field`, `text_column`, or `full_text_column` | Yes | N/A | Text column to search. |
+| `column` | Yes | N/A | Text column to search. |
 | `query` | Yes | N/A | Full-text query string for this route. |
 | `limit` | No | Final limit | Top K results to retrieve from this text column before ranking. |
 | `weight` | No | `1.0` | Weight for this route when ranking results. |
@@ -118,7 +118,7 @@ FROM hybrid_search(
       'options', map('ivf.nprobe', '32'))),
   array(
     named_struct(
-      'field', 'content',
+      'column', 'content',
       'query', '{"match":{"query":"paimon search"}}',
       'limit', 50,
       'weight', 1.0f,
