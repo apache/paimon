@@ -3056,12 +3056,10 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
     @Test
     public void testLookupRejectsIncompatibleDeltaBranchConfig() throws Exception {
         // Tests that creating a lookup table for a chain table with partial-update merge engine
-        // and changelog-producer=none on the delta branch is rejected at the API level.
-        //
-        // This test uses the API directly (not SQL lookup join) because the SQL path calls
-        // BaseDataTableSource.timeTravelDisabledTable() → table.copy(TableSchema), which
-        // overwrites branch-specific options with the main table's options, masking the
-        // incompatible delta branch configuration.
+        // on the delta branch is rejected. The SQL lookup join path is covered by
+        // testLookupRejectsAggregateOnDeltaBranch, which verifies the same validation
+        // through the SQL path (prepareBranchOptions preserves branch-specific merge-engine
+        // during table.copy(TableSchema)).
         sql(
                 "CREATE TABLE chain_dim_partial_cfg ("
                         + "  k BIGINT,"
@@ -3628,11 +3626,13 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                             + "$branch_delta` PARTITION (dt = '20250810')"
                             + " VALUES (3, 1, 'delta_3')");
 
-            // The delta branch has only one new snapshot, so the async refresh path should be chosen.
+            // The delta branch has only one new snapshot, so the async refresh path should be
+            // chosen.
             lookupTable.refresh();
 
             assertThat(lookupTable.getRefreshFuture())
-                    .as("Chain table lookup refresh should use the async path when the delta backlog is small.")
+                    .as(
+                            "Chain table lookup refresh should use the async path when the delta backlog is small.")
                     .isNotNull();
 
             // Wait for the async refresh to complete before closing.
