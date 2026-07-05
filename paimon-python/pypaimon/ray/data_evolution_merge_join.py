@@ -685,7 +685,7 @@ def distributed_read_by_row_id(
             frid_col, pa.array(sorted_arr[idx], type=pa.int64())
         )
 
-    captured_table = table
+    captured_table = scan_table  # read at the same pinned snapshot the planner routed on
     captured_read_cols = read_cols
     captured_empty = empty_out
 
