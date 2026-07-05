@@ -584,6 +584,21 @@ def distributed_update_apply(
     return all_msgs, num_updated, action_row_ids
 
 
+def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
+    """Arrow schema of a read-by-row-id result: each projected column's type plus
+    int64 ``_ROW_ID``, in ``read_cols`` order. Shared by the empty-result paths so
+    the schema of an empty read can't drift from a non-empty one."""
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.table.special_fields import SpecialFields
+
+    rid = SpecialFields.ROW_ID.name
+    full = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    return pa.schema([
+        (col, pa.int64() if col == rid else full.field(col).type)
+        for col in read_cols
+    ])
+
+
 def distributed_read_by_row_id(
     row_ids_ds,
     table,
@@ -608,7 +623,6 @@ def distributed_read_by_row_id(
     from pypaimon.common.options.core_options import CoreOptions
     from pypaimon.globalindex.indexed_split import IndexedSplit
     from pypaimon.read.split import DataSplit
-    from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
     from pypaimon.table.special_fields import SpecialFields
     from pypaimon.utils.range import Range
@@ -619,17 +633,14 @@ def distributed_read_by_row_id(
     if row_id_name not in read_cols:
         read_cols.append(row_id_name)
 
-    # The exact output schema (projection order, then _ROW_ID); used to emit a
-    # correctly-typed empty block if a group is ever empty, so all output blocks
-    # share one schema.
-    full_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    empty_out = pa.schema([
-        (col, pa.int64() if col == row_id_name else full_pa.field(col).type)
-        for col in read_cols
-    ]).empty_table()
+    # A correctly-typed empty block, in case a group is ever empty, so every output
+    # block shares one schema.
+    empty_out = _read_output_schema(table, read_cols).empty_table()
 
-    # Pin the planner to the caller's base snapshot so row-id routing is stable
-    # even if a concurrent commit lands (mirrors the update path).
+    # Reuse TableUpdateByRowId purely as a read-only planner: its constructor only
+    # scans the manifest to index files by first_row_id (no staging dirs, locks or
+    # commits). Pin it to the caller's base snapshot so routing is stable even if a
+    # concurrent commit lands (mirrors the update path).
     scan_table = (
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
@@ -682,6 +693,9 @@ def distributed_read_by_row_id(
     captured_empty = empty_out
 
     def _read_group(group: pa.Table) -> pa.Table:
+        # The group supplies only row ids (all owned by the same file, keyed by
+        # frid); output columns come from the fresh projected read below, so the
+        # injected frid_col never leaks into the result.
         if group.num_rows == 0:
             return captured_empty
         frid = int(group.column(frid_col)[0].as_py())

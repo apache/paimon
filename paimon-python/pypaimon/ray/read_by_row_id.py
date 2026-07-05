@@ -34,25 +34,20 @@ from pypaimon.ray.data_evolution_merge_into import (
     _require_ray_join,
     _resolve_num_partitions,
 )
-from pypaimon.ray.data_evolution_merge_join import distributed_read_by_row_id
+from pypaimon.ray.data_evolution_merge_join import (
+    _read_output_schema,
+    distributed_read_by_row_id,
+)
 
 __all__ = ["read_by_row_id"]
 
 
 def _empty_result(table: "FileStoreTable", read_cols: List[str]):
-    """An empty ``ray.data.Dataset`` with the projected schema (empty target)."""
+    """An empty ``ray.data.Dataset`` with the projected read schema (empty source
+    or target). Uses the same schema builder as the read path so they can't drift."""
     import ray
 
-    from pypaimon.schema.data_types import PyarrowFieldParser
-    from pypaimon.table.special_fields import SpecialFields
-
-    rid = SpecialFields.ROW_ID.name
-    full = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
-    arrays = {}
-    for col in read_cols:
-        col_type = pa.int64() if col == rid else full.field(col).type
-        arrays[col] = pa.array([], type=col_type)
-    return ray.data.from_arrow(pa.table(arrays))
+    return ray.data.from_arrow(_read_output_schema(table, read_cols).empty_table())
 
 
 def read_by_row_id(
