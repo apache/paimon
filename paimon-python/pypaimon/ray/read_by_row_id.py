@@ -64,12 +64,18 @@ def read_by_row_id(
 
     ``row_ids`` (a ``ray.data.Dataset`` / ``pyarrow.Table`` / ``pandas.DataFrame``)
     must carry the target row ids in column ``row_id_col`` (default ``_ROW_ID``; set
-    e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator); any other columns are
-    ignored. Each row id is routed to the data file owning it and only those files --
-    and only the matched rows -- are read, so the target is never fully scanned and
-    there is no join against it. ``projection`` may include blob columns, which are
-    resolved to their payloads. Requires ``ray >= 2.50`` and a target with
-    ``data-evolution.enabled`` + ``row-tracking.enabled``.
+    e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator). Each row id is routed
+    to the data file owning it and only those files -- and only the matched rows --
+    are read, so the target is never fully scanned and there is no join against it.
+    ``projection`` may include blob columns, which are resolved to their payloads.
+    Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
+    ``row-tracking.enabled``.
+
+    Lookup/set semantics, like SQL ``... WHERE _ROW_ID IN (...)``: the result has one
+    row per *distinct* matched row id -- duplicate row ids are deduplicated, source
+    columns other than ``row_id_col`` are dropped, and the input row order is not
+    preserved (rows come out grouped by owning file). An empty source yields an empty
+    but correctly-typed Dataset.
 
     Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``.
     """
