@@ -96,8 +96,7 @@ def read_by_row_id(
         raise ValueError(
             f"read_by_row_id requires 'row-tracking.enabled'='true' on '{target}'.")
     if table.options.deletion_vectors_enabled():
-        # A DV-deleted row still lives in its data file, so row-id slicing can't tell
-        # it apart without extra reads; refuse rather than surface a deleted row.
+        # A DV-deleted row still lives in its file, so slicing would surface it.
         raise ValueError(
             f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
             f"'{target}'.")
@@ -109,9 +108,7 @@ def read_by_row_id(
             raise ValueError(f"projection column {col!r} is not in target '{target}'.")
 
     if isinstance(row_ids, str):
-        # A table's system _ROW_ID is its own, independent of the target's, so a
-        # table-name source can't address target rows. Require in-memory data that
-        # already carries the target row ids (e.g. produced by bucket_join).
+        # A source table's _ROW_ID is its own, not the target's; require in-memory ids.
         raise ValueError(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
@@ -126,14 +123,12 @@ def read_by_row_id(
     rid_ds = source_ds.map_batches(_project_rid, batch_format="pyarrow")
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
-    # An empty source yields an empty result whatever the target holds. Return a
-    # typed empty Dataset up front: a groupby over zero rows produces zero groups,
-    # so the read map is never called and the output would otherwise be schema-less.
+    # Empty source -> typed empty Dataset up front: a zero-row groupby yields no
+    # groups, so the read never runs and the output would otherwise be schema-less.
     source_empty = rid_ds.limit(1).count() == 0
 
     base = table.snapshot_manager().get_latest_snapshot()
-    # Without deletion vectors (rejected above), total_record_count is the live row
-    # count, so 0 means the target is empty (never written, or emptied by overwrite).
+    # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
     if base is None or base.total_record_count == 0:
         if not source_empty:
             raise ValueError(

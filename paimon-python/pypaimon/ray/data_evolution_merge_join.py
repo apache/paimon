@@ -585,9 +585,8 @@ def distributed_update_apply(
 
 
 def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
-    """Arrow schema of a read-by-row-id result: each projected column's type plus
-    int64 ``_ROW_ID``, in ``read_cols`` order. Shared by the empty-result paths so
-    the schema of an empty read can't drift from a non-empty one."""
+    """Result schema: each projected column's type plus int64 ``_ROW_ID``, in
+    ``read_cols`` order. Shared by the empty-result paths so they can't drift."""
     from pypaimon.schema.data_types import PyarrowFieldParser
     from pypaimon.table.special_fields import SpecialFields
 
@@ -633,14 +632,11 @@ def distributed_read_by_row_id(
     if row_id_name not in read_cols:
         read_cols.append(row_id_name)
 
-    # A correctly-typed empty block, in case a group is ever empty, so every output
-    # block shares one schema.
+    # Typed empty block so all output blocks share one schema.
     empty_out = _read_output_schema(table, read_cols).empty_table()
 
-    # Reuse TableUpdateByRowId purely as a read-only planner: its constructor only
-    # scans the manifest to index files by first_row_id (no staging dirs, locks or
-    # commits). Pin it to the caller's base snapshot so routing is stable even if a
-    # concurrent commit lands (mirrors the update path).
+    # Read-only planner: construction only scans the manifest (no writes). Pin to the
+    # base snapshot so routing is stable under concurrent commits (as the update path).
     scan_table = (
         table.copy({CoreOptions.SCAN_SNAPSHOT_ID.key(): str(base_snapshot_id)})
         if base_snapshot_id is not None else table
@@ -654,8 +650,7 @@ def distributed_read_by_row_id(
     if not sorted_first_row_ids:
         return None
 
-    # Broadcast the file index once; workers route + read without re-scanning the
-    # manifest (mirrors the update path's precomputed-info ref).
+    # Broadcast the file index once so workers don't re-scan the manifest.
     precomputed_info_ref = ray.put(planner._snapshot_files_info())
     frid_col = "_FIRST_ROW_ID"
     sorted_arr = np.asarray(sorted_first_row_ids, dtype=np.int64)
@@ -693,9 +688,8 @@ def distributed_read_by_row_id(
     captured_empty = empty_out
 
     def _read_group(group: pa.Table) -> pa.Table:
-        # The group supplies only row ids (all owned by the same file, keyed by
-        # frid); output columns come from the fresh projected read below, so the
-        # injected frid_col never leaks into the result.
+        # Group supplies only row ids; output comes from the fresh read, so frid_col
+        # never leaks.
         if group.num_rows == 0:
             return captured_empty
         frid = int(group.column(frid_col)[0].as_py())
@@ -707,11 +701,8 @@ def distributed_read_by_row_id(
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        # Read only the matched rows: contiguous row ids are compressed into
-        # ranges (so a dense group is a few ranges, not one object per row). For
-        # blob format this becomes native row-index pushdown, so unmatched rows in
-        # the owning file are never materialised. Duplicate row ids are deduplicated
-        # (each matched row is returned once, like SQL ``IN``).
+        # Read only the matched rows (deduped, contiguous ids compressed to ranges);
+        # blob format gets native row-index pushdown, so unmatched rows aren't read.
         wanted = set(group.column(row_id_name).to_pylist())
         indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
         read = captured_table.new_read_builder().with_projection(

@@ -542,3 +542,48 @@ print(metrics)   # {"num_updated": 50}
 - Partition columns cannot be updated (in-place rewrite can't move a row across partitions).
 - Deletion-vectors-enabled tables are not supported yet: a DV-deleted row still lives
   in its data file, so it can't be told apart from a live row without reading the target.
+
+## Read By Row Id
+
+`read_by_row_id` is the read-side mirror of `update_by_row_id`: it reads columns
+(including blob) of a **data-evolution** table for a set of `_ROW_ID`s, without
+scanning or joining the whole target. Each row id is routed to the data file that
+owns it and only those files — and only the matched rows — are read. It pairs with
+`bucket_join` (which produces the row ids) and feeds `update_by_row_id`: match by
+key → read the matched rows → transform → write back by row id. Requires
+`ray >= 2.50` and a target with `data-evolution.enabled` and `row-tracking.enabled`.
+
+```python
+from pypaimon.ray import read_by_row_id
+
+ds = read_by_row_id(
+    target="database_name.table_name",
+    row_ids=locator_ds,          # ray.data.Dataset / pa.Table / pandas, carrying the row ids
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    projection=["image", "feature"],   # columns to read; may include blob columns
+    row_id_col="row_id",         # source column holding the row ids (default "_ROW_ID")
+)
+# ds: ray.data.Dataset of (image, feature, _ROW_ID) for the matched rows
+```
+
+**Parameters:**
+- `row_ids`: a `ray.data.Dataset`, `pyarrow.Table`, or `pandas.DataFrame` carrying the
+  target row ids in column `row_id_col`; other columns are ignored. A table-name source
+  is not accepted (a table's system `_ROW_ID` is its own and cannot address the target).
+- `projection`: columns to read. Blob columns are resolved to their payloads. Must be
+  non-empty.
+- `row_id_col`: the source column holding the row ids (default `_ROW_ID`); set e.g.
+  `row_id_col="row_id"` to consume a `bucket_join` locator directly.
+- `num_partitions`: parallelism for grouping the row ids by target file; defaults to
+  `max(1, cluster_cpus * 2)`.
+- `ray_remote_args`: Ray remote options applied to the read tasks.
+
+**Returns:** a `ray.data.Dataset` of `(*projection, _ROW_ID)`.
+
+**Notes:**
+- Lookup/set semantics, like SQL `... WHERE _ROW_ID IN (...)`: one row per **distinct**
+  matched row id (duplicates deduplicated), input order not preserved (rows come out
+  grouped by owning file). An empty source yields an empty but correctly-typed Dataset.
+- The row ids must exist in the target's current snapshot; a foreign `_ROW_ID` raises.
+- Deletion-vectors-enabled tables are not supported yet, for the same reason as
+  `update_by_row_id`.
