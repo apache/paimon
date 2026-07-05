@@ -46,6 +46,7 @@ import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
 import org.apache.iceberg.data.Record;
@@ -950,6 +951,29 @@ public class IcebergRestMetadataCommitterTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testCreateDatabaseIsIdempotentUnderRace() throws Exception {
+        // Two commits targeting the same namespace can both observe it as missing and both
+        // call createNamespace() (the check-then-act race in commitMetadataImpl). The loser
+        // must not fail. Here the second createDatabase() hits an already-existing namespace.
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        randomFormat(),
+                        Collections.emptyMap());
+
+        IcebergRestMetadataCommitter committer = new IcebergRestMetadataCommitter(table);
+        committer.createDatabase();
+        committer.createDatabase();
+        assertThat(restCatalog.namespaceExists(Namespace.of("mydb"))).isTrue();
     }
 
     @Test
