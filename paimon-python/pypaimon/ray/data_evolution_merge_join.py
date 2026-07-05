@@ -693,12 +693,13 @@ def distributed_read_by_row_id(
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        # Read only the matched rows: one discrete [rid, rid] range per row id.
-        # For blob format this becomes native row-index pushdown, so unmatched
-        # rows in the owning file are never materialised. Duplicate row ids are
-        # deduplicated (each matched row is returned once, like SQL ``IN``).
-        wanted = sorted(set(group.column(row_id_name).to_pylist()))
-        indexed = IndexedSplit(origin_split, [Range(r, r) for r in wanted])
+        # Read only the matched rows: contiguous row ids are compressed into
+        # ranges (so a dense group is a few ranges, not one object per row). For
+        # blob format this becomes native row-index pushdown, so unmatched rows in
+        # the owning file are never materialised. Duplicate row ids are deduplicated
+        # (each matched row is returned once, like SQL ``IN``).
+        wanted = set(group.column(row_id_name).to_pylist())
+        indexed = IndexedSplit(origin_split, Range.to_ranges(list(wanted)))
         read = captured_table.new_read_builder().with_projection(
             captured_read_cols
         ).new_read()

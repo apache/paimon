@@ -277,6 +277,33 @@ class RayReadByRowIdTest(unittest.TestCase):
         ds = read_by_row_id(target, empty_src, self.catalog_options, projection=["age"])
         self.assertEqual(ds.count(), 0)
 
+    def test_empty_source_non_empty_target_keeps_schema(self):
+        # A groupby over zero rows yields zero groups, so the output must still carry
+        # the projected schema (projection + _ROW_ID), not be schema-less.
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        empty_src = pa.table({"_ROW_ID": pa.array([], pa.int64())})
+        ds = read_by_row_id(target, empty_src, self.catalog_options, projection=["id", "age"])
+        self.assertEqual(ds.count(), 0)
+        self.assertIsNotNone(ds.schema())
+        self.assertEqual(set(ds.schema().names), {"id", "age", "_ROW_ID"})
+
+    def test_custom_row_id_col(self):
+        # bucket_join locators expose "row_id", not the system "_ROW_ID".
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2, 3], "name": ["a", "b", "c"], "age": [1, 2, 3]},
+            schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        src = pa.table({"row_id": [rid[2]], "url": ["u2"]},
+                       schema=pa.schema([("row_id", pa.int64()), ("url", pa.string())]))
+        ds = read_by_row_id(target, src, self.catalog_options,
+                            projection=["name"], row_id_col="row_id")
+        rows = ds.take_all()
+        self.assertEqual([r["name"] for r in rows], ["b"])
+        self.assertEqual(rows[0]["_ROW_ID"], rid[2])   # output still uses _ROW_ID
+
 
 if __name__ == "__main__":
     unittest.main()
