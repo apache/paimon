@@ -34,6 +34,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -228,8 +229,8 @@ public class PartitionIndex {
     }
 
     // Merges disk row count into nonFullBucketInformation, keeping uncommitted increments.
-    private void reconcileBucketWithDisk(int bucket, long diskNow) {
-        if (!totalBucketSet.contains(bucket)) {
+    private void reconcileBucketWithDisk(int bucket, long diskNow, Set<Integer> knownBuckets) {
+        if (!knownBuckets.contains(bucket)) {
             return;
         }
         nonFullBucketInformation.compute(
@@ -246,11 +247,14 @@ public class PartitionIndex {
 
     private void refreshBucketsFromDisk(IntPredicate bucketFilter) {
         if (refreshFuture == null || refreshFuture.isDone()) {
+            // Snapshot the known buckets on the assign thread; the refresh reads this copy instead
+            // of the live, non-thread-safe totalBucketSet that assign may mutate concurrently.
+            Set<Integer> knownBuckets = new HashSet<>(totalBucketSet);
             // Reuse the shared FileOperationThreadPool (I/O-bound scan) rather than a dedicated
             // executor, to avoid extra thread-pool resources and fan-out.
             refreshFuture =
                     CompletableFuture.runAsync(
-                                    () -> scanAndReconcile(bucketFilter),
+                                    () -> scanAndReconcile(bucketFilter, knownBuckets),
                                     FileOperationThreadPool.getExecutorService(
                                             Runtime.getRuntime().availableProcessors()))
                             .exceptionally(
@@ -264,7 +268,7 @@ public class PartitionIndex {
         }
     }
 
-    private void scanAndReconcile(IntPredicate bucketFilter) {
+    private void scanAndReconcile(IntPredicate bucketFilter, Set<Integer> knownBuckets) {
         try {
             List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
             // bucketFilter keeps only buckets owned by this assigner, so assigners never race.
@@ -277,7 +281,8 @@ public class PartitionIndex {
                                             IndexManifestEntry::bucket,
                                             f -> f.indexFile().rowCount(),
                                             (existing, replacement) -> existing));
-            tempBucketInfo.forEach(this::reconcileBucketWithDisk);
+            tempBucketInfo.forEach(
+                    (bucket, diskNow) -> reconcileBucketWithDisk(bucket, diskNow, knownBuckets));
             lastRefreshTime = Instant.now();
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
