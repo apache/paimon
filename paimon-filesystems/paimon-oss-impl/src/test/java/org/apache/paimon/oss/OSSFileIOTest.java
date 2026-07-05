@@ -18,11 +18,24 @@
 
 package org.apache.paimon.oss;
 
+import com.aliyun.oss.ClientConfiguration;
+import com.aliyun.oss.ClientException;
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.common.auth.DefaultCredentialProvider;
+import com.aliyun.oss.common.comm.ExecutionContext;
+import com.aliyun.oss.common.comm.RequestMessage;
+import com.aliyun.oss.common.comm.ResponseMessage;
+import com.aliyun.oss.common.comm.RetryStrategy;
+import com.aliyun.oss.common.comm.ServiceClient;
 import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.ObjectMetadata;
 import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -79,6 +92,54 @@ public class OSSFileIOTest {
         assertThat(aes.getServerSideEncryption()).isEqualTo("AES256");
         assertThat(aes.getServerSideEncryptionKeyId()).isNull();
         assertThat(aes.getHeaders()).doesNotContainKey("x-oss-server-side-data-encryption");
+    }
+
+    /** copyObject must carry all three SSE headers through to the final signed wire request. */
+    @Test
+    public void testCopyObjectSendsSseHeadersOnWire() throws Exception {
+        AtomicReference<Map<String, String>> wire = new AtomicReference<>();
+        ServiceClient capturing =
+                new ServiceClient(new ClientConfiguration()) {
+                    @Override
+                    protected ResponseMessage sendRequestCore(
+                            ServiceClient.Request request, ExecutionContext context) {
+                        wire.set(new HashMap<>(request.getHeaders()));
+                        throw new ClientException("captured");
+                    }
+
+                    @Override
+                    protected RetryStrategy getDefaultRetryStrategy() {
+                        return new RetryStrategy() {
+                            @Override
+                            public boolean shouldRetry(
+                                    Exception e,
+                                    RequestMessage request,
+                                    ResponseMessage response,
+                                    int retries) {
+                                return false;
+                            }
+                        };
+                    }
+
+                    @Override
+                    public void shutdown() {}
+                };
+
+        OSSFileIO.SseObjectOperation operation =
+                new OSSFileIO.SseObjectOperation(
+                        capturing,
+                        new DefaultCredentialProvider("ak", "sk"),
+                        OSSFileIO.resolveSse("KMS", "my-cmk", "SM4"));
+        operation.setEndpoint(new URI("http://oss.example.com"));
+
+        assertThatThrownBy(
+                        () -> operation.copyObject(new CopyObjectRequest("sb", "sk", "db", "dk")))
+                .isInstanceOf(ClientException.class);
+
+        assertThat(wire.get())
+                .containsEntry("x-oss-server-side-encryption", "KMS")
+                .containsEntry("x-oss-server-side-encryption-key-id", "my-cmk")
+                .containsEntry("x-oss-server-side-data-encryption", "SM4");
     }
 
     @Test
