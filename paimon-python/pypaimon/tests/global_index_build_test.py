@@ -34,7 +34,6 @@ from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.key_serializer import create_serializer
 from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
     TANTIVY_FULLTEXT_IDENTIFIER,
-    TANTIVY_NGRAM_TOKENIZER,
     TantivyFullTextIndexOptions,
 )
 from pypaimon.globalindex.tantivy.tantivy_full_text_index_writer import (
@@ -109,6 +108,38 @@ class _FakeVectorIndexWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+
+class _FakeFullTextForBuild(types.SimpleNamespace):
+
+    def __init__(self):
+        super().__init__()
+        self.writers = []
+        parent = self
+
+        class FullTextIndexWriter:
+
+            def __init__(self_inner, options=None):
+                self_inner.options = dict(options or {})
+                self_inner.documents = []
+                self_inner.written = False
+                self_inner.closed = False
+                parent.writers.append(self_inner)
+
+            def add_document(self_inner, row_id, text):
+                self_inner.documents.append({
+                    "row_id": int(row_id),
+                    "text": str(text),
+                })
+
+            def write(self_inner, output):
+                self_inner.written = True
+                output.write(b"fake-ftindex")
+
+            def close(self_inner):
+                self_inner.closed = True
+
+        self.FullTextIndexWriter = FullTextIndexWriter
 
 
 class _FakeTantivyDocument:
@@ -901,9 +932,9 @@ class GlobalIndexBuildTest(
             schema=schema,
         ))
 
-        tantivy = _FakeTantivyForBuild()
-        old_tantivy = sys.modules.get("tantivy")
-        sys.modules["tantivy"] = tantivy
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
         try:
             added = table.create_global_index(
                 'content',
@@ -918,33 +949,32 @@ class GlobalIndexBuildTest(
                 },
             )
         finally:
-            if old_tantivy is None:
-                sys.modules.pop("tantivy", None)
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
             else:
-                sys.modules["tantivy"] = old_tantivy
+                sys.modules["paimon_ftindex"] = old_ftindex
 
         self.assertEqual(2, added)
-        self.assertEqual(2, len(tantivy.indexes))
+        self.assertEqual(2, len(ftindex.writers))
         self.assertEqual(
-            {"row_id": {"stored": False, "indexed": True, "fast": True},
-             "text": {"stored": False,
-                      "tokenizer_name": TANTIVY_NGRAM_TOKENIZER,
-                      "index_option": "freq"}},
-            tantivy.indexes[0].schema.fields,
-        )
-        self.assertEqual(
-            [(TANTIVY_NGRAM_TOKENIZER,
-              ("ngram", 2, 3, True, (("remove_long", 40), "lowercase")))],
-            tantivy.indexes[0].registered_tokenizers,
+            {
+                "tokenizer": "ngram",
+                "ngram.max-gram": "3",
+                "ngram.prefix-only": "true",
+                "with-position": "false",
+            },
+            ftindex.writers[0].options,
         )
         self.assertEqual(
             [{'row_id': 0, 'text': 'Apache Paimon full text'}],
-            tantivy.indexes[0].writer_instance.documents,
+            ftindex.writers[0].documents,
         )
         self.assertEqual(
             [{'row_id': 0, 'text': 'Tantivy full text search'}],
-            tantivy.indexes[1].writer_instance.documents,
+            ftindex.writers[1].documents,
         )
+        self.assertTrue(all(writer.written for writer in ftindex.writers))
+        self.assertTrue(all(writer.closed for writer in ftindex.writers))
 
         snapshot = table.snapshot_manager().get_latest_snapshot()
         entries = sorted(
@@ -977,25 +1007,40 @@ class GlobalIndexBuildTest(
             file_path = table.path_factory().global_index_path_factory().to_path(
                 entry.index_file.file_name)
             self.assertEqual(
-                ['docs.bin', 'meta.json'],
-                _archive_file_names(table.file_io, file_path),
+                b"fake-ftindex",
+                table.file_io.new_input_stream(file_path).read(),
             )
 
-    def test_tantivy_fulltext_writer_rejects_jieba_tokenizer(self):
+    def test_tantivy_fulltext_writer_accepts_jieba_tokenizer(self):
         table = self._create_table()
         index_path = (
             table.path_factory()
             .global_index_path_factory()
             .global_index_root_path()
         )
-        with self.assertRaisesRegex(ValueError, "tantivy.tokenizer=jieba"):
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
+        try:
             writer = TantivyFullTextIndexWriter(
                 table.file_io,
                 index_path,
                 AtomicType('STRING'),
                 {'tantivy.tokenizer': 'jieba'},
             )
-            writer.close()
+            writer.write('北京大学支持全文检索', 0)
+            entries = writer.finish()
+        finally:
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
+            else:
+                sys.modules["paimon_ftindex"] = old_ftindex
+
+        self.assertEqual(1, len(entries))
+        self.assertEqual([{"row_id": 0, "text": "北京大学支持全文检索"}],
+                         ftindex.writers[0].documents)
+        self.assertEqual({"tokenizer": "jieba"}, ftindex.writers[0].options)
+        self.assertTrue(ftindex.writers[0].closed)
 
     def test_tantivy_fulltext_options_serialize_matches_java_sparse_json(self):
         ngram = TantivyFullTextIndexOptions.from_options({

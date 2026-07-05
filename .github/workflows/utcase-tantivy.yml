@@ -22,9 +22,15 @@ on:
   push:
     paths:
       - 'paimon-tantivy/**'
+      - 'pom.xml'
+      - '.github/workflows/utcase-tantivy.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-tantivy/**'
+      - 'pom.xml'
+      - '.github/workflows/utcase-tantivy.yml'
+      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -53,21 +59,14 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Build Tantivy native library
+      - name: Install paimon-full-text native dependency
         run: |
-          cd paimon-tantivy/paimon-tantivy-jni/rust
-          cargo build --release
-
-      - name: Copy native library to resources
-        run: |
-          RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
-          mkdir -p ${RESOURCE_DIR}
-          cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
+          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Build and test Tantivy modules
         timeout-minutes: 30
         run: |
           mvn -T 2C -B -ntp clean install -DskipTests
-          mvn -B -ntp verify -pl paimon-tantivy/paimon-tantivy-jni,paimon-tantivy/paimon-tantivy-index -Dcheckstyle.skip=true -Dspotless.check.skip=true
+          mvn -B -ntp verify -pl paimon-tantivy -Dcheckstyle.skip=true -Dspotless.check.skip=true
         env:
           MAVEN_OPTS: -Xmx4096m
