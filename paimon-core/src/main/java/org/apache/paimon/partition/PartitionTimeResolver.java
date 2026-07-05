@@ -18,8 +18,6 @@
 
 package org.apache.paimon.partition;
 
-import org.apache.paimon.utils.Pair;
-
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -53,7 +51,6 @@ public class PartitionTimeResolver {
     private final String pattern;
     private final String formatter;
     private Map<PatternToken, List<FormatToken>> patternFormatMappings;
-    private Map<PatternToken, Pair<Integer, Integer>> patternSpanMappings;
     private List<PatternToken> patternTokens;
     private List<FormatToken> formatTokens;
 
@@ -84,7 +81,6 @@ public class PartitionTimeResolver {
         boolean matched = matchRecursive(0, 0);
         checkArgument(
                 matched, "Failed to match pattern '%s' to formatter '%s'", pattern, formatter);
-        this.patternSpanMappings = calPatternSpanMappings();
     }
 
     /**
@@ -113,15 +109,18 @@ public class PartitionTimeResolver {
      * variable's segment according to the pattern-to-format mapping.
      */
     public LinkedHashMap<String, String> resolvePartitionValues(LocalDateTime dateTime) {
-        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(formatter, Locale.ROOT);
-        String formatted = dateTime.format(dateTimeFormatter);
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
-        for (Map.Entry<PatternToken, Pair<Integer, Integer>> entry :
-                patternSpanMappings.entrySet()) {
-            String variableName = entry.getKey().token.substring(1);
-            int start = entry.getValue().getLeft();
-            int end = entry.getValue().getRight();
-            result.put(variableName, formatted.substring(start, end));
+        for (PatternToken patternToken : patternTokens) {
+            if (!patternToken.isVariable) {
+                continue;
+            }
+            String variableName = patternToken.token.substring(1);
+            List<FormatToken> tokens = patternFormatMappings.get(patternToken);
+            int start = tokens.get(0).start;
+            int end = tokens.get(tokens.size() - 1).end;
+            DateTimeFormatter dateTimeFormatter =
+                    DateTimeFormatter.ofPattern(formatter.substring(start, end), Locale.ROOT);
+            result.put(variableName, dateTime.format(dateTimeFormatter));
         }
         return result;
     }
@@ -147,30 +146,6 @@ public class PartitionTimeResolver {
             return LocalDateTime.of(
                     LocalDate.parse(timestampString, dateTimeFormatter), LocalTime.MIDNIGHT);
         }
-    }
-
-    private Map<PatternToken, Pair<Integer, Integer>> calPatternSpanMappings() {
-        int pos = 0;
-        Map<FormatToken, Integer> startPositions = new LinkedHashMap<>();
-        for (FormatToken token : formatTokens) {
-            startPositions.put(token, pos);
-            pos += token.getLength();
-        }
-
-        Map<PatternToken, Pair<Integer, Integer>> patternSpanMapping = new LinkedHashMap<>();
-        for (PatternToken patternToken : patternTokens) {
-            if (!patternToken.isVariable) {
-                continue;
-            }
-            List<FormatToken> tokens = patternFormatMappings.get(patternToken);
-            int start = startPositions.get(tokens.get(0));
-            int end = start;
-            for (FormatToken token : tokens) {
-                end += token.getLength();
-            }
-            patternSpanMapping.put(patternToken, Pair.of(start, end));
-        }
-        return patternSpanMapping;
     }
 
     /** Parses formatter into format tokens (time fields and literals). */

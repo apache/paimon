@@ -214,6 +214,29 @@ public class PartitionTimeResolverTest {
                     }
                 },
                 partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt", "t"), "$dtT$t", "yy-M-d'T'H:m:ss")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 12, 1, 11, 2, 3));
+        assertEquals(
+                new LinkedHashMap<String, String>() {
+                    {
+                        put("dt", "23-12-1");
+                        put("t", "11:2:03");
+                    }
+                },
+                partitionValues);
+
+        partitionValues =
+                new PartitionTimeResolver(Arrays.asList("dt"), "$dt", "yy-MMM-d")
+                        .resolvePartitionValues(LocalDateTime.of(2023, 12, 1, 11, 2, 3));
+        assertEquals(
+                new LinkedHashMap<String, String>() {
+                    {
+                        put("dt", "23-Dec-1");
+                    }
+                },
+                partitionValues);
     }
 
     @Test
