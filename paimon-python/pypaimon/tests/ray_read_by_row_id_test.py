@@ -104,13 +104,12 @@ class RayReadByRowIdTest(unittest.TestCase):
         ds = read_by_row_id(target, ray.data.from_arrow(src), self.catalog_options,
                             projection=["id", "name", "age"])
         got = self._rows_by_id(ds)
-        self.assertEqual(set(got), set(want))                 # only requested rows
+        self.assertEqual(set(got), set(want))
         self.assertEqual(got[2]["age"], 20)
         self.assertEqual(got[5]["name"], "n5")
-        self.assertEqual(got[2]["_ROW_ID"], rid[2])           # _ROW_ID carried through
+        self.assertEqual(got[2]["_ROW_ID"], rid[2])
 
     def test_reads_correct_row_across_files(self):
-        # A _ROW_ID owned by a middle data file must return only that row.
         target = self._create()
         for chunk in ([10, 11, 12], [20, 21], [30, 31, 32, 33]):
             self._write(target, pa.Table.from_pydict(
@@ -126,9 +125,7 @@ class RayReadByRowIdTest(unittest.TestCase):
         self.assertEqual(rows[0]["age"], 21)
 
     def test_reads_across_evolution_split_files(self):
-        # update_by_row_id writes a column delta, splitting a row's range across the
-        # original file and the delta. read_by_row_id must merge them: the updated
-        # column comes from the delta, the untouched column from the original file.
+        # update_by_row_id writes a column delta (splits the row's range); the read must merge original + delta.
         from pypaimon.ray import update_by_row_id
         target = self._create()
         self._write(target, pa.Table.from_pydict(
@@ -147,8 +144,8 @@ class RayReadByRowIdTest(unittest.TestCase):
         rows = ds.take_all()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], 2)
-        self.assertEqual(rows[0]["name"], "b")     # untouched, from original file
-        self.assertEqual(rows[0]["age"], 999)      # updated, from delta file
+        self.assertEqual(rows[0]["name"], "b")
+        self.assertEqual(rows[0]["age"], 999)
 
     def test_reads_blob_column(self):
         blob_schema = pa.schema([("id", pa.int32()), ("payload", pa.large_binary())])
@@ -164,13 +161,12 @@ class RayReadByRowIdTest(unittest.TestCase):
                             projection=["id", "payload"])
         got = self._rows_by_id(ds)
         self.assertEqual(set(got), {2, 4})
-        self.assertEqual(bytes(got[2]["payload"]), payloads[1])   # blob resolved to payload
+        self.assertEqual(bytes(got[2]["payload"]), payloads[1])
         self.assertEqual(bytes(got[4]["payload"]), payloads[3])
 
     def test_pins_base_snapshot(self):
-        # The read pins its base snapshot and threads it to distributed_read_by_row_id.
         import importlib
-        m = importlib.import_module("pypaimon.ray.read_by_row_id")  # module, not the fn
+        m = importlib.import_module("pypaimon.ray.read_by_row_id")
         target = self._create()
         self._write(target, pa.Table.from_pydict(
             {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
@@ -196,12 +192,10 @@ class RayReadByRowIdTest(unittest.TestCase):
             {"id": [1, 2, 3], "name": ["a", "b", "c"], "age": [1, 2, 3]},
             schema=self.pa_schema))
         rid = self._rowid_by_id(target)
-        # pyarrow.Table source
         ds = read_by_row_id(
             target, pa.table({"_ROW_ID": [rid[2]]}, schema=pa.schema([("_ROW_ID", pa.int64())])),
             self.catalog_options, projection=["name"])
         self.assertEqual([r["name"] for r in ds.take_all()], ["b"])
-        # pandas.DataFrame source
         import pandas as pd
         ds = read_by_row_id(
             target, pd.DataFrame({"_ROW_ID": pd.array([rid[3]], dtype="int64")}),
@@ -213,7 +207,6 @@ class RayReadByRowIdTest(unittest.TestCase):
         self._write(target, pa.Table.from_pydict(
             {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
         rid = self._rowid_by_id(target)
-        # source carries junk columns and a duplicate row id -> junk ignored, row deduped
         src = pa.table({"_ROW_ID": [rid[2], rid[2]], "junk": ["x", "y"]},
                        schema=pa.schema([("_ROW_ID", pa.int64()), ("junk", pa.string())]))
         ds = read_by_row_id(target, ray.data.from_arrow(src), self.catalog_options,
@@ -231,7 +224,7 @@ class RayReadByRowIdTest(unittest.TestCase):
                            projection=["age"])
 
     def test_rejects_non_data_evolution_table(self):
-        target = self._create(options={})  # plain append table
+        target = self._create(options={})
         self._write(target, pa.Table.from_pydict(
             {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
         src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
@@ -269,16 +262,13 @@ class RayReadByRowIdTest(unittest.TestCase):
         src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
         empty_src = pa.table({"_ROW_ID": pa.array([], pa.int64())})
 
-        # never written -> a foreign row id raises
         target = self._create()
         with self.assertRaises(ValueError):
             read_by_row_id(target, src, self.catalog_options, projection=["age"])
-        # empty source against an empty target -> empty result, not an error
         ds = read_by_row_id(target, empty_src, self.catalog_options, projection=["age"])
         self.assertEqual(ds.count(), 0)
 
     def test_foreign_row_id_raises(self):
-        # A row id outside the target's valid ranges is rejected (surfaces on read).
         target = self._create()
         self._write(target, pa.Table.from_pydict(
             {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
@@ -288,8 +278,6 @@ class RayReadByRowIdTest(unittest.TestCase):
             ds.take_all()
 
     def test_empty_source_non_empty_target_keeps_schema(self):
-        # A groupby over zero rows yields zero groups, so the output must still carry
-        # the projected schema (projection + _ROW_ID), not be schema-less.
         target = self._create()
         self._write(target, pa.Table.from_pydict(
             {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
@@ -299,8 +287,26 @@ class RayReadByRowIdTest(unittest.TestCase):
         self.assertIsNotNone(ds.schema())
         self.assertEqual(set(ds.schema().names), {"id", "age", "_ROW_ID"})
 
+    def test_empty_result_schema_matches_nonempty_read(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        proj = ["id", "age"]
+        nonempty = read_by_row_id(
+            target, pa.table({"_ROW_ID": [rid[1]]}, schema=pa.schema([("_ROW_ID", pa.int64())])),
+            self.catalog_options, projection=proj)
+        real_schema = None
+        for b in nonempty.iter_batches(batch_format="pyarrow"):
+            real_schema = b.schema
+            break
+        empty = read_by_row_id(
+            target, pa.table({"_ROW_ID": pa.array([], pa.int64())}),
+            self.catalog_options, projection=proj)
+        self.assertTrue(real_schema.equals(empty.schema().base_schema))
+        self.assertFalse(empty.schema().base_schema.field("_ROW_ID").nullable)
+
     def test_custom_row_id_col(self):
-        # bucket_join locators expose "row_id", not the system "_ROW_ID".
         target = self._create()
         self._write(target, pa.Table.from_pydict(
             {"id": [1, 2, 3], "name": ["a", "b", "c"], "age": [1, 2, 3]},
@@ -312,7 +318,7 @@ class RayReadByRowIdTest(unittest.TestCase):
                             projection=["name"], row_id_col="row_id")
         rows = ds.take_all()
         self.assertEqual([r["name"] for r in rows], ["b"])
-        self.assertEqual(rows[0]["_ROW_ID"], rid[2])   # output still uses _ROW_ID
+        self.assertEqual(rows[0]["_ROW_ID"], rid[2])
 
 
 if __name__ == "__main__":

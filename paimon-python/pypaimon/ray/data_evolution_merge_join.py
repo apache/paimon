@@ -592,8 +592,9 @@ def _read_output_schema(table, read_cols: Sequence[str]) -> "pa.Schema":
 
     rid = SpecialFields.ROW_ID.name
     full = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    # Keep each field's nullability so an empty result matches a non-empty read.
     return pa.schema([
-        (col, pa.int64() if col == rid else full.field(col).type)
+        pa.field(rid, pa.int64(), nullable=False) if col == rid else full.field(col)
         for col in read_cols
     ])
 
