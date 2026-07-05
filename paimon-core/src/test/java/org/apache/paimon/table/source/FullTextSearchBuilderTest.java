@@ -284,10 +284,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         () ->
                                 table.newHybridSearchBuilder()
                                         .addFullTextRoute(
-                                                TEXT_FIELD_NAME,
-                                                matchQuery("Paimon"),
-                                                3,
-                                                1.0f)
+                                                TEXT_FIELD_NAME, matchQuery("Paimon"), 3, 1.0f)
                                         .withFilter(idFilter)
                                         .withLimit(3)
                                         .routeBuilders())
@@ -380,9 +377,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         ScoredGlobalIndexResult result =
                 (ScoredGlobalIndexResult)
                         table.newFullTextSearchBuilder()
-                                .withQuery(
-                                        TEXT_FIELD_NAME,
-                                        boostQuery("paimon", "vector", 0.1f))
+                                .withQuery(TEXT_FIELD_NAME, boostQuery("paimon", "vector", 0.1f))
                                 .withLimit(3)
                                 .executeLocal();
 

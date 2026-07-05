@@ -683,6 +683,7 @@ class NativeFullTextIndexOptionsTest(unittest.TestCase):
         self.assertEqual(8.0, result.score_getter()(3))
         self.assertEqual(include_row_ids.serialize(), filters[0])
 
+
 class FullTextSearchBuilderDslTest(unittest.TestCase):
 
     def tearDown(self):
@@ -728,7 +729,7 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
                 .with_limit(10)
                 .new_full_text_read()
                 .read([split])
-        )
+            )
 
         self.assertEqual(1, len(captured_searches))
         self.assertEqual("content", captured_searches[0].column)

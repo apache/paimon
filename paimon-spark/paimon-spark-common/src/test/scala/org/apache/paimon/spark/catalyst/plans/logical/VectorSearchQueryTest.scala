@@ -151,8 +151,9 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(search.routes().size() == 1)
     assert(search.routes().get(0).isFullText)
     assert(search.routes().get(0).fieldName() == "content")
-    assert(search.routes().get(0).fullTextQuery() ==
-      """{"match":{"query":"paimon lake","operator":"And"}}""")
+    assert(
+      search.routes().get(0).fullTextQuery() ==
+        """{"match":{"query":"paimon lake","operator":"And"}}""")
     assert(search.routes().get(0).limit() == 20)
     assert(search.routes().get(0).weight() == 1.5f)
   }
@@ -251,17 +252,15 @@ class VectorSearchQueryTest extends AnyFunSuite {
         Literal(10)))
 
     assert(search.column() == "content")
-    assert(search.query() == """{"match":{"column":"content","terms":"paimon lake","operator":"And"}}""")
+    assert(
+      search.query() == """{"match":{"column":"content","terms":"paimon lake","operator":"And"}}""")
     assert(search.limit() == 10)
   }
 
   test("create full-text search exposes single column") {
     val search = FullTextSearchQuery(Seq.empty).createFullTextSearch(
       innerTable,
-      Seq(
-        Literal("content"),
-        Literal("""{"match":{"query":"paimon"}}"""),
-        Literal(10)))
+      Seq(Literal("content"), Literal("""{"match":{"query":"paimon"}}"""), Literal(10)))
 
     assert(search.column() == "content")
   }

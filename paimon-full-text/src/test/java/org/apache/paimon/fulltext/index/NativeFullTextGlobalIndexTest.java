@@ -53,9 +53,7 @@ import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/**
- * Test for {@link NativeFullTextGlobalIndexWriter} and {@link NativeFullTextGlobalIndexReader}.
- */
+/** Test for {@link NativeFullTextGlobalIndexWriter} and {@link NativeFullTextGlobalIndexReader}. */
 public class NativeFullTextGlobalIndexTest {
 
     private static boolean isNativeAvailable() {
@@ -227,8 +225,7 @@ public class NativeFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
-            FullTextSearch search =
-                    new FullTextSearch("text", matchQuery("nonexistent"), 10);
+            FullTextSearch search = new FullTextSearch("text", matchQuery("nonexistent"), 10);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();
@@ -300,8 +297,7 @@ public class NativeFullTextGlobalIndexTest {
 
         try (NativeFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             // Search for the special keyword — should match every 10th doc
-            FullTextSearch search =
-                    new FullTextSearch("text", matchQuery("special_keyword"), 1000);
+            FullTextSearch search = new FullTextSearch("text", matchQuery("special_keyword"), 1000);
             Optional<ScoredGlobalIndexResult> searchResult =
                     reader.visitFullTextSearch(search).join();
             assertThat(searchResult).isPresent();

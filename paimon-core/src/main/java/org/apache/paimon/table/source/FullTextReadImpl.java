@@ -114,22 +114,12 @@ public class FullTextReadImpl implements FullTextRead {
         GlobalIndexFileReader indexFileReader = m -> table.fileIO().newInputStream(m.filePath());
         RoaringNavigableMap64 liveRows = GlobalIndexLiveRowFilter.liveRows(table, partitionFilter);
         ScoredGlobalIndexResult result =
-                evalQuery(
-                        splitsByColumn,
-                        indexPathFactory,
-                        indexFileReader,
-                        executor,
-                        liveRows);
+                evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, liveRows);
         if (!rawRowRanges.isEmpty()) {
             result =
                     new RawFullTextReadImpl(
-                                    table,
-                                    partitionFilter,
-                                    limit,
-                                    textColumn,
-                                    this::evalQuery)
-                            .withRawSearch(
-                                    result, rawRowRanges, splitsByColumn, executor);
+                                    table, partitionFilter, limit, textColumn, this::evalQuery)
+                            .withRawSearch(result, rawRowRanges, splitsByColumn, executor);
         }
         return result.topK(limit);
     }
@@ -139,12 +129,7 @@ public class FullTextReadImpl implements FullTextRead {
             IndexPathFactory indexPathFactory,
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor) {
-        return evalQuery(
-                splitsByColumn,
-                indexPathFactory,
-                indexFileReader,
-                executor,
-                null);
+        return evalQuery(splitsByColumn, indexPathFactory, indexFileReader, executor, null);
     }
 
     private ScoredGlobalIndexResult evalQuery(

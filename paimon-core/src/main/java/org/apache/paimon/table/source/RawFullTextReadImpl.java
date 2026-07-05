@@ -92,8 +92,7 @@ class RawFullTextReadImpl {
             return indexedResult;
         }
 
-        ScoredGlobalIndexResult rawResult =
-                readRawSearch(rawRowRanges, splitsByColumn, executor);
+        ScoredGlobalIndexResult rawResult = readRawSearch(rawRowRanges, splitsByColumn, executor);
         return overrideWithRawSearch(indexedResult, rawRowRanges, rawResult);
     }
 

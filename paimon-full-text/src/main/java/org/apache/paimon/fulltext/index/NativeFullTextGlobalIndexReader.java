@@ -76,8 +76,7 @@ public class NativeFullTextGlobalIndexReader implements GlobalIndexReader {
                         if (includeRowIds != null && includeRowIds.isEmpty()) {
                             return Optional.of(ScoredGlobalIndexResult.createEmpty());
                         }
-                        byte[] filter =
-                                includeRowIds == null ? null : includeRowIds.serialize();
+                        byte[] filter = includeRowIds == null ? null : includeRowIds.serialize();
                         FullTextSearchResult result =
                                 filter == null
                                         ? reader.search(
@@ -88,8 +87,7 @@ public class NativeFullTextGlobalIndexReader implements GlobalIndexReader {
                                                 filter);
                         return Optional.of(toScoredResult(result));
                     } catch (IOException e) {
-                        throw new RuntimeException(
-                                "Failed to search native full-text index", e);
+                        throw new RuntimeException("Failed to search native full-text index", e);
                     }
                 },
                 executor);

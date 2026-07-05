@@ -135,7 +135,8 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
                     * floatValue(match, "boost", 1.0f);
         }
         if (query.has("match_phrase") || query.has("phrase")) {
-            JsonNode phrase = query.has("match_phrase") ? query.get("match_phrase") : query.get("phrase");
+            JsonNode phrase =
+                    query.has("match_phrase") ? query.get("match_phrase") : query.get("phrase");
             String terms = textValue(phrase, "query", "terms");
             return document.toLowerCase(Locale.ROOT).contains(terms.toLowerCase(Locale.ROOT))
                     ? 1.0f
@@ -145,7 +146,9 @@ public class TestFullTextGlobalIndexReader implements GlobalIndexReader {
             JsonNode boost = query.get("boost");
             float score = computeScore(document, required(boost, "positive"));
             if (computeScore(document, required(boost, "negative")) > 0) {
-                score *= floatValue(boost, "negative_boost", floatValue(boost, "negativeBoost", 0.5f));
+                score *=
+                        floatValue(
+                                boost, "negative_boost", floatValue(boost, "negativeBoost", 0.5f));
             }
             return score;
         }

@@ -42,7 +42,6 @@ public class NativeFullTextGlobalIndexerFactory implements GlobalIndexerFactory 
     public GlobalIndexer create(DataField field, Options options) {
         return new NativeFullTextGlobalIndexer(
                 new NativeFullTextIndexOptions(
-                        options.removePrefix(NativeFullTextIndexOptions.FULL_TEXT_PREFIX)
-                                .toMap()));
+                        options.removePrefix(NativeFullTextIndexOptions.FULL_TEXT_PREFIX).toMap()));
     }
 }
