@@ -25,29 +25,20 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TantivyFullTextGlobalIndexerFactory}. */
 public class TantivyFullTextGlobalIndexerFactoryTest {
 
     @Test
-    public void testFactoryDisablesSearcherPoolForZeroMaxSize() throws Exception {
+    public void testFactoryAcceptsDeprecatedSearcherPoolOption() {
         TantivyFullTextGlobalIndexerFactory factory = new TantivyFullTextGlobalIndexerFactory();
         DataField field = new DataField(0, "text", DataTypes.STRING());
 
-        GlobalIndexer pooled = factory.create(field, new Options());
-        Options disabledOptions = new Options();
-        disabledOptions.set(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE, 0);
-        GlobalIndexer disabled = factory.create(field, disabledOptions);
+        Options options = new Options();
+        options.set(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE, 0);
+        GlobalIndexer indexer = factory.create(field, options);
 
-        assertThat(searcherPool(pooled)).isNotSameAs(searcherPool(disabled));
-    }
-
-    private static TantivySearcherPool searcherPool(GlobalIndexer indexer) throws Exception {
-        Field field = TantivyFullTextGlobalIndexer.class.getDeclaredField("searcherPool");
-        field.setAccessible(true);
-        return (TantivySearcherPool) field.get(indexer);
+        assertThat(indexer).isInstanceOf(TantivyFullTextGlobalIndexer.class);
     }
 }

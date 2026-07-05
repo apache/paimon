@@ -31,8 +31,6 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     public static final String IDENTIFIER = "tantivy-fulltext";
 
-    private volatile TantivySearcherPool searcherPool;
-
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -45,21 +43,8 @@ public class TantivyFullTextGlobalIndexerFactory implements GlobalIndexerFactory
 
     @Override
     public GlobalIndexer create(DataField field, Options options) {
-        int maxSize = options.get(TantivyFullTextIndexOptions.SEARCHER_POOL_MAX_SIZE);
-        if (maxSize <= 0) {
-            return new TantivyFullTextGlobalIndexer(
-                    new TantivySearcherPool(0),
-                    new TantivyFullTextIndexOptions(removeTantivyPrefix(options)));
-        }
-        if (searcherPool == null) {
-            synchronized (this) {
-                if (searcherPool == null) {
-                    searcherPool = new TantivySearcherPool(maxSize);
-                }
-            }
-        }
         return new TantivyFullTextGlobalIndexer(
-                searcherPool, new TantivyFullTextIndexOptions(removeTantivyPrefix(options)));
+                new TantivyFullTextIndexOptions(removeTantivyPrefix(options)));
     }
 
     static Map<String, Object> removeTantivyPrefix(Options options) {

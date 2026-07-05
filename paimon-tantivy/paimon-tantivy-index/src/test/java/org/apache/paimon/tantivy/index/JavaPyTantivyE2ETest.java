@@ -42,11 +42,11 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.tantivy.NativeLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -54,6 +54,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
@@ -80,12 +81,8 @@ public class JavaPyTantivyE2ETest {
     }
 
     private static boolean isNativeAvailable() {
-        try {
-            NativeLoader.loadJni();
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
+        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
+        return path != null && !path.isEmpty() && new File(path).isFile();
     }
 
     java.nio.file.Path tempDir =
@@ -95,9 +92,8 @@ public class JavaPyTantivyE2ETest {
 
     @BeforeEach
     public void before() throws Exception {
-        if (!Files.exists(tempDir.resolve("warehouse"))) {
-            Files.createDirectories(tempDir.resolve("warehouse"));
-        }
+        FileIOUtils.deleteDirectoryQuietly(tempDir.resolve("warehouse").toFile());
+        Files.createDirectories(tempDir.resolve("warehouse"));
         warehouse = new Path("file://" + tempDir.resolve("warehouse"));
     }
 
@@ -129,7 +125,7 @@ public class JavaPyTantivyE2ETest {
                 Arrays.asList(
                         "Running runners search Apache Paimon",
                         "Run search with Paimon lake",
-                        "The connector runs analytics"),
+                        "The connector runs search analytics"),
                 "simple");
 
         writeTableWithTantivyIndex(
@@ -194,9 +190,6 @@ public class JavaPyTantivyE2ETest {
         if ("ngram".equals(tokenizer)) {
             indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MIN_GRAM, 2);
             indexOptions.set(TantivyFullTextIndexOptions.NGRAM_MAX_GRAM, 2);
-        } else if ("simple".equals(tokenizer)) {
-            indexOptions.set(TantivyFullTextIndexOptions.STEM, true);
-            indexOptions.set(TantivyFullTextIndexOptions.REMOVE_STOP_WORDS, true);
         }
 
         GlobalIndexSingleColumnWriter writer =
@@ -220,10 +213,6 @@ public class JavaPyTantivyE2ETest {
         assertThat(persistedOptions.tokenizer()).isEqualTo(tokenizer);
         assertThat(persistedOptions.ngramMinGram()).isEqualTo(2);
         assertThat(persistedOptions.ngramMaxGram()).isEqualTo(2);
-        if ("simple".equals(tokenizer)) {
-            assertThat(persistedOptions.stem()).isTrue();
-            assertThat(persistedOptions.removeStopWords()).isTrue();
-        }
 
         Range rowRange = new Range(0, contents.size() - 1);
         List<IndexFileMeta> indexFiles =

@@ -24,22 +24,17 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.index.fulltext.FullTextIndexInput;
+import org.apache.paimon.index.fulltext.FullTextIndexReader;
+import org.apache.paimon.index.fulltext.FullTextQuery;
+import org.apache.paimon.index.fulltext.FullTextSearchResult;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
-import org.apache.paimon.tantivy.SearchResult;
-import org.apache.paimon.tantivy.StreamFileInput;
-import org.apache.paimon.tantivy.TantivySearcher;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -47,45 +42,28 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * Full-text global index reader using Tantivy.
+ * Full-text global index reader using paimon-full-text.
  *
- * <p>Reads the archive header to get file layout, then opens a Tantivy searcher backed by JNI
- * callbacks to the {@link SeekableInputStream}. No temp files are created.
- *
- * <p>On {@link #close()}, the searcher is returned to the {@link TantivySearcherPool} rather than
- * destroyed, so the Rust-side index (including the FST term dictionary) stays warm across queries.
+ * <p>The standalone native reader receives positional read callbacks backed by Paimon's
+ * {@link SeekableInputStream}. No temp files are created.
  */
 public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
 
     private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
-    private final Map<String, ArchiveLayout> layoutCache;
-    private final TantivySearcherPool searcherPool;
-    private final String poolKey;
     private final ExecutorService executor;
-    private final TantivyFullTextIndexOptions indexOptions;
 
-    private volatile TantivySearcherPool.PooledEntry borrowed;
+    private volatile FullTextIndexReader reader;
+    private volatile SeekableInputStream inputStream;
 
     public TantivyFullTextGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
-            Map<String, ArchiveLayout> layoutCache,
-            TantivySearcherPool searcherPool,
             ExecutorService executor) {
         checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.executor = executor;
         this.fileReader = fileReader;
         this.ioMeta = ioMetas.get(0);
-        this.layoutCache = layoutCache;
-        this.searcherPool = searcherPool;
-        this.poolKey =
-                this.ioMeta.filePath().toString()
-                        + "@"
-                        + this.ioMeta.fileSize()
-                        + "#"
-                        + Arrays.hashCode(this.ioMeta.metadata());
-        this.indexOptions = deserializeIndexOptions(this.ioMeta.metadata());
     }
 
     @Override
@@ -99,18 +77,19 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                         if (includeRowIds != null && includeRowIds.isEmpty()) {
                             return Optional.of(ScoredGlobalIndexResult.createEmpty());
                         }
-                        int searchLimit =
+                        checkArgument(
+                                fullTextSearch.columns().size() == 1,
+                                "Tantivy full-text index reader expects a single-column query, got: %s",
+                                fullTextSearch.columns());
+                        FullTextQuery query = FullTextQuery.json(fullTextSearch.queryJson());
+                        FullTextSearchResult result =
                                 includeRowIds == null
-                                        ? fullTextSearch.limit()
-                                        : borrowed.searcher.numDocs();
-                        if (searchLimit <= 0) {
-                            return Optional.of(ScoredGlobalIndexResult.createEmpty());
-                        }
-                        SearchResult result =
-                                borrowed.searcher.searchJson(
-                                        fullTextSearch.queryJson(), searchLimit);
-                        ScoredGlobalIndexResult scored = toScoredResult(result, includeRowIds);
-                        return Optional.of(scored.topK(fullTextSearch.limit()));
+                                        ? reader.search(query, fullTextSearch.limit())
+                                        : reader.search(
+                                                query,
+                                                fullTextSearch.limit(),
+                                                includeRowIds.serialize());
+                        return Optional.of(toScoredResult(result));
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to search Tantivy full-text index", e);
                     }
@@ -118,55 +97,32 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
                 executor);
     }
 
-    private ScoredGlobalIndexResult toScoredResult(
-            SearchResult result, @Nullable RoaringNavigableMap64 includeRowIds) {
+    private ScoredGlobalIndexResult toScoredResult(FullTextSearchResult result) {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(result.size());
         for (int i = 0; i < result.size(); i++) {
-            long rowId = result.getRowIds()[i];
-            if (includeRowIds != null && !includeRowIds.contains(rowId)) {
-                continue;
-            }
+            long rowId = result.rowIds()[i];
             bitmap.add(rowId);
-            id2scores.put(rowId, result.getScores()[i]);
+            id2scores.put(rowId, result.scores()[i]);
         }
         return new TantivyScoredGlobalIndexResult(bitmap, id2scores);
     }
 
     private void ensureLoaded() throws IOException {
-        if (borrowed == null) {
+        if (reader == null) {
             synchronized (this) {
-                if (borrowed == null) {
-                    TantivySearcherPool.PooledEntry entry = searcherPool.borrow(poolKey);
-                    if (entry == null || entry.searcher.isClosed()) {
-                        entry = createEntry();
+                if (reader == null) {
+                    SeekableInputStream input = fileReader.getInputStream(ioMeta);
+                    try {
+                        inputStream = input;
+                        reader = new FullTextIndexReader(new PaimonFullTextIndexInput(input));
+                    } catch (RuntimeException e) {
+                        input.close();
+                        inputStream = null;
+                        throw e;
                     }
-                    borrowed = entry;
                 }
             }
-        }
-    }
-
-    private TantivySearcherPool.PooledEntry createEntry() throws IOException {
-        SeekableInputStream in = fileReader.getInputStream(ioMeta);
-        try {
-            ArchiveLayout layout = layoutCache.get(poolKey);
-            if (layout == null) {
-                layout = parseArchiveHeader(in);
-                layoutCache.put(poolKey, layout);
-            }
-            StreamFileInput streamInput = new SynchronizedStreamFileInput(in);
-            TantivySearcher searcher =
-                    new TantivySearcher(
-                            layout.fileNames,
-                            layout.fileOffsets,
-                            layout.fileLengths,
-                            streamInput,
-                            indexOptions.toNativeConfigJson());
-            return new TantivySearcherPool.PooledEntry(searcher, in);
-        } catch (Exception e) {
-            in.close();
-            throw e;
         }
     }
 
@@ -179,59 +135,11 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    /**
-     * Parse the archive header to extract file names, offsets, and lengths. The archive format is:
-     * [fileCount(4)] then for each file: [nameLen(4)] [name(utf8)] [dataLen(8)] [data].
-     *
-     * <p>This method reads the header sequentially and computes the absolute byte offset of each
-     * file's data within the stream.
-     */
-    private static ArchiveLayout parseArchiveHeader(SeekableInputStream in) throws IOException {
-        int fileCount = readInt(in);
-        List<String> names = new ArrayList<>(fileCount);
-        List<Long> offsets = new ArrayList<>(fileCount);
-        List<Long> lengths = new ArrayList<>(fileCount);
-
-        for (int i = 0; i < fileCount; i++) {
-            int nameLen = readInt(in);
-            byte[] nameBytes = new byte[nameLen];
-            readFully(in, nameBytes);
-            names.add(new String(nameBytes, StandardCharsets.UTF_8));
-
-            long dataLen = readLong(in);
-            long dataOffset = in.getPos();
-            offsets.add(dataOffset);
-            lengths.add(dataLen);
-
-            // Skip past the file data
-            in.seek(dataOffset + dataLen);
-        }
-
-        return new ArchiveLayout(
-                names.toArray(new String[0]),
-                offsets.stream().mapToLong(Long::longValue).toArray(),
-                lengths.stream().mapToLong(Long::longValue).toArray());
-    }
-
-    private static int readInt(SeekableInputStream in) throws IOException {
-        int b1 = in.read();
-        int b2 = in.read();
-        int b3 = in.read();
-        int b4 = in.read();
-        if ((b1 | b2 | b3 | b4) < 0) {
-            throw new IOException("Unexpected end of stream");
-        }
-        return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
-    }
-
-    private static long readLong(SeekableInputStream in) throws IOException {
-        return ((long) readInt(in) << 32) | (readInt(in) & 0xFFFFFFFFL);
-    }
-
-    private static void readFully(SeekableInputStream in, byte[] buf) throws IOException {
-        int off = 0;
-        while (off < buf.length) {
-            int read = in.read(buf, off, buf.length - off);
+    private static void readFully(SeekableInputStream in, byte[] buf, int off, int len)
+            throws IOException {
+        int end = off + len;
+        while (off < end) {
+            int read = in.read(buf, off, end - off);
             if (read == -1) {
                 throw new IOException("Unexpected end of stream");
             }
@@ -241,9 +149,41 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
 
     @Override
     public void close() throws IOException {
-        if (borrowed != null) {
-            searcherPool.returnEntry(poolKey, borrowed);
-            borrowed = null;
+        if (reader != null) {
+            reader.close();
+            reader = null;
+        }
+        if (inputStream != null) {
+            inputStream.close();
+            inputStream = null;
+        }
+    }
+
+    private static class PaimonFullTextIndexInput implements FullTextIndexInput {
+
+        private final SeekableInputStream in;
+
+        private PaimonFullTextIndexInput(SeekableInputStream in) {
+            this.in = in;
+        }
+
+        @Override
+        public synchronized void readAt(long position, byte[] buffer, int offset, int length)
+                throws IOException {
+            in.seek(position);
+            readFully(in, buffer, offset, length);
+        }
+
+        @Override
+        public synchronized void pread(long[] positions, byte[][] buffers) throws IOException {
+            checkArgument(
+                    positions.length == buffers.length,
+                    "positions length %s does not match buffers length %s",
+                    positions.length,
+                    buffers.length);
+            for (int i = 0; i < positions.length; i++) {
+                readAt(positions[i], buffers[i], 0, buffers[i].length);
+            }
         }
     }
 
@@ -329,27 +269,5 @@ public class TantivyFullTextGlobalIndexReader implements GlobalIndexReader {
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
         return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    /**
-     * Thread-safe wrapper around {@link SeekableInputStream} implementing {@link StreamFileInput}.
-     * Rust JNI holds a Mutex across seek+read to prevent interleaving from concurrent threads.
-     */
-    private static class SynchronizedStreamFileInput implements StreamFileInput {
-        private final SeekableInputStream in;
-
-        SynchronizedStreamFileInput(SeekableInputStream in) {
-            this.in = in;
-        }
-
-        @Override
-        public synchronized void seek(long position) throws IOException {
-            in.seek(position);
-        }
-
-        @Override
-        public synchronized int read(byte[] buf, int off, int len) throws IOException {
-            return in.read(buf, off, len);
-        }
     }
 }

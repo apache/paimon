@@ -159,6 +159,17 @@ public class FullTextReadImpl implements FullTextRead {
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor,
             @Nullable RoaringNavigableMap64 liveRows) {
+        if (canPushDownWholeQuery(query)) {
+            return evalColumnQuery(
+                    query,
+                    query.singleColumn(),
+                    fieldsByName,
+                    splitsByColumn,
+                    indexPathFactory,
+                    indexFileReader,
+                    executor,
+                    liveRows);
+        }
         if (query instanceof FullTextQuery.Match) {
             return evalColumnQuery(
                     query,
@@ -223,6 +234,10 @@ public class FullTextReadImpl implements FullTextRead {
                     liveRows);
         }
         throw new IllegalArgumentException("Unsupported full-text query: " + query);
+    }
+
+    private static boolean canPushDownWholeQuery(FullTextQuery query) {
+        return !(query instanceof FullTextQuery.MultiMatch) && query.columns().size() == 1;
     }
 
     private ScoredGlobalIndexResult evalMultiMatch(

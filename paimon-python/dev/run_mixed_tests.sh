@@ -572,9 +572,9 @@ run_tantivy_fulltext_test() {
         fi
     fi
     cd "$PAIMON_PYTHON_DIR"
-    echo "Installing Python jieba tokenizer dependency for Tantivy jieba index reads..."
-    if ! python -m pip install 'jieba>=0.42,<1'; then
-        echo -e "${RED}✗ Failed to install jieba${NC}"
+    echo "Checking paimon-ftindex Python dependency for Tantivy full-text index reads..."
+    if ! python -c "import paimon_ftindex"; then
+        echo -e "${RED}✗ paimon-ftindex is not installed or its native FFI library is unavailable${NC}"
         return 1
     fi
     echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."

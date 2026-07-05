@@ -23,41 +23,26 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.tantivy.TantivyIndexWriter;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.paimon.index.fulltext.FullTextIndexOutput;
+import org.apache.paimon.index.fulltext.FullTextIndexWriter;
 
 import java.io.Closeable;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * Full-text global index writer using Tantivy.
  *
- * <p>Text data is written to a local Tantivy index via JNI. On {@link #finish()}, the index
- * directory is packed into a single file and written to the global index file system.
+ * <p>Text data is written through the standalone paimon-full-text native writer.
  */
 public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "tantivy";
-    private static final Logger LOG =
-            LoggerFactory.getLogger(TantivyFullTextGlobalIndexWriter.class);
 
     private final GlobalIndexFileWriter fileWriter;
     private final TantivyFullTextIndexOptions indexOptions;
-    private File tempIndexDir;
-    private TantivyIndexWriter writer;
+    private FullTextIndexWriter writer;
     private long rowCount;
     private boolean closed;
 
@@ -71,20 +56,15 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumn
         this.indexOptions = indexOptions;
         this.rowCount = 0;
         this.closed = false;
-
-        try {
-            this.tempIndexDir = Files.createTempDirectory("tantivy-index-").toFile();
-            this.tempIndexDir.deleteOnExit();
-            this.writer =
-                    new TantivyIndexWriter(
-                            tempIndexDir.getAbsolutePath(), indexOptions.toNativeConfigJson());
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create temp index directory", e);
-        }
+        this.writer = FullTextIndexWriter.create(indexOptions.toNativeOptions());
     }
 
     @Override
     public void write(Object fieldData, long relativeRowId) {
+        if (closed) {
+            throw new IllegalStateException("TantivyFullTextGlobalIndexWriter is already closed.");
+        }
+
         if (fieldData == null) {
             rowCount++;
             return;
@@ -111,11 +91,7 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumn
                 return Collections.emptyList();
             }
 
-            writer.commit();
-            writer.close();
-            writer = null;
-
-            return Collections.singletonList(packIndex());
+            return Collections.singletonList(writeIndex());
         } catch (IOException e) {
             throw new RuntimeException("Failed to write Tantivy full-text global index", e);
         } finally {
@@ -124,92 +100,28 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumn
                 writer = null;
             }
             closed = true;
-            deleteTempDir();
         }
     }
 
-    private ResultEntry packIndex() throws IOException {
-        LOG.info("Packing Tantivy index for {} rows", rowCount);
-
+    private ResultEntry writeIndex() throws IOException {
         String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
         try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
-            // Write all files in the index directory as a simple archive:
-            // For each file: [nameLen(4)] [name(utf8)] [dataLen(8)] [data]
-            File[] allFiles = tempIndexDir.listFiles();
-            if (allFiles == null) {
-                throw new IOException("Index directory is empty");
-            }
+            writer.writeIndex(
+                    new FullTextIndexOutput() {
+                        @Override
+                        public void write(byte[] buffer, int offset, int length)
+                                throws IOException {
+                            out.write(buffer, offset, length);
+                        }
 
-            // Filter to regular files only before writing count
-            List<File> indexFiles = new ArrayList<>();
-            for (File file : allFiles) {
-                if (file.isFile()) {
-                    indexFiles.add(file);
-                }
-            }
-
-            // Write file count
-            writeInt(out, indexFiles.size());
-
-            for (File file : indexFiles) {
-                byte[] nameBytes = file.getName().getBytes(StandardCharsets.UTF_8);
-                long fileLen = file.length();
-
-                writeInt(out, nameBytes.length);
-                out.write(nameBytes);
-                writeLong(out, fileLen);
-
-                try (FileInputStream fis = new FileInputStream(file)) {
-                    byte[] buf = new byte[8192];
-                    int read;
-                    while ((read = fis.read(buf)) != -1) {
-                        out.write(buf, 0, read);
-                    }
-                }
-            }
+                        @Override
+                        public void flush() throws IOException {
+                            out.flush();
+                        }
+                    });
             out.flush();
         }
-
-        LOG.info("Tantivy index packed for {} rows", rowCount);
         return new ResultEntry(fileName, rowCount, indexOptions.serialize());
-    }
-
-    private static void writeInt(PositionOutputStream out, int value) throws IOException {
-        out.write((value >>> 24) & 0xFF);
-        out.write((value >>> 16) & 0xFF);
-        out.write((value >>> 8) & 0xFF);
-        out.write(value & 0xFF);
-    }
-
-    private static void writeLong(PositionOutputStream out, long value) throws IOException {
-        writeInt(out, (int) (value >>> 32));
-        writeInt(out, (int) value);
-    }
-
-    private void deleteTempDir() {
-        if (tempIndexDir != null) {
-            try {
-                Files.walkFileTree(
-                        tempIndexDir.toPath(),
-                        new SimpleFileVisitor<Path>() {
-                            @Override
-                            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                                    throws IOException {
-                                Files.delete(file);
-                                return FileVisitResult.CONTINUE;
-                            }
-
-                            @Override
-                            public FileVisitResult postVisitDirectory(Path dir, IOException exc)
-                                    throws IOException {
-                                Files.delete(dir);
-                                return FileVisitResult.CONTINUE;
-                            }
-                        });
-            } catch (IOException ignored) {
-            }
-            tempIndexDir = null;
-        }
     }
 
     @Override
@@ -220,7 +132,6 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingleColumn
                 writer.close();
                 writer = null;
             }
-            deleteTempDir();
         }
     }
 }

@@ -34,8 +34,8 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-tantivy-jni</artifactId>
-            <version>${project.version}</version>
+            <artifactId>paimon-full-text-index</artifactId>
+            <version>${paimon.full-text-index.version}</version>
         </dependency>
 
         <dependency>

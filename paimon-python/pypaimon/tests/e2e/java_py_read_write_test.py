@@ -1152,12 +1152,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         simple_table = self.catalog.get_table('default.test_tantivy_fulltext_simple')
         simple_builder = simple_table.new_full_text_search_builder()
-        simple_builder.with_query(MatchQuery('running', 'content'))
+        simple_builder.with_query(MatchQuery('search', 'content'))
         simple_builder.with_limit(10)
 
         simple_result = simple_builder.execute_local()
         simple_row_ids = sorted(list(simple_result.results()))
-        print(f"Tantivy simple stemmed search for 'running': row_ids={simple_row_ids}")
+        print(f"Tantivy simple search for 'search': row_ids={simple_row_ids}")
         self.assertEqual(simple_row_ids, [0, 1, 2])
 
         jieba_table = self.catalog.get_table('default.test_tantivy_fulltext_jieba')

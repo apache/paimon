@@ -194,6 +194,19 @@ public class TantivyFullTextIndexOptions {
         return JsonSerdeUtil.toFlatJson(config);
     }
 
+    public Map<String, String> toNativeOptions() {
+        Map<String, String> options = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : config.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof List) {
+                options.put(entry.getKey(), joinStopWords(toStopWordList(value)));
+            } else {
+                options.put(entry.getKey(), String.valueOf(value));
+            }
+        }
+        return options;
+    }
+
     public byte[] serialize() throws IOException {
         return toNativeConfigJson().getBytes(StandardCharsets.UTF_8);
     }

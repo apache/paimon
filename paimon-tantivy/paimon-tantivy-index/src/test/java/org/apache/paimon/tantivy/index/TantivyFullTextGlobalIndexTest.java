@@ -31,7 +31,6 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
-import org.apache.paimon.tantivy.NativeLoader;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
@@ -39,13 +38,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,28 +55,20 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 public class TantivyFullTextGlobalIndexTest {
 
     private static boolean isNativeAvailable() {
-        try {
-            NativeLoader.loadJni();
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
+        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
+        return path != null && !path.isEmpty() && new File(path).isFile();
     }
 
     @TempDir java.nio.file.Path tempDir;
 
     private FileIO fileIO;
     private Path indexPath;
-    private Map<String, ArchiveLayout> layoutCache;
-    private TantivySearcherPool pool;
 
     @BeforeEach
     public void setup() {
         assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
         fileIO = new LocalFileIO();
         indexPath = new Path(tempDir.toString());
-        layoutCache = new ConcurrentHashMap<>();
-        pool = new TantivySearcherPool(4);
     }
 
     @AfterEach
@@ -117,8 +107,7 @@ public class TantivyFullTextGlobalIndexTest {
 
     private TantivyFullTextGlobalIndexReader createReader(
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> metas) {
-        return new TantivyFullTextGlobalIndexReader(
-                fileReader, metas, layoutCache, pool, newDirectExecutorService());
+        return new TantivyFullTextGlobalIndexReader(fileReader, metas, newDirectExecutorService());
     }
 
     @Test
@@ -376,7 +365,7 @@ public class TantivyFullTextGlobalIndexTest {
     }
 
     @Test
-    public void testPoolReuse() throws IOException {
+    public void testRepeatedReadersReturnConsistentResults() throws IOException {
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer = new TantivyFullTextGlobalIndexWriter(fileWriter);
         writer.write(BinaryString.fromString("Apache Paimon streaming lake"), 0);
@@ -387,14 +376,12 @@ public class TantivyFullTextGlobalIndexTest {
         GlobalIndexFileReader fileReader = createFileReader();
         FullTextSearch search = new FullTextSearch(FullTextQuery.match("paimon", "text"), 10);
 
-        // First query: pool miss, searcher is loaded and returned to pool on close.
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             Optional<ScoredGlobalIndexResult> result = reader.visitFullTextSearch(search).join();
             assertThat(result).isPresent();
             assertThat(result.get().results().contains(0L)).isTrue();
         }
 
-        // Second query: pool hit, reuses the same searcher. Results must be identical.
         try (TantivyFullTextGlobalIndexReader reader = createReader(fileReader, metas)) {
             Optional<ScoredGlobalIndexResult> result = reader.visitFullTextSearch(search).join();
             assertThat(result).isPresent();
@@ -405,8 +392,7 @@ public class TantivyFullTextGlobalIndexTest {
 
     @Test
     public void testViaIndexer() throws IOException {
-        TantivyFullTextGlobalIndexer indexer =
-                new TantivyFullTextGlobalIndexer(new TantivySearcherPool(0));
+        TantivyFullTextGlobalIndexer indexer = new TantivyFullTextGlobalIndexer();
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
         TantivyFullTextGlobalIndexWriter writer =
