@@ -589,7 +589,8 @@ ds = read_by_row_id(
 - Lookup/set semantics, like SQL `... WHERE _ROW_ID IN (...)`: one row per **distinct**
   matched row id (duplicates deduplicated), input order not preserved (rows come out
   grouped by owning file). An empty source yields an empty but correctly-typed Dataset.
-- The row ids must exist in the target's current snapshot; a foreign `_ROW_ID` raises.
+- The row ids must exist in the resolved target snapshot (latest, or the one selected via
+  `dynamic_options`); a foreign `_ROW_ID` raises.
 - Deletion-vectors-enabled tables are not supported yet, for the same reason as
   `update_by_row_id`.
 - For a non-empty target, the `row_ids` source is consumed lazily by the downstream

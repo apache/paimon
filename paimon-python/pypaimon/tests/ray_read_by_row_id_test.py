@@ -222,7 +222,7 @@ class RayReadByRowIdTest(unittest.TestCase):
         ds2 = read_by_row_id(target, pa.table({"_ROW_ID": [rid[3]]}, schema=idcol),
                              self.catalog_options, projection=["id", "age"],
                              dynamic_options={"scan.snapshot-id": "1"})
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "valid range"):
             ds2.take_all()
 
     def test_time_travel_via_tag_dynamic_options(self):
@@ -243,8 +243,17 @@ class RayReadByRowIdTest(unittest.TestCase):
         ds2 = read_by_row_id(target, pa.table({"_ROW_ID": [rid[3]]}, schema=idcol),
                              self.catalog_options, projection=["id", "age"],
                              dynamic_options={"scan.tag-name": "v1"})
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "valid range"):
             ds2.take_all()
+
+    def test_rejects_multiple_time_travel_keys(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        with self.assertRaisesRegex(ValueError, "Only one"):
+            read_by_row_id(target, src, self.catalog_options, projection=["age"],
+                           dynamic_options={"scan.snapshot-id": "1", "scan.tag-name": "x"})
 
     def test_pins_base_snapshot(self):
         import importlib
