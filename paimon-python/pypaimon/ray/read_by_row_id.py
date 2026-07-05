@@ -97,6 +97,7 @@ def read_by_row_id(
     Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
     from pypaimon.table.special_fields import SpecialFields
 
     _require_ray_join()
@@ -106,7 +107,6 @@ def read_by_row_id(
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
-    # Validate capabilities on the persisted table, before any dynamic_options override.
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"read_by_row_id requires 'data-evolution.enabled'='true' on '{target}'.")
@@ -119,12 +119,14 @@ def read_by_row_id(
             f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
             f"'{target}'.")
     if dynamic_options:
-        # Flipping these would bypass the checks above; the rest (blob-as-descriptor,
-        # scan.snapshot-id time travel, ...) is applied to the table.
+        # Flipping these would bypass the checks above.
         bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
                       "deletion-vectors.enabled"} & set(dynamic_options))
         if bad:
             raise ValueError(f"dynamic_options cannot override table invariants {bad}.")
+        # table.copy's _try_time_travel swallows the multi-key error, so reject it here.
+        if len([k for k in SCAN_KEYS if k in dynamic_options]) > 1:
+            raise ValueError(f"dynamic_options may set at most one time-travel key {SCAN_KEYS}.")
         table = table.copy(dynamic_options)
 
     rid = SpecialFields.ROW_ID.name
@@ -153,6 +155,15 @@ def read_by_row_id(
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
     base = _read_snapshot(table)
+    if base is not None and dynamic_options and any(k in dynamic_options for k in SCAN_KEYS):
+        # A pre-row-tracking snapshot has files without row ids; fail clearly here rather
+        # than deep in the planner (the persisted-table check above cannot see this).
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+        base_schema = table.schema_manager.get_schema(base.schema_id)
+        if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
+            raise ValueError(
+                f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
     # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
     if base is None or base.total_record_count == 0:
         # Force an action on the source only in this degenerate branch (like update_by_row_id).
@@ -163,7 +174,6 @@ def read_by_row_id(
     # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
     # so the planner's own snapshot-id pin does not read as a second, conflicting one.
     from pypaimon.common.options.core_options import CoreOptions
-    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
     present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
     if present:
         overrides = {k: None for k in present}
