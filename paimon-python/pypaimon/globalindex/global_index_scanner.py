@@ -411,13 +411,13 @@ def _create_inner_readers(
             fallback_scan_max_size=core_options.bitmap_index_fallback_scan_max_size(),
         )]
 
-    from pypaimon.globalindex.tantivy import (
-        TANTIVY_FULLTEXT_IDENTIFIER,
-        TantivyFullTextGlobalIndexReader,
+    from pypaimon.globalindex.full_text import (
+        FULL_TEXT_IDENTIFIER,
+        NativeFullTextGlobalIndexReader,
     )
-    if index_type == TANTIVY_FULLTEXT_IDENTIFIER:
+    if index_type == FULL_TEXT_IDENTIFIER:
         return [
-            TantivyFullTextGlobalIndexReader(file_io, index_path, [io_meta])
+            NativeFullTextGlobalIndexReader(file_io, index_path, [io_meta])
             for io_meta in io_metas
         ]
 

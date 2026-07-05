@@ -19,16 +19,9 @@
 
 from abc import ABC, abstractmethod
 from concurrent.futures import wait
+from io import BytesIO
 from typing import Dict, List
 
-from pypaimon.globalindex.full_text_query import (
-    BooleanQuery,
-    BoostQuery,
-    FullTextQuery,
-    MatchQuery,
-    MultiMatchQuery,
-    PhraseQuery,
-)
 from pypaimon.globalindex.full_text_search import FullTextSearch
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
@@ -38,9 +31,13 @@ from pypaimon.globalindex.vector_search_result import (
     ScoredGlobalIndexResult,
 )
 from pypaimon.table.source import global_index_live_row_filter
-from pypaimon.table.source.full_text_search_split import FullTextSearchSplit
+from pypaimon.table.source.full_text_search_split import (
+    FullTextSearchSplit,
+    IndexFullTextSearchSplit,
+    RawFullTextSearchSplit,
+)
 from pypaimon.table.source.full_text_scan import FullTextScanPlan
-from pypaimon.utils.roaring_bitmap import RoaringBitmap64
+from pypaimon.utils.range import Range
 
 
 class FullTextRead(ABC):
@@ -62,81 +59,40 @@ class FullTextReadImpl(FullTextRead):
         table: 'FileStoreTable',
         limit: int,
         text_column,
-        query: FullTextQuery,
+        query: str,
         partition_filter=None,
     ):
         self._table = table
         self._limit = limit
         self._text_columns = text_column if isinstance(text_column, list) else [text_column]
+        if len(self._text_columns) != 1:
+            raise ValueError(
+                "Full-text search expects exactly one text column, got: %s"
+                % self._text_columns)
         self._query = query
         self._partition_filter = partition_filter
 
     def read(self, splits: List[FullTextSearchSplit]) -> GlobalIndexResult:
-        if not splits:
+        index_splits, raw_splits = _split_search_splits(splits)
+        if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
 
-        splits_by_column: Dict[str, List[FullTextSearchSplit]] = {}
-        for split in splits:
+        splits_by_column: Dict[str, List[IndexFullTextSearchSplit]] = {}
+        for split in index_splits:
             splits_by_column.setdefault(split.column_name, []).append(split)
         live_rows = global_index_live_row_filter.live_rows(
             self._table, self._partition_filter)
-        return self._eval_query(
-            self._query, splits_by_column, live_rows).top_k(self._limit)
-
-    def _eval_query(
-            self,
-            query: FullTextQuery,
-            splits_by_column: Dict[str, List[FullTextSearchSplit]],
-            live_rows
-    ) -> ScoredGlobalIndexResult:
-        if isinstance(query, MatchQuery):
-            return self._eval_column_query(
-                query, query.column, splits_by_column, live_rows)
-        if isinstance(query, PhraseQuery):
-            return self._eval_column_query(
-                query, query.column, splits_by_column, live_rows)
-        if isinstance(query, MultiMatchQuery):
-            results = []
-            for column, boost in zip(query.columns, query.boosts):
-                match = MatchQuery(
-                    query.query, column, boost=boost, operator=query.operator)
-                results.append(
-                    self._eval_column_query(match, column, splits_by_column, live_rows))
-            return _or(results).top_k(self._limit)
-        if isinstance(query, BoostQuery):
-            positive = self._eval_query(query.positive, splits_by_column, live_rows)
-            negative = self._eval_query(query.negative, splits_by_column, live_rows)
-            return _boost(positive, negative, query.negative_boost)
-        if isinstance(query, BooleanQuery):
-            result = None
-            for child in query.must():
-                child_result = self._eval_query(child, splits_by_column, live_rows)
-                result = child_result if result is None else _and(result, child_result)
-
-            should_results = []
-            for child in query.should():
-                should_results.append(
-                    self._eval_query(child, splits_by_column, live_rows))
-            if should_results:
-                should_result = _or(should_results)
-                result = should_result if result is None else _and_with_bonus(
-                    result, should_result)
-
-            if result is None:
-                return ScoredGlobalIndexResult.create_empty()
-            for child in query.must_not():
-                result = _and_not(
-                    result, self._eval_query(child, splits_by_column, live_rows))
-            return result
-        raise ValueError("Unsupported full-text query type: %s" % type(query).__name__)
+        indexed_result = self._eval_column_query(splits_by_column, live_rows)
+        raw_result = self._read_raw_search(
+            _raw_row_ranges(raw_splits), _index_type(index_splits))
+        return indexed_result.or_(raw_result).top_k(self._limit)
 
     def _eval_column_query(
             self,
-            query: FullTextQuery,
-            column: str,
-            splits_by_column: Dict[str, List[FullTextSearchSplit]],
+            splits_by_column: Dict[str, List[IndexFullTextSearchSplit]],
             live_rows
     ) -> ScoredGlobalIndexResult:
+        column = self._text_columns[0].name
         splits = splits_by_column.get(column, [])
         if not splits:
             return ScoredGlobalIndexResult.create_empty()
@@ -149,7 +105,6 @@ class FullTextReadImpl(FullTextRead):
             futures.append(self._eval(
                 split.row_range_start, split.row_range_end,
                 split.full_text_index_files,
-                query,
                 include_row_ids,
             ))
         if not futures:
@@ -169,7 +124,7 @@ class FullTextReadImpl(FullTextRead):
         return DictBasedScoredIndexResult(merged_scores).top_k(self._limit)
 
     def _eval(self, row_range_start, row_range_end, full_text_index_files,
-              query, include_row_ids):
+              include_row_ids):
         index_io_meta_list = []
         for index_file in full_text_index_files:
             meta = index_file.global_index_meta
@@ -193,7 +148,8 @@ class FullTextReadImpl(FullTextRead):
         )
 
         full_text_search = FullTextSearch(
-            query=query,
+            field_name=self._text_columns[0].name,
+            query=self._query,
             limit=_candidate_limit(row_range_start, row_range_end),
         )
         if include_row_ids is not None:
@@ -204,72 +160,168 @@ class FullTextReadImpl(FullTextRead):
         future.add_done_callback(lambda _: reader.close())
         return future
 
+    def _read_raw_search(self, raw_row_ranges, index_type):
+        raw_row_ranges = Range.sort_and_merge_overlap(raw_row_ranges, True)
+        if not raw_row_ranges:
+            return DictBasedScoredIndexResult({})
+        if index_type is not None and not _supports_full_text_search(index_type):
+            raise ValueError(f"Unsupported full-text index type: '{index_type}'")
 
-def _and(left: ScoredGlobalIndexResult, right: ScoredGlobalIndexResult):
-    bitmap = RoaringBitmap64.and_(left.results(), right.results())
-    left_score = left.score_getter()
-    right_score = right.score_getter()
-    return ScoredGlobalIndexResult.create(
-        bitmap,
-        lambda row_id: (left_score(row_id) or 0.0) + (right_score(row_id) or 0.0),
-    )
+        row_range_start = raw_row_ranges[0].from_
+        row_range_end = raw_row_ranges[-1].to
+        table = self._read_raw_rows(raw_row_ranges)
+        if table is None or table.num_rows == 0:
+            return DictBasedScoredIndexResult({})
 
+        from pypaimon.table.special_fields import SpecialFields
 
-def _or(results: List[ScoredGlobalIndexResult]):
-    scores = {}
-    for result in results:
-        score_getter = result.score_getter()
-        for row_id in result.results():
-            scores[row_id] = scores.get(row_id, 0.0) + (score_getter(row_id) or 0.0)
-    return DictBasedScoredIndexResult(scores)
+        row_ids = table.column(SpecialFields.ROW_ID.name).to_pylist()
+        texts = table.column(self._text_columns[0].name).to_pylist()
+        index_bytes = self._build_raw_index(row_ids, texts, row_range_start)
+        if index_bytes is None:
+            return DictBasedScoredIndexResult({})
 
+        return _search_raw_full_text(
+            index_bytes,
+            row_range_start,
+            self._query,
+            _candidate_limit(row_range_start, row_range_end),
+        ).top_k(self._limit)
 
-def _and_with_bonus(base: ScoredGlobalIndexResult, bonus: ScoredGlobalIndexResult):
-    bitmap = base.results()
-    base_score = base.score_getter()
-    bonus_score = bonus.score_getter()
-    bonus_rows = bonus.results()
-    return ScoredGlobalIndexResult.create(
-        bitmap,
-        lambda row_id: (
-            (base_score(row_id) or 0.0)
-            + ((bonus_score(row_id) or 0.0) if bonus_rows.contains(row_id) else 0.0)
-        ),
-    )
+    def _read_raw_rows(self, raw_row_ranges):
+        read_builder = self._table.new_read_builder()
+        if self._partition_filter is not None:
+            read_builder = read_builder.with_partition_filter(self._partition_filter)
 
+        from pypaimon.table.special_fields import SpecialFields
 
-def _and_not(left: ScoredGlobalIndexResult, right: ScoredGlobalIndexResult):
-    bitmap = RoaringBitmap64.remove_all(left.results(), right.results())
-    return ScoredGlobalIndexResult.create(bitmap, left.score_getter())
+        projection = [self._text_columns[0].name, SpecialFields.ROW_ID.name]
+        read_builder = read_builder.with_projection(projection)
+        plan = read_builder.new_scan().with_global_index_result(
+            GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        return read_builder.new_read().to_arrow(plan.splits())
 
+    def _build_raw_index(self, row_ids, texts, row_range_start):
+        try:
+            from paimon_ftindex import FullTextIndexWriter
+        except ImportError as e:
+            raise ImportError(
+                "paimon-ftindex is required to search uncovered full-text "
+                "row ranges. Install paimon-full-text's Python package and "
+                "native FFI library."
+            ) from e
 
-def _boost(
-        positive: ScoredGlobalIndexResult,
-        negative: ScoredGlobalIndexResult,
-        negative_boost: float):
-    positive_score = positive.score_getter()
-    negative_rows = negative.results()
-    return ScoredGlobalIndexResult.create(
-        positive.results(),
-        lambda row_id: (
-            (positive_score(row_id) or 0.0)
-            * (negative_boost if negative_rows.contains(row_id) else 1.0)
-        ),
-    )
+        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+            NativeFullTextIndexOptions,
+        )
+
+        writer = FullTextIndexWriter(
+            NativeFullTextIndexOptions.from_options(
+                _raw_search_options(self._table)).to_native_options())
+        indexed = False
+        try:
+            for row_id, text in zip(row_ids, texts):
+                if text is None:
+                    continue
+                writer.add_document(
+                    int(row_id) - row_range_start,
+                    _materialize_text(text),
+                )
+                indexed = True
+            if not indexed:
+                return None
+            output = BytesIO()
+            writer.write(output)
+            return output.getvalue()
+        finally:
+            writer.close()
 
 
 def _candidate_limit(row_range_start: int, row_range_end: int) -> int:
-    return row_range_end - row_range_start + 1
+    size = row_range_end - row_range_start + 1
+    return min(size, 2147483647)
 
 
 def _create_full_text_reader(index_type, file_io, index_path, index_io_meta_list):
     """Create a global index reader for full-text search."""
-    from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
-        TANTIVY_FULLTEXT_IDENTIFIER,
+    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+        FULL_TEXT_IDENTIFIER,
     )
-    if index_type == TANTIVY_FULLTEXT_IDENTIFIER:
-        from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
-            TantivyFullTextGlobalIndexReader,
+    if index_type == FULL_TEXT_IDENTIFIER:
+        from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+            NativeFullTextGlobalIndexReader,
         )
-        return TantivyFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list)
+        return NativeFullTextGlobalIndexReader(file_io, index_path, index_io_meta_list)
     raise ValueError(f"Unsupported full-text index type: '{index_type}'")
+
+
+def _supports_full_text_search(index_type):
+    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+        FULL_TEXT_IDENTIFIER,
+    )
+    return index_type == FULL_TEXT_IDENTIFIER
+
+
+def _split_search_splits(splits):
+    index_splits = []
+    raw_splits = []
+    for split in splits:
+        if isinstance(split, IndexFullTextSearchSplit):
+            index_splits.append(split)
+        elif isinstance(split, RawFullTextSearchSplit):
+            raw_splits.append(split)
+        else:
+            raise ValueError(
+                "Unsupported full-text search split: %s"
+                % type(split).__name__)
+    return index_splits, raw_splits
+
+
+def _raw_row_ranges(raw_splits):
+    ranges = []
+    for split in raw_splits:
+        ranges.extend(split.row_ranges)
+    return Range.sort_and_merge_overlap(ranges, True)
+
+
+def _index_type(index_splits):
+    for split in index_splits:
+        if split.full_text_index_files:
+            return split.full_text_index_files[0].index_type
+    return None
+
+
+def _search_raw_full_text(index_bytes, row_range_start, query, limit):
+    from paimon_ftindex import FullTextIndexReader
+    from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+        PaimonFullTextInput,
+    )
+
+    reader = FullTextIndexReader(PaimonFullTextInput(BytesIO(index_bytes)))
+    try:
+        row_ids, scores = reader.search(query, limit=limit)
+        return DictBasedScoredIndexResult(
+            {
+                row_range_start + row_id: score
+                for row_id, score in zip(row_ids, scores)
+            })
+    finally:
+        reader.close()
+
+
+def _raw_search_options(table):
+    table_options = getattr(getattr(table, "options", None), "options", None)
+    if table_options is not None:
+        options = dict(table_options.to_map())
+    else:
+        options = dict(getattr(getattr(table, "table_schema", None), "options", {}) or {})
+    options["full-text.searcher-pool.max-size"] = "0"
+    return options
+
+
+def _materialize_text(value) -> str:
+    if hasattr(value, "as_py"):
+        value = value.as_py()
+    if not isinstance(value, str):
+        raise ValueError("Unsupported field type: %s" % type(value).__name__)
+    return value

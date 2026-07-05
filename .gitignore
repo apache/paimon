@@ -49,5 +49,6 @@ paimon-spark/paimon-spark-ut/PaimonLambdaFunctionfunction_test.java
 Cargo.lock
 ### Vortex lib ###
 *libvortex_jni*
-### Tantivy lib ###
-*libtantivy_jni*
+### Full-text lib ###
+*libpaimon_ftindex_jni*
+*libpaimon_ftindex_ffi*
