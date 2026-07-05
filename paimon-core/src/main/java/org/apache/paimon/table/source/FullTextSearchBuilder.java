@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FullTextQuery;
 
 import java.io.Serializable;
 
@@ -36,8 +35,8 @@ public interface FullTextSearchBuilder extends Serializable {
     /** The top k results to return. */
     FullTextSearchBuilder withLimit(int limit);
 
-    /** The structured full-text query to search. */
-    FullTextSearchBuilder withQuery(FullTextQuery query);
+    /** The full-text query string to search against the given field. */
+    FullTextSearchBuilder withQuery(String fieldName, String query);
 
     /** Create full-text scan to scan index files. */
     FullTextScan newFullTextScan();

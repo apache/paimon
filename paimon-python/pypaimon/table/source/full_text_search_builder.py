@@ -21,7 +21,6 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
-from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.table.source.full_text_read import FullTextRead, FullTextReadImpl
 from pypaimon.table.source.full_text_scan import FullTextScan, FullTextScanImpl
@@ -36,8 +35,8 @@ class FullTextSearchBuilder(ABC):
         pass
 
     @abstractmethod
-    def with_query(self, query: FullTextQuery) -> 'FullTextSearchBuilder':
-        """The structured full-text query to search."""
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        """The full-text query string to search against the given field."""
         pass
 
     @abstractmethod
@@ -66,14 +65,16 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def __init__(self, table: 'FileStoreTable'):
         self._table = table
         self._limit: int = 0
-        self._query: Optional[FullTextQuery] = None
+        self._field_name: Optional[str] = None
+        self._query: Optional[str] = None
         self._partition_filter = None
 
     def with_limit(self, limit: int) -> 'FullTextSearchBuilder':
         self._limit = limit
         return self
 
-    def with_query(self, query: FullTextQuery) -> 'FullTextSearchBuilder':
+    def with_query(self, field_name: str, query: str) -> 'FullTextSearchBuilder':
+        self._field_name = field_name
         self._query = query
         return self
 
@@ -133,10 +134,10 @@ class FullTextSearchBuilderImpl(FullTextSearchBuilder):
     def _text_columns(self):
         if self._query is None:
             raise ValueError("Query must be set via with_query()")
+        if self._field_name is None:
+            raise ValueError("Field name must be set via with_query()")
         field_dict = {f.name: f for f in self._table.fields}
-        fields = []
-        for name in self._query.referenced_columns():
-            if name not in field_dict:
-                raise ValueError(f"Text column '{name}' not found in table schema")
-            fields.append(field_dict[name])
-        return fields
+        if self._field_name not in field_dict:
+            raise ValueError(
+                f"Text column '{self._field_name}' not found in table schema")
+        return [field_dict[self._field_name]]

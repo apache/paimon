@@ -1563,24 +1563,14 @@ class MultimodalTableTest(unittest.TestCase):
 
         options = {"tokenizer": "default"}
         self.assertEqual(
-            "tantivy-fulltext",
+            "full-text",
             docs.create_index("content", index_type="full-text",
                               options=options),
-        )
-        self.assertEqual(
-            "tantivy-fulltext",
-            docs.create_index("content", index_type="full_text"),
-        )
-        self.assertEqual(
-            "tantivy-fulltext",
-            docs.create_index("content", index_type="fulltext"),
         )
 
         self.assertEqual(
             [
-                ("content", "tantivy-fulltext", options),
-                ("content", "tantivy-fulltext", None),
-                ("content", "tantivy-fulltext", None),
+                ("content", "full-text", options),
             ],
             calls,
         )
@@ -1925,8 +1915,8 @@ class MultimodalTableTest(unittest.TestCase):
         calls = {}
 
         class FakeFullTextBuilder:
-            def with_query(self, query):
-                calls["query"] = query.to_dict()
+            def with_query(self, field_name, query):
+                calls["query"] = (field_name, json.loads(query))
                 return self
 
             def with_limit(self, limit):
@@ -1945,9 +1935,8 @@ class MultimodalTableTest(unittest.TestCase):
         )
 
         self.assertEqual(1, calls["limit"])
-        self.assertEqual("content", calls["query"]["match"]["column"])
-        self.assertEqual("paimon vector", calls["query"]["match"]["terms"])
-        self.assertEqual("Or", calls["query"]["match"]["operator"])
+        self.assertEqual("content", calls["query"][0])
+        self.assertEqual("paimon vector", calls["query"][1]["match"]["query"])
         self.assertEqual([1], result["id"].to_pylist())
 
     def test_search_string_requires_unambiguous_text_column(self):
@@ -1981,7 +1970,7 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             pmm.vector_route([1.0, 0.0, 0.0])
         route = pmm.text_route("paimon")
-        self.assertFalse(hasattr(route, "column"))
+        self.assertIsNone(route.column)
         self.assertEqual("paimon", route.query)
 
     def test_search_can_build_hybrid_routes(self):
@@ -2016,8 +2005,9 @@ class MultimodalTableTest(unittest.TestCase):
                 return self
 
             def add_full_text_route(
-                    self, query_json, limit, weight=1.0, options=None):
-                calls["text"] = (json.loads(query_json), limit, weight, options)
+                    self, field_name, query, limit, weight=1.0, options=None):
+                calls["text"] = (
+                    field_name, json.loads(query), limit, weight, options)
                 return self
 
             def with_filter(self, predicate):
@@ -2047,8 +2037,8 @@ class MultimodalTableTest(unittest.TestCase):
             ("embedding", [1.0, 0.0, 0.0], 2, 1.0, {}),
             calls["vector"],
         )
-        self.assertEqual("content", calls["text"][0]["match"]["column"])
-        self.assertEqual("paimon", calls["text"][0]["match"]["terms"])
+        self.assertEqual("content", calls["text"][0])
+        self.assertEqual("paimon", calls["text"][1]["match"]["query"])
         self.assertEqual([1, 2], result["id"].to_pylist())
 
     def test_search_hybrid_applies_pre_filter_to_vector_routes(self):
@@ -2160,9 +2150,9 @@ class MultimodalTableTest(unittest.TestCase):
                 return self
 
             def add_full_text_route(
-                    self, query_json, limit, weight=1.0, options=None):
+                    self, field_name, query, limit, weight=1.0, options=None):
                 calls["text_routes"].append(
-                    (json.loads(query_json), limit, weight, options))
+                    (field_name, json.loads(query), limit, weight, options))
                 return self
 
             def execute_local(self):
@@ -2217,10 +2207,10 @@ class MultimodalTableTest(unittest.TestCase):
             ],
             calls["vector_routes"],
         )
-        self.assertEqual("content", calls["text_routes"][0][0]["match"]["column"])
-        self.assertEqual("paimon", calls["text_routes"][0][0]["match"]["terms"])
-        self.assertEqual(4, calls["text_routes"][0][1])
-        self.assertEqual(0.2, calls["text_routes"][0][2])
+        self.assertEqual("content", calls["text_routes"][0][0])
+        self.assertEqual("paimon", calls["text_routes"][0][1]["match"]["query"])
+        self.assertEqual(4, calls["text_routes"][0][2])
+        self.assertEqual(0.2, calls["text_routes"][0][3])
         self.assertEqual(
             [{
                 "id": 1,

@@ -19,12 +19,11 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -38,7 +37,8 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private final FileStoreTable table;
 
     private int limit;
-    private FullTextQuery query;
+    private String fieldName;
+    private String query;
     private PartitionPredicate partitionFilter;
 
     public FullTextSearchBuilderImpl(InnerTable table) {
@@ -58,7 +58,8 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     }
 
     @Override
-    public FullTextSearchBuilder withQuery(FullTextQuery query) {
+    public FullTextSearchBuilder withQuery(String fieldName, String query) {
+        this.fieldName = fieldName;
         this.query = query;
         return this;
     }
@@ -76,12 +77,9 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     private List<DataField> textColumns() {
         checkNotNull(query, "Query must be set via withQuery()");
-        List<DataField> textColumns = new ArrayList<>();
-        for (String columnName : query.columns()) {
-            DataField textColumn = table.rowType().getField(columnName);
-            checkNotNull(textColumn, "Text column '%s' does not exist.", columnName);
-            textColumns.add(textColumn);
-        }
-        return textColumns;
+        checkNotNull(fieldName, "Field name must be set via withQuery()");
+        DataField textColumn = table.rowType().getField(fieldName);
+        checkNotNull(textColumn, "Text column '%s' does not exist.", fieldName);
+        return Collections.singletonList(textColumn);
     }
 }

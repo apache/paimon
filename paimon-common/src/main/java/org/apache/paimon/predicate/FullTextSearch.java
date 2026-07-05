@@ -23,25 +23,29 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.List;
 
-/** FullTextSearch to perform full-text search with a structured query. */
+/** FullTextSearch to perform full-text search with a query string. */
 public class FullTextSearch implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final FullTextQuery query;
+    private final String fieldName;
+    private final String query;
     private final int limit;
 
     @Nullable private RoaringNavigableMap64 includeRowIds;
 
-    public FullTextSearch(FullTextQuery query, int limit) {
+    public FullTextSearch(String fieldName, String query, int limit) {
+        if (fieldName == null || fieldName.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
+        }
         if (query == null) {
             throw new IllegalArgumentException("Query cannot be null");
         }
         if (limit <= 0) {
             throw new IllegalArgumentException("Limit must be positive, got: " + limit);
         }
+        this.fieldName = fieldName;
         this.query = query;
         this.limit = limit;
     }
@@ -50,15 +54,15 @@ public class FullTextSearch implements Serializable {
         return limit;
     }
 
-    public List<String> columns() {
-        return query.columns();
+    public String column() {
+        return fieldName;
     }
 
     public String fieldName() {
-        return query.singleColumn();
+        return fieldName;
     }
 
-    public FullTextQuery query() {
+    public String query() {
         return query;
     }
 
@@ -73,21 +77,16 @@ public class FullTextSearch implements Serializable {
 
     public FullTextSearch offsetRange(long from, long to) {
         if (includeRowIds != null) {
-            FullTextSearch target = new FullTextSearch(query, limit);
+            FullTextSearch target = new FullTextSearch(fieldName, query, limit);
             target.withIncludeRowIds(VectorSearchUtils.offsetRowIds(includeRowIds, from, to));
             return target;
         }
         return this;
     }
 
-    public String queryJson() {
-        return query.toJson();
-    }
-
     @Override
     public String toString() {
         return String.format(
-                "FullTextSearch{columns=%s, limit=%d, queryJson=%s}",
-                columns(), limit, queryJson());
+                "FullTextSearch{fieldName=%s, limit=%d, query=%s}", fieldName, limit, query);
     }
 }

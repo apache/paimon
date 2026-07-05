@@ -41,11 +41,11 @@ from pypaimon.globalindex.build_plan import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
 from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
-    TANTIVY_FULLTEXT_IDENTIFIER,
+from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+    FULL_TEXT_IDENTIFIER,
 )
-from pypaimon.globalindex.tantivy.tantivy_full_text_index_writer import (
-    TantivyFullTextIndexWriter,
+from pypaimon.globalindex.full_text.native_full_text_index_writer import (
+    NativeFullTextIndexWriter,
 )
 from pypaimon.globalindex.vindex.vindex_vector_global_index_reader import (
     VINDEX_IDENTIFIERS,
@@ -97,7 +97,7 @@ def create_global_index(
 
 _SORTED_INDEX_IDENTIFIERS = (BTREE_IDENTIFIER, BITMAP_IDENTIFIER)
 _GENERIC_INDEX_IDENTIFIERS = tuple(VINDEX_IDENTIFIERS) + (
-    TANTIVY_FULLTEXT_IDENTIFIER,
+    FULL_TEXT_IDENTIFIER,
 )
 _SORTED_INDEX_RECORDS_PER_RANGE_FLOATING = 1.2
 
@@ -341,8 +341,8 @@ class GlobalIndexBuilder:
                 self._options.to_map(),
                 index_field.name,
             )
-        if self._index_type == TANTIVY_FULLTEXT_IDENTIFIER:
-            return TantivyFullTextIndexWriter(
+        if self._index_type == FULL_TEXT_IDENTIFIER:
+            return NativeFullTextIndexWriter(
                 self._table.file_io,
                 index_path,
                 index_field.type,

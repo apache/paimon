@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
@@ -22,7 +23,6 @@ from typing import Dict, Mapping, Optional, Sequence
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.globalindex.full_text_query import FullTextQuery
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
     HybridQuery,
@@ -60,6 +60,7 @@ class TextRoute:
     """Full-text route spec for hybrid search."""
 
     query: object
+    column: Optional[str] = None
     weight: float = 1.0
     limit: Optional[int] = None
     options: Optional[Dict[str, str]] = None
@@ -77,11 +78,12 @@ def vector_route(column, vector, *, weight: float = 1.0,
     )
 
 
-def text_route(query, *, weight: float = 1.0,
+def text_route(query, *, column: Optional[str] = None, weight: float = 1.0,
                limit: Optional[int] = None,
                options: Optional[Dict[str, str]] = None) -> TextRoute:
     return TextRoute(
         query=query,
+        column=column,
         weight=weight,
         limit=limit,
         options=dict(options or {}),
@@ -215,7 +217,8 @@ class MultimodalTable:
         if isinstance(query, str):
             return TextQuery(
                 read_table,
-                text_query=_coerce_full_text_query(query, "search", schema),
+                text_query=_coerce_full_text_query(
+                    query, "search", schema, column=column),
                 pre_filter=pre_filter,
             )
         vector = _coerce_vector(query, "search")
@@ -580,9 +583,9 @@ def _rewrite_merge_refs(text):
 def _normalize_index_type(index_type):
     if not isinstance(index_type, str):
         return index_type
-    normalized = index_type.strip().lower().replace("_", "-")
-    if normalized in ("full-text", "fulltext"):
-        return "tantivy-fulltext"
+    normalized = index_type.strip().lower()
+    if normalized == "full-text":
+        return "full-text"
     return index_type
 
 
@@ -702,16 +705,13 @@ def _normalize_vector_route(route, method, schema):
 
 def _normalize_text_route(route, method, schema):
     if isinstance(route, TextRoute):
+        column = route.column
         query = route.query
         weight = route.weight
         limit = route.limit
         options = route.options
     elif isinstance(route, Mapping):
-        column = route.get("column") or route.get("text_column") or route.get("field")
-        if column is not None:
-            raise ValueError(
-                "%s text routes do not accept a column; use a full-text "
-                "query DSL to target a column." % method)
+        column = route.get("column")
         query = (
             route.get("query")
             or route.get("text")
@@ -725,8 +725,10 @@ def _normalize_text_route(route, method, schema):
         raise ValueError(
             "%s text routes require a route spec with a query."
             % method)
+    text_query = _coerce_full_text_query(query, method, schema, column=column)
     return {
-        "query": _coerce_full_text_query(query, method, schema),
+        "column": text_query["column"],
+        "query": text_query["query"],
         "weight": weight,
         "limit": limit,
         "options": dict(options or {}),
@@ -774,17 +776,22 @@ def _is_column_vector_pair(route):
     )
 
 
-def _coerce_full_text_query(query, method, schema):
-    if isinstance(query, FullTextQuery):
-        return query
+def _coerce_full_text_query(query, method, schema, column=None):
+    field_name = column or _infer_text_column(schema, "text")
     if isinstance(query, str):
-        return FullTextQuery.from_dict({
-            "match": {
-                "column": _infer_text_column(schema, "text"),
-                "terms": query,
-            },
-        })
-    raise ValueError("%s requires a text string." % method)
+        stripped = query.lstrip()
+        query_json = (
+            query
+            if stripped.startswith("{")
+            else json.dumps({"match": {"query": query}}, separators=(",", ":"))
+        )
+        return {"column": field_name, "query": query_json}
+    if isinstance(query, Mapping):
+        return {
+            "column": field_name,
+            "query": json.dumps(query, separators=(",", ":")),
+        }
+    raise ValueError("%s requires a text string or query mapping." % method)
 
 
 def _infer_vector_column(schema: pa.Schema, parameter: str = "vector_column"):

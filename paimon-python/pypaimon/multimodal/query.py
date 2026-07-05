@@ -383,7 +383,7 @@ class TextQuery(_PreFilterQuery):
         limit = query._limit if query._limit is not None else 10
         builder = (
             self._table.new_full_text_search_builder()
-            .with_query(self._text_query)
+            .with_query(self._text_query["column"], self._text_query["query"])
             .with_limit(limit)
         )
         if query._pre_filter is not None:
@@ -431,7 +431,8 @@ class HybridQuery(_PreFilterQuery):
             )
         for route in self._text_routes:
             builder = builder.add_full_text_route(
-                route["query"].to_json(),
+                route["column"],
+                route["query"],
                 limit=route.get("limit") or route_limit,
                 weight=route["weight"],
                 options=route["options"],

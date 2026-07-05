@@ -1037,7 +1037,7 @@ All available procedures are listed below.
          To create a global index on a table for accelerating queries. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>index_column(required): the column name to build index on.</li>
-            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'tantivy-fulltext'.</li>
+            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'ivf-flat', 'ivf-pq', 'ivf-hnsw-flat', 'ivf-hnsw-sq', 'full-text'.</li>
             <li>partitions(optional): partition filter for selective index creation.</li>
             <li>options(optional): additional dynamic options for index creation.</li>
       </td>
@@ -1059,24 +1059,24 @@ All available procedures are listed below.
             `index_column` => 'name',<br/>
             `index_type` => 'btree',<br/>
             `partitions` => 'pt=p1;pt=p2')<br/><br/>
-         -- Create Tantivy full-text index with ngram tokenizer<br/>
+         -- Create native full-text index with ngram tokenizer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2')<br/><br/>
-         -- Create Tantivy full-text index with jieba tokenizer<br/>
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=ngram,full-text.ngram.min-gram=2,full-text.ngram.max-gram=2')<br/><br/>
+         -- Create native full-text index with jieba tokenizer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=jieba')<br/><br/>
-         -- Create Tantivy full-text index with a custom analyzer<br/>
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=jieba')<br/><br/>
+         -- Create native full-text index with a custom analyzer<br/>
          CALL sys.create_global_index(<br/>
             `table` => 'default.T',<br/>
             `index_column` => 'content',<br/>
-            `index_type` => 'tantivy-fulltext',<br/>
-            `options` => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true')
+            `index_type` => 'full-text',<br/>
+            `options` => 'full-text.tokenizer=simple,full-text.stem=true,full-text.remove-stop-words=true')
       </td>
    </tr>
    <tr>
