@@ -194,6 +194,58 @@ class RayReadByRowIdTest(unittest.TestCase):
         self.assertEqual(n[rid[2]], len(payloads[1]))
         self.assertEqual(n[rid[4]], len(payloads[3]))
 
+    def test_rejects_invariant_dynamic_options(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        src = pa.table({"_ROW_ID": [0]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        with self.assertRaisesRegex(ValueError, "invariant"):
+            read_by_row_id(target, src, self.catalog_options, projection=["age"],
+                           dynamic_options={"deletion-vectors.enabled": "true"})
+
+    def test_time_travel_via_dynamic_options(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        self._write(target, pa.Table.from_pydict(   # snapshot 2 adds ids 3, 4
+            {"id": [3, 4], "name": ["c", "d"], "age": [3, 4]}, schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        idcol = pa.schema([("_ROW_ID", pa.int64())])
+
+        ds = read_by_row_id(target, pa.table({"_ROW_ID": [rid[1]]}, schema=idcol),
+                            self.catalog_options, projection=["id", "age"],
+                            dynamic_options={"scan.snapshot-id": "1"})
+        got = self._rows_by_id(ds)
+        self.assertEqual(set(got), {1})
+
+        # id=3 exists only in snapshot 2; at snapshot 1 its row id is foreign
+        ds2 = read_by_row_id(target, pa.table({"_ROW_ID": [rid[3]]}, schema=idcol),
+                             self.catalog_options, projection=["id", "age"],
+                             dynamic_options={"scan.snapshot-id": "1"})
+        with self.assertRaises(Exception):
+            ds2.take_all()
+
+    def test_time_travel_via_tag_dynamic_options(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        self.catalog.get_table(target).create_tag("v1", 1)
+        self._write(target, pa.Table.from_pydict(
+            {"id": [3, 4], "name": ["c", "d"], "age": [3, 4]}, schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        idcol = pa.schema([("_ROW_ID", pa.int64())])
+
+        # tag v1 == snapshot 1: id=1 reads, id=3 (snapshot 2 only) is foreign
+        ds = read_by_row_id(target, pa.table({"_ROW_ID": [rid[1]]}, schema=idcol),
+                            self.catalog_options, projection=["id", "age"],
+                            dynamic_options={"scan.tag-name": "v1"})
+        self.assertEqual(set(self._rows_by_id(ds)), {1})
+        ds2 = read_by_row_id(target, pa.table({"_ROW_ID": [rid[3]]}, schema=idcol),
+                             self.catalog_options, projection=["id", "age"],
+                             dynamic_options={"scan.tag-name": "v1"})
+        with self.assertRaises(Exception):
+            ds2.take_all()
+
     def test_pins_base_snapshot(self):
         import importlib
         m = importlib.import_module("pypaimon.ray.read_by_row_id")

@@ -48,6 +48,20 @@ def _empty_result(table: "FileStoreTable", read_cols: List[str]):
     return ray.data.from_arrow(_read_output_schema(table, read_cols).empty_table())
 
 
+def _read_snapshot(table):
+    """The snapshot to route/read on: a time-travel dynamic option if set, else the latest."""
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
+
+    opts = table.options.options
+    if not any(opts.contains_key(k) for k in SCAN_KEYS):
+        return table.snapshot_manager().get_latest_snapshot()
+    snap = TimeTravelUtil.try_travel_to_snapshot(
+        opts, table.tag_manager(), table.snapshot_manager())
+    if snap is None:
+        raise ValueError("could not resolve the time-travel snapshot from dynamic_options.")
+    return snap
+
+
 def read_by_row_id(
     target: str,
     row_ids: Any,
@@ -66,9 +80,11 @@ def read_by_row_id(
     e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator). Each row id is routed
     to the data file owning it and only those files -- and only the matched rows --
     are read, so the target is never fully scanned and there is no join against it.
-    ``projection`` lists top-level columns; blob columns are resolved to their payloads
-    by default. ``dynamic_options`` overrides read options via ``table.copy`` -- e.g.
-    ``{"blob-as-descriptor": "true"}`` returns ``BlobDescriptor`` bytes (resolve with ``map_with_blobs``).
+    ``projection`` lists top-level columns; blob columns resolve to payloads by default.
+    ``dynamic_options`` overrides read options via ``table.copy``: ``{"blob-as-descriptor":
+    "true"}`` for descriptor bytes (resolve with ``map_with_blobs``), or ``scan.snapshot-id`` /
+    ``scan.tag-name`` to read that snapshot. Options flipping table invariants
+    (``data-evolution.enabled`` etc.) are rejected.
     Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
     ``row-tracking.enabled``.
 
@@ -90,8 +106,7 @@ def read_by_row_id(
     num_partitions = _resolve_num_partitions(num_partitions)
 
     table = CatalogFactory.create(catalog_options).get_table(target)
-    if dynamic_options:
-        table = table.copy(dynamic_options)
+    # Validate capabilities on the persisted table, before any dynamic_options override.
     if not table.options.data_evolution_enabled():
         raise ValueError(
             f"read_by_row_id requires 'data-evolution.enabled'='true' on '{target}'.")
@@ -103,6 +118,14 @@ def read_by_row_id(
         raise ValueError(
             f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
             f"'{target}'.")
+    if dynamic_options:
+        # Flipping these would bypass the checks above; the rest (blob-as-descriptor,
+        # scan.snapshot-id time travel, ...) is applied to the table.
+        bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
+                      "deletion-vectors.enabled"} & set(dynamic_options))
+        if bad:
+            raise ValueError(f"dynamic_options cannot override table invariants {bad}.")
+        table = table.copy(dynamic_options)
 
     rid = SpecialFields.ROW_ID.name
     src_rid_col = row_id_col or rid
@@ -129,7 +152,7 @@ def read_by_row_id(
     rid_ds = source_ds.map_batches(_project_rid, batch_format="pyarrow")
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
-    base = table.snapshot_manager().get_latest_snapshot()
+    base = _read_snapshot(table)
     # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
     if base is None or base.total_record_count == 0:
         # Force an action on the source only in this degenerate branch (like update_by_row_id).
@@ -137,6 +160,15 @@ def read_by_row_id(
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return _empty_result(table, read_cols)
+    # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
+    # so the planner's own snapshot-id pin does not read as a second, conflicting one.
+    from pypaimon.common.options.core_options import CoreOptions
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
+    present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
+    if present:
+        overrides = {k: None for k in present}
+        overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
+        table = table.copy(overrides)
     try:
         result = distributed_read_by_row_id(
             rid_ds, table, projection,

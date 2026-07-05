@@ -576,7 +576,9 @@ ds = read_by_row_id(
   `row_id_col="row_id"` to consume a `bucket_join` locator directly.
 - `dynamic_options`: read options applied via `table.copy`, e.g.
   `{"blob-as-descriptor": "true"}` to read blob columns as small `BlobDescriptor` bytes
-  (resolved later with `map_with_blobs`) instead of materializing large payloads here.
+  (resolved later with `map_with_blobs`), or `scan.snapshot-id` / `scan.tag-name` to read a
+  specific snapshot. Options that flip table invariants (`data-evolution.enabled`,
+  `row-tracking.enabled`, `deletion-vectors.enabled`) are rejected.
 - `num_partitions`: parallelism for grouping the row ids by target file; defaults to
   `max(1, cluster_cpus * 2)`.
 - `ray_remote_args`: Ray remote options applied to the read tasks.
