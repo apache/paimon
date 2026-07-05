@@ -50,6 +50,8 @@ jobs:
         with:
           java-version: 8
           distribution: 'temurin'
+      - name: Install paimon-full-text Java dependency
+        run: bash .github/workflows/install-paimon-full-text.sh java
       - name: Build
         run: |
           set -o pipefail

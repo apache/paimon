@@ -237,7 +237,25 @@ public class FullTextReadImpl implements FullTextRead {
     }
 
     private static boolean canPushDownWholeQuery(FullTextQuery query) {
-        return !(query instanceof FullTextQuery.MultiMatch) && query.columns().size() == 1;
+        return query.columns().size() == 1 && !containsMultiMatch(query);
+    }
+
+    private static boolean containsMultiMatch(FullTextQuery query) {
+        if (query instanceof FullTextQuery.MultiMatch) {
+            return true;
+        }
+        if (query instanceof FullTextQuery.Boost) {
+            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
+            return containsMultiMatch(boost.positive()) || containsMultiMatch(boost.negative());
+        }
+        if (query instanceof FullTextQuery.BooleanQuery) {
+            for (FullTextQuery.Clause clause : ((FullTextQuery.BooleanQuery) query).queries()) {
+                if (containsMultiMatch(clause.query())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private ScoredGlobalIndexResult evalMultiMatch(

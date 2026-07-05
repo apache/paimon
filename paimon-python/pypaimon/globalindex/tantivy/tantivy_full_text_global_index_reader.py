@@ -392,7 +392,6 @@ def _native_query_dict(query):
         BoostQuery,
         MatchQuery,
         MultiMatchQuery,
-        Occur,
         PhraseQuery,
     )
 
