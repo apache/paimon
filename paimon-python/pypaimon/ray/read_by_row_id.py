@@ -66,8 +66,8 @@ def read_by_row_id(
     e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator). Each row id is routed
     to the data file owning it and only those files -- and only the matched rows --
     are read, so the target is never fully scanned and there is no join against it.
-    ``projection`` lists top-level columns; blob columns are resolved to their payloads.
-    ``dynamic_options`` overrides read options via ``table.copy`` -- e.g.
+    ``projection`` lists top-level columns; blob columns are resolved to their payloads
+    by default. ``dynamic_options`` overrides read options via ``table.copy`` -- e.g.
     ``{"blob-as-descriptor": "true"}`` returns ``BlobDescriptor`` bytes (resolve with ``map_with_blobs``).
     Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
     ``row-tracking.enabled``.
