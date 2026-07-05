@@ -477,6 +477,34 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testNestedSingleColumnMultiMatchFallsBackToRecursiveEvaluation() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {
+            "paimon overview", "vector overview", "paimon search", "engine notes"
+        };
+
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+
+        FullTextQuery query =
+                FullTextQuery.bool(
+                        Arrays.asList(
+                                FullTextQuery.occurMust(
+                                        FullTextQuery.multiMatch(
+                                                "paimon",
+                                                Collections.singletonList(TEXT_FIELD_NAME))),
+                                FullTextQuery.occurMust(
+                                        FullTextQuery.match("search", TEXT_FIELD_NAME))));
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder().withQuery(query).withLimit(10).executeLocal();
+
+        assertThat(readIds(table, result)).containsExactly(2);
+    }
+
+    @Test
     public void testMultiMatchFullTextSearchAddsColumnScores() throws Exception {
         FileStoreTable table = createMultiTextTable();
 

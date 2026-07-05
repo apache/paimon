@@ -159,6 +159,17 @@ public class FullTextReadImpl implements FullTextRead {
             GlobalIndexFileReader indexFileReader,
             ExecutorService executor,
             @Nullable RoaringNavigableMap64 liveRows) {
+        if (canPushDownWholeQuery(query)) {
+            return evalColumnQuery(
+                    query,
+                    query.singleColumn(),
+                    fieldsByName,
+                    splitsByColumn,
+                    indexPathFactory,
+                    indexFileReader,
+                    executor,
+                    liveRows);
+        }
         if (query instanceof FullTextQuery.Match) {
             return evalColumnQuery(
                     query,
@@ -223,6 +234,28 @@ public class FullTextReadImpl implements FullTextRead {
                     liveRows);
         }
         throw new IllegalArgumentException("Unsupported full-text query: " + query);
+    }
+
+    private static boolean canPushDownWholeQuery(FullTextQuery query) {
+        return query.columns().size() == 1 && !containsMultiMatch(query);
+    }
+
+    private static boolean containsMultiMatch(FullTextQuery query) {
+        if (query instanceof FullTextQuery.MultiMatch) {
+            return true;
+        }
+        if (query instanceof FullTextQuery.Boost) {
+            FullTextQuery.Boost boost = (FullTextQuery.Boost) query;
+            return containsMultiMatch(boost.positive()) || containsMultiMatch(boost.negative());
+        }
+        if (query instanceof FullTextQuery.BooleanQuery) {
+            for (FullTextQuery.Clause clause : ((FullTextQuery.BooleanQuery) query).queries()) {
+                if (containsMultiMatch(clause.query())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private ScoredGlobalIndexResult evalMultiMatch(
