@@ -118,26 +118,26 @@ def read_by_row_id(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
     source_ds = _normalize_source(row_ids, catalog_options)
-    if src_rid_col not in set(source_ds.schema().names):
+    # Only check now if the schema is free; fetching it would execute a lazy source.
+    known_schema = source_ds.schema(fetch_if_missing=False)
+    if known_schema is not None and src_rid_col not in set(known_schema.names):
         raise ValueError(f"row_ids source is missing the {src_rid_col!r} column.")
 
     def _project_rid(batch: pa.Table) -> pa.Table:
+        if src_rid_col not in batch.column_names:
+            raise ValueError(f"row_ids source is missing the {src_rid_col!r} column.")
         return pa.table({rid: batch.column(src_rid_col).cast(pa.int64())})
 
     rid_ds = source_ds.map_batches(_project_rid, batch_format="pyarrow")
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
-    # Empty source -> typed empty Dataset (a zero-row groupby has no schema).
-    source_empty = rid_ds.limit(1).count() == 0
-
     base = table.snapshot_manager().get_latest_snapshot()
     # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
     if base is None or base.total_record_count == 0:
-        if not source_empty:
+        # Force an action on the source only in this degenerate branch (like update_by_row_id).
+        if rid_ds.limit(1).count() > 0:
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
-        return _empty_result(table, read_cols)
-    if source_empty:
         return _empty_result(table, read_cols)
     try:
         result = distributed_read_by_row_id(
@@ -151,4 +151,5 @@ def read_by_row_id(
         raise  # _reraise_inner always raises
     if result is None:
         return _empty_result(table, read_cols)
-    return result
+    # Lazy result; union a typed-empty block so an empty source still carries the schema.
+    return result.union(_empty_result(table, read_cols))

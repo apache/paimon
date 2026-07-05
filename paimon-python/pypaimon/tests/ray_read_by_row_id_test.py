@@ -307,6 +307,26 @@ class RayReadByRowIdTest(unittest.TestCase):
         with self.assertRaises(Exception):
             ds.take_all()
 
+    def test_returns_lazy_without_executing_source(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1, 2], "name": ["a", "b"], "age": [1, 2]}, schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        marker = os.path.join(self.tempdir, f"exec_{uuid.uuid4().hex}")
+
+        def spy(batch):
+            open(marker, "a").close()
+            return batch
+
+        src = ray.data.from_arrow(
+            pa.table({"_ROW_ID": [rid[1]]}, schema=pa.schema([("_ROW_ID", pa.int64())]))
+        ).map_batches(spy, batch_format="pyarrow")
+        ds = read_by_row_id(target, src, self.catalog_options, projection=["id", "age"])
+        self.assertFalse(os.path.exists(marker), "source was executed at call time")
+        rows = ds.take_all()
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual({r["id"] for r in rows}, {1})
+
     def test_empty_source_non_empty_target_keeps_schema(self):
         target = self._create()
         self._write(target, pa.Table.from_pydict(
