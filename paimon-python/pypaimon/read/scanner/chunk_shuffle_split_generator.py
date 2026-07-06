@@ -29,6 +29,7 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.read.split import DataSplit, Split
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 
 
 def _null_safe_partition_key(partition_values) -> tuple:
@@ -353,25 +354,16 @@ class DataEvolutionChunkShuffleSplitGenerator(ChunkShuffleSplitGeneratorBase):
         also returns the merged row_id range per group, which the chunk
         slicer needs to drive row-count accumulation.
         """
-        list_ranges = []
         for f in files:
-            file_range = f.row_id_range()
-            if file_range is None:
+            if f.row_id_range() is None:
                 raise ValueError(
                     "chunk_shuffle for data evolution tables requires row tracking; "
                     f"file {f.file_name} is missing first_row_id"
                 )
-            list_ranges.append(file_range)
-        if not list_ranges:
-            return []
-        sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
-
-        range_to_files: "dict[Range, List[DataFileMeta]]" = {}
-        for f in files:
-            file_range = f.row_id_range()
-            for r in sorted_ranges:
-                if r.overlaps(file_range):
-                    range_to_files.setdefault(r, []).append(f)
-                    break
-
-        return sorted(range_to_files.items(), key=lambda kv: kv[0].from_)
+        groups = RangeHelper(lambda f: f.row_id_range()).merge_overlapping_ranges(files)
+        result = []
+        for group in groups:
+            ranges = [f.row_id_range() for f in group]
+            merged = Range(min(r.from_ for r in ranges), max(r.to for r in ranges))
+            result.append((merged, group))
+        return sorted(result, key=lambda kv: kv[0].from_)
