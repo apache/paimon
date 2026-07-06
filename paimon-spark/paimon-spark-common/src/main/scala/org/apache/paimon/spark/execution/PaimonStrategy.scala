@@ -315,14 +315,12 @@ case class LateralVectorSearchExec(
       readerTracker: LateralVectorSearchReaderTracker): LateralVectorSearchContext = {
     val rowType = innerTable.rowType()
     val readFieldNames = vectorSearchOutput
-      .filterNot(_.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN)
+      .filterNot(
+        attr =>
+          attr.name == PaimonMetadataColumn.SEARCH_SCORE_COLUMN ||
+            attr.name == SpecialFields.ROW_ID.name())
       .map(_.name)
-    val readFieldNamesWithRowId =
-      if (readFieldNames.contains(SpecialFields.ROW_ID.name())) {
-        readFieldNames
-      } else {
-        readFieldNames :+ SpecialFields.ROW_ID.name()
-      }
+    val readFieldNamesWithRowId = readFieldNames :+ SpecialFields.ROW_ID.name()
     val rowTypeWithRowId = SpecialFields.rowTypeWithRowId(rowType)
     val readRowType = rowType.project(readFieldNames.asJava)
     val readRowTypeWithRowId = SpecialFields.rowTypeWithRowId(readRowType)
