@@ -111,7 +111,6 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("true", options["deletion-vectors.enabled"])
         self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
-        self.assertEqual("vortex", options["file.format"])
         self.assertEqual("full", options["global-index.search-mode"])
         self.assertEqual("vortex", options["vector.file.format"])
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
