@@ -493,6 +493,17 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Enable sink writer coordinator to plan data files in Job Manager.");
 
+    public static final ConfigOption<Boolean> SINK_KEY_ONLY_DELETES_ENABLED =
+            key("sink.key-only-deletes.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a primary-key table sink advertises the FLIP-510 key-only "
+                                    + "(partial) deletes capability, allowing the Flink planner to drop the "
+                                    + "upstream ChangelogNormalize node when the source produces deletes by key. "
+                                    + "This changes the execution plan and requires Flink 2.1+; it has no "
+                                    + "effect on Flink 1.x. Disabled by default.");
+
     public static final ConfigOption<MemorySize> SINK_WRITER_COORDINATOR_CACHE_MEMORY =
             key("sink.writer-coordinator.cache-memory")
                     .memoryType()

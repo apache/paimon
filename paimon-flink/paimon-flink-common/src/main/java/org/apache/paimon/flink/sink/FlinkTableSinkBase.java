@@ -21,7 +21,9 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
+import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
@@ -96,12 +98,13 @@ public abstract class FlinkTableSinkBase
                 }
             }
             // FLIP-510: a primary-key Paimon table applies changes (including deletes) by primary
-            // key, so it can always accept key-only (partial) deletes. Advertise this as a sink
-            // capability so the planner can drop the upstream ChangelogNormalize when the source
-            // produces deletes by key. We set the flag unconditionally (rather than echoing
-            // requestedMode.keyOnlyDeletes()) because the planner builds the requested mode via
-            // ModifyKindSet#toDefaultChangelogMode(), which does not carry the keyOnlyDeletes flag.
-            builder.keyOnlyDeletes(true);
+            // key, so it can accept key-only (partial) deletes. Advertising this as a sink
+            // capability lets the planner drop the upstream ChangelogNormalize when the source
+            // produces deletes by key. This changes the execution plan, so it is opt-in via
+            // 'sink.key-only-deletes.enabled' and is a no-op on Flink 1.x (API added in Flink 2.1).
+            if (options.get(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED)) {
+                ChangelogModeUtils.enableKeyOnlyDeletes(builder);
+            }
             return builder.build();
         }
     }
