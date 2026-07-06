@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.AppendPreCommitCompactCoordinatorOperator;
 import org.apache.paimon.flink.compact.AppendPreCommitCompactWorkerOperator;
@@ -40,13 +41,16 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.flink.FlinkConnectorOptions.PRECOMMIT_COMPACT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Sink for unaware-bucket table.
@@ -142,11 +146,30 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED)
                 && !options.get(PRECOMMIT_COMPACT)) {
+            validateCoordinatorCommitOptions(written, options);
             return written.sinkTo(new DiscardingSink<>())
                     .name("end")
                     .setParallelism(written.getParallelism());
         } else {
             return super.doCommit(written, commitUser);
         }
+    }
+
+    private void validateCoordinatorCommitOptions(
+            DataStream<Committable> written, Options options) {
+        checkArgument(
+                !options.get(SINK_AUTO_TAG_FOR_SAVEPOINT),
+                "%s is not supported when %s is enabled.",
+                SINK_AUTO_TAG_FOR_SAVEPOINT.key(),
+                SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED.key());
+        checkArgument(
+                written.getExecutionEnvironment()
+                                        .getConfiguration()
+                                        .get(ExecutionOptions.RUNTIME_MODE)
+                                != RuntimeExecutionMode.BATCH
+                        || table.coreOptions().tagCreationMode() != TagCreationMode.BATCH,
+                "%s=BATCH is not supported in batch runtime when %s is enabled.",
+                TAG_AUTOMATIC_CREATION.key(),
+                SINK_COMMITTER_COORDINATOR_OPERATOR_ENABLED.key());
     }
 }
