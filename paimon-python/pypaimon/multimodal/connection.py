@@ -33,7 +33,6 @@ _DEFAULT_OPTIONS = {
     "data-evolution.enabled": "true",
     "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
-    "file.format": "vortex",
     "global-index.search-mode": "full",
     "vector.file.format": "vortex",
 }
