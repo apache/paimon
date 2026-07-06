@@ -90,6 +90,22 @@ public class ChangelogModeTest {
     }
 
     @Test
+    public void testKeyOnlyDeletesEnabled() throws Exception {
+        Options options = new Options();
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // Enabling the option must not change the contained RowKinds; it only affects the
+        // keyOnlyDeletes flag, which is unreadable on Flink 1.x.
+        test(
+                options,
+                ChangelogMode.upsert(),
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE)
+                        .build());
+    }
+
+    @Test
     public void testInputChangelogProducer() throws Exception {
         Options options = new Options();
         options.set(CHANGELOG_PRODUCER, INPUT);
