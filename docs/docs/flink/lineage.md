@@ -5,7 +5,7 @@ sidebar_position: 13
 
 # Data Lineage
 
-Paimon implements [FLIP-314](https://cwiki.apache.org/confluence/spaces/FLINK/pages/240884116/FLIP-294+Support+Customized+Catalog+Modification+Listener) to expose lineage information through Flink's native `LineageVertexProvider` interface. This allows lineage consumers (such as [OpenLineage](https://openlineage.io/docs/integrations/flink/flink2)) to automatically discover Paimon datasets in the Flink job graph.
+Paimon implements [FLIP-314](https://cwiki.apache.org/confluence/spaces/FLINK/pages/255070913/FLIP-314+Support+Customized+Job+Lineage+Listener) to expose lineage information through Flink's native `LineageVertexProvider` interface. This allows lineage consumers (such as [OpenLineage](https://openlineage.io/docs/integrations/flink/flink2)) to automatically discover Paimon datasets in the Flink job graph.
 
 ## Table API / SQL
 
@@ -13,7 +13,9 @@ When using Paimon tables via Flink SQL or Table API, lineage is automatically re
 
 Apart from the table lineage information provided by Flink natively (name, schema), Paimon enriches each dataset with a namespace and a **config facet** containing core table options and Iceberg metadata options.
 
-**Note:** For Flink's planner to extract Paimon's lineage datasets from `DataStreamScanProvider` and `DataStreamSinkProvider`, [this upstream Flink change](https://github.com/apache/flink/pull/27727) is pending merge. Without it, Table API lineage events may have missing Paimon table datasets.
+:::warning
+Full Table API lineage support requires <a href="https://github.com/apache/flink/pull/27727" style="color: #1677ff; text-decoration: underline;">this upstream Flink change</a> which is pending merge. Without it, Flink will not call `getLineageVertex()` for `DataStreamScanProvider` and `DataStreamSinkProvider`, which can lead to potentially missing Paimon input or output datasets. This applies to all Flink 2.x versions that do not yet include this change.
+:::
 
 ## DataStream API
 
