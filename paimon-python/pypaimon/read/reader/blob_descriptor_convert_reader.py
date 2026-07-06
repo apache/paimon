@@ -22,7 +22,7 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
+from pypaimon.table.row.blob import Blob, BlobViewStruct
 
 
 class BlobInlineConvertReader(RecordBatchReader):
@@ -200,8 +200,8 @@ class BlobInlineConvertReader(RecordBatchReader):
             converted_values = []
 
             for idx, value in enumerate(values):
-                view_file_io = field_file_ios[idx]
-                blob, file_io = self._blob_from_descriptor_value(value, view_file_io)
+                file_io = field_file_ios[idx] or self._table.file_io
+                blob = Blob.from_bytes(value, file_io)
                 if self._blob_parallelism > 1:
                     converted_values.append(None)
                     if blob is not None:
@@ -223,20 +223,6 @@ class BlobInlineConvertReader(RecordBatchReader):
             )
 
         return batch
-
-    def _blob_from_descriptor_value(self, value, view_file_io):
-        if value is None:
-            return None, self._table.file_io
-        if view_file_io is None:
-            file_io = self._table.file_io
-            return Blob.from_bytes(value, file_io), file_io
-
-        file_io = view_file_io
-        if BlobDescriptor.is_blob_descriptor(value):
-            descriptor = BlobDescriptor.deserialize(value)
-            return Blob.from_file(
-                file_io, descriptor.uri, descriptor.offset, descriptor.length), file_io
-        return Blob.from_bytes(value, file_io), file_io
 
     # ------------------------------------------------------------------
     # Utilities

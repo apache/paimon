@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Set
 
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.uri_reader import UriReader
+from pypaimon.common.uri_reader import FileUriReader, UriReader
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
@@ -121,23 +121,13 @@ class BlobViewLookup:
 
     def resolve_file_io(self, view_struct: BlobViewStruct):
         uri_reader = self.resolve_uri_reader(view_struct)
-        if not hasattr(uri_reader, '_file_io'):
+        if not isinstance(uri_reader, FileUriReader):
             raise ValueError(
                 "Cannot resolve BlobViewStruct {} with parallel blob reads because "
                 "upstream table {} does not use a file-backed UriReader.".format(
                     view_struct, view_struct.identifier.get_full_name())
             )
         return uri_reader._file_io
-
-    def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
-        if view_struct in self._null_value_cache:
-            return True
-        if view_struct not in self._descriptor_cache:
-            raise ValueError(
-                "Cannot resolve BlobViewStruct {} because row id {} was not found "
-                "in upstream table.".format(view_struct, view_struct.row_id)
-            )
-        return False
 
     def resolve_uri_reader(self, view_struct: BlobViewStruct) -> UriReader:
         table_key = view_struct.identifier.get_full_name()
@@ -148,6 +138,16 @@ class BlobViewLookup:
                 "was not loaded.".format(view_struct, table_key)
             )
         return uri_reader
+
+    def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
+        if view_struct in self._null_value_cache:
+            return True
+        if view_struct not in self._descriptor_cache:
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} because row id {} was not found "
+                "in upstream table.".format(view_struct, view_struct.row_id)
+            )
+        return False
 
     def _group_by_table(
             self, view_structs: List[BlobViewStruct]
