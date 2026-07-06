@@ -51,7 +51,8 @@ class MapSelectedKeysMetadataUtilsTest {
                 MapSelectedKeysMetadataUtils.buildMapSelectedKeysMetadata(
                         Arrays.asList("key1", "", "key2"));
 
-        assertThat(metadata).isEqualTo("__PAIMON_MAP_SELECTED_KEYS:key1;;key2");
+        String expectedMetadata = String.join(";", "__PAIMON_MAP_SELECTED_KEYS:key1", "", "key2");
+        assertThat(metadata).isEqualTo(expectedMetadata);
         assertThat(MapSelectedKeysMetadataUtils.selectedKeys(metadata))
                 .containsExactly("key1", "", "key2");
         assertThat(MapSelectedKeysMetadataUtils.selectedKeys("__PAIMON_MAP_SELECTED_KEYS:"))
