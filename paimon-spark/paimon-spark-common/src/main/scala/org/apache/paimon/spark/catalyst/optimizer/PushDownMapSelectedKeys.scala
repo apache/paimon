@@ -117,7 +117,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
           case _ =>
         }
     }
-    candidates
+    candidates.toSeq
   }
 
   private def rewriteExpression(
@@ -333,7 +333,7 @@ object PushDownMapSelectedKeys extends Rule[LogicalPlan] {
       StructType(keys.zipWithIndex.map {
         case (_, ordinal) =>
           StructField(ordinal.toString, valueType, nullable = true)
-      })
+      }.toSeq)
     }
   }
 
