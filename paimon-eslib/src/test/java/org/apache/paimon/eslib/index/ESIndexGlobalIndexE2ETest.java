@@ -32,7 +32,6 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.FullTextQuery;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
@@ -161,8 +160,7 @@ class ESIndexGlobalIndexE2ETest {
 
         // --- full-text search: 10 rows contain "even" ---
         Optional<ScoredGlobalIndexResult> ft =
-                reader.visitFullTextSearch(
-                                new FullTextSearch(FullTextQuery.match("even", "title"), 50))
+                reader.visitFullTextSearch(new FullTextSearch("title", matchQuery("even"), 50))
                         .join();
         assertTrue(ft.isPresent(), "full-text search returns a result");
         assertEquals(10, ft.get().results().getIntCardinality(), "10 even docs");
@@ -171,7 +169,7 @@ class ESIndexGlobalIndexE2ETest {
         // is a consecutive phrase only in row 0; "even document" never occurs in that order. ---
         Optional<ScoredGlobalIndexResult> phraseHit =
                 reader.visitFullTextSearch(
-                                new FullTextSearch(FullTextQuery.phrase("document 0", "title"), 50))
+                                new FullTextSearch("title", phraseQuery("document 0"), 50))
                         .join();
         assertTrue(phraseHit.isPresent(), "phrase 'document 0' matches");
         assertEquals(
@@ -179,8 +177,7 @@ class ESIndexGlobalIndexE2ETest {
         assertTrue(contains(phraseHit.get().results(), 0L), "phrase 'document 0' is row 0");
         assertTrue(
                 reader.visitFullTextSearch(
-                                new FullTextSearch(
-                                        FullTextQuery.phrase("even document", "title"), 50))
+                                new FullTextSearch("title", phraseQuery("even document"), 50))
                         .join()
                         .isEmpty(),
                 "phrase 'even document' never occurs in that order");
@@ -190,8 +187,7 @@ class ESIndexGlobalIndexE2ETest {
         // even docs that contain both tokens.
         Optional<ScoredGlobalIndexResult> orFt =
                 reader.visitFullTextSearch(
-                                new FullTextSearch(
-                                        FullTextQuery.match("even document", "title"), 50))
+                                new FullTextSearch("title", matchQuery("even document"), 50))
                         .join();
         assertEquals(
                 20,
@@ -199,12 +195,7 @@ class ESIndexGlobalIndexE2ETest {
                 "OR match on 'even document' hits every doc (all contain 'document')");
         Optional<ScoredGlobalIndexResult> andFt =
                 reader.visitFullTextSearch(
-                                new FullTextSearch(
-                                        FullTextQuery.match(
-                                                "even document",
-                                                "title",
-                                                FullTextQuery.Operator.AND),
-                                        50))
+                                new FullTextSearch("title", matchQuery("even document", "and"), 50))
                         .join();
         assertEquals(
                 10,
@@ -213,31 +204,12 @@ class ESIndexGlobalIndexE2ETest {
 
         // --- fuzziness is honoured: "evon" is one edit from "even" ---
         Optional<ScoredGlobalIndexResult> exactTypo =
-                reader.visitFullTextSearch(
-                                new FullTextSearch(
-                                        new FullTextQuery.Match(
-                                                "evon",
-                                                "title",
-                                                1.0f,
-                                                0,
-                                                50,
-                                                FullTextQuery.Operator.OR,
-                                                0),
-                                        50))
+                reader.visitFullTextSearch(new FullTextSearch("title", matchQuery("evon"), 50))
                         .join();
         assertTrue(exactTypo.isEmpty(), "exact 'evon' matches nothing");
         Optional<ScoredGlobalIndexResult> fuzzyTypo =
                 reader.visitFullTextSearch(
-                                new FullTextSearch(
-                                        new FullTextQuery.Match(
-                                                "evon",
-                                                "title",
-                                                1.0f,
-                                                1,
-                                                50,
-                                                FullTextQuery.Operator.OR,
-                                                0),
-                                        50))
+                                new FullTextSearch("title", fuzzyMatchQuery("evon", 1), 50))
                         .join();
         assertEquals(
                 10,
@@ -248,8 +220,7 @@ class ESIndexGlobalIndexE2ETest {
         // return empty, not throw: the ES index carries the column but cannot serve full-text on
         // it, so the engine should fall back to raw scan ---
         assertTrue(
-                reader.visitFullTextSearch(
-                                new FullTextSearch(FullTextQuery.match("even", "category"), 50))
+                reader.visitFullTextSearch(new FullTextSearch("category", matchQuery("even"), 50))
                         .join()
                         .isEmpty(),
                 "full-text search on a KEYWORD field must return empty, not throw");
@@ -345,8 +316,7 @@ class ESIndexGlobalIndexE2ETest {
 
             // full-text match works regardless of the sub-field (analyzed field).
             Optional<ScoredGlobalIndexResult> m =
-                    reader.visitFullTextSearch(
-                                    new FullTextSearch(FullTextQuery.match("paimon", "t"), 50))
+                    reader.visitFullTextSearch(new FullTextSearch("t", matchQuery("paimon"), 50))
                             .join();
             assertTrue(m.isPresent(), "match works on the FULLTEXT field");
             assertEquals(2, m.get().results().getIntCardinality(), "two docs contain 'paimon'");
@@ -884,6 +854,22 @@ class ESIndexGlobalIndexE2ETest {
             // clustering quality; with vpc=64 + 1000 docs we visit only 4/~16 clusters by default.
             // The bug-fix verification is "finite scores + non-zero hits" — see Javadoc.
         }
+    }
+
+    private static String matchQuery(String terms) {
+        return "{\"match\":{\"query\":\"" + terms + "\"}}";
+    }
+
+    private static String matchQuery(String terms, String operator) {
+        return "{\"match\":{\"query\":\"" + terms + "\",\"operator\":\"" + operator + "\"}}";
+    }
+
+    private static String fuzzyMatchQuery(String terms, int fuzziness) {
+        return "{\"match\":{\"query\":\"" + terms + "\",\"fuzziness\":" + fuzziness + "}}";
+    }
+
+    private static String phraseQuery(String terms) {
+        return "{\"match_phrase\":{\"query\":\"" + terms + "\"}}";
     }
 
     private static boolean contains(RoaringNavigableMap64 bitmap, long id) {

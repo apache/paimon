@@ -32,13 +32,17 @@ from pypaimon.ray.data_evolution_merge_into import (
     _union_update_cols,
     _validate_source_has_target_cols,
 )
-from pypaimon.ray.data_evolution_merge_join import _build_matched_transform
+from pypaimon.ray.data_evolution_merge_join import (
+    _build_matched_delete_transform,
+    _build_matched_transform,
+)
 from pypaimon.ray.data_evolution_merge_transform import (
     OnSpec,
     SourceColumnRef,
     WhenMatched,
     WhenNotMatched,
     _NormalizedClause,
+    build_delete_schema,
     build_update_schema,
     cast_to_schema,
     lit,
@@ -50,6 +54,7 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_write import BatchTableWrite, StreamTableWrite
+from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
 __all__ = [
@@ -97,7 +102,7 @@ def merge_into(
         on,
     )
 
-    update_table, insert_table, update_cols_union = _build_tables(
+    update_table, delete_table, insert_table, update_cols_union = _build_tables(
         target_table,
         source_table,
         matched_specs,
@@ -109,6 +114,7 @@ def merge_into(
     return _prepare_commit_messages(
         target_table,
         update_table,
+        delete_table,
         insert_table,
         update_cols_union,
         base_snapshot,
@@ -147,22 +153,34 @@ def _prepare(
         raise ValueError(
             "merge_into requires 'row-tracking.enabled' = 'true' on target table."
         )
+    if any(c.delete for c in when_matched) and not (
+        target_table.options.deletion_vectors_enabled(False)
+    ):
+        raise ValueError(
+            "merge_into DELETE requires 'deletion-vectors.enabled' = "
+            "'true' on target table."
+        )
 
     full_target_field_names = list(target_table.field_names)
     settable_field_names = list(full_target_field_names)
     on_map = dict(zip(target_on_cols, source_on_cols))
 
-    matched_specs = [
-        _NormalizedClause(
-            spec=_normalize_set_spec(
+    matched_specs = []
+    for c in when_matched:
+        spec = {}
+        if not c.delete:
+            spec = _normalize_set_spec(
                 c.update,
                 settable_field_names,
                 on_map,
-            ),
-            condition=c.condition,
+            )
+        matched_specs.append(
+            _NormalizedClause(
+                spec=spec,
+                condition=c.condition,
+                delete=c.delete,
+            )
         )
-        for c in when_matched
-    ]
     if matched_specs and target_table.partition_keys:
         partition_set = set(target_table.partition_keys)
         for clause in matched_specs:
@@ -283,6 +301,7 @@ def _build_tables(
 ):
     base_snapshot_id = base_snapshot.id if base_snapshot is not None else None
     update_table = None
+    delete_table = None
     insert_table = None
     update_cols_union: List[str] = []
 
@@ -297,7 +316,14 @@ def _build_tables(
                     update_cols_union,
                     base_snapshot_id,
                 )
-        return update_table, insert_table, update_cols_union
+            if any(c.delete for c in matched_specs):
+                delete_table = _build_self_merge_delete_table(
+                    target_table,
+                    matched_specs,
+                    ctx,
+                    base_snapshot_id,
+                )
+        return update_table, delete_table, insert_table, update_cols_union
 
     if matched_specs and base_snapshot is not None:
         update_cols_union = _union_update_cols(matched_specs)
@@ -308,6 +334,14 @@ def _build_tables(
                 matched_specs,
                 ctx,
                 update_cols_union,
+                base_snapshot_id,
+            )
+        if any(c.delete for c in matched_specs):
+            delete_table = _build_matched_delete_table(
+                target_table,
+                source_table,
+                matched_specs,
+                ctx,
                 base_snapshot_id,
             )
 
@@ -321,7 +355,7 @@ def _build_tables(
             target_empty=base_snapshot is None,
         )
 
-    return update_table, insert_table, update_cols_union
+    return update_table, delete_table, insert_table, update_cols_union
 
 
 def _build_self_merge_update_table(
@@ -380,6 +414,53 @@ def _build_self_merge_update_table(
     return transform(aliased)
 
 
+def _build_self_merge_delete_table(
+    target_table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = set(
+        _resolve_target_projection(
+            clauses,
+            [row_id_name],
+            [],
+            ctx.full_target_field_names,
+        )
+    )
+    target_set = set(ctx.full_target_field_names)
+    for clause in clauses:
+        if clause.condition is not None:
+            from pypaimon.ray.merge_condition import extract_columns
+
+            for ref in extract_columns(clause.condition):
+                prefix, col = ref.split(".", 1)
+                if prefix == "s" and col in target_set:
+                    needed_cols.add(col)
+    projection = [row_id_name] + [
+        c for c in ctx.full_target_field_names if c in needed_cols
+    ]
+
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    delete_schema = build_delete_schema(row_id_name)
+    if target.num_rows == 0:
+        return delete_schema.empty_table()
+
+    orig_names = list(target.schema.names)
+    target_renamed = _rename_with_prefix(target, "t.")
+    aliased = _add_self_merge_source_aliases(
+        target_renamed, orig_names, row_id_name
+    )
+    transform = _build_matched_delete_transform(
+        clauses,
+        on_map={row_id_name: row_id_name},
+        row_id_name=row_id_name,
+        delete_schema=delete_schema,
+    )
+    return transform(aliased)
+
+
 def _build_matched_update_table(
     target_table,
     source_table: pa.Table,
@@ -418,6 +499,43 @@ def _build_matched_update_table(
         update_cols=list(update_cols),
         row_id_name=row_id_name,
         update_schema=update_schema,
+    )
+    return transform(joined)
+
+
+def _build_matched_delete_table(
+    target_table,
+    source_table: pa.Table,
+    clauses: List[_NormalizedClause],
+    ctx: _PrepareCtx,
+    snapshot_id: Optional[int],
+) -> pa.Table:
+    row_id_name = SpecialFields.ROW_ID.name
+    needed_cols = _resolve_target_projection(
+        clauses,
+        ctx.target_on_cols,
+        [],
+        ctx.settable_field_names,
+    )
+    projection = [row_id_name] + [c for c in needed_cols if c != row_id_name]
+    target = _read_table(target_table, projection=projection, snapshot_id=snapshot_id)
+    delete_schema = build_delete_schema(row_id_name)
+    if target.num_rows == 0 or source_table.num_rows == 0:
+        return delete_schema.empty_table()
+
+    target_renamed = _rename_with_prefix(target, "t.")
+    source_renamed = _rename_with_prefix(source_table, "s.")
+    joined = target_renamed.join(
+        source_renamed,
+        keys=["t.{}".format(c) for c in ctx.target_on_cols],
+        right_keys=["s.{}".format(c) for c in ctx.source_on_cols],
+        join_type="inner",
+    )
+    transform = _build_matched_delete_transform(
+        clauses,
+        on_map=dict(zip(ctx.source_on_cols, ctx.target_on_cols)),
+        row_id_name=row_id_name,
+        delete_schema=delete_schema,
     )
     return transform(joined)
 
@@ -462,6 +580,7 @@ def _build_not_matched_insert_table(
 def _prepare_commit_messages(
     table,
     update_table: Optional[pa.Table],
+    delete_table: Optional[pa.Table],
     insert_table: Optional[pa.Table],
     update_cols_union: Sequence[str],
     base_snapshot,
@@ -469,8 +588,9 @@ def _prepare_commit_messages(
     commit_identifier: int,
 ) -> List[CommitMessage]:
     all_msgs: list = []
+    _validate_unique_action_row_ids(update_table, delete_table)
+
     if update_table is not None and update_table.num_rows > 0:
-        _validate_unique_row_ids(update_table)
         update_snapshot_table = _copy_at_snapshot(
             table, base_snapshot.id if base_snapshot is not None else None
         )
@@ -483,6 +603,17 @@ def _prepare_commit_messages(
             update_table, list(update_cols_union)
         )
         all_msgs.extend(update_msgs)
+
+    if delete_table is not None and delete_table.num_rows > 0:
+        delete_snapshot_table = _copy_at_snapshot(
+            table, base_snapshot.id if base_snapshot is not None else None
+        )
+        deleter = TableDeleteByRowId(delete_snapshot_table)
+        row_id_name = SpecialFields.ROW_ID.name
+        delete_msgs = deleter.delete(
+            delete_table.column(row_id_name).to_pylist()
+        )
+        all_msgs.extend(delete_msgs)
 
     if insert_table is not None and insert_table.num_rows > 0:
         writer = _new_table_write(table, commit_user, commit_identifier)
@@ -612,12 +743,22 @@ def _validate_source_on_cols(source_table: pa.Table, on: Sequence[str]) -> None:
         )
 
 
-def _validate_unique_row_ids(update_table: pa.Table) -> None:
+def _validate_unique_action_row_ids(
+    update_table: Optional[pa.Table],
+    delete_table: Optional[pa.Table],
+) -> None:
+    chunks = []
+    total_rows = 0
     row_id_name = SpecialFields.ROW_ID.name
-    if (
-        pc.count_distinct(update_table.column(row_id_name)).as_py()
-        != update_table.num_rows
-    ):
+    for table in (update_table, delete_table):
+        if table is None or table.num_rows == 0:
+            continue
+        total_rows += table.num_rows
+        chunks.extend(table.column(row_id_name).chunks)
+    if not chunks:
+        return
+    row_ids = pa.chunked_array(chunks)
+    if pc.count_distinct(row_ids).as_py() != total_rows:
         raise ValueError(
             "MERGE matched multiple source rows to the same target _ROW_ID. "
             "Deduplicate the source before merging."

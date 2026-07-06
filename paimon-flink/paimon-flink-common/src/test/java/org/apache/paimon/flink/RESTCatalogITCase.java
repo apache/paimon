@@ -472,6 +472,49 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                         DATABASE_NAME, filterTable)))
                 .containsExactlyInAnyOrder(Row.of(3, "Charlie", 35, "IT"));
 
+        String partitionFilterTable = "partition_row_filter_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING, dtpart STRING) PARTITIONED BY (dtpart) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, partitionFilterTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 'blocked', '2026-07-03'), (2, 'allowed', '2026-07-02')",
+                        DATABASE_NAME, partitionFilterTable));
+        Predicate partitionPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "dtpart", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("2026-07-02")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, partitionFilterTable),
+                Collections.singletonList(partitionPredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s WHERE dtpart = '2026-07-02'",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "allowed", "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "allowed", "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id, dtpart FROM %s.%s LIMIT 1",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .containsExactly(Row.of(2, "2026-07-02"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id FROM %s.%s WHERE dtpart = '2026-07-03'",
+                                        DATABASE_NAME, partitionFilterTable)))
+                .isEmpty();
+
         // Test JOIN with row filter
         String joinTable = "join_table";
         batchSql(

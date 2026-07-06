@@ -35,7 +35,7 @@ without full-table scans. Paimon supports multiple global index types:
 - **[BTree Index](./global-index/btree)**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
 - **[Bitmap Index](./global-index/bitmap)**: A bitmap based index for enum-like scalar dimensions and tag columns. Supports equality, IN, prefix match on string columns, complement predicates, and null checks with compressed row-id bitmaps.
 - **[Vector Index](./global-index/vector)**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
-- **[Full-Text Index](./global-index/full-text)**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
+- **[Full-Text Index](./global-index/full-text)**: A full-text search index backed by the native full-text engine for text retrieval. Supports term matching and relevance scoring.
 - **[Hybrid Search](./global-index/hybrid-search)**: A multi-route search API that combines results from multiple vector routes, multiple full-text routes, or both before reading table rows.
 
 | Index Type | Best For | Notes |
@@ -43,7 +43,7 @@ without full-table scans. Paimon supports multiple global index types:
 | BTree | Scalar filters on numeric, string, date, and timestamp columns | Best when predicates are selective, such as equality, IN, range, and null checks. |
 | Bitmap | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
 | Vector | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
-| Full-Text | Keyword search over text columns | Uses Tantivy scoring and tokenizer configuration stored with each index file. |
+| Full-Text | Keyword search over text columns | Uses full-text scoring and tokenizer configuration stored with each index file. |
 | Hybrid Search | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
@@ -158,8 +158,8 @@ added_files = table.create_global_index(
 </Tabs>
 
 PyPaimon global index build currently supports single-column BTree indexes,
-single-column Bitmap indexes, and single-column paimon-vindex IVF vector indexes
-on tables with row tracking enabled.
+single-column Bitmap indexes, single-column paimon-vindex IVF vector indexes,
+and single-column full-text indexes on tables with row tracking enabled.
 
 Drop index files:
 
@@ -418,7 +418,7 @@ for supported index types, options, and search examples.
 
 ## Full-Text Index
 
-Use Full-Text indexes for text retrieval powered by Tantivy. See [Full-Text Index](./global-index/full-text)
+Use Full-Text indexes for text retrieval backed by the native full-text engine. See [Full-Text Index](./global-index/full-text)
 for tokenizer options and search examples.
 
 ## Hybrid Search

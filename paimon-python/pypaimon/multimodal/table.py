@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Sequence
 
 import pyarrow as pa
 
-from pypaimon.globalindex.full_text_query import FullTextQuery
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.multimodal.query import (
     BatchVectorQuery,
     HybridQuery,
@@ -35,6 +36,7 @@ from pypaimon.table.data_evolution_merge_into import (
     WhenNotMatched,
     source_col as _source_col,
 )
+from pypaimon.table.special_fields import SpecialFields
 
 
 _ALL_SOURCE_COLUMNS = object()
@@ -58,6 +60,7 @@ class TextRoute:
     """Full-text route spec for hybrid search."""
 
     query: object
+    column: Optional[str] = None
     weight: float = 1.0
     limit: Optional[int] = None
     options: Optional[Dict[str, str]] = None
@@ -75,11 +78,12 @@ def vector_route(column, vector, *, weight: float = 1.0,
     )
 
 
-def text_route(query, *, weight: float = 1.0,
+def text_route(query, *, column: Optional[str] = None, weight: float = 1.0,
                limit: Optional[int] = None,
                options: Optional[Dict[str, str]] = None) -> TextRoute:
     return TextRoute(
         query=query,
+        column=column,
         weight=weight,
         limit=limit,
         options=dict(options or {}),
@@ -109,6 +113,23 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
+        arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
+        overwrite_partition = dict(partition) if partition is not None else None
+        write_builder = (
+            self.raw_table.new_batch_write_builder()
+            .overwrite(overwrite_partition)
+        )
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        try:
+            table_write.write_arrow(arrow_table)
+            table_commit.commit(table_write.prepare_commit())
+        finally:
+            table_write.close()
+            table_commit.close()
+        return self
+
     def update(self, where, values):
         query = self.scan().where(where)
         predicate = query._predicate
@@ -122,11 +143,64 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def delete(self, where):
+        query = self.scan().where(where)
+        predicate = query._predicate
+        write_builder = self.raw_table.new_batch_write_builder()
+        table_update = write_builder.new_update()
+        table_commit = write_builder.new_commit()
+        try:
+            messages = table_update.delete_by_predicate(predicate)
+            table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        return self
+
     def merge(self, on):
         return _MergeBuilder(self, on)
 
-    def scan(self):
-        return ScanQuery(self.raw_table)
+    def map_with_blobs(self, dataset, columns, fn, **kwargs):
+        from pypaimon.ray import map_with_blobs
+
+        return map_with_blobs(
+            dataset,
+            columns,
+            fn,
+            file_io=self.raw_table.file_io,
+            all_blob_columns=_blob_columns(self.raw_table),
+            **kwargs,
+        )
+
+    def scan(
+            self,
+            *,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        return ScanQuery(_time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name))
+
+    def take_row_ids(
+            self,
+            row_ids,
+            *,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        row_ids = _coerce_row_ids(row_ids)
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        read_builder = read_table.new_read_builder().with_projection(
+            [field.name for field in read_table.fields]
+            + [SpecialFields.ROW_ID.name]
+        )
+        predicate = read_builder.new_predicate_builder().is_in(
+            SpecialFields.ROW_ID.name, row_ids)
+        query = ScanQuery(read_table)
+        query._predicate = predicate
+        return query
+
+    def blobs(self, *, column: Optional[str] = None, key_column: Optional[str] = None):
+        from pypaimon.multimodal.blob_store import BlobStore
+        return BlobStore(self, column=column, key_column=key_column)
 
     def search(
             self,
@@ -134,12 +208,17 @@ class MultimodalTable:
             *,
             column: Optional[str] = None,
             options: Optional[Dict[str, str]] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         if isinstance(query, str):
             return TextQuery(
-                self.raw_table,
-                text_query=_coerce_full_text_query(query, "search", schema),
+                read_table,
+                text_query=_coerce_full_text_query(
+                    query, "search", schema, column=column),
                 pre_filter=pre_filter,
             )
         vector = _coerce_vector(query, "search")
@@ -148,7 +227,7 @@ class MultimodalTable:
                 "search() accepts a single query; use search_vectors() for "
                 "multiple vectors.")
         return VectorQuery(
-            self.raw_table,
+            read_table,
             vector=vector,
             vector_column=column or _infer_vector_column(schema, "column"),
             vector_options=options,
@@ -161,12 +240,16 @@ class MultimodalTable:
             *,
             column: Optional[str] = None,
             options: Optional[Dict[str, str]] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         vectors = _coerce_vectors(vectors)
         vector_column = column or _infer_vector_column(schema, "column")
         return BatchVectorQuery(
-            self.raw_table,
+            read_table,
             vectors=vectors,
             vector_column=vector_column,
             vector_options=options,
@@ -179,8 +262,12 @@ class MultimodalTable:
             *,
             ranker: str = "rrf",
             route_limit: Optional[int] = None,
-            pre_filter=None):
-        schema = _target_schema(self.raw_table)
+            pre_filter=None,
+            snapshot_id: Optional[int] = None,
+            tag_name: Optional[str] = None):
+        read_table = _time_travel_table(
+            self.raw_table, snapshot_id=snapshot_id, tag_name=tag_name)
+        schema = _target_schema(read_table)
         vector_routes, text_routes = _normalize_hybrid_routes(
             schema,
             routes=routes,
@@ -190,7 +277,7 @@ class MultimodalTable:
             raise ValueError(
                 "search_hybrid requires at least one route.")
         return HybridQuery(
-            self.raw_table,
+            read_table,
             vector_routes=vector_routes,
             text_routes=text_routes,
             ranker=ranker,
@@ -251,8 +338,15 @@ class _MergeBuilder:
 
     def when_matched_update(self, values=None, where: Optional[str] = None):
         self._when_matched.append(
-            WhenMatched(
-                update=_ALL_SOURCE_COLUMNS if values is None else values,
+            WhenMatched.update(
+                _ALL_SOURCE_COLUMNS if values is None else values,
+                condition=_normalize_merge_where(where),
+            ))
+        return self
+
+    def when_matched_delete(self, where: Optional[str] = None):
+        self._when_matched.append(
+            WhenMatched.delete(
                 condition=_normalize_merge_where(where),
             ))
         return self
@@ -278,6 +372,13 @@ class _MergeBuilder:
         )
 
 
+def _blob_columns(table):
+    return tuple(
+        field.name for field in table.fields
+        if getattr(field.type, "type", None) == "BLOB"
+    )
+
+
 def _to_arrow_table(data, target_schema=None):
     if isinstance(data, pa.Table):
         table = data
@@ -295,6 +396,37 @@ def _to_arrow_table(data, target_schema=None):
     if target_schema is None:
         return table
     return _align_to_schema(table, target_schema)
+
+
+def _coerce_row_ids(row_ids):
+    if row_ids is None or isinstance(row_ids, (str, bytes)):
+        raise ValueError("row_ids must be an iterable of row id integers.")
+    try:
+        iterator = iter(row_ids)
+    except TypeError:
+        raise ValueError("row_ids must be an iterable of row id integers.")
+
+    coerced = []
+    for row_id in iterator:
+        if hasattr(row_id, "as_py"):
+            row_id = row_id.as_py()
+        coerced.append(int(row_id))
+    return coerced
+
+
+def _time_travel_table(table, snapshot_id=None, tag_name=None):
+    if snapshot_id is not None and tag_name is not None:
+        raise ValueError(
+            "snapshot_id and tag_name cannot be set at the same time")
+    if snapshot_id is not None:
+        return table.copy({
+            CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id),
+        })
+    if tag_name is not None:
+        return table.copy({
+            CoreOptions.SCAN_TAG_NAME.key(): tag_name,
+        })
+    return table
 
 
 def _target_schema(table):
@@ -391,10 +523,14 @@ def _resolve_merge_clauses(
     source_names = set(source_table.column_names)
     return (
         [
-            WhenMatched(
-                update=_resolve_merge_set_spec(
-                    clause.update, target_names, source_names, on_map),
-                condition=clause.condition,
+            (
+                WhenMatched.delete(condition=clause.condition)
+                if clause.delete
+                else WhenMatched.update(
+                    _resolve_merge_set_spec(
+                        clause.update, target_names, source_names, on_map),
+                    condition=clause.condition,
+                )
             )
             for clause in when_matched
         ],
@@ -447,9 +583,9 @@ def _rewrite_merge_refs(text):
 def _normalize_index_type(index_type):
     if not isinstance(index_type, str):
         return index_type
-    normalized = index_type.strip().lower().replace("_", "-")
-    if normalized in ("full-text", "fulltext"):
-        return "tantivy-fulltext"
+    normalized = index_type.strip().lower()
+    if normalized == "full-text":
+        return "full-text"
     return index_type
 
 
@@ -569,16 +705,13 @@ def _normalize_vector_route(route, method, schema):
 
 def _normalize_text_route(route, method, schema):
     if isinstance(route, TextRoute):
+        column = route.column
         query = route.query
         weight = route.weight
         limit = route.limit
         options = route.options
     elif isinstance(route, Mapping):
-        column = route.get("column") or route.get("text_column") or route.get("field")
-        if column is not None:
-            raise ValueError(
-                "%s text routes do not accept a column; use a full-text "
-                "query DSL to target a column." % method)
+        column = route.get("column")
         query = (
             route.get("query")
             or route.get("text")
@@ -592,8 +725,10 @@ def _normalize_text_route(route, method, schema):
         raise ValueError(
             "%s text routes require a route spec with a query."
             % method)
+    text_query = _coerce_full_text_query(query, method, schema, column=column)
     return {
-        "query": _coerce_full_text_query(query, method, schema),
+        "column": text_query["column"],
+        "query": text_query["query"],
         "weight": weight,
         "limit": limit,
         "options": dict(options or {}),
@@ -641,17 +776,22 @@ def _is_column_vector_pair(route):
     )
 
 
-def _coerce_full_text_query(query, method, schema):
-    if isinstance(query, FullTextQuery):
-        return query
+def _coerce_full_text_query(query, method, schema, column=None):
+    field_name = column or _infer_text_column(schema, "text")
     if isinstance(query, str):
-        return FullTextQuery.from_dict({
-            "match": {
-                "column": _infer_text_column(schema, "text"),
-                "terms": query,
-            },
-        })
-    raise ValueError("%s requires a text string." % method)
+        stripped = query.lstrip()
+        query_json = (
+            query
+            if stripped.startswith("{")
+            else json.dumps({"match": {"query": query}}, separators=(",", ":"))
+        )
+        return {"column": field_name, "query": query_json}
+    if isinstance(query, Mapping):
+        return {
+            "column": field_name,
+            "query": json.dumps(query, separators=(",", ":")),
+        }
+    raise ValueError("%s requires a text string or query mapping." % method)
 
 
 def _infer_vector_column(schema: pa.Schema, parameter: str = "vector_column"):

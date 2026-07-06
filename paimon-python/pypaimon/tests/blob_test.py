@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
@@ -1487,6 +1487,143 @@ class BlobEndToEndTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Blob placeholder is not supported"):
             reader.read_arrow_batch()
         reader.close()
+
+
+class BlobParallelismTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.catalog = CatalogFactory.create({'warehouse': os.path.join(self.temp_dir, 'wh')})
+        self.catalog.create_database('default', True)
+        pa_schema = pa.schema([('id', pa.int32()), ('img', pa.large_binary())])
+        self.catalog.create_table('default.bp_test', Schema.from_pyarrow_schema(
+            pa_schema, options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}), False)
+        self.payloads = [os.urandom(512) for _ in range(20)]
+        t = self.catalog.get_table('default.bp_test')
+        w = t.new_batch_write_builder().new_write()
+        w.write_arrow(pa.Table.from_pydict(
+            {'id': list(range(20)), 'img': self.payloads}, schema=pa_schema))
+        t.new_batch_write_builder().new_commit().commit(w.prepare_commit())
+        w.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_to_arrow_blob_parallelism(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        serial = rb.new_read().to_arrow(splits)
+        parallel = rb.new_read().to_arrow(splits, blob_parallelism=4)
+        self.assertEqual(serial.num_rows, parallel.num_rows)
+        for i in range(serial.num_rows):
+            self.assertEqual(serial['img'][i].as_py(), parallel['img'][i].as_py())
+
+    def test_to_arrow_batch_reader_blob_parallelism(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        splits = rb.new_scan().plan().splits()
+        serial = rb.new_read().to_arrow(splits)
+        batches = []
+        for batch in rb.new_read().to_arrow_batch_reader(splits, blob_parallelism=4):
+            batches.append(batch)
+        parallel = pa.Table.from_batches(batches)
+        self.assertEqual(serial.num_rows, parallel.num_rows)
+        for i in range(serial.num_rows):
+            self.assertEqual(serial['img'][i].as_py(), parallel['img'][i].as_py())
+
+    def test_blob_parallelism_with_projection(self):
+        t = self.catalog.get_table('default.bp_test')
+        rb = t.new_read_builder()
+        rb = rb.with_projection(['id', 'img'])
+        splits = rb.new_scan().plan().splits()
+        result = rb.new_read().to_arrow(splits, blob_parallelism=4)
+        self.assertEqual(result.column_names, ['id', 'img'])
+        got = dict(zip(result['id'].to_pylist(), result['img'].to_pylist()))
+        for i in range(20):
+            self.assertEqual(got[i], self.payloads[i])
+
+
+class CapBlobParallelismTest(unittest.TestCase):
+    """Peak blob threads on the parallel path (workers * blob_parallelism)
+    must stay within TableRead._MAX_TOTAL_BLOB_WORKERS."""
+
+    def test_cap(self):
+        from pypaimon.read.table_read import TableRead
+        cap = TableRead._MAX_TOTAL_BLOB_WORKERS
+        f = TableRead._cap_blob_parallelism
+        self.assertEqual(f(1, 1), 1)             # serial blobs, untouched
+        self.assertEqual(f(16, 1), 1)            # B<=1 untouched
+        self.assertEqual(f(4, 8), 8)             # 32 <= cap, untouched
+        self.assertEqual(f(16, 16), cap // 16)   # 256 -> shrink to cap/workers
+        self.assertEqual(f(cap, 2), 1)           # workers==cap -> 1
+        self.assertEqual(f(cap + 100, 2), 1)     # workers>cap -> floor to 1
+        for w in (2, 4, 8, 16, 32, 64):
+            self.assertLessEqual(w * f(w, 999), cap)
+
+
+class CoalesceRangesTest(unittest.TestCase):
+    """read_ranges_coalesced merges same-file adjacent reads into fewer requests
+    (JingsongLi's IO-merging suggestion) while returning identical bytes."""
+
+    def test_coalesce_ranges_grouping(self):
+        from pypaimon.common.file_io import _coalesce_ranges
+        items = [(0, "a", 0, 10), (1, "a", 10, 10), (2, "a", 1000, 10), (3, "b", 0, 5)]
+        # a:[0,20) merged, a:[1000,1010) split by gap, b:[0,5) separate file
+        spans = _coalesce_ranges(items, max_gap=100, max_span=1 << 30)
+        self.assertEqual(len(spans), 3)
+        self.assertEqual(sorted(i for _, _, _, mem in spans for i, _, _ in mem), [0, 1, 2, 3])
+        # max_span forces a split even when contiguous
+        self.assertEqual(len(_coalesce_ranges(
+            [(0, "a", 0, 10), (1, "a", 10, 10)], max_gap=100, max_span=15)), 2)
+
+    def test_read_ranges_coalesced(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(256)) * 4  # 1024 bytes
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "f.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            fio = FileIO.get(f"file://{tmp_dir}", {})
+            ranges = [(path, 0, 10), (path, 10, 10), None, (path, 500, 20),
+                      (path, 100, -1), (path, None, None)]
+            got = fio.read_ranges_coalesced(ranges, parallelism=4)
+            self.assertEqual(got[0], data[0:10])
+            self.assertEqual(got[1], data[10:20])   # contiguous with got[0], merged
+            self.assertIsNone(got[2])
+            self.assertEqual(got[3], data[500:520])
+            self.assertEqual(got[4], data[100:])     # length -1 => read to EOF
+            self.assertIsNone(got[5])                # None offset/length => skipped
+
+
+class ReadFileRangeTest(unittest.TestCase):
+    """read_file_range must accept length == -1 (read to EOF) -- the valid
+    unknown-length BlobDescriptor case -- not pass -1 into pread."""
+
+    def test_negative_length_reads_to_eof(self):
+        from pypaimon.common.file_io import FileIO
+        data = bytes(range(64))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "blob.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            # -1: offset to EOF; positive: exact range (pread)
+            self.assertEqual(file_io.read_file_range(path, 0, -1), data)
+            self.assertEqual(file_io.read_file_range(path, 10, -1), data[10:])
+            self.assertEqual(file_io.read_file_range(path, 10, 8), data[10:18])
+
+    def test_descriptor_negative_length_roundtrip(self):
+        from pypaimon.common.file_io import FileIO
+        data = b"actual blob content"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "blob.bin")
+            with open(path, 'wb') as f:
+                f.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            blob = Blob.from_bytes(BlobDescriptor(path, 0, -1).serialize(), file_io)
+            self.assertIsInstance(blob, BlobRef)
+            self.assertEqual(blob.to_data(), data)
 
 
 class OffsetInputStreamTest(unittest.TestCase):

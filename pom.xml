@@ -75,7 +75,7 @@ under the License.
         <module>paimon-lumina</module>
         <module>paimon-vortex</module>
         <module>paimon-mosaic</module>
-        <module>paimon-tantivy</module>
+        <module>paimon-full-text</module>
         <module>paimon-vector</module>
     </modules>
 
@@ -118,6 +118,7 @@ under the License.
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
         <arrow.version>15.0.0</arrow.version>
+        <paimon.full-text-index.version>0.1.0-SNAPSHOT</paimon.full-text-index.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>

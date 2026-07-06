@@ -62,6 +62,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -540,32 +541,42 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     private RestoreFiles scanExistingFileMetas(BinaryRow partition, int bucket) {
-        RestoreFiles restored =
-                restore.restoreFiles(
-                        partition,
-                        bucket,
-                        dbMaintainerFactory != null,
-                        dvMaintainerFactory != null);
+        Supplier<String> partInfo =
+                () ->
+                        partitionType.getFieldCount() > 0
+                                ? "partition "
+                                        + getPartitionComputer(
+                                                        partitionType,
+                                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                                        legacyPartitionName)
+                                                .generatePartValues(partition)
+                                : "table";
+        RestoreFiles restored;
+        try {
+            restored =
+                    restore.restoreFiles(
+                            partition,
+                            bucket,
+                            dbMaintainerFactory != null,
+                            dvMaintainerFactory != null);
+        } catch (RuntimeException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to restore existing files for %s, bucket %d.",
+                            partInfo.get(), bucket),
+                    e);
+        }
         Integer restoredTotalBuckets = restored.totalBuckets();
         int totalBuckets = numBuckets;
         if (restoredTotalBuckets != null) {
             totalBuckets = restoredTotalBuckets;
         }
         if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            String partInfo =
-                    partitionType.getFieldCount() > 0
-                            ? "partition "
-                                    + getPartitionComputer(
-                                                    partitionType,
-                                                    PARTITION_DEFAULT_NAME.defaultValue(),
-                                                    legacyPartitionName)
-                                            .generatePartValues(partition)
-                            : "table";
             throw new RuntimeException(
                     String.format(
                             "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
                                     + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, numBuckets, totalBuckets));
+                            partInfo.get(), numBuckets, totalBuckets));
         }
         return restored;
     }

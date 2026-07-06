@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Objects;
+import java.util.function.LongConsumer;
 import java.util.zip.CRC32;
 
 /**
@@ -87,6 +88,11 @@ public class Bitmap64DeletionVector implements DeletionVector {
     @Override
     public long getCardinality() {
         return roaringBitmap.cardinality();
+    }
+
+    @Override
+    public void forEachDeletedPosition(LongConsumer consumer) {
+        roaringBitmap.forEach(consumer);
     }
 
     @Override

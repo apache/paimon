@@ -28,7 +28,10 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.RoaringNavigableMap64;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import org.elasticsearch.eslib.api.ArchiveDataProvider;
 import org.elasticsearch.eslib.api.ESIndexSearcher;
@@ -181,12 +184,13 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 () -> {
                     try {
                         ensureLoaded();
-                        // Map the paimon query tree to an eslib FullTextQuerySpec and run it. The
+                        // Parse the JSON DSL query into an eslib FullTextQuerySpec and run it. The
                         // eslib searcher builds the Lucene query (Match/Phrase/Bool/Boost) and
                         // treats any referenced field that is not FULLTEXT in this index as a
                         // no-match, so a non-FULLTEXT column simply yields an empty result rather
                         // than throwing.
-                        FullTextQuerySpec spec = toSpec(fullTextSearch.query());
+                        FullTextQuerySpec spec =
+                                parseSpec(fullTextSearch.fieldName(), fullTextSearch.query());
                         SearchResult result = searcher.fullTextSearch(spec, fullTextSearch.limit());
                         return toScoredResult(result);
                     } catch (IOException e) {
@@ -195,79 +199,99 @@ public class ESIndexGlobalIndexReader implements GlobalIndexReader {
                 });
     }
 
-    /** Recursively maps a paimon {@link org.apache.paimon.predicate.FullTextQuery} to a spec. */
-    private static FullTextQuerySpec toSpec(org.apache.paimon.predicate.FullTextQuery ftq) {
-        if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Match) {
-            org.apache.paimon.predicate.FullTextQuery.Match m =
-                    (org.apache.paimon.predicate.FullTextQuery.Match) ftq;
-            return new FullTextQuerySpec.Match(m.column(), m.query(), toFullTextParams(m));
-        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Phrase) {
-            org.apache.paimon.predicate.FullTextQuery.Phrase p =
-                    (org.apache.paimon.predicate.FullTextQuery.Phrase) ftq;
-            return new FullTextQuerySpec.Phrase(p.column(), p.query(), p.slop());
-        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.Boost) {
-            org.apache.paimon.predicate.FullTextQuery.Boost b =
-                    (org.apache.paimon.predicate.FullTextQuery.Boost) ftq;
-            return new FullTextQuerySpec.Boost(
-                    toSpec(b.positive()), toSpec(b.negative()), b.negativeBoost());
-        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.BooleanQuery) {
-            org.apache.paimon.predicate.FullTextQuery.BooleanQuery b =
-                    (org.apache.paimon.predicate.FullTextQuery.BooleanQuery) ftq;
-            return new FullTextQuerySpec.Bool(
-                    toSpecs(b.must()), toSpecs(b.should()), toSpecs(b.mustNot()));
-        } else if (ftq instanceof org.apache.paimon.predicate.FullTextQuery.MultiMatch) {
-            // Expand a multi_match into a SHOULD-bool of per-column matches (with per-column
-            // boost).
-            // Columns that are not FULLTEXT in this index no-match inside the searcher.
-            org.apache.paimon.predicate.FullTextQuery.MultiMatch mm =
-                    (org.apache.paimon.predicate.FullTextQuery.MultiMatch) ftq;
-            List<String> columns = mm.columns();
-            List<Float> boosts = mm.boosts();
-            FullTextParams.Operator operator =
-                    mm.operator() == org.apache.paimon.predicate.FullTextQuery.Operator.AND
-                            ? FullTextParams.Operator.AND
-                            : FullTextParams.Operator.OR;
-            List<FullTextQuerySpec> should = new ArrayList<>(columns.size());
-            for (int i = 0; i < columns.size(); i++) {
-                float boost = (boosts != null && i < boosts.size()) ? boosts.get(i) : 1.0f;
-                FullTextParams params = new FullTextParams(operator, boost, 0, 50, 0);
-                should.add(new FullTextQuerySpec.Match(columns.get(i), mm.query(), params));
-            }
-            return new FullTextQuerySpec.Bool(null, should, null);
+    /**
+     * Parses the {@link FullTextSearch#query()} JSON DSL into an eslib {@link FullTextQuerySpec}.
+     */
+    private static FullTextQuerySpec parseSpec(String field, String json) {
+        try {
+            return parseSpec(field, JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(json));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid full-text query JSON: " + json, e);
         }
-        throw new UnsupportedOperationException(
-                "Unsupported full-text query type: " + ftq.getClass().getName());
-    }
-
-    private static List<FullTextQuerySpec> toSpecs(
-            List<org.apache.paimon.predicate.FullTextQuery> queries) {
-        if (queries == null || queries.isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
-        List<FullTextQuerySpec> specs = new ArrayList<>(queries.size());
-        for (org.apache.paimon.predicate.FullTextQuery q : queries) {
-            specs.add(toSpec(q));
-        }
-        return specs;
     }
 
     /**
-     * Maps a paimon {@link org.apache.paimon.predicate.FullTextQuery.Match} onto eslib {@link
-     * FullTextParams} so operator / boost / fuzziness / maxExpansions / prefixLength are honoured
-     * by the underlying Lucene query (rather than silently dropped).
+     * Maps the JSON query DSL ({@code {"match":...}}, {@code {"match_phrase":...}}, {@code
+     * {"boolean":...}}, {@code {"boost":...}}) onto an eslib spec. The field comes from {@link
+     * FullTextSearch#fieldName()} (the flat model carries a single field); the query semantics come
+     * from the JSON. A column that is not FULLTEXT in this index no-matches inside the searcher.
      */
-    private static FullTextParams toFullTextParams(
-            org.apache.paimon.predicate.FullTextQuery.Match match) {
+    private static FullTextQuerySpec parseSpec(String field, JsonNode q) {
+        if (q.has("match")) {
+            JsonNode m = q.get("match");
+            return new FullTextQuerySpec.Match(field, queryText(m), parseParams(m));
+        } else if (q.has("match_phrase") || q.has("phrase")) {
+            JsonNode p = q.has("match_phrase") ? q.get("match_phrase") : q.get("phrase");
+            int slop = p.has("slop") ? p.get("slop").asInt() : 0;
+            return new FullTextQuerySpec.Phrase(field, queryText(p), slop);
+        } else if (q.has("boost")) {
+            JsonNode b = q.get("boost");
+            float negativeBoost = 0.5f;
+            if (b.has("negative_boost")) {
+                negativeBoost = (float) b.get("negative_boost").asDouble();
+            } else if (b.has("negativeBoost")) {
+                negativeBoost = (float) b.get("negativeBoost").asDouble();
+            }
+            return new FullTextQuerySpec.Boost(
+                    parseSpec(field, b.get("positive")),
+                    parseSpec(field, b.get("negative")),
+                    negativeBoost);
+        } else if (q.has("boolean")) {
+            List<FullTextQuerySpec> must = new ArrayList<>();
+            List<FullTextQuerySpec> should = new ArrayList<>();
+            List<FullTextQuerySpec> mustNot = new ArrayList<>();
+            JsonNode clauses = q.get("boolean").get("queries");
+            if (clauses != null) {
+                for (JsonNode clause : clauses) {
+                    String occur;
+                    JsonNode child;
+                    if (clause.isArray()) {
+                        occur = clause.get(0).asText();
+                        child = clause.get(1);
+                    } else {
+                        occur = clause.has("occur") ? clause.get("occur").asText() : "Should";
+                        child = clause.get("query");
+                    }
+                    FullTextQuerySpec spec = parseSpec(field, child);
+                    if ("Must".equalsIgnoreCase(occur)) {
+                        must.add(spec);
+                    } else if ("MustNot".equalsIgnoreCase(occur)) {
+                        mustNot.add(spec);
+                    } else {
+                        should.add(spec);
+                    }
+                }
+            }
+            return new FullTextQuerySpec.Bool(must, should, mustNot);
+        }
+        throw new UnsupportedOperationException("Unsupported full-text query JSON: " + q);
+    }
+
+    private static String queryText(JsonNode node) {
+        if (node.has("query")) {
+            return node.get("query").asText();
+        } else if (node.has("terms")) {
+            return node.get("terms").asText();
+        }
+        throw new IllegalArgumentException("Full-text query missing 'query'/'terms': " + node);
+    }
+
+    /**
+     * Reads the ES-style match params ({@code operator} / {@code boost} / {@code fuzziness} /
+     * {@code max_expansions} / {@code prefix_length}) from a match node into {@link
+     * FullTextParams}; the eslib searcher applies them to the Lucene query. Absent params keep
+     * their defaults.
+     */
+    private static FullTextParams parseParams(JsonNode match) {
         FullTextParams.Operator operator =
-                match.operator() == org.apache.paimon.predicate.FullTextQuery.Operator.AND
+                match.has("operator") && "and".equalsIgnoreCase(match.get("operator").asText())
                         ? FullTextParams.Operator.AND
                         : FullTextParams.Operator.OR;
-        return new FullTextParams(
-                operator,
-                match.boost(),
-                match.fuzziness(),
-                match.maxExpansions(),
-                match.prefixLength());
+        float boost = match.has("boost") ? (float) match.get("boost").asDouble() : 1.0f;
+        int fuzziness = match.has("fuzziness") ? match.get("fuzziness").asInt() : 0;
+        int maxExpansions = match.has("max_expansions") ? match.get("max_expansions").asInt() : 50;
+        int prefixLength = match.has("prefix_length") ? match.get("prefix_length").asInt() : 0;
+        return new FullTextParams(operator, boost, fuzziness, maxExpansions, prefixLength);
     }
 
     /**

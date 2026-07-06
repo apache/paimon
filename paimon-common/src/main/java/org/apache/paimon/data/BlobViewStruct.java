@@ -84,6 +84,10 @@ public class BlobViewStruct implements Serializable {
     }
 
     public static BlobViewStruct deserialize(byte[] bytes) {
+        if (bytes == null || bytes.length < Byte.BYTES) {
+            throw invalidPayload("too short");
+        }
+
         ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         byte version = buffer.get();
 
@@ -96,6 +100,7 @@ public class BlobViewStruct implements Serializable {
                             + ".");
         }
 
+        checkRemaining(buffer, Long.BYTES, "too short");
         long magic = buffer.getLong();
         if (magic != MAGIC) {
             throw new IllegalArgumentException(
@@ -105,13 +110,35 @@ public class BlobViewStruct implements Serializable {
                             + magic);
         }
 
-        byte[] identifierBytes = new byte[buffer.getInt()];
+        checkRemaining(buffer, Integer.BYTES, "too short");
+        int identifierLength = buffer.getInt();
+        if (identifierLength < 0) {
+            throw invalidPayload("negative identifier length: " + identifierLength);
+        }
+        if (identifierLength > buffer.remaining()) {
+            throw invalidPayload("identifier length exceeds data size");
+        }
+        if (buffer.remaining() - identifierLength < Integer.BYTES + Long.BYTES) {
+            throw invalidPayload("missing fieldId/rowId");
+        }
+
+        byte[] identifierBytes = new byte[identifierLength];
         buffer.get(identifierBytes);
 
         int fieldId = buffer.getInt();
         long rowId = buffer.getLong();
         return new BlobViewStruct(
                 Identifier.fromString(new String(identifierBytes, UTF_8)), fieldId, rowId);
+    }
+
+    private static void checkRemaining(ByteBuffer buffer, int length, String message) {
+        if (buffer.remaining() < length) {
+            throw invalidPayload(message);
+        }
+    }
+
+    private static IllegalArgumentException invalidPayload(String message) {
+        return new IllegalArgumentException("Invalid BlobViewStruct data: " + message);
     }
 
     public static boolean isBlobViewStruct(byte[] bytes) {

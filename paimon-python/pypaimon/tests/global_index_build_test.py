@@ -30,14 +30,14 @@ from pypaimon.globalindex.build_plan import (
     split_by_global_index_shard as _split_by_global_index_shard,
     split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
+from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.key_serializer import create_serializer
-from pypaimon.globalindex.tantivy.tantivy_full_text_global_index_reader import (
-    TANTIVY_FULLTEXT_IDENTIFIER,
-    TANTIVY_NGRAM_TOKENIZER,
-    TantivyFullTextIndexOptions,
+from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+    FULL_TEXT_IDENTIFIER,
+    NativeFullTextIndexOptions,
 )
-from pypaimon.globalindex.tantivy.tantivy_full_text_index_writer import (
-    TantivyFullTextIndexWriter,
+from pypaimon.globalindex.full_text.native_full_text_index_writer import (
+    NativeFullTextIndexWriter,
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
@@ -110,176 +110,36 @@ class _FakeVectorIndexWriter:
         return False
 
 
-class _FakeTantivyDocument:
-
-    def __init__(self):
-        self.values = {}
-
-    def add_unsigned(self, field_name, value):
-        self.values[field_name] = value
-
-    def add_text(self, field_name, text):
-        self.values[field_name] = text
-
-
-class _FakeTantivyIndexWriter:
-
-    def __init__(self, index):
-        self.index = index
-        self.documents = []
-        self.committed = False
-        self.waited = False
-
-    def add_document(self, document):
-        self.documents.append(dict(document.values))
-
-    def commit(self):
-        self.committed = True
-        with open(os.path.join(self.index.path, "meta.json"), "wb") as f:
-            f.write(b"{}")
-        with open(os.path.join(self.index.path, "docs.bin"), "wb") as f:
-            for document in self.documents:
-                row_id = document["row_id"]
-                text = document["text"].encode("utf-8")
-                f.write(struct.pack(">q", row_id))
-                f.write(struct.pack(">i", len(text)))
-                f.write(text)
-
-    def wait_merging_threads(self):
-        self.waited = True
-
-
-class _FakeTantivySchemaBuilder:
-
-    def __init__(self, parent):
-        self._parent = parent
-        self.fields = {}
-
-    def add_unsigned_field(self, name, stored=False, indexed=False, fast=False):
-        self.fields[name] = {
-            "stored": stored,
-            "indexed": indexed,
-            "fast": fast,
-        }
-
-    def add_text_field(self, name, stored=False, tokenizer_name=None, **kwargs):
-        self.fields[name] = {
-            "stored": stored,
-            "tokenizer_name": tokenizer_name or "default",
-        }
-        if "index_option" in kwargs:
-            self.fields[name]["index_option"] = kwargs["index_option"]
-
-    def build(self):
-        schema = types.SimpleNamespace(fields=self.fields)
-        self._parent.last_schema = schema
-        return schema
-
-
-class _FakeTantivyTokenizer:
-
-    @staticmethod
-    def ngram(min_gram=2, max_gram=3, prefix_only=False):
-        return ("ngram", min_gram, max_gram, prefix_only)
-
-    @staticmethod
-    def simple():
-        return ("simple",)
-
-    @staticmethod
-    def whitespace():
-        return ("whitespace",)
-
-    @staticmethod
-    def raw():
-        return ("raw",)
-
-
-class _FakeTantivyFilter:
-
-    @staticmethod
-    def lowercase():
-        return "lowercase"
-
-    @staticmethod
-    def remove_long(length_limit):
-        return ("remove_long", length_limit)
-
-    @staticmethod
-    def ascii_fold():
-        return "ascii_fold"
-
-    @staticmethod
-    def stemmer(language):
-        return ("stemmer", language)
-
-    @staticmethod
-    def stopword(language):
-        return ("stopword", language)
-
-    @staticmethod
-    def custom_stopword(stopwords):
-        return ("custom_stopword", tuple(stopwords))
-
-
-class _FakeTantivyTextAnalyzerBuilder:
-
-    def __init__(self, tokenizer):
-        self._tokenizer = tokenizer
-        self._filters = []
-
-    def filter(self, filter_):
-        result = _FakeTantivyTextAnalyzerBuilder(self._tokenizer)
-        result._filters = self._filters + [filter_]
-        return result
-
-    def build(self):
-        return self._tokenizer + (tuple(self._filters),)
-
-
-class _FakeTantivyIndex:
-
-    def __init__(self, parent, schema, path=None):
-        self.parent = parent
-        self.schema = schema
-        self.path = path
-        self.registered_tokenizers = []
-        self.writer_instance = _FakeTantivyIndexWriter(self)
-        parent.indexes.append(self)
-        parent.last_index = self
-
-    def register_tokenizer(self, name, analyzer):
-        self.registered_tokenizers.append((name, analyzer))
-
-    def writer(self):
-        return self.writer_instance
-
-
-class _FakeTantivyForBuild(types.SimpleNamespace):
+class _FakeFullTextForBuild(types.SimpleNamespace):
 
     def __init__(self):
         super().__init__()
-        self.Document = _FakeTantivyDocument
-        self.Tokenizer = _FakeTantivyTokenizer
-        self.Filter = _FakeTantivyFilter
-        self.TextAnalyzerBuilder = _FakeTantivyTextAnalyzerBuilder
-        self.indexes = []
-        self.last_schema = None
-        self.last_index = None
+        self.writers = []
         parent = self
 
-        class SchemaBuilder(_FakeTantivySchemaBuilder):
+        class FullTextIndexWriter:
 
-            def __init__(self_inner):
-                super().__init__(parent)
+            def __init__(self_inner, options=None):
+                self_inner.options = dict(options or {})
+                self_inner.documents = []
+                self_inner.written = False
+                self_inner.closed = False
+                parent.writers.append(self_inner)
 
-        class Index(_FakeTantivyIndex):
+            def add_document(self_inner, row_id, text):
+                self_inner.documents.append({
+                    "row_id": int(row_id),
+                    "text": str(text),
+                })
 
-            def __init__(self_inner, schema, path=None):
-                super().__init__(parent, schema, path=path)
+            def write(self_inner, output):
+                self_inner.written = True
+                output.write(b"fake-ftindex")
 
-        self.SchemaBuilder = SchemaBuilder
-        self.Index = Index
+            def close(self_inner):
+                self_inner.closed = True
+
+        self.FullTextIndexWriter = FullTextIndexWriter
 
 
 def _archive_file_names(file_io, file_path):
@@ -416,6 +276,54 @@ class GlobalIndexBuildTest(
         index_table = index_read_builder.new_read().to_arrow(
             index_read_builder.new_scan().plan().splits())
         self.assertEqual(0, index_table.num_rows)
+
+    def test_stale_global_index_commit_conflicts_when_data_files_removed(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['a', 'b', 'c', 'd'],
+                'age': [10, 20, 30, 40],
+                'city': ['x', 'y', 'z', 'w'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        messages = GlobalIndexBuilder(
+            table,
+            'id',
+            options={'sorted-index.records-per-range': '2'},
+        ).build()
+        self.assertGreater(sum(len(message.index_adds) for message in messages), 0)
+
+        overwrite_wb = table.new_batch_write_builder().overwrite({})
+        overwrite_write = overwrite_wb.new_write()
+        overwrite_commit = overwrite_wb.new_commit()
+        overwrite_write.write_arrow(pa.table(
+            {
+                'id': [5, 6],
+                'name': ['e', 'f'],
+                'age': [50, 60],
+                'city': ['new1', 'new2'],
+            },
+            schema=self.pa_schema,
+        ))
+        overwrite_commit.commit(overwrite_write.prepare_commit())
+        overwrite_write.close()
+        overwrite_commit.close()
+
+        stale_commit = table.new_batch_write_builder().new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            stale_commit.commit(messages)
+        stale_commit.close()
+        self.assertIn(
+            'Global index row ID existence conflict',
+            str(ctx.exception),
+        )
+        self.assertEqual(
+            [],
+            IndexFileHandler(table).scan(table.snapshot_manager().get_latest_snapshot()),
+        )
 
     def test_create_bitmap_global_index_from_python(self):
         table = self._create_table()
@@ -834,7 +742,7 @@ class GlobalIndexBuildTest(
             ],
         )
 
-    def test_create_tantivy_fulltext_global_index_from_python(self):
+    def test_create_native_fulltext_global_index_from_python(self):
         schema = pa.schema([
             ('id', pa.int32()),
             ('content', pa.string()),
@@ -846,56 +754,56 @@ class GlobalIndexBuildTest(
                 'content': [
                     'Apache Paimon full text',
                     None,
-                    'Tantivy full text search',
+                    'Native full text search',
                 ],
             },
             schema=schema,
         ))
 
-        tantivy = _FakeTantivyForBuild()
-        old_tantivy = sys.modules.get("tantivy")
-        sys.modules["tantivy"] = tantivy
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
         try:
             added = table.create_global_index(
                 'content',
-                index_type=TANTIVY_FULLTEXT_IDENTIFIER,
+                index_type=FULL_TEXT_IDENTIFIER,
                 options={
                     'global-index.row-count-per-shard': '2',
-                    'tantivy.tokenizer': 'ngram',
-                    'tantivy.ngram.min-gram': '2',
-                    'tantivy.ngram.max-gram': '3',
-                    'tantivy.ngram.prefix-only': 'true',
-                    'tantivy.with-position': 'false',
+                    'full-text.tokenizer': 'ngram',
+                    'full-text.ngram.min-gram': '2',
+                    'full-text.ngram.max-gram': '3',
+                    'full-text.ngram.prefix-only': 'true',
+                    'full-text.with-position': 'false',
                 },
             )
         finally:
-            if old_tantivy is None:
-                sys.modules.pop("tantivy", None)
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
             else:
-                sys.modules["tantivy"] = old_tantivy
+                sys.modules["paimon_ftindex"] = old_ftindex
 
         self.assertEqual(2, added)
-        self.assertEqual(2, len(tantivy.indexes))
+        self.assertEqual(2, len(ftindex.writers))
         self.assertEqual(
-            {"row_id": {"stored": False, "indexed": True, "fast": True},
-             "text": {"stored": False,
-                      "tokenizer_name": TANTIVY_NGRAM_TOKENIZER,
-                      "index_option": "freq"}},
-            tantivy.indexes[0].schema.fields,
-        )
-        self.assertEqual(
-            [(TANTIVY_NGRAM_TOKENIZER,
-              ("ngram", 2, 3, True, (("remove_long", 40), "lowercase")))],
-            tantivy.indexes[0].registered_tokenizers,
+            {
+                "tokenizer": "ngram",
+                "ngram.min-gram": "2",
+                "ngram.max-gram": "3",
+                "ngram.prefix-only": "true",
+                "with-position": "false",
+            },
+            ftindex.writers[0].options,
         )
         self.assertEqual(
             [{'row_id': 0, 'text': 'Apache Paimon full text'}],
-            tantivy.indexes[0].writer_instance.documents,
+            ftindex.writers[0].documents,
         )
         self.assertEqual(
-            [{'row_id': 0, 'text': 'Tantivy full text search'}],
-            tantivy.indexes[1].writer_instance.documents,
+            [{'row_id': 0, 'text': 'Native full text search'}],
+            ftindex.writers[1].documents,
         )
+        self.assertTrue(all(writer.written for writer in ftindex.writers))
+        self.assertTrue(all(writer.closed for writer in ftindex.writers))
 
         snapshot = table.snapshot_manager().get_latest_snapshot()
         entries = sorted(
@@ -914,92 +822,84 @@ class GlobalIndexBuildTest(
             ],
         )
         self.assertEqual(
-            {TANTIVY_FULLTEXT_IDENTIFIER},
+            {FULL_TEXT_IDENTIFIER},
             {entry.index_file.index_type for entry in entries},
         )
         for entry in entries:
-            index_options = TantivyFullTextIndexOptions.deserialize(
+            index_options = NativeFullTextIndexOptions.deserialize(
                 entry.index_file.global_index_meta.index_meta)
-            self.assertEqual("ngram", index_options.tokenizer)
-            self.assertEqual(2, index_options.ngram_min_gram)
-            self.assertEqual(3, index_options.ngram_max_gram)
-            self.assertTrue(index_options.ngram_prefix_only)
-            self.assertFalse(index_options.with_position)
+            self.assertEqual(
+                {
+                    "tokenizer": "ngram",
+                    "ngram.min-gram": "2",
+                    "ngram.max-gram": "3",
+                    "ngram.prefix-only": "true",
+                    "with-position": "false",
+                },
+                index_options.to_native_options(),
+            )
             file_path = table.path_factory().global_index_path_factory().to_path(
                 entry.index_file.file_name)
             self.assertEqual(
-                ['docs.bin', 'meta.json'],
-                _archive_file_names(table.file_io, file_path),
+                b"fake-ftindex",
+                table.file_io.new_input_stream(file_path).read(),
             )
 
-    def test_tantivy_fulltext_writer_rejects_jieba_tokenizer(self):
+    def test_native_fulltext_writer_accepts_jieba_tokenizer(self):
         table = self._create_table()
         index_path = (
             table.path_factory()
             .global_index_path_factory()
             .global_index_root_path()
         )
-        with self.assertRaisesRegex(ValueError, "tantivy.tokenizer=jieba"):
-            writer = TantivyFullTextIndexWriter(
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
+        try:
+            writer = NativeFullTextIndexWriter(
                 table.file_io,
                 index_path,
                 AtomicType('STRING'),
-                {'tantivy.tokenizer': 'jieba'},
+                {'full-text.tokenizer': 'jieba'},
             )
-            writer.close()
+            writer.write('北京大学支持全文检索', 0)
+            entries = writer.finish()
+        finally:
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
+            else:
+                sys.modules["paimon_ftindex"] = old_ftindex
 
-    def test_tantivy_fulltext_options_serialize_matches_java_sparse_json(self):
-        ngram = TantivyFullTextIndexOptions.from_options({
-            'tantivy.tokenizer': ' NGRAM ',
-            'tantivy.ngram.min-gram': '2',
-            'tantivy.ngram.max-gram': '3',
-            'tantivy.ngram.prefix-only': 'true',
-            'tantivy.lower-case': 'false',
+        self.assertEqual(1, len(entries))
+        self.assertEqual([{"row_id": 0, "text": "北京大学支持全文检索"}],
+                         ftindex.writers[0].documents)
+        self.assertEqual({"tokenizer": "jieba"}, ftindex.writers[0].options)
+        self.assertTrue(ftindex.writers[0].closed)
+
+    def test_native_fulltext_options_are_passed_through(self):
+        ngram = NativeFullTextIndexOptions.from_options({
+            'full-text.tokenizer': 'ngram',
+            'full-text.ngram.min-gram': '2',
+            'full-text.ngram.max-gram': '3',
+            'full-text.ngram.prefix-only': 'true',
+            'full-text.lower-case': 'false',
+            'full-text.custom-future-option': 'future-value',
+            'unrelated': 'ignored',
         })
+
         self.assertEqual(
-            b'{"tokenizer":"ngram","ngram.max-gram":3,'
-            b'"ngram.prefix-only":true,"lower-case":false}',
-            ngram.serialize(),
+            {
+                "tokenizer": "ngram",
+                "ngram.min-gram": "2",
+                "ngram.max-gram": "3",
+                "ngram.prefix-only": "true",
+                "lower-case": "false",
+                "custom-future-option": "future-value",
+            },
+            ngram.to_native_options(),
         )
 
-        analyzer = TantivyFullTextIndexOptions.from_options({
-            'tantivy.tokenizer': 'whitespace',
-            'tantivy.max-token-length': '12',
-            'tantivy.ascii-folding': 'true',
-            'tantivy.stem': 'true',
-            'tantivy.remove-stop-words': 'true',
-            'tantivy.stop-words': 'paimon;lake',
-            'tantivy.with-position': 'false',
-        })
-        self.assertEqual(
-            b'{"tokenizer":"whitespace","max-token-length":12,'
-            b'"ascii-folding":true,"stem":true,'
-            b'"remove-stop-words":true,"stop-words":["paimon","lake"],'
-            b'"with-position":false}',
-            analyzer.serialize(),
-        )
-
-    def test_tantivy_fulltext_options_validate_like_java(self):
-        with self.assertRaisesRegex(ValueError, "Unsupported Tantivy tokenizer"):
-            TantivyFullTextIndexOptions.from_options({
-                'tantivy.tokenizer': 'ik',
-            })
-
-        with self.assertRaisesRegex(
-                ValueError, "ngram min gram must not be greater than max gram"):
-            TantivyFullTextIndexOptions.from_options({
-                'tantivy.tokenizer': 'ngram',
-                'tantivy.ngram.min-gram': '3',
-                'tantivy.ngram.max-gram': '2',
-            })
-
-        with self.assertRaisesRegex(ValueError, "Unsupported Tantivy language"):
-            TantivyFullTextIndexOptions.from_options({
-                'tantivy.stem': 'true',
-                'tantivy.language': 'klingon',
-            })
-
-    def test_create_tantivy_fulltext_global_index_rejects_non_string_column(self):
+    def test_create_native_fulltext_global_index_rejects_non_string_column(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
             {
@@ -1014,7 +914,7 @@ class GlobalIndexBuildTest(
         with self.assertRaisesRegex(ValueError, 'requires string type'):
             table.create_global_index(
                 'id',
-                index_type=TANTIVY_FULLTEXT_IDENTIFIER,
+                index_type=FULL_TEXT_IDENTIFIER,
             )
 
     def test_create_vindex_global_index_rejects_generic_unsupported_tables(self):

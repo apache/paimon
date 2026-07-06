@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.errors.ErrorMessages
 import org.apache.paimon.spark.PaimonMetrics.RESULTED_TABLE_FILES
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.read.PaimonSplitScan
@@ -149,7 +150,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
                        |WHEN MATCHED THEN
                        |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
                        |""".stripMargin).collect(),
-          "multiple 'MERGE INTO' operations have encountered conflicts"
+          ErrorMessages.DATA_EVOLUTION_ROW_ID_CONFLICT_MESSAGE
         )
       }
 
@@ -1095,6 +1096,39 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
           sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
           Seq(Row(2, 22, 2, 0, 2), Row(3, 22, 3, 1, 2))
         )
+      }
+    }
+  }
+
+  test("Data Evolution: V1 update retries concurrent update conflicts") {
+    withSparkSQLConf(
+      "spark.paimon.write.use-v2-write" -> "false",
+      "spark.paimon.write.data-evolution.update-conflict-retry.max-attempts" -> "50",
+      "spark.paimon.write.data-evolution.update-conflict-retry.wait-ms" -> "10"
+    ) {
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+        sql("INSERT INTO t VALUES (1, 0, 0)")
+
+        val ready = new CountDownLatch(4)
+        val start = new CountDownLatch(1)
+        val updates = (1 to 4).map {
+          _ =>
+            Future {
+              ready.countDown()
+              assert(start.await(30, TimeUnit.SECONDS))
+              for (_ <- 1 to 5) {
+                sql("UPDATE t SET b = b + 1 WHERE id = 1").collect()
+              }
+            }
+        }
+
+        assert(ready.await(30, TimeUnit.SECONDS))
+        start.countDown()
+        updates.foreach(Await.result(_, 120.seconds))
+
+        checkAnswer(sql("SELECT b FROM t"), Seq(Row(20)))
       }
     }
   }

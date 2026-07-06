@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import json
 import os
 import shutil
@@ -28,6 +29,11 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon import Schema as PaimonSchema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.utils.range import Range
+
+try:
+    import ray
+except ImportError:
+    ray = None
 
 
 _PARQUET_OPTIONS = {
@@ -103,6 +109,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("true", options["row-tracking.enabled"])
         self.assertEqual("true", options["data-evolution.enabled"])
         self.assertEqual("true", options["deletion-vectors.enabled"])
+        self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
         self.assertEqual("vortex", options["file.format"])
         self.assertEqual("full", options["global-index.search-mode"])
@@ -182,6 +189,257 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("ROW<rank: INT>", types_by_name["meta"])
         self.assertEqual("VECTOR<FLOAT, 3>", types_by_name["embedding"])
 
+    def test_blob_store_put_objects_get_list_and_delete(self):
+        table = self.conn.create_table(
+            "objects",
+            schema=_schema({
+                "key": pa.string(),
+                "image": pa.large_binary(),
+                "content_type": pa.string(),
+                "owner": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        store = table.blobs(column="image")
+
+        results = store.put_objects([
+            {
+                "key": "images/cat.jpg",
+                "body": b"cat-image-old",
+                "columns": {"content_type": "image/gif", "owner": "ignored"},
+            },
+            {
+                "key": "images/cat.jpg",
+                "body": b"cat-image-v1",
+                "columns": {"content_type": "image/jpeg", "owner": "alice"},
+            },
+            {
+                "key": "images/dog.jpg",
+                "body": bytearray(b"dog-image"),
+                "columns": {"content_type": "image/jpeg", "owner": "bob"},
+            },
+        ])
+
+        self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
+                         [result.key for result in results])
+        self.assertEqual([12, 9], [result.size for result in results])
+
+        cat = store.get_object("images/cat.jpg")
+        self.assertEqual(b"cat-image-v1", cat.read())
+        self.assertEqual(b"at-i", store.get_object(
+            "images/cat.jpg", range="bytes=1-4").read())
+        clipped = store.get_object("images/cat.jpg", range="bytes=10-999")
+        self.assertEqual(2, clipped.content_length)
+        self.assertEqual(b"v1", clipped.read())
+        with self.assertRaisesRegex(ValueError, "Range start"):
+            store.get_object("images/cat.jpg", range="bytes=12-13")
+        self.assertEqual("image/jpeg", cat.columns["content_type"])
+        self.assertEqual("alice", cat.columns["owner"])
+        owner_only = store.get_object(
+            "images/cat.jpg",
+            columns=["owner"],
+        )
+        self.assertEqual({"owner": "alice"}, owner_only.columns)
+
+        listed = store.list_objects(prefix="images/")
+        self.assertEqual(["images/cat.jpg", "images/dog.jpg"],
+                         sorted(obj.key for obj in listed))
+        self.assertEqual(
+            {
+                "images/cat.jpg": "image/jpeg",
+                "images/dog.jpg": "image/jpeg",
+            },
+            {obj.key: obj.columns["content_type"] for obj in listed},
+        )
+        listed_without_columns = store.list_objects(
+            prefix="images/",
+            columns=[],
+        )
+        self.assertEqual(
+            {"images/cat.jpg": {}, "images/dog.jpg": {}},
+            {obj.key: obj.columns for obj in listed_without_columns},
+        )
+        self.assertEqual([], store.list_objects(prefix="images/", limit=0))
+        with self.assertRaisesRegex(ValueError, "limit"):
+            store.list_objects(prefix="images/", limit=-1)
+
+        store.put_object(
+            "images/cat.jpg",
+            b"cat-image-v2",
+            columns={"content_type": "image/png", "owner": "alice"},
+        )
+        self.assertEqual(b"cat-image-v2", store.get_object("images/cat.jpg").read())
+        info = store.head_object("images/cat.jpg")
+        self.assertEqual("image/png", info.columns["content_type"])
+        self.assertEqual(
+            {"content_type": "image/png"},
+            store.head_object(
+                "images/cat.jpg",
+                columns="content_type",
+            ).columns,
+        )
+        self.assertEqual(2, table.scan().to_arrow().num_rows)
+
+        previous_descriptor = info.descriptor
+        updated = store.update_object_columns(
+            "images/cat.jpg",
+            {"content_type": "image/webp"},
+        )
+        self.assertEqual(previous_descriptor, updated.descriptor)
+        self.assertEqual("image/webp", updated.columns["content_type"])
+        self.assertEqual("alice", updated.columns["owner"])
+        self.assertEqual(b"cat-image-v2", store.get_object("images/cat.jpg").read())
+
+        batch_updates = store.update_objects_columns([
+            {"key": "images/cat.jpg", "columns": {"owner": "carol"}},
+            {"key": "images/dog.jpg", "columns": {"owner": "dave"}},
+        ])
+        self.assertEqual(
+            ["images/cat.jpg", "images/dog.jpg"],
+            [obj.key for obj in batch_updates],
+        )
+        self.assertEqual("carol", store.head_object("images/cat.jpg").columns["owner"])
+        self.assertEqual("dave", store.head_object("images/dog.jpg").columns["owner"])
+        self.assertEqual(2, table.scan().to_arrow().num_rows)
+
+        with self.assertRaisesRegex(ValueError, "columns must not be empty"):
+            store.update_object_columns("images/cat.jpg", {})
+        with self.assertRaises(pmm.NoSuchKey):
+            store.update_object_columns("images/missing.jpg", {"owner": "nobody"})
+        with self.assertRaisesRegex(ValueError, "columns must not include"):
+            store.update_object_columns("images/cat.jpg", {"image": b"new"})
+
+        store.delete_objects(["images/dog.jpg", "images/dog.jpg"])
+        with self.assertRaises(pmm.NoSuchKey):
+            store.head_object("images/dog.jpg")
+        self.assertEqual(["images/cat.jpg"],
+                         [obj.key for obj in store.list_objects(prefix="images/")])
+        store.delete_object("images/cat.jpg")
+        self.assertEqual([], store.list_objects(prefix="images/"))
+
+    def test_blob_store_put_object_accepts_blob_without_materializing(self):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+
+        table = self.conn.create_table(
+            "streamed_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        data = b"streamed-managed-payload"
+        stream_uri = "stream://payloads/1"
+        stream_calls = []
+
+        class StreamOnlyReader:
+
+            def new_input_stream(self, uri):
+                stream_calls.append(("new_input_stream", uri))
+                return io.BytesIO(data)
+
+        class StreamOnlyReaderFactory:
+
+            def create(self, uri):
+                stream_calls.append(("create", uri))
+                return StreamOnlyReader()
+
+        class DescriptorOnlyBlob(Blob):
+
+            def to_data(self):
+                raise AssertionError("put_object should not materialize Blob data")
+
+            def to_descriptor(self):
+                return BlobDescriptor(stream_uri, 0, len(data))
+
+            def new_input_stream(self):
+                raise AssertionError("put_object should use the URI stream")
+
+        store = table.blobs(column="payload")
+        original_factory = table.raw_table.file_io.uri_reader_factory
+        table.raw_table.file_io.uri_reader_factory = StreamOnlyReaderFactory()
+        try:
+            result = store.put_object("payloads/1", DescriptorOnlyBlob())
+        finally:
+            table.raw_table.file_io.uri_reader_factory = original_factory
+
+        self.assertEqual(len(data), result.size)
+        self.assertEqual([
+            ("create", stream_uri),
+            ("new_input_stream", stream_uri),
+        ], stream_calls)
+        stored = store.get_object("payloads/1")
+        self.assertNotEqual(stream_uri, stored.descriptor.uri)
+        self.assertEqual(data, stored.read())
+
+    def test_blob_store_put_object_reference_preserves_descriptor_uri(self):
+        table = self.conn.create_table(
+            "referenced_objects",
+            schema=_schema({
+                "object_key": pa.string(),
+                "payload": pa.large_binary(),
+                "media_type": pa.string(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-descriptor-field": "payload",
+            }),
+        )
+        data = b"external-video-payload"
+        external_path = os.path.join(self.temp_dir, "video.bin")
+        with open(external_path, "wb") as f:
+            f.write(data)
+
+        store = table.blobs(column="payload")
+        result = store.put_object(
+            "videos/1",
+            uri=external_path,
+            length=len(data),
+            columns={"media_type": "video/mp4"},
+        )
+        descriptor = store.head_object("videos/1").descriptor
+        more = store.put_objects([
+            {
+                "key": "videos/2",
+                "descriptor": descriptor,
+                "columns": {"media_type": "video/mp4"},
+            }
+        ])
+
+        self.assertEqual("videos/1", result.key)
+        self.assertEqual(len(data), result.size)
+        self.assertEqual("videos/2", more[0].key)
+        obj = store.get_object("videos/1")
+        self.assertEqual(data, obj.read())
+        self.assertEqual("video/mp4", obj.columns["media_type"])
+        self.assertEqual(external_path, store.head_object("videos/1").descriptor.uri)
+        self.assertEqual(data, store.get_object("videos/2").read())
+
+    def test_blob_store_put_object_uri_streams_into_managed_blob(self):
+        table = self.conn.create_table(
+            "managed_only_objects",
+            schema=_schema({
+                "key": pa.string(),
+                "payload": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        data = b"external-managed-payload"
+        external_path = os.path.join(self.temp_dir, "managed.bin")
+        with open(external_path, "wb") as f:
+            f.write(data)
+
+        store = table.blobs(column="payload")
+        result = store.put_object(
+            "payloads/1",
+            uri=external_path,
+            length=len(data),
+        )
+
+        self.assertEqual(len(data), result.size)
+        stored = store.get_object("payloads/1")
+        self.assertNotEqual(external_path, stored.descriptor.uri)
+        self.assertEqual(data, stored.read())
+
     def test_drop_table_can_ignore_missing_table(self):
         self.conn.drop_table("missing", ignore_if_not_exists=True)
 
@@ -260,6 +518,699 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual(1, result.num_rows)
         self.assertEqual([1], result["id"].to_pylist())
 
+    def test_scan_with_row_id_returns_system_column(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        result = (
+            users.scan()
+            .with_row_id()
+            .select(["id"])
+            .to_arrow()
+        )
+
+        self.assertEqual(["id", "_ROW_ID"], result.column_names)
+        self.assertEqual([1, 2], result["id"].to_pylist())
+        self.assertEqual([0, 1], result["_ROW_ID"].to_pylist())
+
+    def test_take_row_ids_reads_projected_rows(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[
+                {"id": 1, "content": "alpha"},
+                {"id": 2, "content": "beta"},
+                {"id": 3, "content": "gamma"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        manifest = {
+            row["id"]: row["_ROW_ID"]
+            for row in docs.scan().select(["id"]).with_row_id().to_list()
+        }
+
+        rows = sorted(
+            docs.take_row_ids([manifest[3], manifest[1]])
+            .select(["id", "content"])
+            .with_row_id()
+            .to_list(),
+            key=lambda row: row["id"],
+        )
+
+        self.assertEqual(
+            [
+                {"id": 1, "content": "alpha", "_ROW_ID": manifest[1]},
+                {"id": 3, "content": "gamma", "_ROW_ID": manifest[3]},
+            ],
+            rows,
+        )
+
+    def test_take_row_ids_accepts_empty_manifest(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": 1}],
+            schema=_schema({"id": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        self.assertEqual([], docs.take_row_ids([]).select(["id"]).to_list())
+
+    def test_take_row_ids_supports_snapshot_and_tag_time_travel(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "content": pa.string(),
+                "embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([
+            {"id": 1, "content": "first", "embedding": [1.0, 0.0, 0.0]},
+        ])
+        snapshot_id = docs.raw_table.snapshot_manager().get_latest_snapshot().id
+        docs.raw_table.create_tag("v1", snapshot_id=snapshot_id)
+        row_id = (
+            docs.scan(snapshot_id=snapshot_id)
+            .select(["id"])
+            .with_row_id()
+            .to_list()[0]["_ROW_ID"]
+        )
+
+        docs.delete(where="id = 1")
+
+        self.assertEqual(
+            [],
+            docs.take_row_ids([row_id]).select(["id"]).to_list(),
+        )
+        self.assertEqual(
+            [{"id": 1, "_ROW_ID": row_id}],
+            docs.take_row_ids([row_id], snapshot_id=snapshot_id)
+            .select(["id"])
+            .with_row_id()
+            .to_list(),
+        )
+        self.assertEqual(
+            [{"id": 1}],
+            docs.take_row_ids([row_id], tag_name="v1")
+            .select(["id"])
+            .to_list(),
+        )
+        self.assertEqual(
+            snapshot_id,
+            docs.search(
+                [1.0, 0.0, 0.0],
+                column="embedding",
+                snapshot_id=snapshot_id,
+            )._table.options.scan_snapshot_id(),
+        )
+
+    def test_time_travel_rejects_snapshot_id_and_tag_name_together(self):
+        docs = self.conn.create_table(
+            "docs",
+            data=[{"id": 1}],
+            schema=_schema({"id": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+            docs.take_row_ids([0], snapshot_id=1, tag_name="v1")
+
+    def test_overwrite_replaces_unpartitioned_table(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        result = users.overwrite([
+            {"id": 3, "name": "Carol", "age": 40},
+        ])
+
+        self.assertIs(users, result)
+        self.assertEqual(
+            [
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            users.scan().to_list(),
+        )
+
+    def test_empty_overwrite_clears_unpartitioned_table(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.overwrite([])
+
+        self.assertEqual([], users.scan().to_list())
+
+    def test_overwrite_replaces_dynamic_partitions(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "dt": "2024-01-01"},
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "dt": pa.string(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["dt"],
+        )
+
+        users.overwrite([
+            {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+        ])
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+                {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+            ],
+            rows,
+        )
+
+    def test_overwrite_replaces_static_partition(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "dt": "2024-01-01"},
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "dt": pa.string(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "dynamic-partition-overwrite": "false",
+            }),
+            partitioned=["dt"],
+        )
+
+        users.overwrite([
+            {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+        ], partition={"dt": "2024-01-01"})
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 2, "name": "Bob", "dt": "2024-01-02"},
+                {"id": 3, "name": "Carol", "dt": "2024-01-01"},
+            ],
+            rows,
+        )
+
+    def test_scan_read_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = [("blob-%d-" % i).encode() * (i + 1) for i in range(6)]
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": payloads[0]},
+            {"clip": "c1", "idx": 1, "image": payloads[1]},
+            {"clip": "c1", "idx": 2, "image": payloads[2]},
+            {"clip": "c2", "idx": 0, "image": payloads[3]},
+            {"clip": "c2", "idx": 1, "image": payloads[4]},
+            {"clip": "c3", "idx": 0, "image": None},
+        ])
+
+        # scalar table is row-aligned with the blob list and drops the blob column
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs("image")
+        images = blobs["image"]
+        self.assertEqual(3, len(images))
+        self.assertNotIn("image", scalar.column_names)
+        got = dict(zip(scalar.column("idx").to_pylist(), images))
+        self.assertEqual({0: payloads[0], 1: payloads[1], 2: payloads[2]}, got)
+
+        # blob column auto-detected when columns=None
+        _, blobs2 = obs.scan().where("clip = 'c2'").read_blobs()
+        self.assertEqual({payloads[3], payloads[4]}, set(blobs2["image"]))
+
+        # null blob -> None
+        _, blobs3 = obs.scan().where("clip = 'c3'").read_blobs("image")
+        self.assertEqual([None], blobs3["image"])
+
+        # non-BLOB column is rejected
+        with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+            obs.scan().read_blobs("idx")
+
+        # empty result: 0 matching rows -> empty blob list, schema preserved
+        scalar_e, blobs_e = obs.scan().where("clip = 'none'").read_blobs("image")
+        self.assertEqual(0, scalar_e.num_rows)
+        self.assertEqual([], blobs_e["image"])
+
+    def test_scan_read_blobs_multi_column(self):
+        obs = self.conn.create_table(
+            "multi",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "img": pa.large_binary(),
+                "aud": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i,
+             "img": ("img-%d" % i).encode(), "aud": ("aud-%d" % i).encode()}
+            for i in range(4)
+        ])
+
+        # both BLOB columns fetched in one call, each row-aligned with the scalars
+        scalar, blobs = obs.scan().where("clip = 'c1'").read_blobs(["img", "aud"])
+        self.assertEqual({"img", "aud"}, set(blobs))
+        self.assertNotIn("img", scalar.column_names)
+        self.assertNotIn("aud", scalar.column_names)
+        idx = scalar.column("idx").to_pylist()
+        self.assertEqual({i: ("img-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["img"])))
+        self.assertEqual({i: ("aud-%d" % i).encode() for i in range(4)},
+                         dict(zip(idx, blobs["aud"])))
+
+        # reading only one BLOB column must not leak the other into scalar as
+        # descriptor bytes
+        scalar1, blobs1 = obs.scan().where("clip = 'c1'").read_blobs("img")
+        self.assertEqual({"img"}, set(blobs1))
+        self.assertEqual(["clip", "idx"], scalar1.column_names)
+
+        # columns=None intersects all BLOBs with select() -> only projected BLOB
+        _, blobs2 = obs.scan().where("clip = 'c1'").select(["clip", "idx", "img"]).read_blobs()
+        self.assertEqual({"img"}, set(blobs2))
+
+        # duplicate columns are de-duplicated
+        _, blobs3 = obs.scan().where("clip = 'c1'").read_blobs(["img", "img"])
+        self.assertEqual({"img"}, set(blobs3))
+
+    def test_scan_read_blobs_filter_column_not_selected(self):
+        # The row filter must apply even when its column is not in select().
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i, "image": ("v-%d" % i).encode()}
+            for i in range(4)
+        ])
+
+        scalar, blobs = (
+            obs.scan().select(["image"]).where("idx = 1").read_blobs("image"))
+        self.assertEqual([b"v-1"], blobs["image"])
+        self.assertNotIn("idx", scalar.schema.names)
+
+        scalar2, blobs2 = (
+            obs.scan().select(["idx", "image"]).where("idx = 2").read_blobs("image"))
+        self.assertEqual([b"v-2"], blobs2["image"])
+        self.assertEqual([2], scalar2.column("idx").to_pylist())
+
+        streamed = []
+        for _, body in (
+                obs.scan().select(["image"]).where("idx = 1").stream_blobs("image")):
+            streamed.extend(body["image"])
+        self.assertEqual([b"v-1"], streamed)
+
+        scalar3, _ = obs.scan().select(["missing", "image"]).read_blobs("image")
+        self.assertNotIn("missing", scalar3.schema.names)
+
+    def test_scan_read_blobs_with_row_id(self):
+        # with_row_id() must expose _ROW_ID in the scalar table, like to_arrow().
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": i, "image": ("v-%d" % i).encode()}
+            for i in range(3)
+        ])
+        row_id = "_ROW_ID"
+
+        expected = {r["idx"]: r[row_id]
+                    for r in obs.scan().with_row_id().to_arrow().to_pylist()}
+
+        scalar, blobs = (
+            obs.scan().with_row_id().select(["idx", "image"]).read_blobs("image"))
+        self.assertIn(row_id, scalar.schema.names)
+        self.assertEqual(expected, dict(zip(scalar.column("idx").to_pylist(),
+                                            scalar.column(row_id).to_pylist())))
+
+        got = {}
+        for sb, _ in obs.scan().with_row_id().select(["idx", "image"]).stream_blobs("image"):
+            self.assertIn(row_id, sb.schema.names)
+            got.update(zip(sb.column("idx").to_pylist(), sb.column(row_id).to_pylist()))
+        self.assertEqual(expected, got)
+
+    def test_scan_read_blobs_where_on_blob_column(self):
+        # A where() on one BLOB column must still filter when a different BLOB is
+        # read (the predicate BLOB column is read as descriptor for filtering).
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "imga": pa.large_binary(),
+                "imgb": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": 0, "imga": b"a0", "imgb": b"b0"},
+            {"clip": "c1", "idx": 1, "imga": None, "imgb": b"b1"},
+            {"clip": "c1", "idx": 2, "imga": b"a2", "imgb": b"b2"},
+        ])
+
+        scalar, blobs = obs.scan().where("imga IS NOT NULL").read_blobs("imgb")
+        self.assertEqual([b"b0", b"b2"], blobs["imgb"])
+        self.assertNotIn("imga", scalar.schema.names)
+
+    def test_search_query_rejects_blob_reads(self):
+        t = self.conn.create_table(
+            "srch",
+            schema=_schema({
+                "id": pa.int32(),
+                "emb": _vector(3),
+                "img": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").read_blobs("img")
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").stream_blobs("img")
+        with self.assertRaisesRegex(TypeError, "only supported on scan"):
+            t.search([1.0, 0.0, 0.0], column="emb").to_ray()
+
+    def test_scan_stream_blobs(self):
+        obs = self.conn.create_table(
+            "obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        payloads = {i: ("s-%d-" % i).encode() * (i + 1) for i in range(5)}
+        obs.add([
+            {"clip": "c1", "idx": i, "image": payloads[i]} for i in range(5)
+        ])
+
+        # collecting every streamed batch must reproduce the full, row-aligned result
+        got = {}
+        batches = 0
+        for scalar, blobs in obs.scan().where("clip = 'c1'").stream_blobs("image"):
+            batches += 1
+            self.assertNotIn("image", scalar.schema.names)
+            for idx, img in zip(scalar.column("idx").to_pylist(), blobs["image"]):
+                got[idx] = img
+        self.assertGreaterEqual(batches, 1)
+        self.assertEqual({i: payloads[i] for i in range(5)}, got)
+
+        # bad column is rejected eagerly (not deferred to first iteration)
+        with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+            obs.scan().stream_blobs("idx")
+        # breaking out early closes the reader without error
+        it = obs.scan().where("clip = 'c1'").stream_blobs("image")
+        next(it)
+        it.close()
+        # empty result streams nothing
+        self.assertEqual(
+            [], list(obs.scan().where("clip = 'none'").stream_blobs("image")))
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_blobs(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+                "audio": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([
+            {"clip": "c1", "idx": 0, "image": b"img-0", "audio": b"aud-0"},
+            {"clip": "c1", "idx": 1, "image": b"img-1", "audio": b"aud-1"},
+            {"clip": "c2", "idx": 0, "image": b"img-x", "audio": b"aud-x"},
+        ])
+
+        def collect_batch(scalar, blobs, prefix):
+            assert isinstance(scalar, pa.Table)
+            assert ["idx"] == scalar.column_names
+            idxs = scalar.column("idx").to_pylist()
+            rows = []
+            for idx, image in zip(idxs, blobs["image"]):
+                rows.append({"idx": idx, "image": prefix + image})
+            return pa.Table.from_pylist(rows)
+
+        try:
+            from pypaimon.ray import map_with_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image", "audio"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            ds = ds.filter(lambda row: row["idx"] >= 0)
+
+            with self.assertRaisesRegex(ValueError, "not a BLOB column"):
+                obs.map_with_blobs(ds, ["idx"], collect_batch)
+            with self.assertRaisesRegex(ValueError, "FileIO"):
+                map_with_blobs(ds, ["image"], collect_batch)
+
+            from pypaimon.table.row.blob import BlobDescriptor
+
+            descriptor = BlobDescriptor("oss://bucket/blob", 0, 1).serialize()
+            foreign_ds = ray.data.from_arrow(pa.table({
+                "idx": [0],
+                "image": [descriptor],
+                "foreign_blob": [descriptor],
+            }))
+            with self.assertRaisesRegex(Exception, "does not own"):
+                map_with_blobs(
+                    foreign_ds,
+                    ["image"],
+                    collect_batch,
+                    file_io=obs.raw_table.file_io,
+                    all_blob_columns=["image"],
+                    batch_size=1,
+                ).take_all()
+
+            result = obs.map_with_blobs(
+                ds,
+                ["image"],
+                collect_batch,
+                parallelism=2,
+                batch_size=1,
+                fn_kwargs={"prefix": b"got-"},
+                ray_remote_args={"num_cpus": 1},
+            )
+            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+
+            self.assertEqual(
+                [
+                    {"idx": 0, "image": b"got-img-0"},
+                    {"idx": 1, "image": b"got-img-1"},
+                ],
+                rows,
+            )
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    @unittest.skipIf(ray is None, "ray is not installed")
+    def test_scan_to_ray_map_with_blobs_guards(self):
+        started_ray = False
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=2)
+            started_ray = True
+        obs = self.conn.create_table(
+            "ray_obs_guards",
+            schema=_schema({
+                "clip": pa.string(),
+                "idx": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+            partitioned=["clip"],
+        )
+        obs.add([{"clip": "c1", "idx": 0, "image": b"img-0"}])
+
+        def return_none(scalar, blobs):
+            return None
+
+        try:
+            from pypaimon.ray import map_with_blobs
+
+            ds = (
+                obs.scan()
+                .where("clip = 'c1'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+
+            with self.assertRaisesRegex(ValueError, "all_blob_columns"):
+                map_with_blobs(
+                    ray.data.from_arrow(pa.table({"image": [b"inline"]})),
+                    ["image"],
+                    lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                    file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(Exception, "must return"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=1,
+                ).take_all()
+
+            empty_ds = (
+                obs.scan()
+                .where("clip = 'none'")
+                .select(["idx", "image"])
+                .to_ray(concurrency=1, override_num_blocks=1)
+            )
+            result = obs.map_with_blobs(
+                empty_ds,
+                ["image"],
+                lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
+                batch_size=1,
+            )
+            self.assertEqual([], result.take_all())
+        finally:
+            if started_ray:
+                ray.shutdown()
+
+    def test_scan_to_ray_nested_projection_output_names(self):
+        obs = self.conn.create_table(
+            "ray_nested_obs",
+            schema=_schema({
+                "id": pa.int32(),
+                "tag": pa.string(),
+                "payload": pa.struct([("a", pa.int64()), ("b", pa.string())]),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        _, _, visible_columns = (
+            obs.scan()
+            .where("tag = 'keep'")
+            .select(["id", "payload.a"])
+            ._blob_descriptor_query_read_builder()
+        )
+
+        self.assertEqual(["id", "payload_a"], visible_columns)
+
+    def test_fetch_bodies_decodes_descriptor_inline_and_null(self):
+        # Cells may be descriptor bytes (incl. -1 read-to-EOF), inline bytes, or null.
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.table.row.blob import BlobDescriptor
+        data = bytes(range(64))
+        path = os.path.join(self.temp_dir, "blob.bin")
+        with open(path, "wb") as f:
+            f.write(data)
+        file_io = FileIO.get("file://" + self.temp_dir, {})
+        cells = [
+            BlobDescriptor(path, 0, -1).serialize(),
+            BlobDescriptor(path, 10, 8).serialize(),
+            b"raw-inline-bytes",
+            None,
+        ]
+        bodies = ScanQuery._fetch_bodies(
+            file_io, {"image": cells}, ["image"], 4)
+        self.assertEqual(
+            [data, data[10:18], b"raw-inline-bytes", None], bodies["image"])
+
+    def test_fetch_bodies_reads_via_file_io_not_uri_reader(self):
+        # Blobs must be read through file_io.read_ranges_coalesced (which carries the
+        # resolved DLF/OSS token), never via uri_reader_factory -- that would rebuild a
+        # FileIO from the raw catalog options and fail in DLF data-token mode.
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        class _FakeIO:
+            @property
+            def uri_reader_factory(self):
+                raise AssertionError("_fetch_bodies must not use uri_reader_factory")
+
+            def read_ranges_coalesced(self, ranges, parallelism):
+                return [None if r is None else b"BODY:" + r[0].encode() for r in ranges]
+
+        cells = [BlobDescriptor("oss://bucket/x", 4, 10).serialize(), b"inline-blob", None]
+        bodies = ScanQuery._fetch_bodies(_FakeIO(), {"img": cells}, ["img"], 8)
+        self.assertEqual([b"BODY:oss://bucket/x", b"inline-blob", None], bodies["img"])
+
+    def test_fetch_bodies_rejects_unresolved_blob_view(self):
+        from pypaimon.multimodal.query import ScanQuery
+        from pypaimon.table.row.blob import BlobViewStruct
+        view_bytes = BlobViewStruct("db.tbl", 1, 2).serialize()
+        with self.assertRaisesRegex(ValueError, "blob-view"):
+            ScanQuery._fetch_bodies(None, {"image": [view_bytes]}, ["image"], 4)
+
     def test_scan_does_not_expose_pre_filter(self):
         users = self.conn.create_table(
             "users",
@@ -306,6 +1257,33 @@ class MultimodalTableTest(unittest.TestCase):
             rows,
         )
 
+    def test_delete_by_filter(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.delete(where="id = 2")
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            rows,
+        )
+
     def test_merge_updates_matches_and_inserts_new_rows(self):
         users = self.conn.create_table(
             "users",
@@ -335,6 +1313,37 @@ class MultimodalTableTest(unittest.TestCase):
                 {"id": 1, "name": "Alice", "age": 30},
                 {"id": 2, "name": "Bob_v2", "age": 26},
                 {"id": 3, "name": "Carol", "age": 40},
+            ],
+            rows,
+        )
+
+    def test_merge_deletes_matched_rows(self):
+        users = self.conn.create_table(
+            "users",
+            data=[
+                {"id": 1, "name": "Alice", "age": 30},
+                {"id": 2, "name": "Bob", "age": 25},
+                {"id": 3, "name": "Carol", "age": 40},
+            ],
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        users.merge("id") \
+            .when_matched_delete() \
+            .execute([
+                {"id": 2},
+                {"id": 3},
+            ])
+
+        rows = sorted(users.scan().to_list(), key=lambda r: r["id"])
+        self.assertEqual(
+            [
+                {"id": 1, "name": "Alice", "age": 30},
             ],
             rows,
         )
@@ -466,6 +1475,62 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("s.age > 0", calls["not_matched"][0].condition)
         self.assertEqual([], calls["messages"])
 
+    def test_merge_delete_where_uses_source_and_target_aliases(self):
+        users = self.conn.create_table(
+            "users",
+            schema=_schema({
+                "id": pa.int32(),
+                "name": pa.string(),
+                "age": pa.int32(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+
+        calls = {}
+
+        class FakeUpdate:
+            def merge_into(
+                    self,
+                    source,
+                    on,
+                    when_matched=None,
+                    when_not_matched=None):
+                calls["matched"] = list(when_matched or [])
+                return []
+
+        class FakeCommit:
+            def commit(self, messages):
+                calls["messages"] = messages
+
+            def close(self):
+                pass
+
+        class FakeWriteBuilder:
+            def new_update(self):
+                return FakeUpdate()
+
+            def new_commit(self):
+                return FakeCommit()
+
+        users.raw_table.new_batch_write_builder = lambda: FakeWriteBuilder()
+
+        (
+            users.merge("id")
+            .when_matched_delete(
+                where="source.age < target.age and source.name != 'target.name'",
+            )
+            .execute([
+                {"id": 1, "name": "Alice", "age": 29},
+            ])
+        )
+
+        self.assertTrue(calls["matched"][0].delete)
+        self.assertEqual(
+            "s.age < t.age and s.name != 'target.name'",
+            calls["matched"][0].condition,
+        )
+        self.assertEqual([], calls["messages"])
+
     def test_merge_validates_on_columns(self):
         users = self.conn.create_table(
             "users",
@@ -498,24 +1563,14 @@ class MultimodalTableTest(unittest.TestCase):
 
         options = {"tokenizer": "default"}
         self.assertEqual(
-            "tantivy-fulltext",
+            "full-text",
             docs.create_index("content", index_type="full-text",
                               options=options),
-        )
-        self.assertEqual(
-            "tantivy-fulltext",
-            docs.create_index("content", index_type="full_text"),
-        )
-        self.assertEqual(
-            "tantivy-fulltext",
-            docs.create_index("content", index_type="fulltext"),
         )
 
         self.assertEqual(
             [
-                ("content", "tantivy-fulltext", options),
-                ("content", "tantivy-fulltext", None),
-                ("content", "tantivy-fulltext", None),
+                ("content", "full-text", options),
             ],
             calls,
         )
@@ -706,6 +1761,45 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual([1.0, 0.0, 0.0], calls["vector"])
         self.assertEqual([{"id": 1, "embedding": [1.0, 0.0, 0.0]}], result)
 
+    def test_search_with_row_id_returns_system_column(self):
+        docs = self.conn.create_table(
+            "docs",
+            schema=_schema({
+                "id": pa.int32(),
+                "embedding": _vector(3),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        docs.add([{"id": 1, "embedding": [1.0, 0.0, 0.0]}])
+
+        class FakeVectorBuilder:
+            def with_vector_column(self, column):
+                return self
+
+            def with_query_vector(self, vector):
+                return self
+
+            def with_limit(self, limit):
+                return self
+
+            def with_options(self, options):
+                return self
+
+            def execute_local(self):
+                return GlobalIndexResult.from_range(Range(0, 0))
+
+        docs.raw_table.new_vector_search_builder = lambda: FakeVectorBuilder()
+
+        result = (
+            docs.search([1.0, 0.0, 0.0], column="embedding")
+            .select(["id"])
+            .with_row_id()
+            .limit(1)
+            .to_list()
+        )
+
+        self.assertEqual([{"id": 1, "_ROW_ID": 0}], result)
+
     def test_search_rejects_batch_vectors(self):
         docs = self.conn.create_table(
             "docs",
@@ -821,8 +1915,8 @@ class MultimodalTableTest(unittest.TestCase):
         calls = {}
 
         class FakeFullTextBuilder:
-            def with_query(self, query):
-                calls["query"] = query.to_dict()
+            def with_query(self, field_name, query):
+                calls["query"] = (field_name, json.loads(query))
                 return self
 
             def with_limit(self, limit):
@@ -841,9 +1935,8 @@ class MultimodalTableTest(unittest.TestCase):
         )
 
         self.assertEqual(1, calls["limit"])
-        self.assertEqual("content", calls["query"]["match"]["column"])
-        self.assertEqual("paimon vector", calls["query"]["match"]["terms"])
-        self.assertEqual("Or", calls["query"]["match"]["operator"])
+        self.assertEqual("content", calls["query"][0])
+        self.assertEqual("paimon vector", calls["query"][1]["match"]["query"])
         self.assertEqual([1], result["id"].to_pylist())
 
     def test_search_string_requires_unambiguous_text_column(self):
@@ -877,7 +1970,7 @@ class MultimodalTableTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             pmm.vector_route([1.0, 0.0, 0.0])
         route = pmm.text_route("paimon")
-        self.assertFalse(hasattr(route, "column"))
+        self.assertIsNone(route.column)
         self.assertEqual("paimon", route.query)
 
     def test_search_can_build_hybrid_routes(self):
@@ -912,8 +2005,9 @@ class MultimodalTableTest(unittest.TestCase):
                 return self
 
             def add_full_text_route(
-                    self, query_json, limit, weight=1.0, options=None):
-                calls["text"] = (json.loads(query_json), limit, weight, options)
+                    self, field_name, query, limit, weight=1.0, options=None):
+                calls["text"] = (
+                    field_name, json.loads(query), limit, weight, options)
                 return self
 
             def with_filter(self, predicate):
@@ -943,8 +2037,8 @@ class MultimodalTableTest(unittest.TestCase):
             ("embedding", [1.0, 0.0, 0.0], 2, 1.0, {}),
             calls["vector"],
         )
-        self.assertEqual("content", calls["text"][0]["match"]["column"])
-        self.assertEqual("paimon", calls["text"][0]["match"]["terms"])
+        self.assertEqual("content", calls["text"][0])
+        self.assertEqual("paimon", calls["text"][1]["match"]["query"])
         self.assertEqual([1, 2], result["id"].to_pylist())
 
     def test_search_hybrid_applies_pre_filter_to_vector_routes(self):
@@ -1056,9 +2150,9 @@ class MultimodalTableTest(unittest.TestCase):
                 return self
 
             def add_full_text_route(
-                    self, query_json, limit, weight=1.0, options=None):
+                    self, field_name, query, limit, weight=1.0, options=None):
                 calls["text_routes"].append(
-                    (json.loads(query_json), limit, weight, options))
+                    (field_name, json.loads(query), limit, weight, options))
                 return self
 
             def execute_local(self):
@@ -1113,10 +2207,10 @@ class MultimodalTableTest(unittest.TestCase):
             ],
             calls["vector_routes"],
         )
-        self.assertEqual("content", calls["text_routes"][0][0]["match"]["column"])
-        self.assertEqual("paimon", calls["text_routes"][0][0]["match"]["terms"])
-        self.assertEqual(4, calls["text_routes"][0][1])
-        self.assertEqual(0.2, calls["text_routes"][0][2])
+        self.assertEqual("content", calls["text_routes"][0][0])
+        self.assertEqual("paimon", calls["text_routes"][0][1]["match"]["query"])
+        self.assertEqual(4, calls["text_routes"][0][2])
+        self.assertEqual(0.2, calls["text_routes"][0][3])
         self.assertEqual(
             [{
                 "id": 1,

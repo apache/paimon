@@ -133,9 +133,9 @@ run_batched_java_write_tests() {
 
     if [[ "$PYTHON_MINOR" -ge 10 ]]; then
         if ! run_maven_test_batch \
-            "paimon-tantivy Java write tests" \
-            "paimon-tantivy/paimon-tantivy-index" \
-            "org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite" \
+            "paimon-full-text Java write tests" \
+            "paimon-full-text" \
+            "org.apache.paimon.fulltext.index.JavaPyNativeFullTextE2ETest#testNativeFullTextIndexWrite" \
             -q; then
             result=1
         fi
@@ -556,15 +556,15 @@ run_multi_vector_dedicated_file_py_write_test() {
     fi
 }
 
-# Function to run Tantivy full-text index test (Java write index, Python read and search)
-run_tantivy_fulltext_test() {
-    echo -e "${YELLOW}=== Step 8: Running Tantivy Full-Text Index Test (Java Write, Python Read) ===${NC}"
+# Function to run native full-text index test (Java write index, Python read and search)
+run_native_fulltext_test() {
+    echo -e "${YELLOW}=== Step 8: Running Native Full-Text Index Test (Java Write, Python Read) ===${NC}"
 
     if ! skip_batched_java_write; then
         cd "$PROJECT_ROOT"
 
-        echo "Running Maven test for JavaPyTantivyE2ETest.testTantivyFullTextIndexWrite..."
-        if mvn test -Dtest=org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite -pl paimon-tantivy/paimon-tantivy-index -q -Drun.e2e.tests=true; then
+        echo "Running Maven test for JavaPyNativeFullTextE2ETest.testNativeFullTextIndexWrite..."
+        if mvn test -Dtest=org.apache.paimon.fulltext.index.JavaPyNativeFullTextE2ETest#testNativeFullTextIndexWrite -pl paimon-full-text -q -Drun.e2e.tests=true; then
             echo -e "${GREEN}✓ Java test completed successfully${NC}"
         else
             echo -e "${RED}✗ Java test failed${NC}"
@@ -572,13 +572,13 @@ run_tantivy_fulltext_test() {
         fi
     fi
     cd "$PAIMON_PYTHON_DIR"
-    echo "Installing Python jieba tokenizer dependency for Tantivy jieba index reads..."
-    if ! python -m pip install 'jieba>=0.42,<1'; then
-        echo -e "${RED}✗ Failed to install jieba${NC}"
+    echo "Checking paimon-ftindex Python dependency for native full-text index reads..."
+    if ! python -c "import paimon_ftindex"; then
+        echo -e "${RED}✗ paimon-ftindex is not installed or its native FFI library is unavailable${NC}"
         return 1
     fi
-    echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_tantivy_full_text_index -v; then
+    echo "Running Python test for JavaPyReadWriteTest.test_read_native_full_text_index..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_native_full_text_index -v; then
         echo -e "${GREEN}✓ Python test completed successfully${NC}"
         return 0
     else
@@ -1024,7 +1024,7 @@ main() {
     local compressed_global_index_result=0
     local compressed_text_result=0
     local vector_append_table_result=0
-    local tantivy_fulltext_result=0
+    local native_fulltext_result=0
     local lumina_vector_result=0
     local lumina_vector_btree_result=0
     local vindex_vector_result=0
@@ -1182,14 +1182,14 @@ main() {
 
     echo ""
 
-    # Run Tantivy full-text index test (requires Python >= 3.10)
+    # Run native full-text index test (requires Python >= 3.10)
     if [[ "$PYTHON_MINOR" -ge 10 ]]; then
-        if ! run_tantivy_fulltext_test; then
-            tantivy_fulltext_result=1
+        if ! run_native_fulltext_test; then
+            native_fulltext_result=1
         fi
     else
-        echo -e "${YELLOW}⏭ Skipping Tantivy Full-Text Index Test (requires Python >= 3.10, current: $PYTHON_VERSION)${NC}"
-        tantivy_fulltext_result=0
+        echo -e "${YELLOW}⏭ Skipping Native Full-Text Index Test (requires Python >= 3.10, current: $PYTHON_VERSION)${NC}"
+        native_fulltext_result=0
     fi
 
     echo ""
@@ -1387,10 +1387,10 @@ main() {
         echo -e "${RED}✗ Multi-Vector Dedicated File Test (Python Write, Java Read): FAILED${NC}"
     fi
 
-    if [[ $tantivy_fulltext_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Tantivy Full-Text Index Test (Java Write, Python Read): PASSED${NC}"
+    if [[ $native_fulltext_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Native Full-Text Index Test (Java Write, Python Read): PASSED${NC}"
     else
-        echo -e "${RED}✗ Tantivy Full-Text Index Test (Java Write, Python Read): FAILED${NC}"
+        echo -e "${RED}✗ Native Full-Text Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
     if [[ $lumina_vector_result -eq 0 ]]; then
@@ -1476,7 +1476,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $btree_raw_fallback_result -eq 0 && $bitmap_index_result -eq 0 && $compressed_global_index_result -eq 0 && $compressed_text_result -eq 0 && $native_fulltext_result -eq 0 && $lumina_vector_result -eq 0 && $lumina_vector_btree_result -eq 0 && $vindex_vector_result -eq 0 && $vindex_vector_raw_fallback_result -eq 0 && $compact_conflict_result -eq 0 && $blob_compact_conflict_result -eq 0 && $blob_alter_compact_result -eq 0 && $data_evolution_result -eq 0 && $data_evolution_deletion_vector_result -eq 0 && $data_evolution_py_write_result -eq 0 && $java_variant_write_py_read_result -eq 0 && $py_variant_write_java_read_result -eq 0 && $vector_append_table_result -eq 0 && $vector_dedicated_java_write_result -eq 0 && $vector_dedicated_py_write_result -eq 0 && $multi_vector_dedicated_java_write_result -eq 0 && $multi_vector_dedicated_py_write_result -eq 0 && $row_format_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

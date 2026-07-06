@@ -30,13 +30,18 @@ from pypaimon.common.options.core_options import (
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex import Range
+from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
+from pypaimon.manifest.index_manifest_file import IndexManifestFile
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.writer.data_writer import DataWriter
@@ -184,6 +189,16 @@ class TableUpdate:
         return TableUpsertByKey(
             self.table, self.commit_user, commit_identifier
         ).upsert(table, upsert_keys, self.update_cols)
+
+    def _upsert_by_key(
+            self,
+            rows,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        return TableUpsertByKey(
+            self.table, self.commit_user, commit_identifier
+        ).upsert_rows(rows, upsert_keys, self.update_cols)
 
     def _merge_into(
             self,
@@ -335,6 +350,148 @@ class TableUpdate:
             array = array.cast(data_type)
         return array
 
+    def _delete_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        partition_filter = self._partition_only_delete_filter(predicate)
+        if partition_filter is not None:
+            return self._delete_by_partition_filter(partition_filter)
+
+        row_ids = self._matched_delete_row_ids(predicate)
+        return TableDeleteByRowId(self.table).delete(row_ids)
+
+    def _delete_by_partition_filter(
+            self, partition_filter: Predicate) -> List[CommitMessage]:
+        snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            return []
+
+        messages = {}
+        manifest_list_manager = ManifestListManager(self.table)
+        data_entries = FileScanner(
+            self.table,
+            lambda: ([], None),
+            partition_predicate=partition_filter,
+        ).read_manifest_entries(manifest_list_manager.read_all(snapshot))
+
+        for entry in data_entries:
+            message = self._partition_delete_message(
+                messages,
+                tuple(entry.partition.values),
+                entry.bucket,
+                snapshot.id,
+            )
+            message.deleted_files.append(entry.file)
+
+        for entry in self._partition_index_entries(snapshot, partition_filter):
+            message = self._partition_delete_message(
+                messages,
+                tuple(entry.partition.values),
+                entry.bucket,
+                snapshot.id,
+            )
+            message.index_deletes.append(IndexManifestEntry(
+                kind=1,
+                partition=entry.partition,
+                bucket=entry.bucket,
+                index_file=entry.index_file,
+            ))
+
+        return [message for message in messages.values() if not message.is_empty()]
+
+    @staticmethod
+    def _partition_delete_message(messages, partition, bucket, snapshot_id):
+        key = (partition, bucket)
+        if key not in messages:
+            messages[key] = CommitMessage(
+                partition=partition,
+                bucket=bucket,
+                new_files=[],
+                check_from_snapshot=snapshot_id,
+            )
+        return messages[key]
+
+    def _partition_index_entries(self, snapshot, partition_filter: Predicate):
+        if snapshot.index_manifest is None:
+            return []
+        return [
+            entry for entry in IndexManifestFile(self.table).read(
+                snapshot.index_manifest)
+            if partition_filter.test(entry.partition)
+        ]
+
+    def _delete_by_row_id(
+            self,
+            row_ids: Sequence[int],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        return TableDeleteByRowId(self.table).delete(list(row_ids))
+
+    def _partition_only_delete_filter(
+            self, predicate: Optional[Predicate]) -> Optional[Predicate]:
+        if predicate is None or not self.table.partition_keys:
+            return None
+        predicate_fields = self._predicate_fields(predicate)
+        if not predicate_fields:
+            return None
+        partition_keys = set(self.table.partition_keys)
+        if not predicate_fields.issubset(partition_keys):
+            return None
+        partition_index = {
+            name: index for index, name in enumerate(self.table.partition_keys)
+        }
+        return self._rewrite_predicate_to_partition_indices(
+            predicate, partition_index
+        )
+
+    def _rewrite_predicate_to_partition_indices(
+            self,
+            predicate: Predicate,
+            partition_index: Mapping[str, int],
+    ) -> Predicate:
+        if predicate.method in ('and', 'or'):
+            return predicate.new_literals([
+                self._rewrite_predicate_to_partition_indices(
+                    child, partition_index,
+                )
+                for child in (predicate.literals or [])
+            ])
+        if predicate.field not in partition_index:
+            raise ValueError(
+                "Partition delete predicate references non-partition "
+                f"field '{predicate.field}'."
+            )
+        return predicate.new_index(partition_index[predicate.field])
+
+    @staticmethod
+    def _predicate_fields(predicate: Predicate) -> set:
+        if predicate.field is not None:
+            return {predicate.field}
+        fields = set()
+        for child in predicate.literals or []:
+            fields.update(TableUpdate._predicate_fields(child))
+        return fields
+
+    def _matched_delete_row_ids(
+            self, predicate: Optional[Predicate]) -> List[int]:
+        scan_table = self._matched_update_scan_table()
+        read_builder = scan_table.new_read_builder()
+        if predicate is not None:
+            read_builder.with_filter(predicate)
+            read_builder.with_projection(
+                list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
+            )
+        else:
+            read_builder.with_projection([SpecialFields.ROW_ID.name])
+
+        splits = read_builder.new_scan().plan().splits()
+        matched = read_builder.new_read().to_arrow(splits)
+        if matched.num_rows == 0:
+            return []
+        return matched[SpecialFields.ROW_ID.name].to_pylist()
+
 
 class BatchTableUpdate(TableUpdate):
     """Batch-mode table update; commit messages always use
@@ -352,6 +509,14 @@ class BatchTableUpdate(TableUpdate):
             table, upsert_keys, BATCH_COMMIT_IDENTIFIER
         )
 
+    def upsert_by_key(
+            self, rows, upsert_keys: List[str]
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by key columns."""
+        return self._upsert_by_key(
+            rows, upsert_keys, BATCH_COMMIT_IDENTIFIER
+        )
+
     def update_by_predicate(
             self,
             predicate: Optional[Predicate],
@@ -361,6 +526,17 @@ class BatchTableUpdate(TableUpdate):
         return self._update_by_predicate(
             predicate, assignments, BATCH_COMMIT_IDENTIFIER
         )
+
+    def delete_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+    ) -> List[CommitMessage]:
+        """Delete rows matching ``predicate`` using deletion vectors."""
+        return self._delete_by_predicate(predicate, BATCH_COMMIT_IDENTIFIER)
+
+    def delete_by_row_id(self, row_ids: Sequence[int]) -> List[CommitMessage]:
+        """Delete rows by ``_ROW_ID`` using deletion vectors."""
+        return self._delete_by_row_id(row_ids, BATCH_COMMIT_IDENTIFIER)
 
     def merge_into(
             self,
@@ -403,6 +579,18 @@ class StreamTableUpdate(TableUpdate):
             table, upsert_keys, commit_identifier
         )
 
+    def upsert_by_key(
+            self,
+            rows,
+            upsert_keys: List[str],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by key columns,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._upsert_by_key(
+            rows, upsert_keys, commit_identifier
+        )
+
     def update_by_predicate(
             self,
             predicate: Optional[Predicate],
@@ -414,6 +602,24 @@ class StreamTableUpdate(TableUpdate):
         return self._update_by_predicate(
             predicate, assignments, commit_identifier
         )
+
+    def delete_by_predicate(
+            self,
+            predicate: Optional[Predicate],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Delete rows matching ``predicate`` using deletion vectors,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._delete_by_predicate(predicate, commit_identifier)
+
+    def delete_by_row_id(
+            self,
+            row_ids: Sequence[int],
+            commit_identifier: int,
+    ) -> List[CommitMessage]:
+        """Delete rows by ``_ROW_ID`` using deletion vectors,
+        tagging the produced commit messages with ``commit_identifier``."""
+        return self._delete_by_row_id(row_ids, commit_identifier)
 
     def merge_into(
             self,

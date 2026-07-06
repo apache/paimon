@@ -765,6 +765,126 @@ def test_read_paimon_partition_filter(append_only_table):
     assert all(dt == "2024-01-01" for dt in result.column("dt").to_pylist())
 
 
+def test_partition_filter_prunes_at_plan_level(append_only_table):
+    """Regression: Daft routes partition predicates to pushdowns.partition_filters
+    (a separate channel from pushdowns.filters). They must become a plan-time
+    predicate so plan() prunes partitions, instead of planning every split and
+    skipping in Python (a full-table plan)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    data = pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-03"], pa.string()),
+        }
+    )
+    _write_to_paimon(table, data)
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    pushdowns = Pushdowns(partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # partition filter must become a plan-time predicate
+    assert state.planning_predicate is not None
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    all_splits = table.new_read_builder().new_scan().plan().splits()
+
+    # pruning reduced the planned splits, and only the matching partition remains
+    assert 0 < len(pruned) < len(all_splits)
+    assert all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
+def test_row_and_partition_filters_both_reach_planning_predicate(append_only_table):
+    """filters and partition_filters arrive on separate Daft channels; both must
+    fold into the planning predicate (via _and_predicates)."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2, 3], pa.int64()),
+            "name": pa.array(["a", "b", "c"], pa.string()),
+            "value": pa.array([1.0, 2.0, 3.0], pa.float64()),
+            "dt": pa.array(["2024-01-01", "2024-01-02", "2024-01-02"], pa.string()),
+        }
+    ))
+
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+    source.push_filters([(col("id") > 1)._expr])
+    pushdowns = Pushdowns(filters=(col("id") > 1),
+                          partition_filters=(col("dt") == "2024-01-02"))
+
+    state = source._read_pushdown_state(table, pushdowns)
+    # both channels combined into one AND planning predicate
+    assert state.planning_predicate is not None
+    assert state.planning_predicate.method == "and"
+
+    pruned = source._scan_read_builder(table, state).new_scan().plan().splits()
+    assert pruned and all(s.partition.to_dict().get("dt") == "2024-01-02" for s in pruned)
+
+
+def test_isnull_partition_filter_keeps_null_partition(append_only_table):
+    """isNull must NOT be pushed to plan pruning: plan pruning would drop the
+    null partition and the Python post-filter can't restore it. It must be left
+    to the post-filter so col(dt).is_null() still returns the null-partition row."""
+    table, _ = append_only_table
+    _write_to_paimon(table, pa.table(
+        {
+            "id": pa.array([1, 2], pa.int64()),
+            "name": pa.array(["a", "b"], pa.string()),
+            "value": pa.array([1.0, 2.0], pa.float64()),
+            "dt": pa.array([None, "2024-01-02"], pa.string()),
+        }
+    ))
+
+    result = _read_table(table).where(col("dt").is_null()).to_arrow()
+
+    assert result.num_rows == 1
+    assert result.column("id").to_pylist() == [1]
+    assert result.column("dt").to_pylist() == [None]
+
+
+def test_isnull_partition_filter_not_pushed_even_for_pk_table(pk_table):
+    """isNull must be excluded from plan pushdown for ALL tables. The row gate
+    (_can_plan_predicate) would allow isNull on a PK table without deletion
+    vectors; the partition path must be stricter (_predicate_contains_is_null),
+    else a PK table would lose its null partition."""
+    from daft import context, runners
+    from daft.daft import StorageConfig
+    from daft.io.pushdowns import Pushdowns
+
+    from pypaimon.daft.daft_datasource import PaimonDataSource
+
+    table, _ = pk_table
+    io_config = context.get_context().daft_planning_config.default_io_config
+    storage_config = StorageConfig(runners.get_or_create_runner().name != "ray", io_config)
+    source = PaimonDataSource(table, storage_config=storage_config, catalog_options={})
+
+    st_null = source._read_pushdown_state(
+        table, Pushdowns(partition_filters=col("dt").is_null()))
+    assert st_null.planning_predicate is None  # would be non-None via _can_plan_predicate
+    st_eq = source._read_pushdown_state(
+        table, Pushdowns(partition_filters=col("dt") == "2024-01-02"))
+    assert st_eq.planning_predicate is not None
+
+
 def test_read_paimon_row_filter(append_only_table):
     """Row-level filter should be applied after reading data."""
     table, _ = append_only_table

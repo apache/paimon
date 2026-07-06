@@ -300,6 +300,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             return readValueType;
         }
 
+        public FileStorePathFactory pathFactory() {
+            return pathFactory;
+        }
+
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
             return build(partition, bucket, dvFactory, true, Collections.emptyList());

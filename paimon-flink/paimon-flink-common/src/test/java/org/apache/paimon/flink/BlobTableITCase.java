@@ -538,6 +538,149 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteFetchFailureDescriptorWritesNull() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE fetch_failure_blob_table (id INT, data STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-as-descriptor'='true',"
+                        + " 'blob-write-null-on-fetch-failure'='true')");
+
+        batchSql(
+                "INSERT INTO fetch_failure_blob_table VALUES"
+                        + " (1, 'invalid-uri', sys.path_to_descriptor('https://img.alicdn.com/imgextra/##1304008055350781673'))");
+
+        List<Row> result = batchSql("SELECT * FROM fetch_failure_blob_table");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("invalid-uri");
+        assertThat(result.get(0).getField(2)).isNull();
+    }
+
+    @Test
+    public void testWriteHttpBadRequestWritesNullWithFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/bad_request_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 400);
+            httpServer.enqueueResponse("", 400);
+
+            tEnv.executeSql(
+                    "CREATE TABLE bad_request_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO bad_request_blob_table VALUES"
+                            + " (1, 'bad-request', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM bad_request_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("bad-request");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testWriteHttpRateLimitWritesNullWithFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/rate_limit_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 420);
+            httpServer.enqueueResponse("", 420);
+
+            tEnv.executeSql(
+                    "CREATE TABLE rate_limit_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO rate_limit_blob_table VALUES"
+                            + " (1, 'rate-limit', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM rate_limit_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("rate-limit");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testWriteInvalidUriWritesNullWithMissingFileAndFetchFailure() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE combined_null_blob_table (id INT, data STRING, picture BYTES)"
+                        + " WITH ('row-tracking.enabled'='true',"
+                        + " 'data-evolution.enabled'='true',"
+                        + " 'blob-field'='picture',"
+                        + " 'blob-as-descriptor'='true',"
+                        + " 'blob-write-null-on-missing-file'='true',"
+                        + " 'blob-write-null-on-fetch-failure'='true')");
+
+        batchSql(
+                "INSERT INTO combined_null_blob_table VALUES"
+                        + " (1, 'invalid-uri', sys.path_to_descriptor('https://img.alicdn.com/imgextra/##1304008055350781673'))");
+
+        List<Row> result = batchSql("SELECT * FROM combined_null_blob_table");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getField(0)).isEqualTo(1);
+        assertThat(result.get(0).getField(1)).isEqualTo("invalid-uri");
+        assertThat(result.get(0).getField(2)).isNull();
+    }
+
+    @Test
+    public void testWriteHttpBadRequestWritesNullWithMissingFileAndFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/combined_bad_request_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 400);
+            httpServer.enqueueResponse("", 400);
+
+            tEnv.executeSql(
+                    "CREATE TABLE combined_bad_request_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-missing-file'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO combined_bad_request_blob_table VALUES"
+                            + " (1, 'bad-request', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            List<Row> result = batchSql("SELECT * FROM combined_bad_request_blob_table");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("bad-request");
+            assertThat(result.get(0).getField(2)).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
     public void testBlobTypeSchemaEquals() throws Exception {
         // Step 1: Create a Paimon table with blob field via Flink SQL
         tEnv.executeSql(

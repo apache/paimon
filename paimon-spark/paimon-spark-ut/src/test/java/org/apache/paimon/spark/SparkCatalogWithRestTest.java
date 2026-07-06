@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LessThan;
 import org.apache.paimon.predicate.Predicate;
@@ -443,6 +444,70 @@ public class SparkCatalogWithRestTest {
                                 .toString())
                 .isEqualTo("[[3,Charlie,35,IT]]");
 
+        spark.sql(
+                "CREATE TABLE t_partition_row_filter (id INT, name STRING, dtpart STRING) PARTITIONED BY (dtpart)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_partition_row_filter VALUES (1, 'blocked', '2026-07-03'), (2, 'allowed', '2026-07-02')");
+        Predicate partitionPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "dtpart", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("2026-07-02")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_partition_row_filter"),
+                Collections.singletonList(partitionPredicate));
+
+        assertThat(
+                        spark.sql(
+                                        "SELECT * FROM t_partition_row_filter WHERE dtpart = '2026-07-02'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2,allowed,2026-07-02]]");
+        assertThat(spark.sql("SELECT * FROM t_partition_row_filter").collectAsList().toString())
+                .isEqualTo("[[2,allowed,2026-07-02]]");
+        assertThat(
+                        spark.sql("SELECT id, dtpart FROM t_partition_row_filter LIMIT 1")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2,2026-07-02]]");
+        assertThat(
+                        spark.sql(
+                                        "SELECT id FROM t_partition_row_filter WHERE dtpart = '2026-07-03'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[]");
+
+        // After DROP COLUMN, a partition key's field id no longer equals its position; pruning must
+        // remap by name, else it mis-projects onto p2 and drops visible rows.
+        spark.sql(
+                "CREATE TABLE t_evolved_row_filter (a INT, b STRING, p1 STRING, p2 STRING)"
+                        + " PARTITIONED BY (p1, p2) TBLPROPERTIES ('query-auth.enabled'='true')");
+        spark.sql("ALTER TABLE t_evolved_row_filter DROP COLUMN a");
+        spark.sql(
+                "INSERT INTO t_evolved_row_filter VALUES ('x', 'keep', 'A'), ('y', 'keep', 'B'),"
+                        + " ('z', 'drop', 'A')");
+        // p1 keeps field id 2 though it now sits at position 1 after the drop.
+        Predicate evolvedPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "p1", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("keep")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_evolved_row_filter"),
+                Collections.singletonList(evolvedPredicate));
+
+        assertThat(
+                        spark.sql("SELECT b FROM t_evolved_row_filter ORDER BY b")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[x], [y]]");
+        assertThat(
+                        spark.sql("SELECT b FROM t_evolved_row_filter WHERE p2 = 'B'")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[y]]");
+
         // Test JOIN with row filter
         spark.sql("CREATE TABLE t_join2 (id INT, salary DOUBLE)");
         spark.sql(
@@ -539,6 +604,161 @@ public class SparkCatalogWithRestTest {
 
         assertThat(spark.sql("SELECT COUNT(*) FROM t_row_filter").collectAsList().toString())
                 .isEqualTo("[[4]]");
+    }
+
+    @Test
+    public void testRowFilterPrimaryKeyTable() {
+        // Row filter on a PK table must respect merge-on-read: id=2 survives on its merged value,
+        // not dropped on the stale file value.
+        spark.sql(
+                "CREATE TABLE t_pk_row_filter (id INT, name STRING, age INT) TBLPROPERTIES"
+                        + " ('primary-key'='id', 'bucket'='2', 'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_pk_row_filter VALUES (1, 'Alice', 25), (2, 'Bob', 30), (3, 'Charlie', 35)");
+        // Later snapshot updates id=2 from age 30 to 40.
+        spark.sql("INSERT INTO t_pk_row_filter VALUES (2, 'Bob', 40)");
+
+        // Filter on a value (non-key) column across the update.
+        Predicate ageGt30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(30));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_pk_row_filter"),
+                Collections.singletonList(ageGt30Predicate));
+        assertThat(
+                        spark.sql("SELECT * FROM t_pk_row_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2,Bob,40], [3,Charlie,35]]");
+
+        // Filter on the primary-key column.
+        Predicate idGe2Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(2));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_pk_row_filter"),
+                Collections.singletonList(idGe2Predicate));
+        assertThat(
+                        spark.sql("SELECT * FROM t_pk_row_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2,Bob,40], [3,Charlie,35]]");
+    }
+
+    @Test
+    public void testRowFilterNullAndDefaultPartition() {
+        // IS NULL row filter on a regular column returns only rows whose value is null.
+        spark.sql(
+                "CREATE TABLE t_null_row_filter (id INT, grade STRING) TBLPROPERTIES"
+                        + " ('query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_null_row_filter VALUES (1, 'A'), (2, CAST(NULL AS STRING)), (3, 'B'),"
+                        + " (4, CAST(NULL AS STRING))");
+        Predicate gradeIsNull =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "grade", DataTypes.STRING())),
+                        IsNull.INSTANCE,
+                        Collections.emptyList());
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_null_row_filter"),
+                Collections.singletonList(gradeIsNull));
+        assertThat(
+                        spark.sql("SELECT id FROM t_null_row_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2], [4]]");
+
+        // Partition column with NULL values goes to the default partition.
+        spark.sql(
+                "CREATE TABLE t_null_partition_filter (id INT, dtpart STRING) PARTITIONED BY (dtpart)"
+                        + " TBLPROPERTIES ('query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_null_partition_filter VALUES (1, '2026-07-02'),"
+                        + " (2, CAST(NULL AS STRING)), (3, '2026-07-03'), (4, CAST(NULL AS STRING))");
+
+        // Equality on the partition column must exclude the NULL (default) partition.
+        Predicate dtpartEq =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "dtpart", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("2026-07-02")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_null_partition_filter"),
+                Collections.singletonList(dtpartEq));
+        assertThat(
+                        spark.sql("SELECT id FROM t_null_partition_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[1]]");
+
+        // IS NULL on the partition column must keep only the default (NULL) partition.
+        Predicate dtpartIsNull =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "dtpart", DataTypes.STRING())),
+                        IsNull.INSTANCE,
+                        Collections.emptyList());
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_null_partition_filter"),
+                Collections.singletonList(dtpartIsNull));
+        assertThat(
+                        spark.sql("SELECT id FROM t_null_partition_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2], [4]]");
+    }
+
+    @Test
+    public void testRowFilterBucketKeyTable() {
+        // Row filter on the bucket-key column flows through bucket selection; must stay correct.
+        spark.sql(
+                "CREATE TABLE t_bucket_row_filter (id INT, name STRING) TBLPROPERTIES"
+                        + " ('bucket'='4', 'bucket-key'='id', 'query-auth.enabled'='true')");
+        spark.sql("INSERT INTO t_bucket_row_filter VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd')");
+        Predicate idEq3Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(3));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_bucket_row_filter"),
+                Collections.singletonList(idEq3Predicate));
+        assertThat(
+                        spark.sql("SELECT * FROM t_bucket_row_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[3,c]]");
+    }
+
+    @Test
+    public void testRowFilterDeletionVectorsTable() {
+        // Deletion-vectors table: deleted rows excluded via the deletion vector, then filtered.
+        spark.sql(
+                "CREATE TABLE t_dv_row_filter (id INT, name STRING, age INT) TBLPROPERTIES"
+                        + " ('primary-key'='id', 'bucket'='2', 'deletion-vectors.enabled'='true',"
+                        + " 'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_dv_row_filter VALUES (1, 'Alice', 25), (2, 'Bob', 30),"
+                        + " (3, 'Charlie', 35), (4, 'David', 45)");
+        // Delete id=4 (writes a deletion vector). id=4 passes the age>=35 filter, so if the
+        // deletion vector were ignored it would resurface in the result and fail the test.
+        spark.sql("DELETE FROM t_dv_row_filter WHERE id = 4");
+        Predicate ageGe35Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(35));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_dv_row_filter"),
+                Collections.singletonList(ageGe35Predicate));
+        assertThat(
+                        spark.sql("SELECT * FROM t_dv_row_filter ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[3,Charlie,35]]");
     }
 
     @Test

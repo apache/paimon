@@ -78,10 +78,48 @@ writer.close()
 
 ## Reading Blob Data
 
-Use `row.get_blob(pos)` to access blob columns. It returns a `Blob` object
-regardless of how the blob is stored.
+### Batch reading (recommended)
+
+Use `to_arrow_batch_reader` to read blob data in batches. Set
+`blob_parallelism` to enable concurrent blob reads within each batch:
 
 ```python
+read_builder = table.new_read_builder()
+splits = read_builder.new_scan().plan().splits()
+read = read_builder.new_read()
+
+for batch in read.to_arrow_batch_reader(splits, blob_parallelism=16):
+    for i in range(len(batch)):
+        image_bytes = batch['image'][i].as_py()
+```
+
+Or read all data into a single Arrow Table:
+
+```python
+arrow_table = read.to_arrow(splits, blob_parallelism=16)
+```
+
+### Row-by-row reading
+
+Use `row.get_blob(pos)` to access blob columns one row at a time:
+
+```python
+for row in read.to_iterator(splits):
+    blob = row.get_blob(2)
+    if blob is None:
+        continue
+    data = blob.to_data()
+```
+
+### Streaming / partial reads
+
+For true on-demand streaming (large blobs like videos or model weights),
+set `blob-as-descriptor=true` so blob values are kept as lightweight
+references instead of being materialized into memory:
+
+```python
+table = table.copy({'blob-as-descriptor': 'true'})
+
 read_builder = table.new_read_builder()
 splits = read_builder.new_scan().plan().splits()
 read = read_builder.new_read()
@@ -90,40 +128,13 @@ for row in read.to_iterator(splits):
     blob = row.get_blob(2)
     if blob is None:
         continue
-    data = blob.to_data()
+    with blob.new_input_stream() as stream:
+        chunk = stream.read(4096)
 ```
 
-## Streaming for Large Blobs
-
-`blob.new_input_stream()` returns a file-like object. Whether it is
-genuinely lazy depends on how the table is configured:
-
-- Default mode (`blob-as-descriptor=false`): the read path materialises
-  the payload before it reaches `row.get_blob(pos)`. `Blob` is a
-  `BlobData` and `new_input_stream()` wraps the in-memory bytes — not
-  true streaming. For large blobs this can still OOM.
-- Descriptor mode (`blob-as-descriptor=true`): the read path preserves
-  the descriptor. `Blob` is a `BlobRef` and `new_input_stream()` opens
-  the underlying file on demand.
-
-This mirrors Java's `BlobFormatReader` semantics.
-
-For genuine on-demand streaming of large blobs (videos, model weights),
-use `table.copy` to set `blob-as-descriptor=true` before reading:
-
-```python
-table = catalog.get_table('my_db.image_table')
-table = table.copy({'blob-as-descriptor': 'true'})
-
-read_builder = table.new_read_builder()
-splits = read_builder.new_scan().plan().splits()
-read = read_builder.new_read()
-
-# Reads now return BlobRef whose new_input_stream() is lazy.
-for row in read.to_iterator(splits):
-    with row.get_blob(2).new_input_stream() as stream:
-        chunk = stream.read(1024)
-```
+Without `blob-as-descriptor=true`, blob values are materialized before
+`row.get_blob(...)` returns; `new_input_stream()` then reads from
+in-memory bytes, not from storage.
 
 ## Lower-level: `Blob.from_bytes`
 
