@@ -933,7 +933,7 @@ public class RESTCatalog implements Catalog {
         } catch (NoSuchResourceException e) {
             throw new ResourceNotExistException(identifier, e);
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
+            throw new DatabaseNoPermissionException(identifier.getDatabaseName(), e);
         }
     }
 
@@ -954,6 +954,8 @@ public class RESTCatalog implements Catalog {
                 return;
             }
             throw new ResourceAlreadyExistException(identifier, e);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(identifier.getDatabaseName(), e);
         }
     }
 
@@ -968,6 +970,8 @@ public class RESTCatalog implements Catalog {
                 return;
             }
             throw new ResourceNotExistException(identifier, e);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(identifier.getDatabaseName(), e);
         }
     }
 
@@ -982,7 +986,7 @@ public class RESTCatalog implements Catalog {
                 throw new ResourceNotExistException(identifier, e);
             }
         } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
+            throw new DatabaseNoPermissionException(identifier.getDatabaseName(), e);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
         }

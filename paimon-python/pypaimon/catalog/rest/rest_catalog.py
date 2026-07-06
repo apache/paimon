@@ -512,7 +512,7 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             raise ResourceNotExistException(identifier) from e
         except ForbiddenException as e:
-            raise TableNoPermissionException(identifier) from e
+            raise DatabaseNoPermissionException(identifier.get_database_name()) from e
 
     def create_resource(self, identifier: Union[str, Identifier],
                         resource: 'Resource', ignore_if_exists: bool = False) -> None:
@@ -532,6 +532,8 @@ class RESTCatalog(Catalog):
             if ignore_if_exists:
                 return
             raise ResourceAlreadyExistException(identifier) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(identifier.get_database_name()) from e
 
     def drop_resource(self, identifier: Union[str, Identifier],
                       ignore_if_not_exists: bool = False) -> None:
@@ -544,6 +546,8 @@ class RESTCatalog(Catalog):
             if ignore_if_not_exists:
                 return
             raise ResourceNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(identifier.get_database_name()) from e
 
     def alter_resource(self, identifier: Union[str, Identifier],
                        changes: List['ResourceChange'],
@@ -556,7 +560,7 @@ class RESTCatalog(Catalog):
             if not ignore_if_not_exists:
                 raise ResourceNotExistException(identifier) from e
         except ForbiddenException as e:
-            raise TableNoPermissionException(identifier) from e
+            raise DatabaseNoPermissionException(identifier.get_database_name()) from e
         except BadRequestException as e:
             raise IllegalArgumentError(str(e)) from e
 
