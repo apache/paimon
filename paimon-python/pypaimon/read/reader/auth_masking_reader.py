@@ -26,9 +26,17 @@ from pypaimon.common.predicate_json_parser import (
     _collect_all_field_refs_from_transform,
 )
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.iface.record_iterator import RecordIterator
+from pypaimon.read.reader.iface.record_reader import RecordReader
+from pypaimon.table.row.offset_row import OffsetRow
 
+
+# ---------------------------------------------------------------------------
+#  Adapters: row ↔ batch conversion
+# ---------------------------------------------------------------------------
 
 class RecordReaderToBatchAdapter(RecordBatchReader):
+    """Convert a row-level RecordReader to a batch-level RecordBatchReader."""
 
     def __init__(self, inner, schema: pa.Schema, chunk_size: int = 65536, include_row_kind: bool = False):
         self._inner = inner
@@ -87,6 +95,59 @@ class RecordReaderToBatchAdapter(RecordBatchReader):
         self._inner.close()
 
 
+class BatchToRecordReaderAdapter(RecordReader):
+    """Convert a batch-level RecordBatchReader back to a row-level RecordReader."""
+
+    def __init__(self, inner: RecordBatchReader):
+        self._inner = inner
+        self._file_io = getattr(inner, 'file_io', None)
+        self._blob_field_indices = getattr(inner, 'blob_field_indices', None)
+        self._vector_field_indices = getattr(inner, 'vector_field_indices', None)
+
+    def read_batch(self):
+        batch = self._inner.read_arrow_batch()
+        if batch is None:
+            return None
+        return _ArrowBatchIterator(
+            batch, self._file_io, self._blob_field_indices, self._vector_field_indices)
+
+    def close(self):
+        self._inner.close()
+
+
+class _ArrowBatchIterator(RecordIterator):
+
+    def __init__(self, batch: pa.RecordBatch):
+        self._batch = batch
+        self._idx = 0
+        self._has_rk = "_row_kind" in batch.schema.names
+        if self._has_rk:
+            self._rk_idx = batch.schema.get_field_index("_row_kind")
+            self._data_cols = [j for j in range(batch.num_columns) if j != self._rk_idx]
+        else:
+            self._rk_idx = -1
+            self._data_cols = list(range(batch.num_columns))
+
+    def next(self):
+        if self._idx >= self._batch.num_rows:
+            return None
+        row_tuple = tuple(
+            self._batch.column(j)[self._idx].as_py()
+            for j in self._data_cols
+        )
+        row = OffsetRow(row_tuple, 0, len(self._data_cols))
+        if self._has_rk:
+            from pypaimon.table.row.row_kind import RowKind
+            kind_str = self._batch.column(self._rk_idx)[self._idx].as_py()
+            row.set_row_kind_byte(RowKind.from_string(kind_str).value)
+        self._idx += 1
+        return row
+
+
+# ---------------------------------------------------------------------------
+#  Batch-level auth readers
+# ---------------------------------------------------------------------------
+
 class AuthFilterReader(RecordBatchReader):
 
     def __init__(self, inner_reader: RecordBatchReader, filter_fn: Callable[[pa.RecordBatch], pa.Array]):
@@ -115,8 +176,6 @@ class AuthMaskingReader(RecordBatchReader):
         self.blob_field_indices = inner_reader.blob_field_indices
         self.vector_field_indices = inner_reader.vector_field_indices
         read_field_names = {f.name for f in read_fields}
-        # Filter to projected columns only; skip empty JSON values (matches Java
-        # extractColumnMasking StringUtils.isEmpty guard and null-transform skip).
         parsed = {}
         for col, tj in masking_rules.items():
             if col not in read_field_names:

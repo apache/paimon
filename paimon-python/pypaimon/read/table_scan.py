@@ -47,10 +47,70 @@ class TableScan:
 
     def plan(self) -> Plan:
         auth_result = self._auth_query()
+        if auth_result is not None:
+            self._apply_auth_to_scanner(auth_result)
         plan = self.file_scanner.scan()
         if auth_result is not None:
             plan = auth_result.convert_plan(plan)
         return plan
+
+    def _apply_auth_to_scanner(self, auth_result):
+        if not auth_result.filter:
+            return
+        partition_preds, has_non_partition = self._split_auth_filter(auth_result)
+        if partition_preds:
+            from pypaimon.common.predicate_builder import PredicateBuilder
+            combined = PredicateBuilder.and_predicates(partition_preds)
+            self.file_scanner.auth_partition_predicate = combined
+        if has_non_partition:
+            self.file_scanner.auth_has_non_partition_filter = True
+
+    def _split_auth_filter(self, auth_result):
+        partition_keys = set(self.table.partition_keys or [])
+        if not partition_keys:
+            return [], bool(auth_result.filter)
+
+        partition_preds = []
+        has_non_partition = False
+        field_index_map = {f.name: i for i, f in enumerate(self.table.fields)}
+
+        for json_str in (auth_result.filter or []):
+            pred = self._try_parse_partition_predicate(json_str, partition_keys, field_index_map)
+            if pred is not None:
+                partition_preds.append(pred)
+            else:
+                has_non_partition = True
+        return partition_preds, has_non_partition
+
+    def _try_parse_partition_predicate(self, json_str, partition_keys, field_index_map):
+        import json as _json
+        data = _json.loads(json_str)
+        if data is None or data.get("kind") != "LEAF":
+            return None
+        transform = data.get("transform", {})
+        if transform.get("name") != "FIELD_REF":
+            return None
+        field_name = transform.get("fieldRef", {}).get("name")
+        if field_name is None or field_name not in partition_keys:
+            return None
+        field_index = field_index_map.get(field_name)
+        if field_index is None:
+            return None
+
+        from pypaimon.common.predicate import Predicate
+        function = data.get("function", "")
+        literals = data.get("literals", [])
+        method_map = {
+            "EQUAL": "equal", "NOT_EQUAL": "not_equal",
+            "LESS_THAN": "less_than", "LESS_OR_EQUAL": "less_or_equal",
+            "GREATER_THAN": "greater_than", "GREATER_OR_EQUAL": "greater_or_equal",
+            "IS_NULL": "is_null", "IS_NOT_NULL": "is_not_null",
+            "IN": "in", "NOT_IN": "not_in",
+        }
+        method = method_map.get(function)
+        if method is None:
+            return None
+        return Predicate(method=method, index=field_index, field=field_name, literals=literals)
 
     def _auth_query(self):
         fn = self.table.catalog_environment.table_query_auth(
@@ -176,7 +236,7 @@ class TableScan:
             self.table,
             all_manifests,
             self.predicate,
-            self.limit,
+            effective_limit,
             partition_predicate=self.partition_predicate,
         )
 

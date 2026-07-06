@@ -31,7 +31,6 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       SplitRead)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
-from pypaimon.table.row.row_kind import RowKind
 
 ROW_KIND_COLUMN = "_row_kind"
 
@@ -122,41 +121,12 @@ class TableRead:
                     return
                 reader = self._create_reader_for_split(split)
                 try:
-                    if isinstance(reader, RecordBatchReader):
-                        blob_indices = getattr(reader, 'blob_field_indices', None)
-                        vector_indices = getattr(reader, 'vector_field_indices', None)
-                        file_io = self.table.file_io
-                        for arrow_batch in iter(reader.read_arrow_batch, None):
-                            has_rk = ROW_KIND_COLUMN in arrow_batch.schema.names
-                            if has_rk:
-                                rk_idx = arrow_batch.schema.get_field_index(ROW_KIND_COLUMN)
-                                data_cols = [j for j in range(arrow_batch.num_columns) if j != rk_idx]
-                            else:
-                                data_cols = list(range(arrow_batch.num_columns))
-                            for row_idx in range(arrow_batch.num_rows):
-                                row_tuple = tuple(
-                                    arrow_batch.column(j)[row_idx].as_py()
-                                    for j in data_cols
-                                )
-                                row = OffsetRow(
-                                    row_tuple, 0, len(data_cols),
-                                    file_io=file_io,
-                                    blob_field_indices=blob_indices,
-                                    vector_field_indices=vector_indices)
-                                if has_rk:
-                                    kind_str = arrow_batch.column(rk_idx)[row_idx].as_py()
-                                    row.set_row_kind_byte(RowKind.from_string(kind_str).value)
-                                yield row
-                                count += 1
-                                if limit is not None and count >= limit:
-                                    return
-                    else:
-                        for batch in iter(reader.read_batch, None):
-                            for row in iter(batch.next, None):
-                                yield row
-                                count += 1
-                                if limit is not None and count >= limit:
-                                    return
+                    for batch in iter(reader.read_batch, None):
+                        for row in iter(batch.next, None):
+                            yield row
+                            count += 1
+                            if limit is not None and count >= limit:
+                                return
                 finally:
                     reader.close()
 
@@ -261,8 +231,7 @@ class TableRead:
                             batch = batch.slice(0, remaining)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
-                            if "_row_kind" not in batch.schema.names:
-                                batch = self._add_row_kind_column_to_batch(batch, "+I")
+                            batch = self._add_row_kind_column_to_batch(batch, "+I")
                         yield batch
                         if remaining is not None:
                             remaining -= batch.num_rows
@@ -843,7 +812,8 @@ class TableRead:
 
     def _authed_reader(self, split, auth_result, blob_parallelism=1):
         from pypaimon.read.reader.auth_masking_reader import (
-            AuthFilterReader, AuthMaskingReader, ColumnProjectReader)
+            AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
+            RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
 
         table_fields = self.table.fields
         read_fields = self.read_type
@@ -857,10 +827,11 @@ class TableRead:
             split, read_type=effective_read_type,
             blob_parallelism=blob_parallelism).create_reader()
 
+        needs_convert_back = False
         if not isinstance(reader, RecordBatchReader):
-            from pypaimon.read.reader.auth_masking_reader import RecordReaderToBatchAdapter
             schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            needs_convert_back = True
 
         filter_fn = auth_result.extract_row_filter()
         if filter_fn:
@@ -872,6 +843,9 @@ class TableRead:
         if extra_fields:
             original_columns = [f.name for f in read_fields]
             reader = ColumnProjectReader(reader, original_columns)
+
+        if needs_convert_back:
+            reader = BatchToRecordReaderAdapter(reader)
 
         return reader
 

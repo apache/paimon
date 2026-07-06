@@ -80,7 +80,7 @@ def _apply_predicate_transform(transform: dict, batch: pa.RecordBatch,
     elif name == "CAST":
         col = batch.column(transform["fieldRef"]["name"])
         target_type = _paimon_type_to_arrow(transform["type"])
-        return pc.cast(col, target_type)
+        return pc.cast(col, target_type, safe=False)
 
     elif name == "UPPER":
         input_col = _resolve_transform_input(transform["inputs"][0], batch)
@@ -238,14 +238,27 @@ def _convert_literal(literal, target_type: pa.DataType):
         if isinstance(literal, str):
             dt = datetime.datetime.fromisoformat(literal.replace("Z", "+00:00"))
             return pa.scalar(dt, type=target_type)
+        elif isinstance(literal, list):
+            dt = datetime.datetime(*literal[:6])
+            if len(literal) > 6:
+                dt = dt.replace(microsecond=literal[6] // 1000)
+            return pa.scalar(dt, type=target_type)
+        elif isinstance(literal, (int, float)):
+            dt = datetime.datetime.fromtimestamp(literal / 1000.0, tz=datetime.timezone.utc)
+            return pa.scalar(dt, type=target_type)
     elif pa.types.is_date(target_type):
         import datetime
         if isinstance(literal, str):
             return pa.scalar(datetime.date.fromisoformat(literal), type=target_type)
+        elif isinstance(literal, list):
+            return pa.scalar(datetime.date(*literal[:3]), type=target_type)
     elif pa.types.is_time(target_type):
         import datetime
         if isinstance(literal, str):
             t = datetime.time.fromisoformat(literal)
+            return pa.scalar(t, type=target_type)
+        elif isinstance(literal, list):
+            t = datetime.time(*literal[:3])
             return pa.scalar(t, type=target_type)
     elif pa.types.is_decimal(target_type):
         import decimal
@@ -255,6 +268,12 @@ def _convert_literal(literal, target_type: pa.DataType):
 
 def _paimon_type_to_arrow(paimon_type: str) -> pa.DataType:
     type_str = paimon_type.strip().upper()
+
+    ltz_match = re.match(
+        r"^TIMESTAMP\s*\((\d+)\)\s+WITH\s+LOCAL\s+TIME\s+ZONE", type_str)
+    if ltz_match:
+        precision = int(ltz_match.group(1))
+        return pa.timestamp(_timestamp_precision_to_unit(precision), tz="UTC")
 
     m = re.match(r"^([A-Z_ ]+?)(?:\((.+)\))?(?:\s+NOT\s+NULL)?$", type_str)
     if not m:
