@@ -90,12 +90,14 @@ public class FlinkSourceBuilder {
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
+    private boolean skipPreloadTargetSnapshot;
 
     public FlinkSourceBuilder(Table table) {
         this.table = table;
         this.sourceName = table.name();
         this.conf = Options.fromMap(table.options());
         this.unordered = unordered(table);
+        this.skipPreloadTargetSnapshot = false;
     }
 
     private static boolean unordered(Table table) {
@@ -186,6 +188,11 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder withSkipPreloadTargetSnapshot(boolean skip) {
+        this.skipPreloadTargetSnapshot = skip;
+        return this;
+    }
+
     private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
         ReadBuilder readBuilder = table.newReadBuilder();
         if (readType != null) {
@@ -213,7 +220,8 @@ public class FlinkSourceBuilder {
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
                         dynamicPartitionFilteringInfo,
                         outerProject(),
-                        options.get(CoreOptions.BLOB_AS_DESCRIPTOR)));
+                        options.get(CoreOptions.BLOB_AS_DESCRIPTOR),
+                        skipPreloadTargetSnapshot));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {
