@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests option-key resolution in {@link ESIndexOptions}. */
 class ESIndexOptionsTest {
@@ -95,5 +96,16 @@ class ESIndexOptionsTest {
         off.put("global-index.es-index.fields.title.keyword_subfield", "false");
         ESIndexOptions disabled = new ESIndexOptions(FIELDS, Options.fromMap(off));
         assertThat(disabled.keywordSubField("title")).isNull();
+    }
+
+    @Test
+    void unsupportedScalarTypeIsRejectedUpFront() {
+        // A BOOLEAN companion column is not a supported es-index scalar type. It must be rejected
+        // when options are parsed, not silently mapped to KEYWORD and then blow up at build time in
+        // ESIndexGlobalIndexWriter.extractScalar (getString -> ClassCastException).
+        List<DataField> fields = Arrays.asList(new DataField(0, "flag", DataTypes.BOOLEAN()));
+        assertThatThrownBy(() -> new ESIndexOptions(fields, Options.fromMap(new HashMap<>())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported scalar type");
     }
 }

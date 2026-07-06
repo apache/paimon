@@ -157,6 +157,13 @@ under the License.
              paimon-eslib when the profile is active. -->
         <profile>
             <id>paimon-eslib</id>
+            <!-- Auto-activate on JDK 11/17/21, aligned with the root paimon-eslib profile that
+                 builds the module. The [11,) range (not a bare <jdk>11</jdk> prefix match) ensures
+                 the shaded Spark jar bundles paimon-eslib on 17/21 too, not only JDK 11; on JDK 8
+                 both profiles stay inactive so the dependency reference is not resolved. -->
+            <activation>
+                <jdk>[11,)</jdk>
+            </activation>
             <dependencies>
                 <dependency>
                     <groupId>org.apache.paimon</groupId>

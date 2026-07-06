@@ -229,8 +229,15 @@ public class ESIndexOptions {
                 return ScalarFieldType.FLOAT;
             case DOUBLE:
                 return ScalarFieldType.DOUBLE;
-            default:
+            case CHAR:
+            case VARCHAR:
                 return ScalarFieldType.KEYWORD;
+            default:
+                // Fail fast on scalar roots the writer cannot extract (e.g. BOOLEAN, DECIMAL,
+                // BINARY). Mapping them to KEYWORD would defer the failure to build time, where
+                // ESIndexGlobalIndexWriter.extractScalar falls through to getString() and throws a
+                // ClassCastException. Mirror mapArrayScalarType, which rejects unsupported types.
+                throw new IllegalArgumentException("Unsupported scalar type for es-index: " + type);
         }
     }
 

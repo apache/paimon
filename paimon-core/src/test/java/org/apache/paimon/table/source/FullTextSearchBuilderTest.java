@@ -761,6 +761,44 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     }
 
     @Test
+    public void testFullTextSearchKeepsRangeCoveredOnlyByExtraFieldIndex() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"paimon lake", "vector search", "paimon engine", "streaming"};
+        writeDocuments(table, documents);
+
+        // Two index definitions cover DIFFERENT row ranges of the same text column:
+        //  - a dedicated full-text index (primary field = content) over rows [0, 1], and
+        //  - a multi-column index (primary = id, content as an extra field) over rows [2, 3].
+        // Per-column selection would keep only the dedicated identity and drop the extra-field
+        // index's [2, 3] file, while raw coverage (computed from all index files) still treats
+        // [2, 3] as indexed, so row 2 ("paimon engine") would be silently unsearchable. Per-range
+        // selection must keep both ranges searchable.
+        buildAndCommitIndexRange(
+                table,
+                new String[] {"paimon lake", "vector search"},
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
+                0);
+        buildAndCommitIndexRange(
+                table,
+                new String[] {"paimon engine", "streaming"},
+                Arrays.asList(
+                        table.rowType().getField("id"), table.rowType().getField(TEXT_FIELD_NAME)),
+                2);
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery(FullTextQuery.match("paimon", TEXT_FIELD_NAME))
+                        .withLimit(10)
+                        .executeLocal();
+
+        // Row 0 is served by the dedicated index over [0,1]; row 2 by the extra-field index over
+        // [2,3]. Neither range may be dropped.
+        assertThat(readIds(table, result)).containsExactlyInAnyOrder(0, 2);
+    }
+
+    @Test
     public void testFullTextSearchSkipsIndexNotCoveringTextColumn() throws Exception {
         createTableDefault();
         FileStoreTable table = getTableDefault();
@@ -888,6 +926,56 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         List<ResultEntry> entries = writer.finish();
 
         Range rowRange = new Range(0, documents.length - 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexFields,
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    /**
+     * Builds and commits a single full-text index file covering rows [rowStart, rowStart+N-1].
+     * {@code indexFields} determines the index identity (primary = first field, the rest are extra
+     * fields), letting a test place different index definitions over different row ranges.
+     */
+    private void buildAndCommitIndexRange(
+            FileStoreTable table, String[] documents, List<DataField> indexFields, int rowStart)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
+
+        GlobalIndexSingleColumnWriter writer =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                                textField,
+                                options);
+        // Doc ids are file-local (0-based); the global row offset is carried by rowRange.from,
+        // which
+        // the OffsetGlobalIndexReader adds back when mapping local doc ids to global row ids.
+        for (int i = 0; i < documents.length; i++) {
+            writer.write(documents[i], i);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        Range rowRange = new Range(rowStart, rowStart + documents.length - 1);
         List<IndexFileMeta> indexFiles =
                 GlobalIndexBuilderUtils.toIndexFileMetas(
                         table.fileIO(),

@@ -106,11 +106,13 @@ public class FullTextScanImpl implements FullTextScan {
         // A searched text column can be covered by more than one full-text-capable global index
         // (e.g. a dedicated full-text index whose primary field is the column, and a vector index
         // that carries the column as an extra field). These are different index definitions and
-        // must not be merged into one reader input. Pick exactly one index definition per column,
+        // must not be merged into one reader input. Pick one index definition per (column, range),
         // preferring the one where the column is the primary indexFieldId (dedicated full-text)
         // over an extra-field match, so every split carries files from a single index identity.
-        Map<String, IndexIdentity> chosenByColumn =
-                chooseIndexPerColumn(allIndexFiles, textColumnIds, idToColumn);
+        // Choosing per range (not per whole column) keeps a range that only one index covers from
+        // being dropped when a different index wins the other ranges of the same column.
+        Map<String, Map<Range, IndexIdentity>> chosenByColumnAndRange =
+                chooseIndexPerColumnAndRange(allIndexFiles, textColumnIds, idToColumn);
 
         // Group full-text index files by column and row range. A multi-column index serves a text
         // column through either its primary indexFieldId or its extraFieldIds, and one file may
@@ -122,8 +124,9 @@ public class FullTextScanImpl implements FullTextScan {
             Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
                 String columnName = checkNotNull(idToColumn.get(columnId));
-                if (!identity.equals(chosenByColumn.get(columnName))) {
-                    // This column is served by a different (preferred) index definition.
+                Map<Range, IndexIdentity> chosenForColumn = chosenByColumnAndRange.get(columnName);
+                if (chosenForColumn == null || !identity.equals(chosenForColumn.get(range))) {
+                    // This (column, range) is served by a different (preferred) index definition.
                     continue;
                 }
                 byColumnAndRange
@@ -181,47 +184,62 @@ public class FullTextScanImpl implements FullTextScan {
     }
 
     /**
-     * Chooses exactly one index definition to serve each searched text column. A column that is the
-     * primary {@code indexFieldId} of some index (a dedicated full-text index) prefers that index;
-     * otherwise it falls back to an index that carries the column as an extra field. Ties are
-     * broken deterministically by index identity so the choice is stable across planning runs.
+     * Chooses exactly one index definition to serve each searched (text column, row range). When
+     * more than one index covers the same column over the same range, the dedicated full-text index
+     * (the column is its primary {@code indexFieldId}) is preferred over an extra-field match; ties
+     * are broken deterministically by index identity so the choice is stable across planning runs.
+     *
+     * <p>Selection is per range rather than per whole column on purpose: a range covered only by a
+     * non-preferred index (e.g. a range indexed solely by a vector index that carries the column as
+     * an extra field) must still be emitted as a searchable split. Otherwise it is skipped here yet
+     * the raw-coverage fallback (computed from all index files) still treats it as indexed, so the
+     * rows in that range would never be searched.
      */
-    private static Map<String, IndexIdentity> chooseIndexPerColumn(
+    private static Map<String, Map<Range, IndexIdentity>> chooseIndexPerColumnAndRange(
             List<IndexFileMeta> allIndexFiles,
             Set<Integer> textColumnIds,
             Map<Integer, String> idToColumn) {
-        // columnId -> candidate identity -> whether the column is that index's primary field
-        Map<Integer, Map<IndexIdentity, Boolean>> candidates = new HashMap<>();
+        // (columnName, range) -> candidate identity -> whether the column is that index's primary
+        Map<String, Map<Range, Map<IndexIdentity, Boolean>>> candidates = new HashMap<>();
         for (IndexFileMeta indexFile : allIndexFiles) {
             GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             IndexIdentity identity = IndexIdentity.of(indexFile);
+            Range range = new Range(meta.rowRangeStart(), meta.rowRangeEnd());
             for (int columnId : matchedTextColumnIds(meta, textColumnIds)) {
+                String columnName = checkNotNull(idToColumn.get(columnId));
                 boolean primary = meta.indexFieldId() == columnId;
                 candidates
-                        .computeIfAbsent(columnId, k -> new HashMap<>())
+                        .computeIfAbsent(columnName, k -> new HashMap<>())
+                        .computeIfAbsent(range, k -> new HashMap<>())
                         .merge(identity, primary, (a, b) -> a || b);
             }
         }
 
-        Map<String, IndexIdentity> chosen = new HashMap<>();
-        for (Map.Entry<Integer, Map<IndexIdentity, Boolean>> entry : candidates.entrySet()) {
-            String columnName = checkNotNull(idToColumn.get(entry.getKey()));
-            IndexIdentity best = null;
-            boolean bestPrimary = false;
-            for (Map.Entry<IndexIdentity, Boolean> candidate : entry.getValue().entrySet()) {
-                IndexIdentity identity = candidate.getKey();
-                boolean primary = candidate.getValue();
-                boolean better =
-                        best == null
-                                || (primary && !bestPrimary)
-                                || (primary == bestPrimary
-                                        && identity.key().compareTo(best.key()) < 0);
-                if (better) {
-                    best = identity;
-                    bestPrimary = primary;
+        Map<String, Map<Range, IndexIdentity>> chosen = new HashMap<>();
+        for (Map.Entry<String, Map<Range, Map<IndexIdentity, Boolean>>> columnEntry :
+                candidates.entrySet()) {
+            String columnName = columnEntry.getKey();
+            for (Map.Entry<Range, Map<IndexIdentity, Boolean>> rangeEntry :
+                    columnEntry.getValue().entrySet()) {
+                IndexIdentity best = null;
+                boolean bestPrimary = false;
+                for (Map.Entry<IndexIdentity, Boolean> candidate :
+                        rangeEntry.getValue().entrySet()) {
+                    IndexIdentity identity = candidate.getKey();
+                    boolean primary = candidate.getValue();
+                    boolean better =
+                            best == null
+                                    || (primary && !bestPrimary)
+                                    || (primary == bestPrimary
+                                            && identity.key().compareTo(best.key()) < 0);
+                    if (better) {
+                        best = identity;
+                        bestPrimary = primary;
+                    }
                 }
+                chosen.computeIfAbsent(columnName, k -> new HashMap<>())
+                        .put(rangeEntry.getKey(), best);
             }
-            chosen.put(columnName, best);
         }
         return chosen;
     }
