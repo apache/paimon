@@ -29,6 +29,7 @@ import org.apache.flink.runtime.operators.coordination.CoordinationRequestHandle
 import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
+import org.apache.flink.runtime.operators.coordination.RecreateOnResetOperatorCoordinator;
 import org.apache.flink.util.ThrowableCatchingRunnable;
 import org.apache.flink.util.function.ThrowingRunnable;
 import org.slf4j.Logger;
@@ -321,13 +322,13 @@ public class PaimonWriterCoordinator implements OperatorCoordinator, Coordinatio
     }
 
     /** Provider for {@link PaimonWriterCoordinator}. */
-    public static class WriterCoordinatorProvider implements OperatorCoordinator.Provider {
+    public static class WriterCoordinatorProvider
+            extends RecreateOnResetOperatorCoordinator.Provider {
 
         private static final long serialVersionUID = 1L;
 
         private final boolean streamingCheckpointEnabled;
         private final String operatorName;
-        private final OperatorID operatorId;
         private final String initialCommitUser;
         private final Committer.Factory<Committable, ?> committerFactory;
         private final Long endInputWatermark;
@@ -339,21 +340,16 @@ public class PaimonWriterCoordinator implements OperatorCoordinator, Coordinatio
                 String initialCommitUser,
                 Committer.Factory<Committable, ?> committerFactory,
                 Long endInputWatermark) {
+            super(operatorId);
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
             this.operatorName = operatorName;
-            this.operatorId = operatorId;
             this.initialCommitUser = initialCommitUser;
             this.committerFactory = committerFactory;
             this.endInputWatermark = endInputWatermark;
         }
 
         @Override
-        public OperatorID getOperatorId() {
-            return operatorId;
-        }
-
-        @Override
-        public OperatorCoordinator create(OperatorCoordinator.Context context) {
+        public OperatorCoordinator getCoordinator(OperatorCoordinator.Context context) {
             CoordinatorExecutorThreadFactory threadFactory =
                     new CoordinatorExecutorThreadFactory(
                             "PaimonWriterCoordinator-" + operatorName, context);
