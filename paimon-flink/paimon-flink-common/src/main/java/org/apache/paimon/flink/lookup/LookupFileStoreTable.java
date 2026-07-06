@@ -75,6 +75,10 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public InnerTableRead newRead() {
+        if (wrapped instanceof FallbackReadFileStoreTable
+                && ((FallbackReadFileStoreTable) wrapped).other() instanceof ChainGroupReadTable) {
+            return wrapped.newRead();
+        }
         switch (lookupScanMode) {
             case CHANGELOG:
             case FILE_MONITOR:

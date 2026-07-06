@@ -3294,6 +3294,79 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                 .hasMessageContaining("consumer-id='my-consumer'");
     }
 
+    @Test
+    @Timeout(180)
+    public void testLookupJoinWithCompactDeltaMonitorMode() throws Exception {
+        // Main table uses partial-update + force-lookup so that
+        // supportCompactDiffStreamingReading returns true and lookupScanMode becomes
+        // COMPACT_DELTA_MONITOR.
+        sql(
+                "CREATE TABLE chain_dim_cdm ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'partial-update',"
+                        + "  'force-lookup' = 'true',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_cdm");
+
+        // Delta branch must be deduplicate for chain table incremental read.
+        sql("ALTER TABLE `chain_dim_cdm$branch_delta` SET ('merge-engine' = 'deduplicate')");
+
+        // Write data to both branches.
+        sql(
+                "INSERT OVERWRITE `chain_dim_cdm$branch_snapshot` PARTITION (dt = '20250808')"
+                        + " VALUES (1, 1, 'snap_v1'), (2, 2, 'snap_v2')");
+        sql(
+                "INSERT INTO `chain_dim_cdm$branch_delta` PARTITION (dt = '20250809')"
+                        + " VALUES (1, 3, 'delta_v1'), (3, 4, 'delta_v3')");
+
+        // Verify that LookupFileStoreTable.newRead() delegates to wrapped.newRead()
+        // (not LookupCompactDiffRead, which would cause ClassCastException on ChainSplit).
+        FileStoreTable table = paimonTable("chain_dim_cdm");
+        org.apache.paimon.flink.lookup.LookupFileStoreTable lookupTable =
+                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                        table, Collections.singletonList("k"));
+        assertThat(lookupTable.newRead()).isInstanceOf(table.newRead().getClass());
+
+        // Run the lookup join and verify results.
+        sql(
+                "CREATE TABLE source_cdm ("
+                        + "  id BIGINT,"
+                        + "  proc_time AS PROCTIME()"
+                        + ") WITH ('connector' = 'paimon')");
+        sql("INSERT INTO source_cdm VALUES (1), (2), (3)");
+
+        List<String> results =
+                collectResult(
+                        "SELECT S.id, D.k, D.v "
+                                + "FROM source_cdm AS S "
+                                + "LEFT JOIN chain_dim_cdm "
+                                + "/*+ OPTIONS('lookup.cache' = 'full') */ "
+                                + "FOR SYSTEM_TIME AS OF S.proc_time AS D "
+                                + "ON S.id = D.k");
+
+        // k=1: appears in both snapshot (dt=20250808) and delta (dt=20250809) partitions.
+        // Chain table merges at partition level, not row level, so both rows appear.
+        // k=2: only in snapshot partition.
+        // k=3: only in delta partition.
+        assertThat(results)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 1, snap_v1]",
+                        "+I[1, 1, delta_v1]",
+                        "+I[2, 2, snap_v2]",
+                        "+I[3, 3, delta_v3]");
+    }
+
     /**
      * Verifies that ChainTableStreamScan correctly propagates bucket filters to its internal scans.
      */
