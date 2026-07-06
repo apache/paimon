@@ -27,6 +27,7 @@ import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.ChainTableFileStoreTable;
 import org.apache.paimon.table.ChainTableStreamScan;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ChainSplit;
@@ -3241,6 +3242,56 @@ public class FlinkChainTableITCase extends CatalogITCaseBase {
                 .rootCause()
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("merge engine");
+    }
+
+    /**
+     * Tests that chain table lookup join rejects unsupported scan modes and consumer-id. The
+     * validation is inherited from {@link ChainTableFileStoreTable#newStreamScan()}.
+     */
+    @Test
+    public void testLookupRejectsUnsupportedScanMode() throws Exception {
+        sql(
+                "CREATE TABLE chain_dim_scan_mode ("
+                        + "  k BIGINT,"
+                        + "  seq BIGINT,"
+                        + "  v STRING,"
+                        + "  dt STRING"
+                        + ") PARTITIONED BY (dt) WITH ("
+                        + "  'primary-key' = 'dt,k',"
+                        + "  'bucket-key' = 'k',"
+                        + "  'bucket' = '2',"
+                        + "  'sequence.field' = 'seq',"
+                        + "  'merge-engine' = 'deduplicate',"
+                        + "  'chain-table.enabled' = 'true',"
+                        + "  'partition.timestamp-pattern' = '$dt',"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches("chain_dim_scan_mode");
+
+        FileStoreTable table = paimonTable("chain_dim_scan_mode");
+
+        // scan.mode=latest should be rejected for chain table lookup
+        FileStoreTable tableLatest = table.copy(Collections.singletonMap("scan.mode", "latest"));
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                                tableLatest, Collections.singletonList("k"))
+                                        .newStreamScan())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("scan.mode=latest")
+                .hasMessageContaining("Chain table streaming read does not support");
+
+        // consumer-id should be rejected for chain table lookup
+        FileStoreTable tableWithConsumer =
+                table.copy(Collections.singletonMap("consumer-id", "my-consumer"));
+        assertThatThrownBy(
+                        () ->
+                                org.apache.paimon.flink.lookup.LookupFileStoreTable.create(
+                                                tableWithConsumer, Collections.singletonList("k"))
+                                        .newStreamScan())
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("consumer mode")
+                .hasMessageContaining("consumer-id='my-consumer'");
     }
 
     /**

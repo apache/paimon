@@ -292,12 +292,23 @@ branch are not detected until the lookup join job is restarted.
 
 ### Limitations
 
+- The incremental refresh only monitors the **delta branch**. Writes to the snapshot
+  branch are not detected until the lookup join job is restarted.
 - Join key must not contain partition keys. Chain table's partition model spans two
   branches (snapshot + delta) with anchor-based merging, making partition-level routing
   unreliable for lookup joins. If partition keys appear in the join condition, an error
   will be raised.
-- `lookup.cache` must be `AUTO` or `FULL`. Other cache modes are not supported for chain
-  tables.
+- Partition filters are not supported in chain table lookup joins. Specifying a
+  partition filter via the `scan.partitions` table option throws an
+  `UnsupportedOperationException`. This is because the chain table lookup scan
+  determines which partitions to read based on the chain-merge logic across snapshot
+  and delta branches, and applying a partition filter would interfere with this logic.
+- The chain-table-aware lookup scan only supports the default startup mode
+  (`latest-full`). When the user specifies an explicit starting position — such as
+  `scan.snapshot-id`, `scan.timestamp-millis`, `scan.mode = 'latest'`, or
+  `consumer-id` — an `UnsupportedOperationException` is thrown.
+- `lookup.cache` must be `AUTO` or `FULL`. Other cache modes are not supported for
+  chain tables.
 - The delta branch must use the `DEDUPLICATE` merge engine (default). Other merge
   engine types are not supported.
 

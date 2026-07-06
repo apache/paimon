@@ -27,7 +27,6 @@ import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.ChainGroupReadTable;
-import org.apache.paimon.table.ChainTableStreamScan;
 import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -93,9 +92,7 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
     public StreamDataTableScan newStreamScan() {
         if (wrapped instanceof FallbackReadFileStoreTable
                 && ((FallbackReadFileStoreTable) wrapped).other() instanceof ChainGroupReadTable) {
-            ChainGroupReadTable chainGroupReadTable =
-                    (ChainGroupReadTable) ((FallbackReadFileStoreTable) wrapped).other();
-            return new ChainTableStreamScan(chainGroupReadTable);
+            return wrapped.newStreamScan();
         }
         return new LookupDataTableScan(wrapped, wrapped.newSnapshotReader(), lookupScanMode);
     }
