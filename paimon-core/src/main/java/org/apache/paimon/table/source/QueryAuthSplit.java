@@ -19,9 +19,16 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.List;
 import java.util.OptionalLong;
 
@@ -30,10 +37,10 @@ public class QueryAuthSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private final Split split;
-    private final TableQueryAuthResult authResult;
+    private Split split;
+    @Nullable private TableQueryAuthResult authResult;
 
-    public QueryAuthSplit(Split split, TableQueryAuthResult authResult) {
+    public QueryAuthSplit(Split split, @Nullable TableQueryAuthResult authResult) {
         this.split = split;
         this.authResult = authResult;
     }
@@ -54,10 +61,37 @@ public class QueryAuthSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
-        List<String> filter = authResult.filter();
-        if (filter != null && !filter.isEmpty()) {
-            return OptionalLong.empty();
+        if (authResult != null) {
+            List<String> filter = authResult.filter();
+            if (filter != null && !filter.isEmpty()) {
+                return OptionalLong.empty();
+            }
         }
         return split.mergedRowCount();
+    }
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        serialize(new DataOutputViewStreamWrapper(out));
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        assign(deserialize(new DataInputViewStreamWrapper(in)));
+    }
+
+    private void assign(QueryAuthSplit other) {
+        this.split = other.split;
+        this.authResult = other.authResult;
+    }
+
+    public void serialize(DataOutputView out) throws IOException {
+        SplitSerializer.serialize(this, out);
+    }
+
+    public static QueryAuthSplit deserialize(DataInputView in) throws IOException {
+        Split split = SplitSerializer.deserialize(in);
+        if (!(split instanceof QueryAuthSplit)) {
+            throw new IOException("Deserialized split is not a QueryAuthSplit: " + split);
+        }
+        return (QueryAuthSplit) split;
     }
 }
