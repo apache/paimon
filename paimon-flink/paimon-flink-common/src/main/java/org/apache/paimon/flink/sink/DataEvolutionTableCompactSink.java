@@ -43,6 +43,22 @@ public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompac
     }
 
     @Override
+    public DataStreamSink<?> sinkFrom(
+            DataStream<DataEvolutionCompactTask> input, String initialCommitUser) {
+        DataStream<Committable> written = doWrite(input, initialCommitUser, null);
+        if (table.coreOptions().deletionVectorsEnabled()) {
+            written =
+                    written.transform(
+                                    "Data Evolution Compact Deletion Vector Rewriter : "
+                                            + table.name(),
+                                    new CommittableTypeInfo(),
+                                    new DataEvolutionCompactDeletionVectorOperator.Factory(table))
+                            .forceNonParallel();
+        }
+        return doCommit(written, initialCommitUser);
+    }
+
+    @Override
     protected OneInputStreamOperatorFactory<DataEvolutionCompactTask, Committable>
             createWriteOperatorFactory(StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new DataEvolutionCompactionWorkerOperator.Factory(table, commitUser);

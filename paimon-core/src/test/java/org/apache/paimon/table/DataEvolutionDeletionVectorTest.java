@@ -19,6 +19,9 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactDeletionVectorRewriter;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BlobData;
@@ -29,6 +32,7 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -46,6 +50,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -66,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.table.BucketMode.UNAWARE_BUCKET;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
@@ -238,6 +244,142 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                         "9|name-9|base-9|9");
     }
 
+    @Test
+    public void testCompactRewritesDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+        List<String> oldAnchorFiles = new ArrayList<>(anchorFilesByRange(table).values());
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        assertRegularFileRowRanges(
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()),
+                Collections.singletonList(FULL_RANGE));
+        assertRowsAndProjections(table, "updated");
+
+        DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
+        assertDeletionFileRanges(fullRangeSplit, FULL_RANGE);
+        assertThat(fullRangeSplit.mergedRowCount()).hasValue(10L);
+        String newAnchorFile = anchorFilesByRange(table).get(FULL_RANGE);
+        List<String> liveDeletionVectorDataFileNames = liveDeletionVectorDataFileNames(table);
+        assertThat(liveDeletionVectorDataFileNames).containsExactly(newAnchorFile);
+        assertThat(liveDeletionVectorDataFileNames).doesNotContainAnyElementsOf(oldAnchorFiles);
+    }
+
+    @Test
+    public void testCompactRenamesDeletionVectorForSameRowRange() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(FIRST_RANGE, 1, 4)));
+        String oldAnchorFile = anchorFilesByRange(table).get(FIRST_RANGE);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        dynamicOptions.put(CoreOptions.TARGET_FILE_SIZE.key(), "1 B");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        assertRegularFileRowRanges(
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()),
+                Arrays.asList(new Range(0, 4), new Range(5, 9), new Range(10, 14)));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRowsExcluding("updated", FULL_RANGE, 1, 4));
+
+        DataSplit firstRangeSplit = planDataSplit(table, FIRST_RANGE);
+        assertDeletionFileRanges(firstRangeSplit, FIRST_RANGE);
+        assertThat(firstRangeSplit.mergedRowCount()).hasValue(3L);
+        String newAnchorFile = anchorFilesByRange(table).get(FIRST_RANGE);
+        assertThat(newAnchorFile).isNotEqualTo(oldAnchorFile);
+        assertThat(liveDeletionVectorDataFileNames(table)).containsExactly(newAnchorFile);
+    }
+
+    @Test
+    public void testCompactRewritesOnlyExistingDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+        commitDeletionVectors(table, Collections.singletonList(new DvSpec(new Range(5, 9), 6)));
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        assertRegularFileRowRanges(
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()),
+                Collections.singletonList(FULL_RANGE));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRowsExcluding("updated", FULL_RANGE, 6));
+
+        DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
+        assertDeletionFileRanges(fullRangeSplit, FULL_RANGE);
+        assertThat(fullRangeSplit.mergedRowCount()).hasValue(14L);
+        assertThat(liveDeletionVectorDataFileNames(table))
+                .containsExactly(anchorFilesByRange(table).get(FULL_RANGE));
+    }
+
+    @Test
+    public void testCompactWithoutDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        updateStructuredColumn(table);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), false);
+
+        table = getTableDefault();
+        assertRegularFileRowRanges(
+                table.store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList()),
+                Collections.singletonList(FULL_RANGE));
+        assertThat(readRows(table.newReadBuilder()))
+                .containsExactlyElementsOf(expectedRowsExcluding("updated", FULL_RANGE));
+
+        DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
+        assertDeletionFileRanges(fullRangeSplit);
+        assertThat(fullRangeSplit.mergedRowCount()).hasValue(15L);
+        assertThat(liveDeletionVectorDataFileNames(table)).isEmpty();
+    }
+
+    @Test
+    public void testBlobCompactKeepsDeletionVectors() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeBaseRows(table);
+        commitDeletionVectors(table, DEFAULT_DV_SPECS);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "128 MB");
+        compactDataEvolutionTable(getTableDefault().copy(dynamicOptions), true);
+
+        table = getTableDefault();
+        assertRowsAndProjections(table, "base");
+        assertFirstBlobFileRowRanges(table, Arrays.asList(new Range(0, 4), new Range(5, 9)), 3);
+        assertDeletionFileRanges(
+                planDataSplit(table, FULL_RANGE),
+                new Range(0, 4),
+                new Range(5, 9),
+                new Range(10, 14));
+    }
+
     @Override
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
@@ -286,6 +428,27 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                 commit.commit(commitables);
             }
         }
+    }
+
+    private void compactDataEvolutionTable(FileStoreTable table, boolean compactBlob)
+            throws Exception {
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, compactBlob, false);
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        try {
+            while (true) {
+                for (DataEvolutionCompactTask task : coordinator.plan()) {
+                    commitMessages.add(task.doCompact(table, "test-compact"));
+                }
+            }
+        } catch (EndOfScanException ignored) {
+        }
+        assertThat(commitMessages).isNotEmpty();
+
+        commitMessages.addAll(
+                new DataEvolutionCompactDeletionVectorRewriter(table)
+                        .rewriteDeletionVectors(commitMessages));
+        commitDefault(commitMessages);
     }
 
     private void commitDeletionVectors(FileStoreTable table, List<DvSpec> deletionVectorSpecs)
@@ -346,6 +509,17 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
 
     private static void assertReadMatrix(FileStoreTable table, String structuredValuePrefix)
             throws Exception {
+        assertRowsAndProjections(table, structuredValuePrefix);
+
+        DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
+        assertDeletionFileRanges(
+                fullRangeSplit, new Range(0, 4), new Range(5, 9), new Range(10, 14));
+        assertThat(fullRangeSplit.mergedRowCount()).hasValue(10L);
+        assertThat(planDataSplit(table, FIRST_RANGE).mergedRowCount()).hasValue(3L);
+    }
+
+    private static void assertRowsAndProjections(FileStoreTable table, String structuredValuePrefix)
+            throws Exception {
         List<String> expectedRows = expectedRows(structuredValuePrefix, FULL_RANGE);
         List<String> expectedFirstRangeRows = expectedRows(structuredValuePrefix, FIRST_RANGE);
         List<String> expectedProjectedStrings =
@@ -390,16 +564,15 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
                                         .withProjection(new int[] {3})
                                         .withRowRanges(Collections.singletonList(FULL_RANGE))))
                 .containsExactlyElementsOf(expectedBlobValues);
-
-        DataSplit fullRangeSplit = planDataSplit(table, FULL_RANGE);
-        assertDeletionFileRanges(
-                fullRangeSplit, new Range(0, 4), new Range(5, 9), new Range(10, 14));
-        assertThat(fullRangeSplit.mergedRowCount()).hasValue(10L);
-        assertThat(planDataSplit(table, FIRST_RANGE).mergedRowCount()).hasValue(3L);
     }
 
     private static void assertDeletionFileRanges(DataSplit split, Range... expectedRanges) {
-        List<DeletionFile> deletionFiles = split.deletionFiles().orElse(Collections.emptyList());
+        if (!split.deletionFiles().isPresent()) {
+            assertThat(expectedRanges).isEmpty();
+            return;
+        }
+
+        List<DeletionFile> deletionFiles = split.deletionFiles().get();
         assertThat(deletionFiles).hasSize(split.dataFiles().size());
 
         Map<Range, DeletionFile> actual = new HashMap<>();
@@ -421,6 +594,17 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         List<String> rows = new ArrayList<>();
         for (int rowId = (int) range.from; rowId <= range.to; rowId++) {
             if (!isDeletedByDefaultDv(rowId)) {
+                rows.add(expectedRow(structuredValuePrefix, rowId));
+            }
+        }
+        return rows;
+    }
+
+    private static List<String> expectedRowsExcluding(
+            String structuredValuePrefix, Range range, long... deletedRowIds) {
+        List<String> rows = new ArrayList<>();
+        for (int rowId = (int) range.from; rowId <= range.to; rowId++) {
+            if (!isDeleted(rowId, deletedRowIds)) {
                 rows.add(expectedRow(structuredValuePrefix, rowId));
             }
         }
@@ -459,6 +643,15 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         return false;
     }
 
+    private static boolean isDeleted(int rowId, long... deletedRowIds) {
+        for (long deletedRowId : deletedRowIds) {
+            if (deletedRowId == rowId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String expectedRow(String structuredValuePrefix, int rowId) {
         return rowId + "|name-" + rowId + "|" + structuredValuePrefix + "-" + rowId + "|" + rowId;
     }
@@ -479,6 +672,23 @@ public class DataEvolutionDeletionVectorTest extends DataEvolutionTestBase {
         TableScan.Plan plan = readBuilder.newScan().plan();
         assertThat(plan.splits()).hasSize(1);
         return toDataSplit(plan.splits().get(0));
+    }
+
+    private static List<String> liveDeletionVectorDataFileNames(FileStoreTable table) {
+        List<String> result = new ArrayList<>();
+        for (IndexManifestEntry entry :
+                table.store()
+                        .newIndexFileHandler()
+                        .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)) {
+            Map<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+            if (dvRanges != null) {
+                for (DeletionVectorMeta meta : dvRanges.values()) {
+                    result.add(meta.dataFileName());
+                }
+            }
+        }
+        Collections.sort(result);
+        return result;
     }
 
     private static List<String> readRows(ReadBuilder readBuilder, TableScan.Plan plan)
