@@ -849,9 +849,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null);
     }
 
-    private boolean isRtasAppendAfterTruncate(
-            @Nullable Snapshot latestSnapshot, CommitKind commitKind) {
-        if (latestSnapshot == null || operation == null || commitKind != CommitKind.APPEND) {
+    private boolean isRtasAfterTruncate(@Nullable Snapshot latestSnapshot, CommitKind commitKind) {
+        if (latestSnapshot == null || operation == null) {
             return false;
         }
 
@@ -1027,22 +1026,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 oldIndexManifest = latestSnapshot.indexManifest();
             }
 
-            boolean resetSnapshotStateForRtasAppend =
-                    isRtasAppendAfterTruncate(latestSnapshot, commitKind);
-            System.out.println(
-                    "[DEBUG][FileStoreCommitImpl] commitKind="
-                            + commitKind
-                            + ", operation="
-                            + operation
-                            + ", latestSnapshotId="
-                            + (latestSnapshot == null ? null : latestSnapshot.id())
-                            + ", latestSnapshotKind="
-                            + (latestSnapshot == null ? null : latestSnapshot.commitKind())
-                            + ", latestSnapshotOperation="
-                            + (latestSnapshot == null ? null : latestSnapshot.operation())
-                            + ", resetSnapshotStateForRtasAppend="
-                            + resetSnapshotStateForRtasAppend);
-            if (resetSnapshotStateForRtasAppend) {
+            boolean resetSnapshotStateForRtas = isRtasAfterTruncate(latestSnapshot, commitKind);
+            if (resetSnapshotStateForRtas) {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
@@ -1112,7 +1097,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String statsFileName = null;
             if (newStatsFileName != null) {
                 statsFileName = newStatsFileName;
-            } else if (latestSnapshot != null && !resetSnapshotStateForRtasAppend) {
+            } else if (latestSnapshot != null && !resetSnapshotStateForRtas) {
                 Optional<Statistics> previousStatistic = statsFileHandler.readStats(latestSnapshot);
                 if (previousStatistic.isPresent()) {
                     if (previousStatistic.get().schemaId() != latestSchemaId) {
