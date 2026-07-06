@@ -32,8 +32,8 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Operator event sent from a writer subtask to {@link WriteOperatorCoordinator}, carrying the
- * committables produced for one checkpoint.
+ * Operator event sent from a writer subtask to {@link CommittingWriteOperatorCoordinator}, carrying
+ * the committables produced for one checkpoint.
  *
  * <p>{@link Committable} is not directly serializable, so the payload is pre-serialized to {@code
  * byte[]} and decoded on the coordinator side.

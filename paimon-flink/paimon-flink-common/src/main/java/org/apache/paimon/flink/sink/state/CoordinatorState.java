@@ -23,8 +23,9 @@ import javax.annotation.Nonnull;
 import java.util.Map;
 
 /**
- * The state persisted by {@link org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator}
- * during {@code checkpointCoordinator}.
+ * The state persisted by {@link
+ * org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator} during {@code
+ * checkpointCoordinator}.
  *
  * <p>Note that uncommitted committables are <b>not</b> persisted here. Writers keep their own
  * uncommitted committables in operator state and re-emit them to the coordinator on {@code

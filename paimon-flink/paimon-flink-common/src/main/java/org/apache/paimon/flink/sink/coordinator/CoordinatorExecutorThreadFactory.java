@@ -27,8 +27,8 @@ import javax.annotation.Nullable;
 import java.util.concurrent.ThreadFactory;
 
 /**
- * Single-thread executor factory used by the {@link WriteOperatorCoordinator} to run commit work
- * off the JM main thread. Any uncaught exception fails the job via {@link
+ * Single-thread executor factory used by the {@link CommittingWriteOperatorCoordinator} to run
+ * commit work off the JM main thread. Any uncaught exception fails the job via {@link
  * OperatorCoordinator.Context#failJob(Throwable)}.
  *
  * <p>Adapted from {@code
