@@ -115,6 +115,10 @@ class ESIndexGlobalIndexE2ETest {
         opt.put("global-index.es-index.fields.embedding.dimension", "4");
         opt.put("global-index.es-index.fields.embedding.metric", "l2");
         opt.put("global-index.es-index.fields.title.analyzer", "standard");
+        // category opts out of full-text (type=keyword) so it stays a KEYWORD field; String columns
+        // otherwise default to FULLTEXT. This keeps the "full-text on a non-FULLTEXT field returns
+        // empty" assertion below meaningful while still exercising exact keyword filters.
+        opt.put("global-index.es-index.fields.category.type", "keyword");
         ESIndexOptions options = new ESIndexOptions(fields, Options.fromMap(opt));
 
         java.nio.file.Path archiveDir = tmp.resolve("archive");

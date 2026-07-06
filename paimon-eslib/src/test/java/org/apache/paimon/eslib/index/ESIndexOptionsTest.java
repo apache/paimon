@@ -108,4 +108,26 @@ class ESIndexOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported scalar type");
     }
+
+    @Test
+    void textFieldDefaultsToFullTextWithKeywordSubField() {
+        // A String column with no analyzer/type configured defaults to FULLTEXT (with a keyword
+        // sub-field), so full-text search always works on text columns and exact filters use the
+        // sub-field. This closes the coverage gap where a text column carried only as an extra
+        // field would otherwise default to KEYWORD yet still be counted as full-text coverage.
+        ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(new HashMap<>()));
+        assertThat(options.getConfig("title").indexType())
+                .isEqualTo(FieldIndexConfig.IndexType.FULLTEXT);
+        assertThat(options.keywordSubField("title")).isEqualTo("title.keyword");
+    }
+
+    @Test
+    void textFieldCanOptOutOfFullTextWithTypeKeyword() {
+        Map<String, String> m = new HashMap<>();
+        m.put("global-index.es-index.fields.title.type", "keyword");
+        ESIndexOptions options = new ESIndexOptions(FIELDS, Options.fromMap(m));
+        assertThat(options.getConfig("title").indexType())
+                .isEqualTo(FieldIndexConfig.IndexType.KEYWORD);
+        assertThat(options.keywordSubField("title")).isNull();
+    }
 }

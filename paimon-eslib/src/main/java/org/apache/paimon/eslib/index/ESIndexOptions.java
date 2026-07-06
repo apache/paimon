@@ -135,15 +135,16 @@ public class ESIndexOptions {
         if (isVectorType(dataType)) {
             return parseVectorConfig(field.name(), dataType, options);
         } else if (isTextType(dataType)) {
-            // String fields: check if analyzer is set → FULLTEXT; otherwise → KEYWORD
-            String analyzer = resolve(options, field.name(), "analyzer", null);
-            if (analyzer != null) {
-                return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.FULLTEXT)
-                        .analyzer(BuiltinAnalyzer.fromName(analyzer))
-                        .build();
-            }
-            return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.KEYWORD)
-                    .scalarType(ScalarFieldType.KEYWORD)
+            // String fields default to FULLTEXT (analyzed with the standard analyzer) so full-text
+            // search always works on a text column; a keyword sub-field (<field>.keyword) is added
+            // below for exact filters — the ES text/keyword multi-field, so both capabilities are
+            // available. This also removes a full-text coverage gap: a text column carried only as
+            // an extra field of a hybrid index would otherwise default to KEYWORD, be counted as
+            // full-text coverage during planning, yet no-match at read time, skipping those rows.
+            // An explicit analyzer overrides the default; use type=keyword to opt out of full-text.
+            String analyzer = resolve(options, field.name(), "analyzer", "standard");
+            return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.FULLTEXT)
+                    .analyzer(BuiltinAnalyzer.fromName(analyzer))
                     .build();
         } else if (isTimestampType(dataType)) {
             return FieldIndexConfig.builder(field.name(), FieldIndexConfig.IndexType.DATE)
