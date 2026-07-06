@@ -107,6 +107,15 @@ def _mock_de_entry(partition_values, bucket, file_name, first_row_id, row_count,
     return entry
 
 
+def _de_file(file_name, first_row_id, row_count):
+    """A DE file mock; row_id_range() is a real Range, or None when first_row_id is None."""
+    file = Mock(spec=DataFileMeta)
+    file.file_name = file_name
+    rng = Range(first_row_id, first_row_id + row_count - 1) if first_row_id is not None else None
+    file.row_id_range = lambda r=rng: r
+    return file
+
+
 def _split_signature(split):
     """A stable, comparable identity for a split — what the worker would actually read."""
     if isinstance(split, SlicedSplit):
@@ -531,6 +540,18 @@ class DataEvolutionChunkShuffleAlgoTest(unittest.TestCase):
     def test_no_entries_returns_empty(self):
         gen = _make_de_generator(seed=1, chunk_size=100)
         self.assertEqual(gen.create_splits([]), [])
+
+    def test_split_by_row_id_with_range_groups_and_merges(self):
+        # a[0,4] & c[2,3] overlap -> one merged group [0,4]; b[10,14] -> another. Input unsorted.
+        files = [_de_file("a", 0, 5), _de_file("b", 10, 5), _de_file("c", 2, 2)]
+        out = DataEvolutionChunkShuffleSplitGenerator._split_by_row_id_with_range(files)
+        self.assertEqual([(r.from_, r.to) for r, _ in out], [(0, 4), (10, 14)])
+        self.assertEqual([[f.file_name for f in fs] for _, fs in out], [["a", "c"], ["b"]])
+
+    def test_split_by_row_id_with_range_raises_on_missing_first_row_id(self):
+        files = [_de_file("a", 0, 5), _de_file("b", None, 5)]
+        with self.assertRaisesRegex(ValueError, "requires row tracking"):
+            DataEvolutionChunkShuffleSplitGenerator._split_by_row_id_with_range(files)
 
     def test_full_aligned_groups_one_per_chunk(self):
         # Three commits of 100 rows each → three aligned groups.
