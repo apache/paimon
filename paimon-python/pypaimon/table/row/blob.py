@@ -408,7 +408,7 @@ class Blob(ABC):
             if file_io is None:
                 raise ValueError("file_io is required to resolve BlobDescriptor bytes")
             descriptor = BlobDescriptor.deserialize(data)
-            uri_reader = UriReader.from_file(file_io)
+            uri_reader = file_io.uri_reader_factory.create(descriptor.uri)
             return BlobRef(uri_reader, descriptor)
         return BlobData(data)
 
