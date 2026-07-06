@@ -151,7 +151,8 @@ const sidebars = {
       "flink/default-value",
       "flink/procedures",
       "flink/action-jars",
-      "flink/savepoint"
+      "flink/savepoint",
+      "flink/lineage"
     ]
   },
   {
