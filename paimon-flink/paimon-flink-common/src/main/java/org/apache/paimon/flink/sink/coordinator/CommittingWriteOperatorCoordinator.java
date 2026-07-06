@@ -124,11 +124,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                         restoreState(restoredCheckpointId, restoredCheckpointData);
                         // not needed after deserialization; release the reference
                         restoredCheckpointData = null;
-                        initializeCommitter();
+                        initializeCommitter(true);
                         // stay in RESTORING until writers re-emit committables and align catches up
                     } else {
                         restoreState(OperatorCoordinator.NO_CHECKPOINT, null);
-                        initializeCommitter();
+                        initializeCommitter(false);
                         transitionState(State.RUNNING);
                     }
                 },
@@ -406,15 +406,17 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
     }
 
-    private void initializeCommitter() {
+    private void initializeCommitter(boolean isRestored) {
+        // Coordinator runs at parallelism 1 (single instance per JobVertex), matching
+        // CommitterOperator's contract; hardcode parallelism=1 / subtaskIndex=0
         Committer.Context committerContext =
                 Committer.createContext(
                         commitUser,
                         context.metricGroup(),
                         streamingCheckpointEnabled,
-                        true,
+                        isRestored,
                         stateStore,
-                        parallelism,
+                        1,
                         0);
         committer = committerFactory.create(committerContext);
     }

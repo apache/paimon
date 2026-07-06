@@ -66,6 +66,7 @@ import java.util.NavigableMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -759,6 +760,67 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
         coordinator.close();
     }
 
+    /**
+     * The coordinator runs at parallelism 1 (single instance per JobVertex), so the {@link
+     * Committer.Context} it hands to the committer must always report parallelism=1 and
+     * subtaskIndex=0, regardless of the writer operator's parallelism.
+     */
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCommitterContextParallelism() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        // deliberately use a writer parallelism > 1 to catch the "writer parallelism leaks into
+        // Committer.Context" bug pattern.
+        TestingContext context = new TestingContext(new OperatorID(), 8);
+        AtomicReference<Committer.Context> captured = new AtomicReference<>();
+        CommittingWriteOperatorCoordinator coordinator =
+                createCoordinatorCapturingContext(table, context, captured);
+        coordinator.start();
+        coordinator.waitProcessAllActions();
+
+        Committer.Context committerContext = captured.get();
+        assertThat(committerContext).isNotNull();
+        assertThat(committerContext.getParallelism()).isEqualTo(1);
+        assertThat(committerContext.getSubtaskIndex()).isEqualTo(0);
+        coordinator.close();
+    }
+
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCommitterContextIsRestored() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        TestingContext context = new TestingContext(new OperatorID(), 2);
+
+        // fresh start: no prior coordinator state, isRestored must be false
+        AtomicReference<Committer.Context> freshContext = new AtomicReference<>();
+        CommittingWriteOperatorCoordinator fresh =
+                createCoordinatorCapturingContext(table, context, freshContext);
+        fresh.start();
+        fresh.waitProcessAllActions();
+        assertThat(freshContext.get()).isNotNull();
+        assertThat(freshContext.get().isRestored()).isFalse();
+        // produce a committed checkpoint so we have real state bytes to restore from
+        fresh.handleEventFromOperator(0, 0, event(false, committable(table, 1, 1)));
+        fresh.handleEventFromOperator(1, 0, event(false, committable(table, 1, 2)));
+        CompletableFuture<byte[]> checkpoint = new CompletableFuture<>();
+        fresh.checkpointCoordinator(1, checkpoint);
+        fresh.notifyCheckpointComplete(1);
+        fresh.waitProcessAllActions();
+        byte[] state = checkpoint.get();
+        fresh.close();
+
+        // restored start: coordinator resets to checkpoint before start(), isRestored must be true
+        AtomicReference<Committer.Context> restoredContext = new AtomicReference<>();
+        CommittingWriteOperatorCoordinator restored =
+                createCoordinatorCapturingContext(table, context, restoredContext);
+        restored.resetToCheckpoint(1, state);
+        restored.start();
+        restored.waitProcessAllActions();
+        assertThat(restoredContext.get()).isNotNull();
+        assertThat(restoredContext.get().isRestored()).isTrue();
+        restored.close();
+    }
+
     // ------------------------------------------------------------------------
 
     private FileStoreTable createUnawareBucketTable() throws Exception {
@@ -783,6 +845,26 @@ public class CommittingWriteOperatorCoordinatorTest extends CommitterOperatorTes
                 true,
                 commitUser,
                 failoverAfterRecovery);
+    }
+
+    private CommittingWriteOperatorCoordinator createCoordinatorCapturingContext(
+            FileStoreTable table,
+            TestingContext context,
+            AtomicReference<Committer.Context> captured) {
+        return new CommittingWriteOperatorCoordinator(
+                context,
+                commitContext -> {
+                    captured.set(commitContext);
+                    return new StoreCommitter(
+                            table,
+                            table.newStreamWriteBuilder()
+                                    .withCommitUser(commitContext.commitUser())
+                                    .newCommit(),
+                            commitContext);
+                },
+                true,
+                commitUser,
+                false);
     }
 
     private Committable committable(FileStoreTable table, long checkpointId, int value)
