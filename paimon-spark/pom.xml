@@ -45,7 +45,7 @@ under the License.
                 <artifactId>paimon-format</artifactId>
                 <version>${project.version}</version>
                 <exclusions>
-                    <!-- todo(fix me): we should use the jackson libraries shaded by Paimon. -->
+                    <!-- Paimon relies on the jackson libraries shaded into its bundle, exclude the unshaded ones. -->
                     <exclusion>
                         <groupId>com.fasterxml.jackson.core</groupId>
                         <artifactId>*</artifactId>
