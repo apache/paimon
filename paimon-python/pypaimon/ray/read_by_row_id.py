@@ -48,6 +48,20 @@ def _empty_result(table: "FileStoreTable", read_cols: List[str]):
     return ray.data.from_arrow(_read_output_schema(table, read_cols).empty_table())
 
 
+def _read_snapshot(table):
+    """The snapshot to route/read on: a time-travel dynamic option if set, else the latest."""
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
+
+    opts = table.options.options
+    if not any(opts.contains_key(k) for k in SCAN_KEYS):
+        return table.snapshot_manager().get_latest_snapshot()
+    snap = TimeTravelUtil.try_travel_to_snapshot(
+        opts, table.tag_manager(), table.snapshot_manager())
+    if snap is None:
+        raise ValueError("could not resolve the time-travel snapshot from dynamic_options.")
+    return snap
+
+
 def read_by_row_id(
     target: str,
     row_ids: Any,
@@ -55,6 +69,7 @@ def read_by_row_id(
     *,
     projection: List[str],
     row_id_col: Optional[str] = None,
+    dynamic_options: Optional[Dict[str, str]] = None,
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ):
@@ -65,7 +80,11 @@ def read_by_row_id(
     e.g. ``row_id_col="row_id"`` for a ``bucket_join`` locator). Each row id is routed
     to the data file owning it and only those files -- and only the matched rows --
     are read, so the target is never fully scanned and there is no join against it.
-    ``projection`` lists top-level columns; blob columns are resolved to their payloads.
+    ``projection`` lists top-level columns; blob columns resolve to payloads by default.
+    ``dynamic_options`` overrides read options via ``table.copy``: ``{"blob-as-descriptor":
+    "true"}`` for descriptor bytes (resolve with ``map_with_blobs``), or ``scan.snapshot-id`` /
+    ``scan.tag-name`` to read that snapshot. Options flipping table invariants
+    (``data-evolution.enabled`` etc.) are rejected.
     Requires ``ray >= 2.50`` and a target with ``data-evolution.enabled`` +
     ``row-tracking.enabled``.
 
@@ -78,6 +97,7 @@ def read_by_row_id(
     Returns a ``ray.data.Dataset`` of ``(*projection, _ROW_ID)``.
     """
     from pypaimon.catalog.catalog_factory import CatalogFactory
+    from pypaimon.snapshot.time_travel_util import SCAN_KEYS
     from pypaimon.table.special_fields import SpecialFields
 
     _require_ray_join()
@@ -98,6 +118,16 @@ def read_by_row_id(
         raise ValueError(
             f"read_by_row_id does not support deletion-vectors-enabled tables yet: "
             f"'{target}'.")
+    if dynamic_options:
+        # Flipping these would bypass the checks above.
+        bad = sorted({"data-evolution.enabled", "row-tracking.enabled",
+                      "deletion-vectors.enabled"} & set(dynamic_options))
+        if bad:
+            raise ValueError(f"dynamic_options cannot override table invariants {bad}.")
+        # table.copy's _try_time_travel swallows the multi-key error, so reject it here.
+        if len([k for k in SCAN_KEYS if k in dynamic_options]) > 1:
+            raise ValueError(f"dynamic_options may set at most one time-travel key {SCAN_KEYS}.")
+        table = table.copy(dynamic_options)
 
     rid = SpecialFields.ROW_ID.name
     src_rid_col = row_id_col or rid
@@ -111,27 +141,44 @@ def read_by_row_id(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
     source_ds = _normalize_source(row_ids, catalog_options)
-    if src_rid_col not in set(source_ds.schema().names):
+    # Only check now if the schema is free; fetching it would execute a lazy source.
+    known_schema = source_ds.schema(fetch_if_missing=False)
+    if known_schema is not None and src_rid_col not in set(known_schema.names):
         raise ValueError(f"row_ids source is missing the {src_rid_col!r} column.")
 
     def _project_rid(batch: pa.Table) -> pa.Table:
+        if src_rid_col not in batch.column_names:
+            raise ValueError(f"row_ids source is missing the {src_rid_col!r} column.")
         return pa.table({rid: batch.column(src_rid_col).cast(pa.int64())})
 
     rid_ds = source_ds.map_batches(_project_rid, batch_format="pyarrow")
     read_cols = list(projection) + ([rid] if rid not in projection else [])
 
-    # Empty source -> typed empty Dataset (a zero-row groupby has no schema).
-    source_empty = rid_ds.limit(1).count() == 0
-
-    base = table.snapshot_manager().get_latest_snapshot()
+    base = _read_snapshot(table)
+    if base is not None and dynamic_options and any(k in dynamic_options for k in SCAN_KEYS):
+        # A pre-row-tracking snapshot has files without row ids; fail clearly here rather
+        # than deep in the planner (the persisted-table check above cannot see this).
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options.options import Options
+        base_schema = table.schema_manager.get_schema(base.schema_id)
+        if not CoreOptions(Options(base_schema.options)).row_tracking_enabled():
+            raise ValueError(
+                f"the resolved snapshot ({base.id}) predates row-tracking; read_by_row_id needs it.")
     # No DV (rejected above) -> total_record_count is the live row count; 0 = empty.
     if base is None or base.total_record_count == 0:
-        if not source_empty:
+        # Force an action on the source only in this degenerate branch (like update_by_row_id).
+        if rid_ds.limit(1).count() > 0:
             raise ValueError(
                 f"target '{target}' has no rows; every _ROW_ID in the source is foreign.")
         return _empty_result(table, read_cols)
-    if source_empty:
-        return _empty_result(table, read_cols)
+    # base captures the resolved snapshot; reduce any time-travel key to a plain snapshot-id
+    # so the planner's own snapshot-id pin does not read as a second, conflicting one.
+    from pypaimon.common.options.core_options import CoreOptions
+    present = [k for k in SCAN_KEYS if table.options.options.contains_key(k)]
+    if present:
+        overrides = {k: None for k in present}
+        overrides[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(base.id)
+        table = table.copy(overrides)
     try:
         result = distributed_read_by_row_id(
             rid_ds, table, projection,
@@ -144,4 +191,5 @@ def read_by_row_id(
         raise  # _reraise_inner always raises
     if result is None:
         return _empty_result(table, read_cols)
-    return result
+    # Lazy result; union a typed-empty block so an empty source still carries the schema.
+    return result.union(_empty_result(table, read_cols))
