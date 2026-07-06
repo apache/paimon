@@ -211,7 +211,7 @@ public abstract class FlinkSink<T> implements Serializable {
         // The commit runs inside the writer's OperatorCoordinator on the JobManager, so there
         // is no global committer operator. Committables are still forwarded by the writer for
         // observability and are discarded here.
-        return written.sinkTo(new DiscardingSink<>())
+        return written.sinkTo(new PaimonDiscardingSink<>(table))
                 .name("end")
                 .setParallelism(written.getParallelism());
     }
