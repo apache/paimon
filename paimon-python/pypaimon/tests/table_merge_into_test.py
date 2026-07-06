@@ -17,7 +17,7 @@
 ################################################################################
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pyarrow as pa
 
@@ -89,21 +89,33 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
         with self.assertRaisesRegex(ValueError, "multiple source rows"):
             ray_merge._validate_disjoint_action_row_ids([7], [7])
 
+    def _mock_ray_commit_table(self):
+        table = Mock()
+        write_builder = Mock()
+        table_commit = Mock()
+        table.new_batch_write_builder.return_value = write_builder
+        write_builder.new_commit.return_value = table_commit
+        return table, table_commit
+
     def test_ray_execute_validates_mixed_update_delete_duplicate_row_ids(self):
         import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        update_msg = object()
+        delete_msg = object()
+        table, table_commit = self._mock_ray_commit_table()
 
         with patch.object(
                 ray_merge,
                 "distributed_update_apply",
-                return_value=([], 1, [7])
+                return_value=([update_msg], 1, [7])
         ), patch.object(
                 ray_merge,
                 "distributed_delete_apply",
-                return_value=([], 1, [7])
+                return_value=([delete_msg], 1, [7])
         ):
             with self.assertRaisesRegex(ValueError, "multiple source rows"):
                 ray_merge._execute_and_commit(
-                    table=object(),
+                    table=table,
                     update_ds=object(),
                     delete_ds=object(),
                     insert_ds=None,
@@ -113,6 +125,98 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                     ray_remote_args=None,
                     concurrency=None,
                 )
+        table_commit.abort.assert_called_once_with([update_msg, delete_msg])
+        table_commit.close.assert_called_once_with()
+
+    def test_ray_execute_aborts_prepared_messages_on_later_branch_failure(self):
+        import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        update_msg = object()
+        table, table_commit = self._mock_ray_commit_table()
+
+        with patch.object(
+                ray_merge,
+                "distributed_update_apply",
+                return_value=([update_msg], 1, [])
+        ), patch.object(
+                ray_merge,
+                "distributed_delete_apply",
+                side_effect=RuntimeError("delete failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "delete failed"):
+                ray_merge._execute_and_commit(
+                    table=table,
+                    update_ds=object(),
+                    delete_ds=object(),
+                    insert_ds=None,
+                    update_cols_union=["age"],
+                    base_snapshot=None,
+                    num_partitions=1,
+                    ray_remote_args=None,
+                    concurrency=None,
+                )
+        table_commit.abort.assert_called_once_with([update_msg])
+        table_commit.close.assert_called_once_with()
+        table_commit.commit.assert_not_called()
+
+    def test_ray_execute_aborts_prepared_messages_on_insert_failure(self):
+        import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        update_msg = object()
+        table, table_commit = self._mock_ray_commit_table()
+
+        with patch.object(
+                ray_merge,
+                "distributed_update_apply",
+                return_value=([update_msg], 1, [])
+        ), patch.object(
+                ray_merge,
+                "distributed_write_collect_msgs",
+                side_effect=RuntimeError("insert failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "insert failed"):
+                ray_merge._execute_and_commit(
+                    table=table,
+                    update_ds=object(),
+                    delete_ds=None,
+                    insert_ds=object(),
+                    update_cols_union=["age"],
+                    base_snapshot=None,
+                    num_partitions=1,
+                    ray_remote_args=None,
+                    concurrency=None,
+                )
+        table_commit.abort.assert_called_once_with([update_msg])
+        table_commit.close.assert_called_once_with()
+        table_commit.commit.assert_not_called()
+
+    def test_ray_execute_does_not_abort_after_commit_starts(self):
+        import pypaimon.ray.data_evolution_merge_into as ray_merge
+
+        update_msg = object()
+        table, table_commit = self._mock_ray_commit_table()
+        table_commit.commit.side_effect = RuntimeError("commit failed")
+
+        with patch.object(
+                ray_merge,
+                "distributed_update_apply",
+                return_value=([update_msg], 1, [])
+        ):
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                ray_merge._execute_and_commit(
+                    table=table,
+                    update_ds=object(),
+                    delete_ds=None,
+                    insert_ds=None,
+                    update_cols_union=["age"],
+                    base_snapshot=None,
+                    num_partitions=1,
+                    ray_remote_args=None,
+                    concurrency=None,
+                )
+        table_commit.commit.assert_called_once_with([update_msg])
+        table_commit.abort.assert_not_called()
+        table_commit.close.assert_called_once_with()
 
     def test_table_merge_into_updates_and_inserts(self):
         target = self._create_table()
