@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -93,16 +94,15 @@ public class ChangelogModeTest {
     public void testKeyOnlyDeletesEnabled() throws Exception {
         Options options = new Options();
         options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
-        // Enabling the option must not change the contained RowKinds; it only affects the
-        // keyOnlyDeletes flag, which is unreadable on Flink 1.x.
-        test(
-                options,
-                ChangelogMode.upsert(),
+        // keyOnlyDeletes is a no-op on Flink 1.x and set on Flink 2.1+, so build the expected
+        // mode through the same adapter the sink uses.
+        ChangelogMode.Builder expectSink =
                 ChangelogMode.newBuilder()
                         .addContainedKind(RowKind.INSERT)
                         .addContainedKind(RowKind.UPDATE_AFTER)
-                        .addContainedKind(RowKind.DELETE)
-                        .build());
+                        .addContainedKind(RowKind.DELETE);
+        ChangelogModeUtils.enableKeyOnlyDeletes(expectSink);
+        test(options, ChangelogMode.upsert(), expectSink.build());
     }
 
     @Test
