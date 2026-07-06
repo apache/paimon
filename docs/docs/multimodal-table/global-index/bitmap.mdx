@@ -3,6 +3,9 @@ title: "Bitmap Index"
 sidebar_position: 2
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -56,6 +59,10 @@ exceeded, Paimon falls back to other matching indexes or regular table scans.
 
 ## Build Bitmap Index
 
+<Tabs groupId="bitmap-build">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 -- Create bitmap index on 'tag' column
 CALL sys.create_global_index(
@@ -76,11 +83,89 @@ CALL sys.create_global_index(
 );
 ```
 
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create bitmap index on 'tag' column.
+added_files = table.create_global_index("tag", index_type="bitmap")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass bitmap build
+options and restrict the build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "tag",
+    index_type="bitmap",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={
+        "sorted-index.records-per-range": "10000000",
+        "bitmap-index.dictionary-block-size": "16 kb",
+    },
+)
+print(added_files)
+```
+
+</TabItem>
+
+</Tabs>
+
 Bitmap indexes share the sorted index build path with BTree indexes. Use
 `sorted-index.records-per-range` to control the expected records per generated index
 file, and `sorted-index.build.max-parallelism` to cap Flink or Spark build
 parallelism. The legacy `btree-index.records-per-range` and
 `btree-index.build.max-parallelism` keys are still recognized as fallback keys.
+
+PyPaimon bitmap index build currently supports `bitmap-index.compression` set to
+`none`, which is also the default. Use SQL if you need to build bitmap index files
+with compressed dictionary blocks.
+
+## Drop Bitmap Index
+
+<Tabs groupId="bitmap-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'tag',
+    index_type => 'bitmap'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("tag", index_type="bitmap")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "tag",
+    index_type="bitmap",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
 
 ## Bitmap Options
 
@@ -98,9 +183,38 @@ parallelism. The legacy `btree-index.records-per-range` and
 Once a bitmap index is built, it is automatically used during scan when a filter
 predicate matches the indexed column.
 
+<Tabs groupId="bitmap-search">
+
+<TabItem value="sql" label="SQL">
+
 ```sql
 SELECT * FROM my_table WHERE tag IN ('vip', 'trial');
 ```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.common.predicate_builder import PredicateBuilder
+
+table = catalog.get_table("db.my_table")
+
+read_builder = table.new_read_builder()
+read_builder = read_builder.with_filter(
+    PredicateBuilder(table.fields)
+    .is_in("tag", ["vip", "trial"])
+)
+
+scan = read_builder.new_scan()
+read = read_builder.new_read()
+pa_table = read.to_arrow(scan.plan().splits())
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
 
 For complement predicates such as `tag != 'blocked'` or
 `tag NOT IN ('blocked', 'test')`, bitmap index evaluates the complement against each

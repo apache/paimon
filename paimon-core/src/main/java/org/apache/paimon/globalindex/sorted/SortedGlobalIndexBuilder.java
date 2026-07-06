@@ -34,7 +34,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -76,6 +75,7 @@ import java.util.stream.IntStream;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.indexedRowRanges;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -174,7 +174,13 @@ public class SortedGlobalIndexBuilder implements Serializable {
 
         Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
         Range dataRange = new Range(0, snapshot.nextRowId() - 1);
-        List<Range> indexedRanges = indexedRowRanges(snapshot);
+        List<Range> indexedRanges =
+                indexedRowRanges(
+                        table,
+                        snapshot,
+                        indexType,
+                        Collections.singletonList(indexField),
+                        partitionPredicate);
         List<Range> nonIndexedRanges = dataRange.exclude(indexedRanges);
         if (nonIndexedRanges.isEmpty()) {
             return Optional.empty();
@@ -191,27 +197,6 @@ public class SortedGlobalIndexBuilder implements Serializable {
                 entry ->
                         !isBlobFile(entry.file().fileName())
                                 && !isVectorStoreFile(entry.file().fileName()));
-    }
-
-    private List<Range> indexedRowRanges(Snapshot snapshot) {
-        List<Range> ranges = new ArrayList<>();
-        for (IndexManifestEntry entry :
-                table.store().newIndexFileHandler().scan(snapshot, indexType)) {
-            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
-                continue;
-            }
-            if (entry.indexFile().globalIndexMeta() == null) {
-                continue;
-            }
-            if (entry.indexFile().globalIndexMeta().indexFieldId() != indexField.id()) {
-                continue;
-            }
-            ranges.add(
-                    new Range(
-                            entry.indexFile().globalIndexMeta().rowRangeStart(),
-                            entry.indexFile().globalIndexMeta().rowRangeEnd()));
-        }
-        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     @VisibleForTesting

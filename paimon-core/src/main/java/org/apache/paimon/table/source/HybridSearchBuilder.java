@@ -63,14 +63,15 @@ public interface HybridSearchBuilder extends Serializable {
     }
 
     /** Add a full-text-search route. */
-    default HybridSearchBuilder addFullTextRoute(String queryJson, int limit, float weight) {
-        return addFullTextRoute(queryJson, limit, weight, null);
+    default HybridSearchBuilder addFullTextRoute(
+            String fieldName, String query, int limit, float weight) {
+        return addFullTextRoute(fieldName, query, limit, weight, null);
     }
 
     /** Add a full-text-search route. Non-empty options are not supported yet. */
     default HybridSearchBuilder addFullTextRoute(
-            String queryJson, int limit, float weight, Map<String, String> options) {
-        return addRoute(HybridSearchRoute.fullText(queryJson, limit, weight, options));
+            String fieldName, String query, int limit, float weight, Map<String, String> options) {
+        return addRoute(HybridSearchRoute.fullText(fieldName, query, limit, weight, options));
     }
 
     /** The final top k ranked results to return. */

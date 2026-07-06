@@ -56,10 +56,12 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.clusteringStrategy;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
@@ -221,7 +223,8 @@ public class FlinkSinkBuilder {
                         this.input,
                         table.rowType(),
                         contextForDescriptor,
-                        table.coreOptions().blobWriteNullOnMissingFile());
+                        table.coreOptions().blobWriteNullOnMissingFile(),
+                        table.coreOptions().blobWriteNullOnFetchFailure());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -254,7 +257,7 @@ public class FlinkSinkBuilder {
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext) {
-        return mapToInternalRow(input, rowType, catalogContext, false);
+        return mapToInternalRow(input, rowType, catalogContext, false, false);
     }
 
     public static DataStream<InternalRow> mapToInternalRow(
@@ -262,6 +265,19 @@ public class FlinkSinkBuilder {
             org.apache.paimon.types.RowType rowType,
             CatalogContext catalogContext,
             boolean checkBlobDescriptorExists) {
+        return mapToInternalRow(input, rowType, catalogContext, checkBlobDescriptorExists, false);
+    }
+
+    public static DataStream<InternalRow> mapToInternalRow(
+            DataStream<RowData> input,
+            org.apache.paimon.types.RowType rowType,
+            CatalogContext catalogContext,
+            boolean checkBlobDescriptorExists,
+            boolean writeNullOnFetchFailure) {
+        Set<Integer> blobFields =
+                checkBlobDescriptorExists
+                        ? FlinkRowWrapper.blobFieldIndexes(rowType)
+                        : Collections.emptySet();
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
@@ -269,7 +285,9 @@ public class FlinkSinkBuilder {
                                                 new FlinkRowWrapper(
                                                         r,
                                                         catalogContext,
-                                                        checkBlobDescriptorExists))
+                                                        checkBlobDescriptorExists,
+                                                        writeNullOnFetchFailure,
+                                                        blobFields))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));

@@ -53,9 +53,12 @@ CREATE TABLE my_table (
 ## Data Skipping
 
 The primary and most significant advantage of a bucketed append table is **data skipping**. When queries contain
-equality (`=`) or `IN` filter conditions on the `bucket-key`, Paimon can efficiently push these predicates down to
-skip irrelevant bucket files entirely. This means a large number of files that do not match the filter are pruned
-before reading, drastically reducing I/O and accelerating queries.
+equality (`=`) or `IN` filter conditions on the complete `bucket-key`, Paimon can efficiently push these predicates
+down to skip irrelevant bucket files entirely. This means a large number of files that do not match the filter are
+pruned before reading, drastically reducing I/O and accelerating queries.
+
+For a composite `bucket-key`, the query predicate must cover all bucket-key columns with finite equality or `IN`
+values to determine the target buckets.
 
 For example, if `bucket-key` is `product_id` and you query:
 

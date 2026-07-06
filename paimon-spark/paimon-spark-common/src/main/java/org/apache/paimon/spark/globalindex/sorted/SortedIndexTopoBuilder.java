@@ -91,7 +91,8 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
 
-        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits = indexBuilder.scan();
+        Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
+                indexBuilder.incrementalScan();
         if (!indexRangeAndSplits.isPresent()) {
             return Collections.emptyList();
         }

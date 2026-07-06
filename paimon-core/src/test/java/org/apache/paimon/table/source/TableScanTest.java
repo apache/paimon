@@ -421,6 +421,25 @@ public class TableScanTest extends ScannerTestBase {
                 .isEqualTo(60);
         assertThat(((DataSplit) splits2.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
 
+        // A non-partition filter must disable TopN pushdown, else it prunes splits by sort-column
+        // stats unaware the filter removes rows. "b" >= 0 matches every row, so all 9 splits are
+        // kept instead of pruned to 3.
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        TableScan.Plan planWithFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(2, 0L))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithFilter.splits().size()).isEqualTo(9);
+
+        // A partition-only filter keeps TopN pushdown enabled (surviving rows all pass): still 3.
+        TableScan.Plan planWithPartitionFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(0, 0))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithPartitionFilter.splits().size()).isEqualTo(3);
+
         // with bottom1 null last
         TableScan.Plan plan3 =
                 table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();

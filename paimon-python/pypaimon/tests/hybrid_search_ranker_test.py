@@ -109,6 +109,7 @@ class HybridSearchRankerTest(unittest.TestCase):
         with self.assertRaisesRegex(
                 ValueError, "Weight must be finite and positive"):
             HybridSearchRoute.full_text_route(
+                "content",
                 '{"match":{"column":"content","terms":"paimon lake"}}',
                 10,
                 weight=math.inf)

@@ -19,17 +19,26 @@ import unittest
 from datetime import date, datetime
 from decimal import Decimal
 import os
+import struct
 import sys
 import types
 
 import pyarrow as pa
 
-from pypaimon.globalindex.create_global_index import (
-    _filter_non_indexable_splits,
-    _split_by_global_index_shard,
-    _split_one_by_contiguous_row_range,
+from pypaimon.globalindex.build_plan import (
+    filter_non_indexable_splits as _filter_non_indexable_splits,
+    split_by_global_index_shard as _split_by_global_index_shard,
+    split_one_by_contiguous_row_range as _split_one_by_contiguous_row_range,
 )
+from pypaimon.globalindex.create_global_index import GlobalIndexBuilder
 from pypaimon.globalindex.key_serializer import create_serializer
+from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
+    FULL_TEXT_IDENTIFIER,
+    NativeFullTextIndexOptions,
+)
+from pypaimon.globalindex.full_text.native_full_text_index_writer import (
+    NativeFullTextIndexWriter,
+)
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
     native_options,
@@ -99,6 +108,53 @@ class _FakeVectorIndexWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+
+class _FakeFullTextForBuild(types.SimpleNamespace):
+
+    def __init__(self):
+        super().__init__()
+        self.writers = []
+        parent = self
+
+        class FullTextIndexWriter:
+
+            def __init__(self_inner, options=None):
+                self_inner.options = dict(options or {})
+                self_inner.documents = []
+                self_inner.written = False
+                self_inner.closed = False
+                parent.writers.append(self_inner)
+
+            def add_document(self_inner, row_id, text):
+                self_inner.documents.append({
+                    "row_id": int(row_id),
+                    "text": str(text),
+                })
+
+            def write(self_inner, output):
+                self_inner.written = True
+                output.write(b"fake-ftindex")
+
+            def close(self_inner):
+                self_inner.closed = True
+
+        self.FullTextIndexWriter = FullTextIndexWriter
+
+
+def _archive_file_names(file_io, file_path):
+    stream = file_io.new_input_stream(file_path)
+    try:
+        file_count = struct.unpack(">i", stream.read(4))[0]
+        names = []
+        for _ in range(file_count):
+            name_len = struct.unpack(">i", stream.read(4))[0]
+            names.append(stream.read(name_len).decode("utf-8"))
+            data_len = struct.unpack(">q", stream.read(8))[0]
+            stream.seek(stream.tell() + data_len)
+        return names
+    finally:
+        stream.close()
 
 
 class _FakeSchemaManager:
@@ -221,6 +277,147 @@ class GlobalIndexBuildTest(
             index_read_builder.new_scan().plan().splits())
         self.assertEqual(0, index_table.num_rows)
 
+    def test_stale_global_index_commit_conflicts_when_data_files_removed(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['a', 'b', 'c', 'd'],
+                'age': [10, 20, 30, 40],
+                'city': ['x', 'y', 'z', 'w'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        messages = GlobalIndexBuilder(
+            table,
+            'id',
+            options={'sorted-index.records-per-range': '2'},
+        ).build()
+        self.assertGreater(sum(len(message.index_adds) for message in messages), 0)
+
+        overwrite_wb = table.new_batch_write_builder().overwrite({})
+        overwrite_write = overwrite_wb.new_write()
+        overwrite_commit = overwrite_wb.new_commit()
+        overwrite_write.write_arrow(pa.table(
+            {
+                'id': [5, 6],
+                'name': ['e', 'f'],
+                'age': [50, 60],
+                'city': ['new1', 'new2'],
+            },
+            schema=self.pa_schema,
+        ))
+        overwrite_commit.commit(overwrite_write.prepare_commit())
+        overwrite_write.close()
+        overwrite_commit.close()
+
+        stale_commit = table.new_batch_write_builder().new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            stale_commit.commit(messages)
+        stale_commit.close()
+        self.assertIn(
+            'Global index row ID existence conflict',
+            str(ctx.exception),
+        )
+        self.assertEqual(
+            [],
+            IndexFileHandler(table).scan(table.snapshot_manager().get_latest_snapshot()),
+        )
+
+    def test_create_bitmap_global_index_from_python(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3, 4, 5],
+                'name': ['a', 'b', 'c', 'd', 'e'],
+                'age': [10, 20, 30, 40, 50],
+                'city': ['vip', 'trial', None, 'vip', 'blocked'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        added = table.create_global_index(
+            'city',
+            index_type='bitmap',
+            options={
+                'sorted-index.records-per-range': '2',
+                'bitmap-index.dictionary-block-size': '1 b',
+            },
+        )
+
+        self.assertEqual(3, added)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = IndexFileHandler(table).scan(snapshot)
+        self.assertEqual(3, len(entries))
+        self.assertEqual({'bitmap'}, {e.index_file.index_type for e in entries})
+        self.assertEqual([1, 2, 2],
+                         sorted(e.index_file.row_count for e in entries))
+        self.assertEqual(
+            {0},
+            {e.index_file.global_index_meta.row_range_start for e in entries},
+        )
+        self.assertEqual(
+            {4},
+            {e.index_file.global_index_meta.row_range_end for e in entries},
+        )
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        cases = [
+            (predicate_builder.is_in('city', ['vip', 'trial']),
+             [Range(0, 1), Range(3, 3)]),
+            (predicate_builder.is_null('city'), [Range(2, 2)]),
+            (predicate_builder.not_equal('city', 'blocked'),
+             [Range(0, 1), Range(3, 3)]),
+        ]
+        for predicate, expected in cases:
+            with GlobalIndexScanner.create(
+                    table,
+                    predicate=predicate,
+                    snapshot=snapshot) as scanner:
+                result = scanner.scan(predicate)
+            self.assertEqual(expected, result.results().to_range_list())
+
+    def test_create_bitmap_global_index_rejects_unsupported_compression(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1],
+                'name': ['a'],
+                'age': [10],
+                'city': ['vip'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        with self.assertRaisesRegex(ValueError, 'bitmap-index.compression=none'):
+            table.create_global_index(
+                'city',
+                index_type='bitmap',
+                options={'bitmap-index.compression': 'lz4'},
+            )
+
+    def test_sorted_index_records_per_range_matches_java_floating_factor(self):
+        table = self._create_table()
+        rows = list(range(12))
+        self._write_arrow(table, pa.table(
+            {
+                'id': rows,
+                'name': ['n%s' % i for i in rows],
+                'age': rows,
+                'city': ['c%s' % i for i in rows],
+            },
+            schema=self.pa_schema,
+        ))
+
+        added = table.create_global_index(
+            'id',
+            options={'sorted-index.records-per-range': '10'},
+        )
+
+        self.assertEqual(1, added)
+
     def test_create_global_index_uses_external_path(self):
         external_root = 'file://%s' % os.path.join(
             self.tempdir, 'global-index-external')
@@ -247,7 +444,7 @@ class GlobalIndexBuildTest(
         self.assertTrue(external_path.startswith(external_root + '/'))
         self.assertTrue(table.file_io.exists(external_path))
 
-    def test_create_global_index_rejects_overlapping_existing_range(self):
+    def test_create_global_index_skips_existing_ranges(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
             {
@@ -264,11 +461,46 @@ class GlobalIndexBuildTest(
         snapshot = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(2, len(IndexFileHandler(table).scan(snapshot)))
 
-        with self.assertRaisesRegex(RuntimeError, 'overlapping row range'):
-            table.create_global_index('id', options=options)
+        self.assertEqual(0, table.create_global_index('id', options=options))
 
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         self.assertEqual(2, len(IndexFileHandler(table).scan(latest_snapshot)))
+
+        self._write_arrow(table, pa.table(
+            {
+                'id': [5, 4],
+                'name': ['e', 'd'],
+                'age': [50, 40],
+                'city': ['v', 'u'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        self.assertEqual(1, table.create_global_index('id', options=options))
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = sorted(
+            IndexFileHandler(table).scan(latest_snapshot),
+            key=lambda entry: (
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.file_name,
+            ),
+        )
+        self.assertEqual(
+            [(0, 3), (0, 3), (4, 5)],
+            [
+                (
+                    entry.index_file.global_index_meta.row_range_start,
+                    entry.index_file.global_index_meta.row_range_end,
+                )
+                for entry in entries
+            ],
+        )
+        self.assertEqual(0, table.create_global_index('id', options=options))
+        self.assertEqual(
+            3,
+            len(IndexFileHandler(table).scan(
+                table.snapshot_manager().get_latest_snapshot())),
+        )
 
     def test_create_btree_global_index_for_java_scalar_types(self):
         schema = pa.schema([
@@ -418,6 +650,273 @@ class GlobalIndexBuildTest(
             ],
         )
 
+    def test_create_vindex_global_index_skips_existing_ranges(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('embedding', pa.list_(pa.float32())),
+        ])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3],
+                'embedding': pa.array(
+                    [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]],
+                    type=pa.list_(pa.float32()),
+                ),
+            },
+            schema=schema,
+        ))
+
+        old_module = sys.modules.get("paimon_vindex")
+        sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            VectorIndexWriter=_FakeVectorIndexWriter)
+        _FakeVectorIndexWriter.instances = []
+        options = {
+            'global-index.row-count-per-shard': '2',
+            'ivf-flat.dimension': '2',
+        }
+        try:
+            self.assertEqual(
+                2,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+            self.assertEqual(
+                0,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+
+            self._write_arrow(table, pa.table(
+                {
+                    'id': [4, 5],
+                    'embedding': pa.array(
+                        [[0.2, 0.8], [0.9, 0.1]],
+                        type=pa.list_(pa.float32()),
+                    ),
+                },
+                schema=schema,
+            ))
+
+            self.assertEqual(
+                2,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+            self.assertEqual(
+                0,
+                table.create_global_index(
+                    'embedding',
+                    index_type='ivf-flat',
+                    options=options,
+                ),
+            )
+        finally:
+            if old_module is None:
+                sys.modules.pop("paimon_vindex", None)
+            else:
+                sys.modules["paimon_vindex"] = old_module
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = sorted(
+            IndexFileHandler(table).scan(snapshot),
+            key=lambda entry: entry.index_file.global_index_meta.row_range_start,
+        )
+        self.assertEqual(
+            [(0, 1), (2, 2), (3, 3), (4, 4)],
+            [
+                (
+                    entry.index_file.global_index_meta.row_range_start,
+                    entry.index_file.global_index_meta.row_range_end,
+                )
+                for entry in entries
+            ],
+        )
+
+    def test_create_native_fulltext_global_index_from_python(self):
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('content', pa.string()),
+        ])
+        table = self._create_table(pa_schema=schema, options=self.table_options)
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1, 2, 3],
+                'content': [
+                    'Apache Paimon full text',
+                    None,
+                    'Native full text search',
+                ],
+            },
+            schema=schema,
+        ))
+
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
+        try:
+            added = table.create_global_index(
+                'content',
+                index_type=FULL_TEXT_IDENTIFIER,
+                options={
+                    'global-index.row-count-per-shard': '2',
+                    'full-text.tokenizer': 'ngram',
+                    'full-text.ngram.min-gram': '2',
+                    'full-text.ngram.max-gram': '3',
+                    'full-text.ngram.prefix-only': 'true',
+                    'full-text.with-position': 'false',
+                },
+            )
+        finally:
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
+            else:
+                sys.modules["paimon_ftindex"] = old_ftindex
+
+        self.assertEqual(2, added)
+        self.assertEqual(2, len(ftindex.writers))
+        self.assertEqual(
+            {
+                "tokenizer": "ngram",
+                "ngram.min-gram": "2",
+                "ngram.max-gram": "3",
+                "ngram.prefix-only": "true",
+                "with-position": "false",
+            },
+            ftindex.writers[0].options,
+        )
+        self.assertEqual(
+            [{'row_id': 0, 'text': 'Apache Paimon full text'}],
+            ftindex.writers[0].documents,
+        )
+        self.assertEqual(
+            [{'row_id': 0, 'text': 'Native full text search'}],
+            ftindex.writers[1].documents,
+        )
+        self.assertTrue(all(writer.written for writer in ftindex.writers))
+        self.assertTrue(all(writer.closed for writer in ftindex.writers))
+
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        entries = sorted(
+            IndexFileHandler(table).scan(snapshot),
+            key=lambda entry: entry.index_file.global_index_meta.row_range_start,
+        )
+        self.assertEqual(
+            [(0, 1, 2), (2, 2, 1)],
+            [
+                (
+                    entry.index_file.global_index_meta.row_range_start,
+                    entry.index_file.global_index_meta.row_range_end,
+                    entry.index_file.row_count,
+                )
+                for entry in entries
+            ],
+        )
+        self.assertEqual(
+            {FULL_TEXT_IDENTIFIER},
+            {entry.index_file.index_type for entry in entries},
+        )
+        for entry in entries:
+            index_options = NativeFullTextIndexOptions.deserialize(
+                entry.index_file.global_index_meta.index_meta)
+            self.assertEqual(
+                {
+                    "tokenizer": "ngram",
+                    "ngram.min-gram": "2",
+                    "ngram.max-gram": "3",
+                    "ngram.prefix-only": "true",
+                    "with-position": "false",
+                },
+                index_options.to_native_options(),
+            )
+            file_path = table.path_factory().global_index_path_factory().to_path(
+                entry.index_file.file_name)
+            self.assertEqual(
+                b"fake-ftindex",
+                table.file_io.new_input_stream(file_path).read(),
+            )
+
+    def test_native_fulltext_writer_accepts_jieba_tokenizer(self):
+        table = self._create_table()
+        index_path = (
+            table.path_factory()
+            .global_index_path_factory()
+            .global_index_root_path()
+        )
+        ftindex = _FakeFullTextForBuild()
+        old_ftindex = sys.modules.get("paimon_ftindex")
+        sys.modules["paimon_ftindex"] = ftindex
+        try:
+            writer = NativeFullTextIndexWriter(
+                table.file_io,
+                index_path,
+                AtomicType('STRING'),
+                {'full-text.tokenizer': 'jieba'},
+            )
+            writer.write('北京大学支持全文检索', 0)
+            entries = writer.finish()
+        finally:
+            if old_ftindex is None:
+                sys.modules.pop("paimon_ftindex", None)
+            else:
+                sys.modules["paimon_ftindex"] = old_ftindex
+
+        self.assertEqual(1, len(entries))
+        self.assertEqual([{"row_id": 0, "text": "北京大学支持全文检索"}],
+                         ftindex.writers[0].documents)
+        self.assertEqual({"tokenizer": "jieba"}, ftindex.writers[0].options)
+        self.assertTrue(ftindex.writers[0].closed)
+
+    def test_native_fulltext_options_are_passed_through(self):
+        ngram = NativeFullTextIndexOptions.from_options({
+            'full-text.tokenizer': 'ngram',
+            'full-text.ngram.min-gram': '2',
+            'full-text.ngram.max-gram': '3',
+            'full-text.ngram.prefix-only': 'true',
+            'full-text.lower-case': 'false',
+            'full-text.custom-future-option': 'future-value',
+            'unrelated': 'ignored',
+        })
+
+        self.assertEqual(
+            {
+                "tokenizer": "ngram",
+                "ngram.min-gram": "2",
+                "ngram.max-gram": "3",
+                "ngram.prefix-only": "true",
+                "lower-case": "false",
+                "custom-future-option": "future-value",
+            },
+            ngram.to_native_options(),
+        )
+
+    def test_create_native_fulltext_global_index_rejects_non_string_column(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {
+                'id': [1],
+                'name': ['a'],
+                'age': [10],
+                'city': ['x'],
+            },
+            schema=self.pa_schema,
+        ))
+
+        with self.assertRaisesRegex(ValueError, 'requires string type'):
+            table.create_global_index(
+                'id',
+                index_type=FULL_TEXT_IDENTIFIER,
+            )
+
     def test_create_vindex_global_index_rejects_generic_unsupported_tables(self):
         schema = pa.schema([
             ('id', pa.int32()),
@@ -494,6 +993,25 @@ class GlobalIndexBuildTest(
                 (['b'], 4, 4),
                 (['c'], 6, 7),
                 (['c'], 8, 8),
+            ],
+            [
+                ([file.file_name for file in shard.files], row_range.from_, row_range.to)
+                for shard, row_range in shards
+            ],
+        )
+
+    def test_split_by_global_index_shard_uses_unindexed_ranges(self):
+        split = _FakeSplit([
+            _FakeFile('a', 0, 100),
+        ])
+
+        shards = _split_by_global_index_shard(
+            [split], 100, [Range(0, 9), Range(90, 99)])
+
+        self.assertEqual(
+            [
+                (['a'], 0, 9),
+                (['a'], 90, 99),
             ],
             [
                 ([file.file_name for file in shard.files], row_range.from_, row_range.to)

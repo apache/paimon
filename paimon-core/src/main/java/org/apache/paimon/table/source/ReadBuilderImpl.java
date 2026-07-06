@@ -19,10 +19,15 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -31,6 +36,7 @@ import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -47,6 +53,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private final InnerTable table;
     private final RowType partitionType;
     private final String defaultPartitionName;
+    private final boolean queryAuthEnabled;
 
     private Predicate filter;
 
@@ -69,7 +76,9 @@ public class ReadBuilderImpl implements ReadBuilder {
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
         this.partitionType = table.rowType().project(table.partitionKeys());
-        this.defaultPartitionName = new CoreOptions(table.options()).partitionDefaultName();
+        CoreOptions options = new CoreOptions(table.options());
+        this.defaultPartitionName = options.partitionDefaultName();
+        this.queryAuthEnabled = options.queryAuthEnabled();
     }
 
     @Override
@@ -234,6 +243,14 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (readType != null) {
             read.withReadType(readType);
         }
+        if (queryAuthEnabled) {
+            // Skip TopN (engine re-applies it); apply the limit after auth only without a TopN,
+            // else an unordered limit could drop sorted rows.
+            if (topN == null && limit != null) {
+                return new LimitTableRead(read, limit);
+            }
+            return read;
+        }
         if (topN != null) {
             read.withTopN(topN);
         }
@@ -263,5 +280,98 @@ public class ReadBuilderImpl implements ReadBuilder {
         int result = Objects.hash(table.name(), filter);
         result = 31 * result + Objects.hash(readType);
         return result;
+    }
+
+    /**
+     * Limits the delegate's output to {@code limit} rows. Used under query auth to apply the limit
+     * after read-time auth filtering, not before (which could drop authorized rows).
+     */
+    private static class LimitTableRead implements TableRead {
+
+        private final TableRead delegate;
+        private final int limit;
+
+        private LimitTableRead(TableRead delegate, int limit) {
+            this.delegate = delegate;
+            this.limit = limit;
+        }
+
+        @Override
+        public TableRead withMetricRegistry(MetricRegistry registry) {
+            delegate.withMetricRegistry(registry);
+            return this;
+        }
+
+        @Override
+        public TableRead executeFilter() {
+            delegate.executeFilter();
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            delegate.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            return limit(delegate.createReader(split));
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
+            // Limit the merged reader so the cap is global, not per split.
+            return limit(delegate.createReader(splits));
+        }
+
+        @Override
+        public RecordReader<InternalRow> createReader(TableScan.Plan plan) throws IOException {
+            return limit(delegate.createReader(plan));
+        }
+
+        private RecordReader<InternalRow> limit(RecordReader<InternalRow> reader) {
+            // Stop reading once the limit is reached (return EOF), rather than filtering and
+            // draining the rest of the data.
+            return new RecordReader<InternalRow>() {
+                private int count;
+
+                @Nullable
+                @Override
+                public RecordIterator<InternalRow> readBatch() throws IOException {
+                    if (count >= limit) {
+                        return null;
+                    }
+                    RecordIterator<InternalRow> batch = reader.readBatch();
+                    if (batch == null) {
+                        return null;
+                    }
+                    return new RecordIterator<InternalRow>() {
+                        @Nullable
+                        @Override
+                        public InternalRow next() throws IOException {
+                            if (count >= limit) {
+                                return null;
+                            }
+                            InternalRow row = batch.next();
+                            if (row != null) {
+                                count++;
+                            }
+                            return row;
+                        }
+
+                        @Override
+                        public void releaseBatch() {
+                            batch.releaseBatch();
+                        }
+                    };
+                }
+
+                @Override
+                public void close() throws IOException {
+                    reader.close();
+                }
+            };
+        }
     }
 }

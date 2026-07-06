@@ -805,6 +805,10 @@ public class ManifestFileSorter {
      * Split a section at the rewrite budget boundary: sort and rewrite the head part that fits
      * within the remaining budget, and return the remaining tail as a new Section (or null if the
      * whole section fits and no tail is left).
+     *
+     * <p>The budget is applied at manifest-file granularity. The first file that exceeds the
+     * remaining budget is still included, and at least two files are rewritten. Otherwise a very
+     * small {@code manifest-sort.max-rewrite-size} would make no progress.
      */
     private static Section splitSectionAndRewriteHead(
             Section section,
@@ -824,7 +828,10 @@ public class ManifestFileSorter {
         boolean tailHasUnsortedCompactMeta = false;
 
         for (ManifestFileMeta file : section.files) {
-            if (headSize + file.fileSize() <= remainingBudget) {
+            // Rewrite budget is enforced at manifest-file granularity. Include the first file that
+            // crosses the byte budget, and keep at least two files in the rewrite head; otherwise a
+            // too-small budget may produce an empty or single-file head and make no sort progress.
+            if (headSize <= remainingBudget || headFiles.size() < 2) {
                 headFiles.add(file);
                 headSize += file.fileSize();
             } else {

@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>legacy-timestamp-mapping.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, map Paimon TIMESTAMP to Spark TIMESTAMP instead of TIMESTAMP_NTZ.</td>
+        </tr>
+        <tr>
             <td><h5>read.allow.fullScan</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -79,6 +85,18 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
+        </tr>
+        <tr>
+            <td><h5>write.data-evolution.update-conflict-retry.max-attempts</h5></td>
+            <td style="word-wrap: break-word;">20</td>
+            <td>Integer</td>
+            <td>Maximum attempts for Spark V1 UPDATE on data-evolution tables when concurrent partial-column updates conflict on the same row-id range and update columns. Values less than 2 disable retry.</td>
+        </tr>
+        <tr>
+            <td><h5>write.data-evolution.update-conflict-retry.wait-ms</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Long</td>
+            <td>Wait time in milliseconds between retry attempts for Spark V1 UPDATE on data-evolution tables after row-id range update conflicts.</td>
         </tr>
         <tr>
             <td><h5>write.merge-schema</h5></td>

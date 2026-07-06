@@ -27,136 +27,212 @@ under the License.
 
 # Full-Text Index
 
-Full-Text Index provides text search capabilities powered by Tantivy. It is suitable for text retrieval scenarios
-such as document search, log analysis, and content-based filtering. Search results are scored by
-the full-text index and can be consumed directly or combined with vector routes in
-[Hybrid Search](./hybrid-search).
+Full-text index lets Paimon run top-k text retrieval on a string column through
+the Global Index framework. The index type is `full-text`. The Paimon integration
+module is `paimon-full-text`, backed by the standalone `paimon-full-text-index`
+native library.
+
+The search API passes the table column name separately from the query. The query
+itself is a JSON string accepted by `paimon-full-text-index`.
+
+Full-text indexes are scored by the native engine and can be used directly, or
+combined with vector routes in [Hybrid Search](./hybrid-search).
 
 ## Build Full-Text Index
 
-```sql
--- Create full-text index on 'content' column
-CALL sys.create_global_index(
-    table => 'db.my_table',
-    index_column => 'content',
-    index_type => 'tantivy-fulltext'
-);
-```
+Build full-text indexes on `STRING`, `CHAR`, or `VARCHAR` columns. Null values
+are skipped by the native text index, while row-id coverage is still tracked by
+Paimon.
 
-For other content where users often search by short character fragments, build the
-index with Tantivy's `ngram` tokenizer:
+<Tabs groupId="fulltext-build">
+
+<TabItem value="sql" label="SQL">
 
 ```sql
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=ngram,tantivy.ngram.min-gram=2,tantivy.ngram.max-gram=2'
+    index_type => 'full-text'
 );
 ```
 
-For Chinese word segmentation, build the index with the `jieba` tokenizer:
+Use the `ngram` tokenizer for short character fragments or substring-like
+lookup:
 
 ```sql
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=jieba'
+    index_type => 'full-text',
+    options => 'full-text.tokenizer=ngram,full-text.ngram.min-gram=2,full-text.ngram.max-gram=3'
 );
 ```
 
-To customize text analysis, choose a base tokenizer and compose token filters:
+Use `jieba` for Chinese word segmentation:
 
 ```sql
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'content',
-    index_type => 'tantivy-fulltext',
-    options => 'tantivy.tokenizer=simple,tantivy.stem=true,tantivy.remove-stop-words=true'
+    index_type => 'full-text',
+    options => 'full-text.tokenizer=jieba'
 );
 ```
 
-Supported tokenizer options:
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+added_files = table.create_global_index(
+    "content",
+    index_type="full-text",
+)
+print(added_files)
+```
+
+Use the `ngram` tokenizer for short character fragments or substring-like
+lookup:
+
+```python
+added_files = table.create_global_index(
+    "content",
+    index_type="full-text",
+    options={
+        "full-text.tokenizer": "ngram",
+        "full-text.ngram.min-gram": "2",
+        "full-text.ngram.max-gram": "3",
+    },
+)
+print(added_files)
+```
+
+PyPaimon full-text build and query require the `paimon_ftindex` Python package
+and the native FFI library from `paimon-full-text`.
+
+</TabItem>
+
+</Tabs>
+
+All native full-text options must use the public `full-text.` prefix in Paimon.
+Paimon removes this prefix once and passes the remaining keys to the native
+library. For example, set `full-text.tokenizer=ngram`, not `tokenizer=ngram`.
+
+Supported full-text index options:
 
 | Option | Default | Description |
 |---|---|---|
-| `tantivy.tokenizer` | `default` | Tokenizer used by the full-text index. Supported values: `default`, `simple`, `whitespace`, `raw`, `ngram`, `jieba`. |
-| `tantivy.ngram.min-gram` | `2` | Minimum gram length for the `ngram` tokenizer. |
-| `tantivy.ngram.max-gram` | `2` | Maximum gram length for the `ngram` tokenizer. |
-| `tantivy.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
-| `tantivy.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
-| `tantivy.max-token-length` | `40` | Maximum token length kept by configurable tokenizers. |
-| `tantivy.ascii-folding` | `false` | Whether to normalize non-ASCII Latin characters to ASCII. |
-| `tantivy.stem` | `false` | Whether to apply stemming to emitted tokens. |
-| `tantivy.language` | `english` | Language used by stemming and built-in stop word filters. |
-| `tantivy.remove-stop-words` | `false` | Whether to remove built-in stop words for the configured language. |
-| `tantivy.stop-words` | ` ` | Semicolon-separated custom stop words to remove. |
-| `tantivy.with-position` | `true` | Whether to store term positions for phrase queries. Disable it to reduce index size when phrase queries are not needed. |
+| `full-text.tokenizer` | `default` | Tokenizer used by the native full-text index. Supported values are `default`, `simple`, `whitespace`, `raw`, `ngram`, and `jieba`. |
+| `full-text.ngram.min-gram` | `3` | Minimum gram length for the `ngram` tokenizer. |
+| `full-text.ngram.max-gram` | `3` | Maximum gram length for the `ngram` tokenizer. |
+| `full-text.ngram.prefix-only` | `false` | Whether the `ngram` tokenizer only emits prefix ngrams. |
+| `full-text.jieba.search-mode` | `true` | Whether the `jieba` tokenizer uses search mode. |
+| `full-text.jieba.ordinal-position` | `true` | Whether the `jieba` tokenizer uses ordinal positions. |
+| `full-text.lower-case` | `true` | Whether configurable tokenizers lowercase emitted tokens. |
+| `full-text.max-token-length` | `40` | Maximum token length kept by configurable tokenizers. |
+| `full-text.ascii-folding` | `true` | Whether to normalize non-ASCII Latin characters to ASCII. |
+| `full-text.stem` | `true` | Whether to apply stemming. |
+| `full-text.language` | `english` | Language used by stemming and built-in stop-word filters. |
+| `full-text.remove-stop-words` | `true` | Whether to remove built-in stop words for the configured language. |
+| `full-text.stop-words` | empty | Semicolon-separated custom stop words. Requires `full-text.remove-stop-words=true`. |
+| `full-text.with-position` | `true` | Whether to store term positions. Keep this enabled for phrase queries. |
 
-Tokenizer settings are persisted in global index metadata. Existing index files keep using the
-tokenizer they were built with, even if later index builds use different options.
-Paimon does not load arbitrary Rust tokenizer plugins from configuration; custom analysis is
-provided by composing the supported tokenizer and filter options above. PyPaimon can query
-`jieba` indexes when the Python `jieba` package is installed.
+The default tokenizer uses English full-text defaults: lower-case, stemming,
+stop-word removal, ASCII folding, maximum token length 40, and positions. Set
+`full-text.with-position=false` only when phrase search is not needed.
 
-Choose tokenizer settings based on the query pattern:
+Tokenizer settings are stored in the global index file metadata. Existing index
+files keep the tokenizer options they were built with, even if later index
+builds use different options.
 
-| Query Pattern | Suggested Options |
-|---|---|
-| Natural-language English text | Use the default tokenizer, or enable `tantivy.stem=true` and `tantivy.remove-stop-words=true`. |
-| Short fragments or substring-like lookup | Use `tantivy.tokenizer=ngram` and tune `tantivy.ngram.min-gram` / `tantivy.ngram.max-gram`. |
-| Chinese text | Use `tantivy.tokenizer=jieba`. |
-| Exact token matching | Use `tantivy.tokenizer=raw` or `tantivy.tokenizer=whitespace`, depending on how the field is written. |
+## Drop Full-Text Index
 
-Set `tantivy.with-position=false` to reduce index size when phrase queries are not needed.
+<Tabs groupId="fulltext-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'full-text'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index(
+    "content",
+    index_type="full-text",
+)
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "content",
+    index_type="full-text",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
 
 ## Full-Text Search
 
-Full-text search accepts a JSON query DSL. The root JSON object should contain one query type.
-Paimon supports `match`, `match_phrase` / `phrase`, `boost`, `multi_match`, and `boolean`.
-The same JSON DSL is used by Spark SQL `full_text_search(...)`, Java `FullTextQuery.fromJson(...)`,
-Python `FullTextQuery.from_json(...)`, and full-text routes in Hybrid Search.
+Spark SQL uses the `full_text_search(table_name, column, query, limit)`
+table-valued function. The `column` argument is the Paimon table column to
+search. The `query` argument is passed to the native full-text reader as a JSON
+string.
 
 <Tabs groupId="fulltext-search">
 
 <TabItem value="spark-sql" label="Spark SQL">
 
 ```sql
--- Search for top-10 documents matching any query term. The default query operator is 'Or'.
-SELECT * FROM full_text_search(
+-- Search for the top 10 rows matching any query term.
+SELECT id, content, __paimon_search_score
+FROM full_text_search(
     'my_table',
-    '{"match":{"column":"content","terms":"paimon lake format"}}',
+    'content',
+    '{"match":{"query":"paimon lake format"}}',
     10
 );
 
--- Search for top-10 documents matching all query terms.
-SELECT * FROM full_text_search(
+-- Require all query terms.
+SELECT id, content, __paimon_search_score
+FROM full_text_search(
     'my_table',
-    '{"match":{"column":"content","terms":"paimon lake format","operator":"And"}}',
+    'content',
+    '{"match":{"query":"paimon lake format","operator":"And"}}',
     10
 );
 
--- Structured query DSL. The JSON shape follows LanceDB full-text queries:
--- match, match_phrase, boost, multi_match, and boolean.
-SELECT * FROM full_text_search(
+-- Phrase query. The index must be built with full-text.with-position=true.
+SELECT id, content, __paimon_search_score
+FROM full_text_search(
     'my_table',
-    '{"match_phrase":{"column":"content","terms":"paimon lake","slop":1}}',
-    10
-);
-
-SELECT * FROM full_text_search(
-    'my_table',
-    '{"boolean":{"must":[{"match":{"column":"content","terms":"paimon"}},{"match":{"column":"content","terms":"format"}}],"must_not":[{"match":{"column":"content","terms":"vector"}}]}}',
-    10
-);
-
-SELECT * FROM full_text_search(
-    'my_table',
-    '{"multi_match":{"query":"paimon","columns":["title","content"],"boost":[2.0,1.0],"operator":"Or"}}',
+    'content',
+    '{"match_phrase":{"query":"paimon lake"}}',
     10
 );
 ```
+
+Spark exposes the score as the `__paimon_search_score` metadata column.
 
 </TabItem>
 
@@ -165,19 +241,16 @@ SELECT * FROM full_text_search(
 ```java
 Table table = catalog.getTable(identifier);
 
-// Step 1: Build full-text search
-GlobalIndexResult result = table.newFullTextSearchBuilder()
-        .withQuery(FullTextQuery.phrase("paimon lake", "content", 1))
-        .withLimit(10)
-        .executeLocal();
+GlobalIndexResult result =
+        table.newFullTextSearchBuilder()
+                .withQuery("content", "{\"match\":{\"query\":\"paimon lake\"}}")
+                .withLimit(10)
+                .executeLocal();
 
-// Step 2: Read matching rows using the search result
 ReadBuilder readBuilder = table.newReadBuilder();
 TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
 try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
-    reader.forEachRemaining(row -> {
-        System.out.println("id=" + row.getInt(0) + ", content=" + row.getString(1));
-    });
+    reader.forEachRemaining(row -> System.out.println(row));
 }
 ```
 
@@ -186,131 +259,140 @@ try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)
 <TabItem value="python-sdk" label="Python SDK">
 
 ```python
-from pypaimon.globalindex.full_text_query import MatchQuery
-
 table = catalog.get_table("db.my_table")
 
-# Step 1: Build full-text search
 result = (
     table.new_full_text_search_builder()
-    .with_query(MatchQuery("paimon lake format", "content", operator="And"))
+    .with_query("content", '{"match":{"query":"paimon lake"}}')
     .with_limit(10)
     .execute_local()
 )
 
-# Step 2: Read matching rows using the search result
 read_builder = table.new_read_builder()
-scan = read_builder.new_scan().with_global_index_result(result)
-plan = scan.plan()
-table_read = read_builder.new_read()
-pa_table = table_read.to_arrow(plan.splits())
+plan = read_builder.new_scan().with_global_index_result(result).plan()
+pa_table = read_builder.new_read().to_arrow(plan.splits())
 print(pa_table)
 ```
-
-PyPaimon reads the Tantivy tokenizer settings stored in the global index metadata. Indexes built
-with `tantivy.tokenizer=ngram` can be queried from Python when the installed `tantivy-py` package
-provides custom tokenizer support. Indexes built with `tantivy.tokenizer=jieba` can be queried
-when the `jieba` package is installed.
 
 </TabItem>
 
 </Tabs>
 
-## Query DSL Reference
+By default, `global-index.search-mode=fast` searches indexed row ranges only.
+When `global-index.search-mode` is `full` or `detail`, Paimon also covers
+unindexed row ranges by reading raw rows and building a temporary native
+full-text index for the searched column.
+
+## Query DSL
+
+The query DSL is a JSON object with one top-level query type. Use the examples
+below as JSON strings in Spark SQL, Java, Python, or hybrid search routes.
 
 ### Match
 
-Use `match` to search terms in one text column. By default, a row matches if any query term
-matches.
+Use `match` for normal term search. The default operator is `Or`.
 
 ```json
 {
   "match": {
-    "column": "content",
-    "terms": "paimon lake format",
-    "operator": "or",
-    "boost": 2.0,
-    "fuzziness": 1,
-    "max_expansions": 50,
-    "prefix_length": 0
+    "query": "paimon lake format",
+    "operator": "And"
   }
 }
 ```
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `column` | Yes |  | Text column to search. |
-| `terms` | Yes |  | Query text. `query` is also accepted as an alias. |
-| `operator` | No | `or` | How query terms are combined. Supported values are `or` and `and`. |
-| `boost` | No | `1.0` | Positive score multiplier for this query. |
-| `fuzziness` | No | `0` | Edit distance for fuzzy matching. Supported numeric values are `0`, `1`, and `2`. Use `null` or `auto` to leave fuzziness unset. |
-| `max_expansions` | No | `50` | Maximum fuzzy term expansions. `maxExpansions` is also accepted. |
-| `prefix_length` | No | `0` | Number of leading characters that must match exactly for fuzzy matching. `prefixLength` is also accepted. |
+| `query` | Yes | N/A | Query text. |
+| `operator` | No | `Or` | How query terms are combined. Supported values are `Or` and `And`. |
+| `boost` | No | `1.0` | Score multiplier for this query. |
+| `fuzziness` | No | `0` | Edit distance for fuzzy matching. Use an integer or `auto`. |
+| `max_expansions` | No | `50` | Maximum fuzzy expansions. `maxExpansions` is also accepted. |
+| `prefix_length` | No | `0` | Number of leading characters that must match exactly. `prefixLength` is also accepted. |
 
 ### Phrase
 
-Use `match_phrase` to match terms in order. Phrase queries require the index to store positions,
-so keep `tantivy.with-position=true` when building indexes that need phrase search.
+Use `match_phrase` for ordered terms. Phrase search requires positions, so build
+the index with `full-text.with-position=true`.
 
 ```json
 {
   "match_phrase": {
-    "column": "content",
-    "terms": "paimon lake",
+    "query": "paimon lake",
     "slop": 1
   }
 }
 ```
 
-`phrase` is accepted as an alias for `match_phrase`, and `query` is accepted as an alias for
-`terms`. Paimon serializes phrase queries as `match_phrase`.
-
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `column` | Yes |  | Text column to search. |
-| `terms` | Yes |  | Phrase text. `query` is also accepted as an alias. |
-| `slop` | No | `0` | Maximum number of term-position moves allowed in the phrase. |
+| `query` | Yes | N/A | Phrase text. |
+| `slop` | No | `0` | Number of positional moves allowed when matching the phrase. |
 
-### Multi Match
+### Boolean
 
-Use `multi_match` to search the same query text across multiple columns in one full-text query.
-Column boosts are applied inside the full-text score before the final top-k is selected.
+Use `boolean` to combine nested queries.
 
 ```json
 {
-  "multi_match": {
-    "query": "paimon lake",
-    "columns": ["title", "content"],
-    "boost": [2.0, 1.0],
-    "operator": "or"
+  "boolean": {
+    "must": [
+      {"match": {"query": "paimon"}}
+    ],
+    "should": [
+      {"match_phrase": {"query": "lake format"}}
+    ],
+    "must_not": [
+      {"match": {"query": "vector"}}
+    ]
   }
 }
 ```
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `query` | Yes |  | Query text searched in every listed column. |
-| `columns` | Yes |  | Non-empty array of text columns. |
-| `boost` | No | all `1.0` | Per-column score multipliers. The array length must match `columns`. `boosts` is also accepted. |
-| `operator` | No | `or` | How query terms are combined within each column. Supported values are `or` and `and`. |
+| `must` | No | empty | Queries that must match. |
+| `should` | No | empty | Queries that may match and contribute score. |
+| `must_not` | No | empty | Queries that exclude matching rows. |
 
-### Boost
+The native reader also accepts a `queries` array of occurrence/query pairs, such
+as `["Must", {"match": {"query": "paimon"}}]`.
 
-Use `boost` to reduce the score of documents that also match a negative query.
+### Multi Match
+
+`multi_match` searches several native text fields in one query.
+
+```json
+{
+  "multi_match": {
+    "query": "paimon search",
+    "columns": ["title", "body"],
+    "boosts": [2.0, 1.0]
+  }
+}
+```
+
+The current Paimon global index build path creates one full-text index for one
+table column. To search multiple Paimon table columns, create one full-text index
+per column and combine them with [Hybrid Search](./hybrid-search). `multi_match`
+is useful for native multi-field indexes provided by adapters that write
+multiple native text fields.
+
+### Boost Demotion
+
+Use `boost` to down-rank rows that also match a negative query.
 
 ```json
 {
   "boost": {
     "positive": {
       "match": {
-        "column": "content",
-        "terms": "paimon"
+        "query": "paimon"
       }
     },
     "negative": {
       "match": {
-        "column": "content",
-        "terms": "vector"
+        "query": "vector"
       }
     },
     "negative_boost": 0.3
@@ -320,93 +402,18 @@ Use `boost` to reduce the score of documents that also match a negative query.
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `positive` | Yes |  | Query that contributes the main score. |
-| `negative` | Yes |  | Query used to down-rank matching rows. |
-| `negative_boost` | No | `0.5` | Positive multiplier applied to rows that also match `negative`. `negativeBoost` is also accepted. |
+| `positive` | Yes | N/A | Query that contributes the main score. |
+| `negative` | Yes | N/A | Query used to down-rank matching rows. |
+| `negative_boost` | No | `0.5` | Positive multiplier applied to rows that also match `negative`. |
 
-### Boolean
+## Notes
 
-Use `boolean` to combine nested queries. `must` clauses restrict matches, `should` clauses add
-matches and score, and `must_not` clauses exclude matches.
-
-```json
-{
-  "boolean": {
-    "must": [
-      {
-        "match": {
-          "column": "content",
-          "terms": "paimon"
-        }
-      }
-    ],
-    "should": [
-      {
-        "match_phrase": {
-          "column": "content",
-          "terms": "lake format"
-        }
-      }
-    ],
-    "must_not": [
-      {
-        "match": {
-          "column": "content",
-          "terms": "vector"
-        }
-      }
-    ]
-  }
-}
-```
-
-| Field | Required | Default | Description |
-|---|---|---|---|
-| `must` | No | empty | Array of nested queries that every result must match. |
-| `should` | No | empty | Array of nested queries that can match and contribute score. |
-| `must_not` | No | empty | Array of nested queries that matching rows must not satisfy. |
-
-`boolean` also accepts a `queries` array for explicit occurrence labels:
-
-```json
-{
-  "boolean": {
-    "queries": [
-      {
-        "occur": "must",
-        "query": {
-          "match": {
-            "column": "content",
-            "terms": "paimon"
-          }
-        }
-      },
-      [
-        "must_not",
-        {
-          "match": {
-            "column": "content",
-            "terms": "vector"
-          }
-        }
-      ]
-    ]
-  }
-}
-```
-
-Supported `occur` values are `should`, `must`, and `must_not`.
-
-### Validation Notes
-
-- Query text and column names cannot be empty.
-- Boost values and `negative_boost` must be positive.
-- `max_expansions` must be positive.
-- `prefix_length` and `slop` must be non-negative.
-- `fuzziness` must be `0`, `1`, `2`, `null`, or `auto`.
-- `max_expansions` and `prefix_length` are part of the DSL for LanceDB compatibility. The current
-  Tantivy backend accepts the default values only: `max_expansions=50` and `prefix_length=0`.
-- PyPaimon can parse the same DSL, but its local Tantivy reader does not support every advanced
-  scoring option yet. Unsupported options fail fast instead of changing query semantics silently.
-- Multi-column queries such as `multi_match` require full-text indexes for every referenced
-  column.
+- The table column is supplied by `full_text_search(..., column, query, limit)`,
+  `withQuery(column, query)`, or `with_query(column, query)`.
+- The optional `column` field inside the JSON query belongs to the native
+  `paimon-full-text-index` DSL. Most Paimon users should omit it and pass the
+  Paimon table column through the Paimon API instead.
+- The query string must be valid JSON understood by the native full-text reader.
+  Invalid query syntax fails during search.
+- `limit` must be positive. Full-text results are returned in score order and
+  can be merged with vector results by hybrid search rankers.

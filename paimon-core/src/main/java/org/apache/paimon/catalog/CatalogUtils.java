@@ -26,6 +26,7 @@ import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
@@ -365,7 +366,12 @@ public class CatalogUtils {
                 return AllPartitionsTable.fromPartitions(
                         toAllPartitions(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
-                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+                Options catalogOptions = Options.fromMap(catalog.options());
+                if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+                    throw new Catalog.TableNotExistException(
+                            Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+                }
+                return new CatalogOptionsTable(catalogOptions);
             default:
                 throw new Catalog.TableNotExistException(
                         Identifier.create(SYSTEM_DATABASE_NAME, tableName));

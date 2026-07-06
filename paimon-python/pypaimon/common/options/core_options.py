@@ -263,6 +263,23 @@ class CoreOptions:
         .with_description("Define the data block size.")
     )
 
+    MOSAIC_STATS_COLUMNS: ConfigOption[str] = (
+        ConfigOptions.key("mosaic.stats-columns")
+        .string_type()
+        .default_value("")
+        .with_description(
+            "Comma-separated list of column names to collect statistics for. "
+            "Empty means no statistics collection."
+        )
+    )
+
+    MOSAIC_NUM_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("mosaic.num-buckets")
+        .int_type()
+        .no_default_value()
+        .with_description("Number of column buckets for parallel IO.")
+    )
+
     METADATA_STATS_MODE: ConfigOption[str] = (
         ConfigOptions.key("metadata.stats-mode")
         .string_type()
@@ -725,6 +742,31 @@ class CoreOptions:
         )
     )
 
+    BITMAP_INDEX_DICTIONARY_BLOCK_SIZE: ConfigOption[MemorySize] = (
+        ConfigOptions.key("bitmap-index.dictionary-block-size")
+        .memory_type()
+        .default_value(MemorySize.of_kibi_bytes(16))
+        .with_description(
+            "The target dictionary block size for bitmap global indexes."
+        )
+    )
+
+    BITMAP_INDEX_COMPRESSION: ConfigOption[str] = (
+        ConfigOptions.key("bitmap-index.compression")
+        .string_type()
+        .default_value("none")
+        .with_description("Compression algorithm for bitmap global index blocks.")
+    )
+
+    BITMAP_INDEX_COMPRESSION_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("bitmap-index.compression-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Compression level for bitmap global index block compression."
+        )
+    )
+
     LOCAL_CACHE_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("local-cache.enabled")
         .boolean_type()
@@ -914,6 +956,19 @@ class CoreOptions:
 
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
+
+    def mosaic_stats_columns(self, default=None):
+        value = self.options.get(CoreOptions.MOSAIC_STATS_COLUMNS, default)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [column.strip() for column in value.split(",") if column.strip()]
+        if isinstance(value, (list, set, tuple)):
+            return [str(column).strip() for column in value if str(column).strip()]
+        return []
+
+    def mosaic_num_buckets(self, default=None):
+        return self.options.get(CoreOptions.MOSAIC_NUM_BUCKETS, default)
 
     def metadata_stats_enabled(self, default=None):
         return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
@@ -1224,6 +1279,17 @@ class CoreOptions:
         return self.options.get(
             CoreOptions.BITMAP_INDEX_FALLBACK_SCAN_MAX_SIZE
         ).get_bytes()
+
+    def bitmap_index_dictionary_block_size(self) -> int:
+        return self.options.get(
+            CoreOptions.BITMAP_INDEX_DICTIONARY_BLOCK_SIZE
+        ).get_bytes()
+
+    def bitmap_index_compression(self) -> str:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION)
+
+    def bitmap_index_compression_level(self) -> int:
+        return self.options.get(CoreOptions.BITMAP_INDEX_COMPRESSION_LEVEL)
 
     def local_cache_enabled(self) -> bool:
         return self.options.get(CoreOptions.LOCAL_CACHE_ENABLED)

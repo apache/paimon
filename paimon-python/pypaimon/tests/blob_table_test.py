@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import io
 import os
 import shutil
 import struct
@@ -26,7 +27,24 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.table.row.blob import Blob
 from pypaimon.write.commit_message import CommitMessage
+
+
+class _StreamingOnlyBlob(Blob):
+    def __init__(self, data: bytes):
+        self.data = data
+        self.opened = False
+
+    def to_data(self) -> bytes:
+        raise AssertionError("streaming blob should not be materialized")
+
+    def to_descriptor(self):
+        raise RuntimeError("streaming blob has no descriptor")
+
+    def new_input_stream(self):
+        self.opened = True
+        return io.BytesIO(self.data)
 
 
 class DedicatedFormatWriterTest(unittest.TestCase):
@@ -1058,6 +1076,128 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             result.column('blob_data').to_pylist(),
             [b'first_blob', None, b'third_blob', None, b'fifth_blob'],
         )
+
+    def test_write_row_accepts_streaming_blob(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.generic_row import GenericRow
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_write_row_streaming', schema, False)
+        table = self.catalog.get_table('test_db.blob_write_row_streaming')
+
+        blob = _StreamingOnlyBlob(b'row-blob')
+        row = GenericRow([1, blob], table.fields)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_row(row)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        self.assertTrue(blob.opened)
+        self.assertEqual(result.column('id').to_pylist(), [1])
+        self.assertEqual(result.column('blob_data').to_pylist(), [b'row-blob'])
+
+    def test_upsert_by_key_accepts_streaming_blob_row(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.generic_row import GenericRow
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.blob_upsert_row_streaming', schema, False)
+        table = self.catalog.get_table('test_db.blob_upsert_row_streaming')
+
+        initial = pa.Table.from_pydict({
+            'id': [1],
+            'blob_data': [b'old-blob'],
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial)
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        updated_blob = _StreamingOnlyBlob(b'updated-blob')
+        update_row = GenericRow([1, updated_blob], table.fields)
+        shadow_blob = _StreamingOnlyBlob(b'shadow-blob')
+        shadow_row = GenericRow([2, shadow_blob], table.fields)
+        new_blob = _StreamingOnlyBlob(b'new-blob')
+        new_row = GenericRow([2, new_blob], table.fields)
+        upsert_builder = table.new_batch_write_builder()
+        table_update = upsert_builder.new_update().with_update_type(['blob_data'])
+        upsert_builder.new_commit().commit(
+            table_update.upsert_by_key(
+                [update_row, shadow_row, new_row], ['id']))
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits())
+        rows = sorted(
+            result.select(['id', 'blob_data']).to_pylist(),
+            key=lambda item: item['id'],
+        )
+        self.assertTrue(updated_blob.opened)
+        self.assertFalse(shadow_blob.opened)
+        self.assertTrue(new_blob.opened)
+        self.assertEqual(
+            rows,
+            [
+                {'id': 1, 'blob_data': b'updated-blob'},
+                {'id': 2, 'blob_data': b'new-blob'},
+            ],
+        )
+
+    def test_upsert_by_key_rejects_heterogeneous_append_row_fields(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.generic_row import GenericRow
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('blob_data', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_upsert_row_heterogeneous_fields', schema, False)
+        table = self.catalog.get_table(
+            'test_db.blob_upsert_row_heterogeneous_fields')
+
+        partial_fields = [
+            table.field_dict['id'],
+            table.field_dict['blob_data'],
+        ]
+        partial_row = GenericRow([1, b'a'], partial_fields)
+        full_row = GenericRow([2, 'bob', b'b'], table.fields)
+
+        with self.assertRaisesRegex(ValueError, 'same field set'):
+            table.new_batch_write_builder().new_update().upsert_by_key(
+                [partial_row, full_row], ['id'])
 
     def test_update_blob_column(self):
         from pypaimon import Schema

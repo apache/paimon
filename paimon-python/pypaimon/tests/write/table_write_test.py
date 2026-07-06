@@ -72,6 +72,23 @@ class TableWriteTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    @staticmethod
+    def _commit_rows(table, rows):
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        for row in rows:
+            table_write.write_row(row)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    @staticmethod
+    def _read_sorted(table, sort_keys):
+        read_builder = table.new_read_builder()
+        return read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by(sort_keys)
+
     def test_write_snapshot(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_write_snapshot', schema, False)
@@ -97,6 +114,97 @@ class TableWriteTest(unittest.TestCase):
         snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
         self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
+
+    def test_write_row_append_only_partitioned_table(self):
+        from pypaimon.table.row.generic_row import GenericRow
+
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table(
+            'default.test_write_row_append_only_partitioned', schema, False)
+        table = self.catalog.get_table(
+            'default.test_write_row_append_only_partitioned')
+
+        reordered_fields = [
+            table.field_dict['dt'],
+            table.field_dict['behavior'],
+            table.field_dict['item_id'],
+            table.field_dict['user_id'],
+        ]
+        rows = [
+            GenericRow(['p1', 'a', 1001, 1], reordered_fields),
+            GenericRow(['p2', 'b', 1002, 2], reordered_fields),
+        ]
+        self._commit_rows(table, rows)
+
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2],
+            'item_id': [1001, 1002],
+            'behavior': ['a', 'b'],
+            'dt': ['p1', 'p2'],
+        }, schema=self.pa_schema)
+        actual = self._read_sorted(table, 'user_id')
+        self.assertEqual(expected, actual)
+
+    def test_write_row_fixed_bucket_primary_key_table(self):
+        from pypaimon.table.row.generic_row import GenericRow
+
+        schema = Schema.from_pyarrow_schema(
+            self.pk_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '2'},
+        )
+        self.catalog.create_table(
+            'default.test_write_row_fixed_bucket_pk', schema, False)
+        table = self.catalog.get_table(
+            'default.test_write_row_fixed_bucket_pk')
+
+        rows = [
+            GenericRow([1, 1001, 'a', 'p1'], table.fields),
+            GenericRow([2, 1002, 'b', 'p2'], table.fields),
+        ]
+        self._commit_rows(table, rows)
+
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2],
+            'item_id': [1001, 1002],
+            'behavior': ['a', 'b'],
+            'dt': ['p1', 'p2'],
+        }, schema=self.pk_pa_schema)
+        sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
+        self.assertEqual(
+            expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
+
+    def test_write_row_dynamic_bucket_primary_key_table(self):
+        from pypaimon.table.row.generic_row import GenericRow
+
+        schema = Schema.from_pyarrow_schema(
+            self.pk_pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '-1'},
+        )
+        self.catalog.create_table(
+            'default.test_write_row_dynamic_bucket_pk', schema, False)
+        table = self.catalog.get_table(
+            'default.test_write_row_dynamic_bucket_pk')
+
+        rows = [
+            GenericRow([1, 1001, 'a', 'p1'], table.fields),
+            GenericRow([2, 1002, 'b', 'p2'], table.fields),
+        ]
+        self._commit_rows(table, rows)
+
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2],
+            'item_id': [1001, 1002],
+            'behavior': ['a', 'b'],
+            'dt': ['p1', 'p2'],
+        }, schema=self.pk_pa_schema)
+        sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
+        self.assertEqual(
+            expected.sort_by(sort_keys), self._read_sorted(table, sort_keys))
 
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

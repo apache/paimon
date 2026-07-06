@@ -18,11 +18,19 @@
 
 package org.apache.paimon.flink.lineage;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+
 import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
+import org.apache.flink.streaming.api.lineage.DatasetSchemaFacet;
+import org.apache.flink.streaming.api.lineage.DatasetSchemaField;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -34,11 +42,21 @@ public class PaimonLineageDataset implements LineageDataset {
     private final String name;
     private final String namespace;
     private final Map<String, String> tableOptions;
+    @Nullable private final RowType rowType;
 
     public PaimonLineageDataset(String name, String namespace, Map<String, String> tableOptions) {
+        this(name, namespace, tableOptions, null);
+    }
+
+    public PaimonLineageDataset(
+            String name,
+            String namespace,
+            Map<String, String> tableOptions,
+            @Nullable RowType rowType) {
         this.name = name;
         this.namespace = namespace;
         this.tableOptions = tableOptions;
+        this.rowType = rowType;
     }
 
     @Override
@@ -67,6 +85,39 @@ public class PaimonLineageDataset implements LineageDataset {
                         return tableOptions;
                     }
                 });
+        if (rowType != null) {
+            facets.put(
+                    "schema",
+                    new DatasetSchemaFacet() {
+                        @Override
+                        public String name() {
+                            return "schema";
+                        }
+
+                        @Override
+                        public Map<String, DatasetSchemaField<String>> fields() {
+                            Map<String, DatasetSchemaField<String>> result = new LinkedHashMap<>();
+                            for (DataField field : rowType.getFields()) {
+                                String fieldName = field.name();
+                                String fieldType = field.type().asSQLString();
+                                result.put(
+                                        fieldName,
+                                        new DatasetSchemaField<String>() {
+                                            @Override
+                                            public String name() {
+                                                return fieldName;
+                                            }
+
+                                            @Override
+                                            public String type() {
+                                                return fieldType;
+                                            }
+                                        });
+                            }
+                            return result;
+                        }
+                    });
+        }
         return facets;
     }
 }
