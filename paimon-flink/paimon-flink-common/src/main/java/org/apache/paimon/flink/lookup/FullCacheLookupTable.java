@@ -34,6 +34,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
@@ -258,7 +260,27 @@ public abstract class FullCacheLookupTable implements LookupTable {
             return;
         }
 
-        Long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        // For chain tables, the delta branch maintains its own snapshot sequence.
+        // Navigate to the delta branch's snapshot manager for backlog calculation:
+        //   unwrapped = ChainTableFileStoreTable
+        //     .other() = ChainGroupReadTable
+        //     .other() = delta branch table
+        FileStoreTable unwrapped = table;
+        if (table instanceof LookupFileStoreTable) {
+            unwrapped = ((LookupFileStoreTable) table).wrapped();
+        }
+        boolean isChainTable =
+                unwrapped instanceof FallbackReadFileStoreTable
+                        && ((FallbackReadFileStoreTable) unwrapped).other()
+                                instanceof ChainGroupReadTable;
+        Long latestSnapshotId =
+                isChainTable
+                        ? ((FallbackReadFileStoreTable)
+                                        ((FallbackReadFileStoreTable) unwrapped).other())
+                                .other()
+                                .snapshotManager()
+                                .latestSnapshotId()
+                        : table.snapshotManager().latestSnapshotId();
         Long nextSnapshotId = reader.nextSnapshotId();
         if (latestSnapshotId != null
                 && nextSnapshotId != null
@@ -413,7 +435,8 @@ public abstract class FullCacheLookupTable implements LookupTable {
         void finish() throws IOException;
     }
 
-    static FullCacheLookupTable create(Context context, long lruCacheSize) {
+    @VisibleForTesting
+    public static FullCacheLookupTable create(Context context, long lruCacheSize) {
         List<String> primaryKeys = context.table.primaryKeys();
         if (primaryKeys.isEmpty()) {
             return new NoPrimaryKeyLookupTable(context, lruCacheSize);
@@ -445,7 +468,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 File tempPath,
                 List<String> joinKey,
                 @Nullable Set<Integer> requiredCachedBucketIds) {
-            this.table = new LookupFileStoreTable(table, joinKey);
+            this.table = LookupFileStoreTable.create(table, joinKey);
             this.projection = projection;
             this.tablePredicate = tablePredicate;
             this.projectedPredicate = projectedPredicate;
