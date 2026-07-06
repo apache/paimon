@@ -185,6 +185,70 @@ class BlobTest(unittest.TestCase):
         self.assertFalse(blob.is_resolved())
         self.assertEqual(blob.view_struct, view_struct)
 
+    def test_blob_view_lookup_resolve_file_io_reuses_cached_uri_reader(self):
+        from pypaimon.common.uri_reader import UriReader
+        from pypaimon.utils.blob_view_lookup import BlobViewLookup
+
+        class DummyFileIO:
+            pass
+
+        file_io = DummyFileIO()
+        view_struct = BlobViewStruct("test_db.source_table", 7, 42)
+        lookup = BlobViewLookup.__new__(BlobViewLookup)
+        lookup._uri_reader_cache = {
+            view_struct.identifier.get_full_name(): UriReader.from_file(file_io)
+        }
+
+        self.assertIs(lookup.resolve_file_io(view_struct), file_io)
+
+    def test_blob_view_parallel_resolution_uses_cached_reader_file_io(self):
+        from pypaimon.read.reader.blob_descriptor_convert_reader import BlobInlineConvertReader
+
+        class RecordingFileIO:
+            def __init__(self):
+                self.calls = []
+
+            def read_blobs_concurrent(self, blobs, parallelism):
+                self.calls.append((blobs, parallelism))
+                return [b"parallel-view"]
+
+        class FakeBlobViewLookup:
+            def __init__(self, file_io, descriptor):
+                self._file_io = file_io
+                self._descriptor = descriptor
+
+            def resolve_to_null(self, view_struct):
+                return False
+
+            def resolve_descriptor(self, view_struct):
+                return self._descriptor
+
+            def resolve_file_io(self, view_struct):
+                return self._file_io
+
+        file_io = RecordingFileIO()
+        descriptor = BlobDescriptor("unused", 0, -1)
+        view_struct = BlobViewStruct("test_db.source_table", 7, 42)
+        batch = pa.record_batch(
+            [pa.array([view_struct.serialize()], type=pa.large_binary())],
+            names=["picture"])
+
+        reader = BlobInlineConvertReader.__new__(BlobInlineConvertReader)
+        reader._view_fields = {"picture"}
+        reader._descriptor_fields = set()
+        reader._blob_as_descriptor = False
+        reader._blob_parallelism = 4
+
+        batch, view_file_ios = reader._resolve_view_fields(
+            batch, FakeBlobViewLookup(file_io, descriptor))
+        result = reader._resolve_descriptor_fields(batch, view_file_ios)
+
+        self.assertEqual(result.column("picture").to_pylist(), [b"parallel-view"])
+        self.assertEqual(len(file_io.calls), 1)
+        blobs, parallelism = file_io.calls[0]
+        self.assertEqual(parallelism, 4)
+        self.assertEqual([b.to_descriptor() for b in blobs], [descriptor])
+
     def test_blob_data_interface_compliance(self):
         """Test that BlobData properly implements Blob interface."""
         test_data = b"interface test data"

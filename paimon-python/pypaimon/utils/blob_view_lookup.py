@@ -116,14 +116,18 @@ class BlobViewLookup:
 
     def resolve_blob(self, view_struct: BlobViewStruct) -> Blob:
         descriptor = self.resolve_descriptor(view_struct)
-        table_key = view_struct.identifier.get_full_name()
-        uri_reader = self._uri_reader_cache.get(table_key)
-        if uri_reader is None:
-            raise ValueError(
-                "Cannot resolve BlobViewStruct {} because upstream table {} "
-                "was not loaded.".format(view_struct, table_key)
-            )
+        uri_reader = self.resolve_uri_reader(view_struct)
         return Blob.from_descriptor(uri_reader, descriptor)
+
+    def resolve_file_io(self, view_struct: BlobViewStruct):
+        uri_reader = self.resolve_uri_reader(view_struct)
+        if not hasattr(uri_reader, '_file_io'):
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} with parallel blob reads because "
+                "upstream table {} does not use a file-backed UriReader.".format(
+                    view_struct, view_struct.identifier.get_full_name())
+            )
+        return uri_reader._file_io
 
     def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
         if view_struct in self._null_value_cache:
@@ -134,6 +138,16 @@ class BlobViewLookup:
                 "in upstream table.".format(view_struct, view_struct.row_id)
             )
         return False
+
+    def resolve_uri_reader(self, view_struct: BlobViewStruct) -> UriReader:
+        table_key = view_struct.identifier.get_full_name()
+        uri_reader = self._uri_reader_cache.get(table_key)
+        if uri_reader is None:
+            raise ValueError(
+                "Cannot resolve BlobViewStruct {} because upstream table {} "
+                "was not loaded.".format(view_struct, table_key)
+            )
+        return uri_reader
 
     def _group_by_table(
             self, view_structs: List[BlobViewStruct]
