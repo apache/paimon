@@ -118,6 +118,8 @@ abstract class PaimonBatchWriteBase(
     batchTableCommit.withMetricRegistry(metricRegistry)
     val operation = operationType.getOrElse(
       if (overwritePartitions.isDefined) Snapshot.Operation.OVERWRITE else Snapshot.Operation.WRITE)
+    println(
+      s"[DEBUG][PaimonBatchWriteBase] table=${table.name()} operation=$operation overwritePartitions=${overwritePartitions.isDefined} messages=${messages.length}")
     batchTableCommit.withOperation(operation)
     val addCommitMessage = WriteTaskResult.merge(messages)
     val deletedCommitMessage = copyOnWriteScan match {

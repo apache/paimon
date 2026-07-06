@@ -1029,6 +1029,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             boolean resetSnapshotStateForRtasAppend =
                     isRtasAppendAfterTruncate(latestSnapshot, commitKind);
+            System.out.println(
+                    "[DEBUG][FileStoreCommitImpl] commitKind="
+                            + commitKind
+                            + ", operation="
+                            + operation
+                            + ", latestSnapshotId="
+                            + (latestSnapshot == null ? null : latestSnapshot.id())
+                            + ", latestSnapshotKind="
+                            + (latestSnapshot == null ? null : latestSnapshot.commitKind())
+                            + ", latestSnapshotOperation="
+                            + (latestSnapshot == null ? null : latestSnapshot.operation())
+                            + ", resetSnapshotStateForRtasAppend="
+                            + resetSnapshotStateForRtasAppend);
             if (resetSnapshotStateForRtasAppend) {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
