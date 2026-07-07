@@ -22,7 +22,7 @@ import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
-import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions}
+import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions, VectorSearchResultUtils}
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
 import org.apache.spark.sql.connector.expressions
@@ -137,6 +137,22 @@ class PaimonScanBuilder(val table: InnerTable)
           case ftst: org.apache.paimon.table.FullTextSearchTable =>
             (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
           case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
+        }
+
+        if (
+          vectorSearch.isDefined &&
+          VectorSearchResultUtils.isVectorSearchMetaOnly(requiredSchema.fieldNames.toSeq)
+        ) {
+          val result = PaimonBaseScan.evalVectorSearch(
+            actualTable,
+            vectorSearch.get,
+            pushedPartitionFilters,
+            pushedDataFilters)
+          return PaimonLocalScan(
+            VectorSearchResultUtils.toRows(result, requiredSchema),
+            requiredSchema,
+            actualTable,
+            pushedPartitionFilters)
         }
 
         PaimonScan(
