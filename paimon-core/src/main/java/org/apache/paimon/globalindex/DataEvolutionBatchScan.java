@@ -78,7 +78,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
-        return batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
     }
 
     @Override
