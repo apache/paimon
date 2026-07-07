@@ -2143,6 +2143,114 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 "Expected BlobDescriptor bytes when blob-as-descriptor=true"
             )
 
+    def test_blob_view_default_read_uses_upstream_file_io(self):
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        class GuardedFileIO:
+            def __init__(self, wrapped, forbidden_uris):
+                self._wrapped = wrapped
+                self._forbidden_uris = forbidden_uris
+                self.forbidden_reads = []
+
+            def new_input_stream(self, path):
+                path = str(path)
+                if path in self._forbidden_uris:
+                    self.forbidden_reads.append(path)
+                    raise AssertionError(
+                        "Downstream file_io must not read upstream blob {}.".format(path)
+                    )
+                return self._wrapped.new_input_stream(path)
+
+            def __getattr__(self, name):
+                return getattr(self._wrapped, name)
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_guard_source', source, False)
+        source_table = self.catalog.get_table('test_db.blob_view_guard_source')
+        payloads = [b'guard-source-0', b'guard-source-1']
+
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2],
+            'picture': payloads,
+        }, schema=source_schema))
+        source_commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(source_commit_messages)
+        writer.close()
+
+        source_blob_paths = {
+            str(f.file_path)
+            for msg in source_commit_messages
+            for f in msg.new_files
+            if f.file_name.endswith('.blob')
+        }
+        self.assertGreater(len(source_blob_paths), 0)
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 0).serialize(),
+            BlobViewStruct('test_db.blob_view_guard_source', picture_field_id, 1).serialize(),
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table('test_db.blob_view_guard_target', target, False)
+        target_table = self.catalog.get_table('test_db.blob_view_guard_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': [10, 11],
+            'picture': view_values,
+        }, schema=target_schema))
+        target_commit_messages = target_writer.prepare_commit()
+        target_write_builder.new_commit().commit(target_commit_messages)
+        target_writer.close()
+
+        all_target_files = [f for msg in target_commit_messages for f in msg.new_files]
+        self.assertFalse(
+            any(f.file_name.endswith('.blob') for f in all_target_files),
+            "Blob view fields should be stored inline without writing new blob files",
+        )
+
+        original_file_io = target_table.file_io
+        guarded_file_io = GuardedFileIO(original_file_io, source_blob_paths)
+        target_table.file_io = guarded_file_io
+        try:
+            read_builder = target_table.new_read_builder()
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            ).sort_by('id')
+        finally:
+            target_table.file_io = original_file_io
+
+        self.assertEqual(result.column('picture').to_pylist(), payloads)
+        self.assertEqual(guarded_file_io.forbidden_reads, [])
+
     def test_blob_view_resolve_disabled_preserves_references(self):
         from pypaimon import Schema
         from pypaimon.common.options.core_options import CoreOptions

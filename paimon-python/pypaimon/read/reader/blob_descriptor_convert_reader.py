@@ -33,10 +33,12 @@ class BlobInlineConvertReader(RecordBatchReader):
                prescan reader (only projecting view columns) to collect
                BlobViewStructs, bulk-preload their descriptors, then read
                full data from the main reader and replace view field values
-               with the corresponding BlobDescriptor serialized bytes.
-      Stage 2 (BlobData resolution): Controlled by blob-as-descriptor option.
-               If false, resolve all BlobDescriptor bytes (from both descriptor
-               fields and view fields) into real blob data bytes.
+               with descriptor bytes or real blob data according to the
+               blob-as-descriptor option.
+      Stage 2 (BlobDescriptor resolution): Controlled by blob-as-descriptor option.
+               If false, resolve BlobDescriptor bytes from descriptor fields
+               into real blob data bytes. BlobView fields are already resolved
+               in Stage 1 with the upstream table FileIO.
                If true, return as-is.
     """
 
@@ -72,8 +74,6 @@ class BlobInlineConvertReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         # Align with Java: only enter blob view resolution when catalog_loader is available
         # If catalog_loader is None, skip both Stage 1 (view resolution) and Stage 2 (descriptor resolution)
-        # This matches Java's behavior in DataEvolutionTableRead.createReader where blob view reader
-        # is only created when catalogContext != null
         if self._view_fields and not self._prescan_done:
             self._prescan_view_structs()
 
@@ -81,10 +81,11 @@ class BlobInlineConvertReader(RecordBatchReader):
         if batch is None:
             return None
         # Resolve view fields using the preloaded lookup
+        view_file_ios = {}
         if self._view_fields and self._blob_view_lookup is not None:
-            batch = self._resolve_view_fields(batch, self._blob_view_lookup)
+            batch, view_file_ios = self._resolve_view_fields(batch, self._blob_view_lookup)
         # Resolve BlobDescriptor -> real bytes (if blob-as-descriptor=false)
-        return self._resolve_descriptor_fields(batch)
+        return self._resolve_descriptor_fields(batch, view_file_ios)
 
     # ------------------------------------------------------------------
     # Stage 1: BlobView prescan (lightweight, only reads view columns)
@@ -128,29 +129,30 @@ class BlobInlineConvertReader(RecordBatchReader):
         self._prescan_done = True
 
     def _resolve_view_fields(self, batch, blob_view_lookup):
-        """Replace BlobViewStruct bytes in view fields with the corresponding
-        BlobDescriptor serialized bytes."""
+        """Replace BlobViewStruct bytes in view fields with descriptor bytes."""
+        view_file_ios = {}
         for field_name in self._view_fields:
             if field_name not in batch.schema.names:
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
             converted_values = []
+            field_file_ios = []
             for value in values:
-                if value is None:
-                    converted_values.append(None)
-                    continue
-                if not isinstance(value, bytes):
+                if value is None or not (
+                        isinstance(value, bytes) and BlobViewStruct.is_blob_view_struct(value)):
                     converted_values.append(value)
+                    field_file_ios.append(None)
                     continue
-                if not BlobViewStruct.is_blob_view_struct(value):
-                    converted_values.append(value)
-                    continue
+
                 view_struct = BlobViewStruct.deserialize(value)
                 if blob_view_lookup.resolve_to_null(view_struct):
                     converted_values.append(None)
+                    field_file_ios.append(None)
                 else:
                     descriptor = blob_view_lookup.resolve_descriptor(view_struct)
                     converted_values.append(descriptor.serialize())
+                    file_io = blob_view_lookup.resolve_file_io(view_struct)
+                    field_file_ios.append(file_io)
 
             column_idx = batch.schema.names.index(field_name)
             batch = batch.set_column(
@@ -158,18 +160,18 @@ class BlobInlineConvertReader(RecordBatchReader):
                 pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
                 pyarrow.array(converted_values, type=pyarrow.large_binary()),
             )
-        return batch
+            view_file_ios[field_name] = field_file_ios
+        return batch, view_file_ios
 
     # ------------------------------------------------------------------
     # Stage 2: BlobData resolution (unified exit)
     # ------------------------------------------------------------------
 
-    def _resolve_descriptor_fields(self, batch):
+    def _resolve_descriptor_fields(self, batch, view_file_ios=None):
         if self._blob_as_descriptor:
             return batch
 
-        all_inline_blob_fields = self._descriptor_fields | self._view_fields
-        for field_name in all_inline_blob_fields:
+        for field_name in self._descriptor_fields:
             if field_name not in batch.schema.names:
                 continue
             values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
@@ -187,6 +189,39 @@ class BlobInlineConvertReader(RecordBatchReader):
                 pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
                 pyarrow.array(converted_values, type=pyarrow.large_binary()),
             )
+
+        view_file_ios = view_file_ios or {}
+        for field_name in self._view_fields:
+            field_file_ios = view_file_ios.get(field_name)
+            if field_name not in batch.schema.names or field_file_ios is None:
+                continue
+            values = [self._normalize_blob_to_bytes(v) for v in batch.column(field_name).to_pylist()]
+            blobs_by_file_io = {}
+            converted_values = []
+
+            for idx, value in enumerate(values):
+                file_io = field_file_ios[idx] or self._table.file_io
+                blob = Blob.from_bytes(value, file_io)
+                if self._blob_parallelism > 1:
+                    converted_values.append(None)
+                    if blob is not None:
+                        blobs_by_file_io.setdefault(file_io, []).append((idx, blob))
+                else:
+                    converted_values.append(blob.to_data() if blob else None)
+
+            for file_io, indexed_blobs in blobs_by_file_io.items():
+                blobs = [item[1] for item in indexed_blobs]
+                results = file_io.read_blobs_concurrent(blobs, self._blob_parallelism)
+                for (idx, _), data in zip(indexed_blobs, results):
+                    converted_values[idx] = data
+
+            column_idx = batch.schema.names.index(field_name)
+            batch = batch.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted_values, type=pyarrow.large_binary()),
+            )
+
         return batch
 
     # ------------------------------------------------------------------
